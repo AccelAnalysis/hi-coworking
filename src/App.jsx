@@ -18,6 +18,7 @@ import {
   Briefcase,
   Wallet
 } from 'lucide-react';
+import MapComponent from './MapComponent';
 
 // --- CONFIGURATION ---
 // TODO: Deploy the Code.gs script as a Web App and paste the URL here
@@ -231,6 +232,7 @@ export default function App() {
           </h1>
           <p className="text-xl md:text-2xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-light">
             A micro-coworking space designed for focus, flexibility, and real local use—not massive floors or long contracts.
+          <MapComponent />
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
             <Button onClick={() => scrollToSection('access')} className="group shadow-xl shadow-slate-900/10">
