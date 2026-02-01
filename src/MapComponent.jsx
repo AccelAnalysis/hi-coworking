@@ -7,7 +7,7 @@ const MapComponent = () => {
   const position = [36.92904282704385, -76.52067450742162];
 
   const customIcon = L.icon({
-    iconUrl: '/images/hi_map_marker.svg',
+    iconUrl: `${import.meta.env.BASE_URL}images/hi_map_marker.svg`,
     iconSize: [32, 41],
     iconAnchor: [16, 41],
     popupAnchor: [0, -41]
