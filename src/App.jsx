@@ -589,7 +589,7 @@ export default function App() {
           </p>
           <div className="flex justify-center gap-6 text-sm text-slate-400">
             <a href="#" className="hover:text-slate-900 transition-colors">Contact Us</a>
-            <a href="#" className="hover:text-slate-900 transition-colors">Twitter</a>
+            <a href="#" className="hover:text-slate-900 transition-colors">X</a>
             <a href="#" className="hover:text-slate-900 transition-colors">Instagram</a>
           </div>
           <p className="mt-8 text-xs text-slate-300">
