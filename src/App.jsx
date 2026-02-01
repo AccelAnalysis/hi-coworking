@@ -280,7 +280,7 @@ export default function App() {
                 <div className="text-3xl mb-2 grayscale opacity-50">🚫</div>
                 <div className="font-semibold text-slate-400 line-through">Massive Floors</div>
               </Card>
-              <Card className="bg-slate-900 text-white border-0 !shadow-slate-900/30">
+              <Card className="bg-white text-black border-0 shadow-slate-200/50">
                 <div className="text-3xl mb-2">✨</div>
                 <div className="font-semibold">Calm Focus</div>
               </Card>
@@ -343,13 +343,13 @@ export default function App() {
                 },
                 { 
                   icon: Briefcase, 
-                  title: "Lower Barriers", 
-                  text: "Lower the barrier to starting and growing small businesses." 
+                  title: "Accelerate Growth", 
+                  text: "Create room for businesses to grow into their potential." 
                 },
                 { 
                   icon: Wallet, 
-                  title: "Keep It Local", 
-                  text: "Keep professional work and economic activity local." 
+                  title: "Build Local Economy", 
+                  text: "Grow mid-day, professional work activity right here." 
                 }
               ].map((item, i) => (
                 <div key={i} className="text-center p-6 rounded-2xl bg-white/40 border border-white/60 backdrop-blur-sm hover:bg-white/60 transition-colors">
