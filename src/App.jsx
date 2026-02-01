@@ -156,7 +156,7 @@ export default function App() {
   const [surveyOpen, setSurveyOpen] = useState(false);
   
   // Early Access Form State
-  const [formData, setFormData] = useState({ name: '', email: '', message: '', interests: [] });
+  const [formData, setFormData] = useState({ name: '', email: '', message: '', interests: [], intent: 'updates' });
   const [formStatus, setFormStatus] = useState('idle'); // idle, submitting, success, error
 
   // Handle scroll for sticky nav styling
@@ -180,6 +180,8 @@ export default function App() {
     await submitData({
       type: 'early_access',
       ...formData,
+      source: 'coming-soon-v3',
+      submission_version: '1.0',
       timestamp: new Date().toISOString()
     });
 
@@ -329,28 +331,25 @@ export default function App() {
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-800 text-xs font-semibold tracking-wide uppercase border border-blue-100 mb-6">
                 <TrendingUp size={12} /> Why This Matters Locally
               </div>
-              <h2 className="text-3xl md:text-4xl font-bold mb-6">More Than Just Desks</h2>
-              <p className="text-slate-600 text-lg">
-                Hi Coworking isn't just about office space. It's about building infrastructure for the local economy.
-              </p>
+              <h2 className="text-3xl md:text-4xl font-bold mb-6">Why Hi Coworking Exists</h2>
             </div>
 
             <div className="grid md:grid-cols-3 gap-8">
               {[
                 { 
                   icon: Users, 
-                  title: "Talent Retention", 
-                  text: "Keeping skilled professionals in our community instead of losing them to daily commutes." 
+                  title: "Support Locals", 
+                  text: "Support people who live here and work remotely." 
                 },
                 { 
                   icon: Briefcase, 
-                  title: "Small Biz Enablement", 
-                  text: "Giving founders and freelancers a professional base to grow without high overhead." 
+                  title: "Lower Barriers", 
+                  text: "Lower the barrier to starting and growing small businesses." 
                 },
                 { 
                   icon: Wallet, 
-                  title: "Local Spending", 
-                  text: "Reducing commute leakage means lunch, coffee, and errands happen here, not miles away." 
+                  title: "Keep It Local", 
+                  text: "Keep professional work and economic activity local." 
                 }
               ].map((item, i) => (
                 <div key={i} className="text-center p-6 rounded-2xl bg-white/40 border border-white/60 backdrop-blur-sm hover:bg-white/60 transition-colors">
@@ -467,8 +466,11 @@ export default function App() {
         <div className="max-w-xl mx-auto">
           <div className="text-center mb-10">
             <h2 className="text-3xl font-bold mb-4">Get Early Access</h2>
-            <p className="text-slate-600">
+            <p className="text-slate-600 mb-2">
               Be the first to know when Hi Coworking opens—and help shape what it becomes.
+            </p>
+            <p className="text-sm text-slate-500 max-w-lg mx-auto bg-slate-100/50 py-2 px-4 rounded-lg">
+              Hi Coworking is intentionally intimate in size. Early access helps us understand demand and plan capacity responsibly.
             </p>
           </div>
 
@@ -477,8 +479,10 @@ export default function App() {
                 <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Check size={32} />
                 </div>
-                <h3 className="text-xl font-bold text-emerald-900 mb-2">You're on the list!</h3>
-                <p className="text-emerald-700">Thanks for joining. We'll be in touch soon with launch updates.</p>
+                <h3 className="text-xl font-bold text-emerald-900 mb-2">Thank you — your input has been recorded.</h3>
+                <p className="text-emerald-800 font-medium mb-4">Hi Coworking is being built as local work infrastructure.</p>
+                <p className="text-emerald-700 mb-2">Your response helps determine what launches first and how the space evolves.</p>
+                <p className="text-emerald-600 text-sm">We’ll share updates only when there’s something meaningful to share.</p>
                 <Button variant="ghost" onClick={() => setFormStatus('idle')} className="mt-6">Submit another</Button>
              </div>
           ) : (
@@ -535,6 +539,32 @@ export default function App() {
                     className="w-full px-4 py-3 rounded-lg border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all" 
                     placeholder="What would you like to see in a coworking space here?" 
                   />
+                </div>
+
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <span className="block text-sm font-medium text-slate-700 mb-2">How would you describe your interest?</span>
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input 
+                        type="radio" 
+                        name="intent"
+                        checked={formData.intent === 'updates'}
+                        onChange={() => setFormData({...formData, intent: 'updates'})}
+                        className="w-4 h-4 text-slate-900 border-slate-300 focus:ring-slate-900" 
+                      />
+                      <span className="text-sm text-slate-700">I’d like updates when Hi Coworking opens</span>
+                    </label>
+                    <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input 
+                        type="radio" 
+                        name="intent"
+                        checked={formData.intent === 'exploring'}
+                        onChange={() => setFormData({...formData, intent: 'exploring'})}
+                        className="w-4 h-4 text-slate-900 border-slate-300 focus:ring-slate-900" 
+                      />
+                      <span className="text-sm text-slate-700">I’m interested, but just exploring options</span>
+                    </label>
+                  </div>
                 </div>
 
                 <Button className="w-full" type="submit" disabled={formStatus === 'submitting'}>
