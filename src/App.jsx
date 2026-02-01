@@ -234,8 +234,8 @@ export default function App() {
           </h1>
           <p className="text-xl md:text-2xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-light">
             A micro-coworking space designed for focus, flexibility, and real local use—not massive floors or long contracts.
-          <MapComponent />
           </p>
+          <MapComponent />
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
             <Button onClick={() => scrollToSection('access')} className="group shadow-xl shadow-slate-900/10">
               Get Early Access <ArrowRight size={18} className="ml-2 group-hover:translate-x-1 transition-transform" />
