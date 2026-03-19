@@ -1,5 +1,8 @@
 node_modules
-dist
+/dist
+
+# Firebase Admin SDK
+hi-coworking-plat-firebase-adminsdk-fbsvc-51715fb8ed.json
 .DS_Store
 .env
 .env.local
