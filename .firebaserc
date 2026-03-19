@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "hi-coworking-plat",
+    "prod": "hi-coworking-plat"
+  }
+}

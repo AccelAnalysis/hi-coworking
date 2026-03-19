@@ -1,0 +1,17 @@
+{
+  "name": "hi-coworking",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace web",
+    "dev:web": "npm run dev --workspace web",
+    "build": "npm run build:shared && npm run build --workspace web",
+    "build:shared": "npm run build --workspace @hi/shared",
+    "build:functions": "npm run build --workspace functions",
+    "lint": "npm run lint --workspace web",
+    "emulators": "npx firebase emulators:start"
+  }
+}

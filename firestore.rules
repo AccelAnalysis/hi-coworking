@@ -1,0 +1,409 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Helper functions ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && request.auth.token.role == role;
+    }
+
+    function isAdmin() {
+      return hasRole("admin") || hasRole("master");
+    }
+
+    function isStaff() {
+      return hasRole("staff") || isAdmin();
+    }
+
+    function isMember() {
+      return isSignedIn(); // All authenticated users are at least members
+    }
+
+    function hasMemberUid(memberUids) {
+      return memberUids is list && request.auth.uid in memberUids;
+    }
+
+    function isTeamMemberDoc(teamData) {
+      return isSignedIn()
+        && (isAdmin()
+            || teamData.primeUid == request.auth.uid
+            || hasMemberUid(teamData.memberUids));
+    }
+
+    function isTeamMemberByTeamId(teamId) {
+      return isSignedIn()
+        && (isAdmin()
+            || (exists(/databases/$(database)/documents/rfxTeams/$(teamId))
+                && (get(/databases/$(database)/documents/rfxTeams/$(teamId)).data.primeUid == request.auth.uid
+                    || hasMemberUid(get(/databases/$(database)/documents/rfxTeams/$(teamId)).data.memberUids))));
+    }
+
+    // --- users/{uid} ---
+    // Owner can read/update their own doc; admins can read/write any user doc.
+    // User doc is created by the authBeforeCreate Cloud Function, not client-side.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow update: if isOwner(uid) || isAdmin();
+      allow create, delete: if false; // Only Cloud Functions create/delete user docs
+    }
+
+    // --- profiles/{uid} ---
+    // Owner read/write; admins can read any profile; public read for published profiles.
+    match /profiles/{uid} {
+      allow read: if isOwner(uid) || isAdmin()
+                  || (resource != null && resource.data.published == true);
+      allow create, update: if isOwner(uid);
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // --- orgs/{orgId} ---
+    // Admins can manage orgs. Members can read orgs they belong to.
+    match /orgs/{orgId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- orgMembers/{orgId}_{uid} ---
+    // Composite key doc: org admin or platform admin can manage; member can read own.
+    match /orgMembers/{docId} {
+      allow read: if isSignedIn()
+                  && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- rfx/{rfxId} ---
+    // Public read if not member-only; member-only requires auth.
+    // Authenticated users can create; owner or admin can update/delete.
+    match /rfx/{rfxId} {
+      allow read: if isAdmin()
+                  || (resource.data.memberOnly == false)
+                  || (resource.data.memberOnly == true && isMember());
+      allow create: if isMember();
+      allow update, delete: if isSignedIn()
+                            && (resource.data.createdBy == request.auth.uid || isAdmin());
+    }
+
+    // --- rfxResponses/{responseId} ---
+    // Respondent can read/create their own responses; RFx owner and admins can read.
+    // RFx owner can update status (accept/decline); respondent can update their own.
+    match /rfxResponses/{responseId} {
+      allow read: if isSignedIn()
+                  && (resource.data.respondentUid == request.auth.uid
+                      || resource.data.rfxOwnerUid == request.auth.uid
+                      || isAdmin());
+      allow create: if isMember();
+      allow update: if isSignedIn()
+                    && (resource.data.respondentUid == request.auth.uid
+                        || resource.data.rfxOwnerUid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // --- rfxTeams/{teamId} ---
+    // Team members (and admin) can read; writes are server-authoritative.
+    match /rfxTeams/{teamId} {
+      allow read: if isTeamMemberDoc(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    // --- teamDocuments/{docId} ---
+    // Team members can read/upload; uploader or admin can edit/delete.
+    match /teamDocuments/{docId} {
+      allow read: if resource.data.teamId is string
+                  && isTeamMemberByTeamId(resource.data.teamId);
+      allow create: if request.resource.data.teamId is string
+                    && request.resource.data.uploadedBy == request.auth.uid
+                    && isTeamMemberByTeamId(request.resource.data.teamId);
+      allow update, delete: if isAdmin()
+                            || (resource.data.teamId is string
+                                && resource.data.uploadedBy == request.auth.uid
+                                && isTeamMemberByTeamId(resource.data.teamId));
+    }
+
+    // --- referrals/{referralId} ---
+    // Authenticated users can read/create referrals; owner or admin can update.
+    match /referrals/{referralId} {
+      allow read: if isMember();
+      allow create: if isMember();
+      allow update: if isSignedIn()
+                    && (resource.data.referrerUid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // --- events/{eventId} ---
+    // Public read for published events; admin write.
+    match /events/{eventId} {
+      allow read: if isAdmin()
+                  || (resource.data.status == "published");
+      allow create, update, delete: if isAdmin();
+
+      // --- events/{eventId}/registrations/{uid} ---
+      match /registrations/{uid} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+      }
+
+      // --- events/{eventId}/waitlist/{uid} ---
+      match /waitlist/{uid} {
+        allow read: if isOwner(uid) || isAdmin();
+        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+      }
+
+      // --- events/{eventId}/sponsors/{sponsorId} ---
+      match /sponsors/{sponsorId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+      }
+
+      // --- events/{eventId}/vendorTables/{tableId} ---
+      match /vendorTables/{tableId} {
+        allow read: if isAdmin();
+        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+      }
+    }
+
+    // --- eventSeries/{seriesId} ---
+    // Public read for published series; admin write.
+    match /eventSeries/{seriesId} {
+      allow read: if isAdmin()
+                  || (resource.data.status == "published");
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- eventCampaigns/{campaignId} ---
+    // Admin manages campaign targeting and scheduling.
+    match /eventCampaigns/{campaignId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- campaignJobs/{jobId} ---
+    // Queue is server/admin controlled.
+    match /campaignJobs/{jobId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- eventShareKits/{shareKitId} ---
+    // Admin generates and approves social kits.
+    match /eventShareKits/{shareKitId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- socialPosts/{postId} ---
+    // Admin or backend social queue access.
+    match /socialPosts/{postId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- payments/{paymentId} ---
+    // Owner + admin read; only Cloud Functions write.
+    match /payments/{paymentId} {
+      allow read: if isSignedIn()
+                  && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+
+    // --- webhookEvents/{eventId} ---
+    // Idempotency table — Cloud Functions only.
+    match /webhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    // --- leads/{leadId} ---
+    // Cloud Functions create (admin SDK bypasses rules); admin read.
+    match /leads/{leadId} {
+      allow read: if isAdmin();
+      allow create: if false; // Cloud Functions only (protected by reCAPTCHA)
+      allow update, delete: if isAdmin();
+    }
+
+    // --- siteSettings/{docId} ---
+    // Public read for feature gating; admin update.
+    match /siteSettings/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- territories/{fips} ---
+    // Authenticated users can read territory metadata; admin/master manage.
+    match /territories/{fips} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- verificationDocuments/{docId} ---
+    // Owner + staff/admin read; writes are server-authoritative.
+    match /verificationDocuments/{docId} {
+      allow read: if isStaff()
+                  || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // --- verificationAuditLog/{auditId} ---
+    // Owner + staff/admin read; writes are server-authoritative.
+    match /verificationAuditLog/{auditId} {
+      allow read: if isStaff()
+                  || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // --- userSuggestions/{uid} ---
+    // Owner or admin read cached suggestions; Cloud Functions write.
+    match /userSuggestions/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // --- integrations/{orgId}/quickbooks/config ---
+    // Admin-only; contains encrypted OAuth tokens.
+    match /integrations/{orgId}/quickbooks/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // --- bookings/{bookingId} ---
+    // Owner can read their bookings; staff+ can read all; Cloud Functions create.
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn()
+                  && (resource.data.userId == request.auth.uid || isStaff());
+      allow create: if false; // Cloud Functions only (slot locking transaction)
+      allow update: if isStaff(); // Staff can update status (e.g. cancel)
+      allow delete: if isAdmin();
+    }
+
+    // --- floorplans/{floorplanId} ---
+    // Public read (displayed on spaces page); admin write.
+    match /floorplans/{floorplanId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- locations/{locationId} ---
+    // Public read for booking/browsing; admin write for builder operations.
+    match /locations/{locationId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+
+      // --- locations/{locationId}/floors/{floorId} ---
+      match /floors/{floorId} {
+        allow read: if true;
+        allow create, update, delete: if isAdmin();
+
+        // --- locations/{locationId}/floors/{floorId}/shell/{shellDocId} ---
+        match /shell/{shellDocId} {
+          allow read: if true;
+          allow create, update, delete: if isAdmin();
+        }
+
+        // --- locations/{locationId}/floors/{floorId}/layouts/{layoutId} ---
+        match /layouts/{layoutId} {
+          allow read: if true;
+          allow create, update, delete: if isAdmin();
+        }
+      }
+    }
+
+    // --- notifications/{notifId} ---
+    // Owner read/update (mark read); Cloud Functions create.
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create, delete: if false; // Cloud Functions only
+    }
+
+    // --- products/{productId} ---
+    // Public read for active products; admin write.
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- paymentAudit/{auditId} ---
+    // Admin-only read; Cloud Functions write.
+    match /paymentAudit/{auditId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+
+    // --- rfxTeamInvites/{inviteId} ---
+    // Inviter or invitee can read; members can create; invitee can update status; admin full access.
+    match /rfxTeamInvites/{inviteId} {
+      allow read: if isSignedIn()
+                  && (resource.data.inviterUid == request.auth.uid
+                      || resource.data.inviteeUid == request.auth.uid
+                      || isAdmin());
+      allow create: if isMember();
+      allow update: if isSignedIn()
+                    && (resource.data.inviteeUid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // --- books/{bookId} ---
+    // Public read for published books; admin CRUD.
+    match /books/{bookId} {
+      allow read: if isAdmin()
+                  || (resource.data.published == true);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // --- bookPurchases/{purchaseId} ---
+    // Owner can read their purchases; admin can read all. Anyone can create (guest checkout).
+    match /bookPurchases/{purchaseId} {
+      allow read: if isSignedIn()
+                  && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // --- bookAffiliateClicks/{clickId} ---
+    // Anyone can create (tracking); admin can read.
+    match /bookAffiliateClicks/{clickId} {
+      allow read: if isAdmin();
+      allow create: if true;
+      allow update, delete: if false;
+    }
+
+    // --- doors/{doorId} ---
+    // Staff+ can read door config; all writes are Cloud Functions only.
+    match /doors/{doorId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false; // Cloud Functions + admin SDK only
+    }
+
+    // --- accessGrants/{grantId} ---
+    // Owner can read their own grants; staff+ can read all; Cloud Functions write.
+    match /accessGrants/{grantId} {
+      allow read: if isSignedIn()
+                  && (resource.data.userId == request.auth.uid || isStaff());
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+
+    // --- accessCodes/{codeId} ---
+    // Owner of the linked grant can read (for status); staff+ can read all.
+    // No client writes — PIN is never exposed via client path.
+    match /accessCodes/{codeId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+
+    // --- accessEvents/{eventId} ---
+    // Audit trail: staff+ read only; Cloud Functions write.
+    match /accessEvents/{eventId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+
+    // --- mail/{mailId} ---
+    // Outbound mail queue: Cloud Functions write only (admin SDK); admin read for debugging.
+    match /mail/{mailId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false; // Cloud Functions only
+    }
+  }
+}

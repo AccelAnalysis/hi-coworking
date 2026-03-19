@@ -1,0 +1,71 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // --- Helper functions ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+             && (request.auth.token.role == "admin" || request.auth.token.role == "master");
+    }
+
+    function isValidFileSize(maxMB) {
+      return request.resource.size < maxMB * 1024 * 1024;
+    }
+
+    // --- capabilityStatements/{uid}/{file} ---
+    // Member uploads their own capability statements; admins can read any.
+    match /capabilityStatements/{uid}/{allPaths=**} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid) && isValidFileSize(10); // 10 MB max
+    }
+
+    // --- proposals/{rfxId}/{responseId}/{file} ---
+    // Respondent uploads; RFx owner and admins can read.
+    match /proposals/{rfxId}/{responseId}/{allPaths=**} {
+      allow read: if isSignedIn(); // Fine-grained access enforced at Firestore level
+      allow write: if isSignedIn() && isValidFileSize(25); // 25 MB max
+    }
+
+    // --- eventAssets/{eventId}/{file} ---
+    // Admins upload event images/assets; public read for published events.
+    match /eventAssets/{eventId}/{allPaths=**} {
+      allow read: if true; // Public CDN for event images
+      allow write: if isAdmin() && isValidFileSize(5); // 5 MB max
+    }
+
+    // --- event-media/{entityId}/{file} ---
+    // Entity may be eventId or seriesId. Public read for rendering pages/social cards.
+    match /event-media/{entityId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidFileSize(10); // 10 MB max
+    }
+
+    // --- profilePhotos/{uid}/{file} ---
+    // Member uploads their own photo; public read.
+    match /profilePhotos/{uid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(uid) && isValidFileSize(5); // 5 MB max
+    }
+
+    // --- floorplanBackgrounds/{locationId}/{floorId}/{file} ---
+    // Admin uploads shell/layout reference imagery; public read for booking display.
+    match /floorplanBackgrounds/{locationId}/{floorId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidFileSize(10); // 10 MB max
+    }
+
+    // --- Deny everything else ---
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
