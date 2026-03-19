@@ -1,0 +1,335 @@
+Developer-ready implementation packet
+0) Updated MVP scope (now includes everything)
+MVP must include:
+Booking engine: dual pricing + member/public horizons + conflict prevention + buffers + approvals
+Stripe: subscriptions + one-off checkout + deposits + refunds/credits
+Holds/blocks + operating hours
+Email + SMS notifications + rule-based automations
+Lightweight e-sign + templates + optional COI upload rules
+Waitlist + member-first notifications
+Gift cards + review prompts + conversion tracking public→member
+Full calendar integrations (Google + Outlook)
+Add-on inventory constraints (when applicable)
+Better dashboards + audit logs
+Access control integrations
+Accounting + CRM sync
+Multi-location support
+Advanced pricing (peak/off-peak + weekend + demand-style modifiers)
+Public marketplace syndication integrations
+We can still keep a “Post-MVP” bucket, but it will now be for new future items not listed above (e.g., SLA engine, printing QR, micro-POS, deeper ops kits exports, etc.).
+1) Recommended architecture (opinionated, buildable)
+This is designed to be fast to ship, safe under concurrency, and integration-friendly.
+1.1 Tech stack
+Frontend: Next.js (React) + TypeScript + Tailwind
+Auth/RBAC: Firebase Auth + Custom Claims (roles) + org membership records
+Database: Firestore (multi-tenant, multi-location)
+Backend: Firebase Cloud Functions (TypeScript) + Cloud Tasks (for sync jobs)
+Payments: Stripe (subscriptions + payment intents)
+Email: SendGrid (or Mailgun)
+SMS: Twilio
+Calendar: Google Calendar API + Microsoft Graph (Outlook)
+E-sign: MVP “lightweight” (typed signature + timestamp + IP) + optional provider later
+File storage: Firebase Storage (COI uploads, signed docs PDFs if generated)
+Observability: Sentry + structured logs
+1.2 Key design choice: “App is source of truth”
+The app owns availability and conflict rules.
+Google/Outlook are synced as downstream calendars (ops + invites), not authoritative.
+2) Core data model (Firestore schema)
+Multi-tenant, multi-location. “Org” can be your operating company; “Location” is each site.
+2.1 Collections
+Top-level:
+orgs/{orgId}
+locations/{locationId}
+resources/{resourceId} (modes + seats)
+priceRules/{ruleId}
+membershipPlans/{planId}
+giftCards/{giftCardId}
+marketplace/{marketplaceId} (Deskpass/LiquidSpace connectors, feeds)
+integrations/{integrationId} (calendar, access control, accounting, CRM)
+inventory/{itemId} (add-on stock, optional per location)
+users/{userId} (org membership record; links to Firebase Auth uid)
+bookings/{bookingId}
+holds/{holdId}
+waitlists/{waitId}
+payments/{paymentId} (mirrors Stripe objects)
+invoices/{invoiceId}
+refunds/{refundId}
+documents/{docId} (signed waivers/contracts)
+incidents/{incidentId}
+notifications/{notifId} (send logs)
+auditLogs/{logId}
+analyticsDaily/{dateId} (rollups)
+syncJobs/{jobId} (calendar/access/CRM/accounting/marketplace)
+2.2 Resource modeling (critical)
+Each resource has:
+type: "MODE" or "SEAT" or "ADDON"
+exclusiveGroupId: e.g., location-wide (all modes share), seats have their own but also reference the group
+capacity: attendees max
+buffers: { beforeMins, afterMins }
+approvalPolicy: { required: boolean, rules... }
+requiredFields: array (attendeeCount, eventType, etc.)
+requiredDocs: array (waiver, rental agreement, COI)
+pricingProfileId: references price rules
+Mutual exclusion rule:
+MODE bookings lock the exclusiveGroupId for that location.
+SEAT bookings lock the seat resourceId and (optionally) respect MODE lock via group.
+3) Concurrency-safe conflict prevention (must-have)
+Firestore can’t reliably do “start < end && end > start” with one query in all cases. Don’t gamble. Use slot-locking.
+3.1 Slot locking approach
+Normalize time into 15-minute slots (configurable)
+Booking request expands to bufferStart / bufferEnd
+Compute slot keys: YYYYMMDD-HHMM for each slot in range
+In a transaction, create lock docs under:
+orgs/{orgId}/locations/{locationId}/locks/{lockKey}/slots/{slotKey}
+Where:
+lockKey =
+exclusiveGroup:{exclusiveGroupId} for MODE bookings
+seat:{resourceId} for seat bookings
+plus any additional locks you need (inventory-limited add-ons, etc.)
+If any slot doc already exists → conflict → reject.
+3.2 Lock release
+On cancel, delete lock docs (transaction / batched deletes)
+On booking end, optionally keep for audit; but typically delete to reduce storage.
+4) RBAC + permissions (Firebase Auth + Firestore rules)
+4.1 Roles
+ADMIN
+STAFF
+MEMBER
+PUBLIC
+Role storage
+Firebase Auth custom claims: { roleGlobal?: '...' } (optional)
+Org membership record: orgs/{orgId}/users/{uid} includes:
+role (ADMIN/STAFF/MEMBER)
+status (active/suspended)
+memberPlanId (if applicable)
+companyId (optional)
+Public users exist in Firebase Auth but may not have org membership until first booking.
+4.2 Rule concept
+Public can create a booking only through callable function (server enforced).
+Members/staff/admin can read what they’re allowed to read.
+Admin/staff can write operational data (holds, approvals, refunds, policies).
+Implementation note: For integrity, all money-affecting actions (price calc, booking creation, refunds) should go through Cloud Functions, not direct client writes.
+5) API contract (Cloud Functions)
+Use Callable Functions for app actions + HTTP endpoints for webhooks/marketplace feeds.
+5.1 Booking
+createBookingQuote(payload)
+input: orgId, locationId, resourceId, start, end, addOns[], userType(member/public)
+output: lineItems[], total, deposit, requiredDocs[], approvalRequired, expiresAt
+createBooking(payload)
+input: quoteId + payment method context
+does: lock slots, create booking, create Stripe PaymentIntent/Checkout, set status
+approveBooking({ orgId, bookingId })
+rejectBooking({ orgId, bookingId, reason })
+cancelBooking({ orgId, bookingId })
+rescheduleBooking({ orgId, bookingId, newStart, newEnd })
+5.2 Holds/blocks
+createHold({ orgId, locationId, lockKey, start, end, reason })
+deleteHold({ orgId, holdId })
+5.3 Memberships (Stripe subscriptions)
+createSubscription({ orgId, planId, uid })
+cancelSubscription({ orgId, uid })
+updatePaymentMethod({ uid })
+5.4 Payments/refunds/gift cards
+createCheckoutSession({ bookingId | giftCardPurchaseId })
+issueRefund({ orgId, bookingId, amount, reason })
+createGiftCard({ orgId, locationId, amount, recipientEmail })
+redeemGiftCard({ orgId, code, bookingOrInvoiceId })
+5.5 Documents (light e-sign)
+getRequiredDocs({ orgId, bookingId })
+signDocument({ orgId, bookingId, templateId, typedName, ip, userAgent })
+uploadCOIUrl({ orgId, bookingId }) → returns signed upload URL
+5.6 Notifications
+sendBroadcast({ orgId, audience, subject, message })
+system-triggered sends occur automatically on booking/payment changes
+5.7 Integrations + sync jobs
+connectGoogleCalendar({ orgId, locationId }) (OAuth flow)
+connectMicrosoftCalendar({ orgId, locationId })
+runCalendarSyncJob({ orgId, jobId })
+connectAccessProvider({ orgId, locationId, providerType })
+syncAccounting({ orgId, locationId, provider })
+syncCRM({ orgId, locationId, provider })
+5.8 Webhooks (HTTP)
+POST /webhooks/stripe
+POST /webhooks/twilio (optional delivery status)
+POST /webhooks/calendar (optional)
+POST /webhooks/marketplace/{partner} (if partner supports push)
+5.9 Marketplace feeds (HTTP GET)
+GET /feeds/{orgId}/{locationId}/availability.ics?resourceId=...
+GET /feeds/{orgId}/{locationId}/resources.json
+6) Pricing engine spec (advanced pricing in MVP)
+6.1 Price rules
+Each location has priceRules that support:
+base rate (public/member)
+day-of-week modifiers
+time-of-day peak/off-peak
+weekend event uplift
+demand modifiers (simple “occupancy threshold” uplift)
+add-on prices and bundles
+coupons/promo codes
+gift card redemption
+taxes + fees
+deposits rules by resource type/attendee count
+Important: The server generates a Quote Snapshot stored in booking.quoteSnapshot so the price can’t change after user starts checkout.
+7) Calendar integration (Google + Outlook) in MVP
+7.1 Behavior
+On booking confirmed:
+Create event on Ops Calendar for the location
+Send user an ICS invite (minimum), plus optionally create on user calendar if authenticated to do so.
+7.2 Data
+integrations/calendar stores:
+provider: google | microsoft
+opsCalendarId
+encrypted refresh token
+status
+7.3 Sync jobs
+“Write-through” on booking changes (create/update/delete event)
+Nightly reconciliation job to fix drift
+8) SMS + Email in MVP
+8.1 Templates
+booking_confirmed
+booking_pending_approval
+booking_reminder_24h / 2h
+booking_changed / canceled
+payment_receipt / invoice
+doc_required_reminder
+waitlist_open_slot_member_first
+review_request
+membership_payment_failed / grace / suspended
+8.2 Consent
+SMS requires opt-in stored per user with timestamp.
+9) Waitlist + member-first notifications in MVP
+9.1 Waitlist model
+orgs/{orgId}/waitlists/{waitId}:
+resourceId, desiredStart, desiredEnd, uid, role, priorityScore
+priorityScore favors members, then tenure, then first-come
+9.2 Slot opening logic
+When a booking cancels:
+compute matching waitlist entries
+notify members first for memberFirstHoldMins (e.g., 120 mins)
+if unclaimed, notify next queue
+10) Gift cards in MVP
+10.1 Gift card model
+code (random + checksum)
+initialBalance, remainingBalance
+purchaserUid, recipientEmail
+expiration
+transactions subcollection
+10.2 Redemption
+can apply to booking checkout; server validates remaining balance and creates line items.
+11) Add-on inventory constraints in MVP
+If you rent limited gear (mics, lighting):
+inventory item has availableQty
+booking with add-on locks inventory slots too:
+lockKey: inventory:{itemId}
+prevents overselling.
+12) Access control integrations in MVP
+Implement via an adapter layer so Kisi/Salto/etc. are swappable.
+12.1 Access grant flow
+When booking confirmed:
+create accessGrant with start/end (+ grace)
+call provider API to issue:
+door code OR unlock link OR mobile credential
+message user access instructions
+When booking ends/cancels:
+revoke credential
+13) Accounting + CRM sync in MVP
+Do it with sync jobs, not inline calls.
+13.1 Sync job queue
+orgs/{orgId}/syncJobs/{jobId}:
+provider, type (accounting|crm), action, payload, status, retries, idempotencyKey
+13.2 MVP targets
+Accounting: QuickBooks Online (invoices, payments, refunds)
+CRM: HubSpot (contacts + lifecycle events + deal optional)
+If you want broader coverage, add connectors later; the job architecture stays the same.
+14) Multi-location in MVP
+Requirements
+Locations each have:
+resources, pricing rules, calendars, access providers
+Users can be:
+org-wide members with location entitlements OR
+location-specific memberships (configurable)
+Implementation: Put memberships at org level but include locationScope: ['loc1','loc2'] for permissions/pricing.
+15) Marketplace syndication in MVP
+Two pathways (implement both; partner-specific logic can expand later):
+ICS availability feed per resource/mode (universally supported)
+Partner webhook intake (if Deskpass/LiquidSpace support a booking request hook)
+route partner booking attempts through your booking quote + create flow
+Also include partner-specific metadata mapping:
+minimum lead time
+cancellation policy mapping
+pricing mapping (public only)
+16) Repository structure (recommended)
+/apps/web                 # Next.js app
+/apps/functions           # Cloud Functions (TS)
+/packages/shared          # shared types, validators (zod), utils
+/packages/integrations    # calendar/access/accounting/crm adapters
+17) Backlog: MVP implementation plan (ticket-level)
+Organized by epics with build order + dependencies.
+Sprint 0 — Foundations
+Set up Firebase (Auth, Firestore, Storage)
+CI/CD for web + functions
+Org/location bootstrap scripts
+Core types + validation (Zod) + error conventions
+Observability (Sentry) + logging format
+Sprint 1 — RBAC + core data objects
+Org user membership model + role management UI
+Resource CRUD (modes/seats/add-ons) + policy fields
+Operating hours config
+Firestore security rules baseline (read-limited; write via functions)
+Sprint 2 — Booking engine + slot locks
+Slot-lock transaction service (15-min slots)
+Booking quote calculation (no Stripe yet)
+Booking creation with conflict prevention + buffers
+Holds/blocks implemented using same lock mechanism
+Staff Today View (timeline + filters)
+Sprint 3 — Stripe payments (subs + one-off) + refunds
+Membership plan mapping → Stripe products
+One-off booking checkout with PaymentIntent/Checkout
+Webhook handler (idempotent)
+Refund/partial refund + credits logic
+Invoice/receipt generation
+Sprint 4 — Documents + lightweight e-sign + COI upload
+Template system (membership, rental, waiver)
+Required-doc rules per resource
+Typed e-sign capture + audit logging
+COI upload signed URLs (Storage) + validation
+Booking confirmation gating on docs
+Sprint 5 — Notifications (email + SMS) + automations
+SendGrid templates + sending service
+Twilio SMS + consent capture
+Rule-based automation triggers (podcast intake, event checklist)
+Reminder scheduler (Cloud Scheduler/Tasks)
+Review prompt and conversion events
+Sprint 6 — Calendar integrations (Google + Outlook)
+OAuth connect flows + token encryption approach
+Ops calendar event create/update/delete
+ICS invites for users
+Nightly reconciliation sync job
+Sprint 7 — Waitlist + member-first notifications + gift cards
+Waitlist create + matching logic
+Member-first window claim flow
+Gift card purchase + redemption in checkout
+Add-on inventory locks (if enabled)
+Sprint 8 — Access + Accounting/CRM + Marketplace + Advanced pricing
+Access provider adapter + first provider (e.g., Kisi)
+SyncJobs framework + QuickBooks + HubSpot minimal sync
+ICS availability feeds + partner connector stubs
+Advanced pricing rules (peak/off-peak/weekend/demand thresholds)
+Dashboards: revenue split, utilization, conversion, churn basics
+Audit log viewer + exports
+If your team prefers smaller sprints: split Sprint 8 into 2–3 sprints (integrations are where time hides).
+18) Definition of Done (MVP)
+A build is “MVP complete” when:
+No double booking is possible (locks + buffers + holds)
+Member vs public horizons + pricing are enforced server-side
+Public can book anything at public rates within the public window
+Stripe subs + one-off + deposits + refunds work via webhooks safely
+Required docs block confirmation when configured
+Email + SMS reminders and key events fire reliably
+Google + Outlook ops calendars receive updates; users get invites
+Waitlist works with member-first notification window
+Gift cards redeem correctly; inventory add-ons can’t be oversold (if enabled)
+Access grants issue/revoke automatically (at least 1 provider)
+Accounting + CRM sync jobs run and are retry-safe
+Marketplace feeds publish availability; partner intake can create bookings (at least via feed)
+Reports show utilization and revenue split; audit trail exists for changes and refunds

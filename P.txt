@@ -1,0 +1,609 @@
+Below is a **build-ready PRD** for your custom micro–coworking management application, based directly on your 12-part checklist and the operating model you described (reconfigurable space + member priority pricing/booking + public FCFS at public rates).
+
+---
+
+# Product Requirements Document (PRD)
+
+## Product name
+
+**Hi Coworking Ops**
+
+## Version
+
+PRD v1.0 — January 27, 2026
+
+## Owner
+
+Jonathan / Accel Analysis (Product Owner)
+
+## Problem statement
+
+We need a single system to run a **micro co-working space** that is **reconfigurable** (coworking desks, podcast studio, live talks, conference setup, small meetings >10). The system must support:
+
+* **Member priority booking + member pricing**
+* **Public rentals for anything** at **public rates** on a **first-come, first-serve basis** (within a controlled public booking window)
+* Strong **calendar management, scheduling, and user management**
+* Operational controls (holds, approvals, buffers, check-in, contracts, reporting)
+
+---
+
+# 1) Goals and success metrics
+
+## 1.1 Goals
+
+1. Prevent double-bookings across **mutually exclusive space modes** and shared desks.
+2. Support clear pricing and rules:
+
+   * **Member pricing** vs **public pricing**
+   * **Member priority** via longer booking horizon + optional waitlist priority
+3. Enable fast self-serve booking for members and public, with automated ops workflows.
+4. Provide an admin/staff control plane for daily operations and reporting.
+5. Provide a growth path: convert public renters into members.
+
+## 1.2 Success metrics (MVP)
+
+* **0 double-booking incidents** after launch
+* ≥ **80% bookings self-served** without staff intervention
+* **< 2 minutes** average time to complete booking + payment for public users
+* **> 90%** of bookings have correct pricing (member/public) and required documents signed
+* Basic utilization and revenue reporting available weekly
+
+---
+
+# 2) Scope
+
+## 2.1 In scope (MVP)
+
+* Roles/permissions: Admin, Staff, Member, Public
+* Resource model: modes + desks/seats + add-ons
+* Booking engine: buffers, conflict detection, booking windows, approvals (optional per mode)
+* Payments: subscriptions + one-off checkout + deposits (if required) + refunds (admin-only)
+* Contracts/waivers: templates, e-sign capture (lightweight acceptable for MVP)
+* Communications: email confirmations + reminders
+* Operations: holds/blocks, staff “today view”, check-in, incident logs (basic)
+* Reporting: utilization + revenue split member/public + audit trail (basic)
+* Public booking pages + member portal
+* Integrations: Stripe (payments), email provider
+
+## 2.2 Out of scope (MVP; V1/V2 candidates)
+
+* Access control smart locks
+* Accounting sync (QuickBooks/Xero)
+* Deep CRM integrations (HubSpot)
+* Complex dynamic pricing optimization
+* Multi-location support (design for it; don’t build full UI until V2)
+* Marketplace syndication (Deskpass/LiquidSpace) integration
+
+---
+
+# 3) Assumptions and policy decisions
+
+These are “default” product rules unless changed later:
+
+1. **Application is the source of truth** for availability. External calendars can receive events, but external events do not create bookings unless explicitly imported as blocks.
+2. **Member priority is enforced primarily through booking horizons**, not bumping:
+
+   * Members can book further in advance (e.g., 30 days)
+   * Public can book closer-in only (e.g., 7 days)
+3. Public rentals are FCFS **within the public booking horizon**.
+4. The space can be in **one “mode” at a time** (mutual exclusion).
+5. Coworking is typically booked by **seat (1–6)**, whereas podcast/talk/conference are booked by **exclusive mode**.
+6. Some booking types may require **approval**, **deposit**, **waiver**, and/or **COI** based on admin-configured rules.
+
+---
+
+# 4) Users and personas
+
+## 4.1 Personas
+
+* **Member (Solo)**: wants reliable desk access, quick booking, member rates.
+* **Member (Small Team)**: wants recurring meeting/podcast blocks, predictable billing, company account.
+* **Public Renter (Creator)**: books podcast blocks, needs add-ons, may be new to the space.
+* **Public Renter (Organizer)**: books live talk/small event, needs attendee capacity and terms.
+* **Staff**: manages day-of operations, approvals, layout readiness, issues.
+* **Admin/Owner**: configures pricing/rules, handles refunds, monitors utilization and revenue.
+
+---
+
+# 5) User journeys (core flows)
+
+## 5.1 Public booking flow (FCFS + public pricing)
+
+1. Choose resource (podcast / live talk / conference / seat if allowed publicly)
+2. Select time slot (limited to public horizon)
+3. Enter booking details (attendees, use case, add-ons, contact)
+4. Accept required waivers/terms (and upload COI if required)
+5. Pay (card; deposit if applicable)
+6. Receive confirmation + calendar invite + instructions
+
+**Key requirement:** Prevent public from booking beyond their allowed horizon.
+
+## 5.2 Member booking flow (priority horizon + member pricing)
+
+1. Login
+2. Choose resource
+3. View extended availability window
+4. Book + apply member pricing
+5. Confirmation + reminders
+
+## 5.3 Staff day-of ops flow
+
+* “Today view” timeline + arrivals + upcoming mode changes
+* Approve/reject bookings
+* Add holds/blocks
+* Check-in management and incident logging
+
+---
+
+# 6) Functional requirements (build-ready)
+
+## FR-1 Users, roles, identities
+
+**Requirements**
+
+* FR-1.1 Support account creation for members and public users.
+* FR-1.2 Role-based access control (RBAC): Admin, Staff, Member, Public.
+* FR-1.3 Optional company accounts:
+
+  * company admin can manage team members (limit configurable)
+  * centralized billing optional (V1 if needed)
+* FR-1.4 Profile completeness rules per booking type (e.g., phone required for public event rentals).
+* FR-1.5 Admin user management: suspend users, reset roles, view history.
+
+**Acceptance criteria**
+
+* AC-1: Public user can book with account creation at checkout.
+* AC-2: Member sees member prices; public does not.
+* AC-3: Staff cannot access pricing configuration unless granted.
+
+---
+
+## FR-2 Memberships, tiers, and priority rules
+
+**Requirements**
+
+* FR-2.1 Membership plans (monthly/annual) with benefits:
+
+  * member pricing eligibility
+  * booking horizon (days in advance)
+  * optional included credits/hours (V1)
+* FR-2.2 Public vs member booking horizons:
+
+  * Public: book within Y days/hours
+  * Member: book within X days
+* FR-2.3 Waitlist for fully booked slots per resource/mode.
+* FR-2.4 “Member-first notifications” on waitlist (optional; V1).
+
+**Acceptance criteria**
+
+* AC-4: Public cannot book outside the public horizon.
+* AC-5: Member can book outside the public horizon up to member horizon.
+* AC-6: Same resource shows different price to member vs public.
+
+---
+
+## FR-3 Resource model for reconfigurable space
+
+**Requirements**
+
+* FR-3.1 Bookable resources support:
+
+  * Modes: Podcast, Live Talk, Conference, Small Meeting
+  * Seats: Hot Desk Seat 1–6
+* FR-3.2 Mutually exclusive mode scheduling:
+
+  * booking any mode blocks other modes and seats for that time + buffers
+* FR-3.3 Resource templates:
+
+  * capacity defaults
+  * setup/teardown buffers
+  * required fields (attendee count, event type)
+  * required documents (waiver/contract/COI)
+* FR-3.4 Add-ons:
+
+  * optional add-on catalog by mode (mics, lighting, engineer, projector)
+  * inventory-backed add-ons (V1 if needed; MVP can be non-inventory)
+
+**Acceptance criteria**
+
+* AC-7: Booking Podcast Mode prevents booking Conference Mode in the same window.
+* AC-8: Booking Live Talk blocks all 6 seats for the same window.
+* AC-9: Required fields change based on selected mode.
+
+---
+
+## FR-4 Booking & scheduling engine
+
+**Requirements**
+
+* FR-4.1 Booking types: hourly, half-day, full-day, recurring (recurring V1).
+* FR-4.2 Buffers: automatic pre/post padding by resource type.
+* FR-4.3 Policies:
+
+  * minimum notice
+  * maximum duration
+  * cancellation window + fees
+  * no-show rules
+* FR-4.4 Approval workflows:
+
+  * per resource: auto-approve or request-to-book
+  * approvals queue for staff/admin
+* FR-4.5 Capacity handling:
+
+  * max attendees per mode
+  * additional required fields for public bookings >10
+* FR-4.6 Conflict detection:
+
+  * no overlaps across mutually exclusive modes/resources including buffers
+
+**Acceptance criteria**
+
+* AC-10: System blocks any booking that overlaps another after buffers are applied.
+* AC-11: Public booking for live talk can be “pending approval” if policy set.
+* AC-12: Cancellation fee triggers when inside configured window.
+
+---
+
+## FR-5 Pricing, billing, and payments
+
+**Requirements**
+
+* FR-5.1 Dual pricing: member rate vs public rate per resource.
+* FR-5.2 Pricing rules:
+
+  * peak/off-peak (V1)
+  * weekend event pricing
+  * add-on pricing
+* FR-5.3 Membership billing:
+
+  * subscription autopay
+  * invoice/receipt generation
+  * dunning: retry schedule + grace period + suspension
+* FR-5.4 One-off checkout:
+
+  * card payments
+  * optional ACH (V2)
+* FR-5.5 Deposits and refunds:
+
+  * refundable deposits for events (configurable)
+  * partial refunds and credits (admin)
+* FR-5.6 Taxes + invoice templates (MVP: basic config)
+
+**Acceptance criteria**
+
+* AC-13: Member checkout applies member pricing automatically.
+* AC-14: Public checkout requires payment to confirm booking (unless request-to-book).
+* AC-15: Admin can issue partial refund and it’s reflected in reporting.
+
+---
+
+## FR-6 Calendar & availability
+
+**Requirements**
+
+* FR-6.1 Public booking page shows real-time availability inside public horizon.
+* FR-6.2 Member portal shows expanded availability.
+* FR-6.3 Two-way calendar options:
+
+  * System generates ICS invites for all bookings (MVP)
+  * Calendar sync integration (Google/Outlook) (V1)
+* FR-6.4 Operational blocks/holds:
+
+  * admin/staff can block resources (maintenance/private use)
+* FR-6.5 Operating hours configurable by day (weekday vs weekend patterns)
+
+**Acceptance criteria**
+
+* AC-16: Public cannot even *see* availability outside public horizon.
+* AC-17: Holds remove availability immediately and cancel/notify if configured.
+
+---
+
+## FR-7 Communications & automation
+
+**Requirements**
+
+* FR-7.1 Email notifications:
+
+  * booking confirmation
+  * reminders
+  * cancellation/change notices
+  * receipts/invoices
+* FR-7.2 Optional SMS (V1)
+* FR-7.3 Rules-based automations:
+
+  * event booking triggers contract + house rules + checklist
+  * podcast triggers tech intake form
+* FR-7.4 Broadcast messaging to members (V1)
+
+**Acceptance criteria**
+
+* AC-18: Confirmation email includes booking details, location, and cancellation policy.
+* AC-19: “Required docs pending” reminders sent if not completed.
+
+---
+
+## FR-8 Contracts, waivers, compliance
+
+**Requirements**
+
+* FR-8.1 Document templates:
+
+  * membership agreement
+  * studio/event rental agreement
+  * liability waiver
+* FR-8.2 E-sign workflow:
+
+  * MVP: checkbox + typed name + timestamp + IP log
+  * V1: integrate e-sign provider optional
+* FR-8.3 Optional COI upload rules per booking type.
+
+**Acceptance criteria**
+
+* AC-20: Booking cannot be confirmed if required documents not completed (configurable per resource).
+
+---
+
+## FR-9 Access, check-in, onsite ops
+
+**Requirements**
+
+* FR-9.1 Self check-in:
+
+  * QR link or member portal button
+* FR-9.2 Staff “Today view”:
+
+  * timeline of bookings
+  * arrivals list
+  * mode changes and buffers visible
+* FR-9.3 Incident logs linked to booking + user.
+* FR-9.4 Optional access control integration (V2)
+
+**Acceptance criteria**
+
+* AC-21: Staff can mark a user checked-in and record a no-show.
+* AC-22: Incident log can attach photos and is auditable.
+
+---
+
+## FR-10 Reporting & admin control
+
+**Requirements**
+
+* FR-10.1 Utilization reporting by mode and by seat.
+* FR-10.2 Revenue reporting:
+
+  * member vs public split
+  * add-ons
+  * deposits/fees/refunds
+* FR-10.3 Customer reporting:
+
+  * active members, churn
+  * conversion from public → member (V1)
+* FR-10.4 Audit trail: changes to bookings, policies, and refunds.
+
+**Acceptance criteria**
+
+* AC-23: Admin can export monthly revenue report (CSV).
+* AC-24: Every booking modification shows who changed it and when.
+
+---
+
+## FR-11 Marketplace-facing features
+
+**Requirements**
+
+* FR-11.1 SEO-friendly public booking pages per resource/mode.
+* FR-11.2 Gift cards (V1)
+* FR-11.3 Review capture prompts (post-visit) (V1)
+* FR-11.4 Lead capture and CRM export (V1)
+
+**Acceptance criteria**
+
+* AC-25: Public resource page is indexable and includes clear CTA to book.
+
+---
+
+## FR-12 Integrations & extensibility
+
+**Requirements**
+
+* FR-12.1 Payments: Stripe (MVP)
+* FR-12.2 Email provider integration
+* FR-12.3 Webhooks + API for future tools
+* FR-12.4 Zapier/Make support (V1)
+* FR-12.5 Accounting and CRM integrations (V2)
+
+**Acceptance criteria**
+
+* AC-26: System can emit webhook for “booking.created”, “payment.succeeded”, “booking.canceled”.
+
+---
+
+# 7) Non-functional requirements
+
+## Performance
+
+* Availability search returns in **< 500ms** for typical ranges (7–30 days).
+* Booking confirmation screen within **< 2 seconds** after payment success.
+
+## Reliability
+
+* Booking creation must be atomic with conflict checks (no race-condition double-booking).
+* Webhook handling must be idempotent.
+
+## Security & privacy
+
+* RBAC enforced server-side.
+* PII encrypted at rest where supported.
+* Audit logs immutable (append-only).
+* Rate limiting on public endpoints.
+
+## Compliance
+
+* Payment handled by Stripe; no raw card storage.
+* Basic privacy policy + data retention policy placeholders (MVP).
+
+---
+
+# 8) Data model (build-ready entities)
+
+Minimum entities:
+
+* **User** (role, profile, status)
+* **Company** (optional) + CompanyMembers
+* **MembershipPlan** / **Membership**
+* **Resource**
+
+  * type: `MODE` or `SEAT`
+  * capacity
+  * exclusivity group (space-level)
+* **AddOn** (price, eligibility, optional inventory qty)
+* **Policy**
+
+  * booking horizon by role
+  * cancellation/no-show/approval rules
+  * buffers
+* **PriceRule**
+
+  * member/public rates, weekend modifiers, peak rules (later)
+* **Booking**
+
+  * resourceId, userId, start/end, bufferStart/bufferEnd, status
+  * attendeeCount, metadata, approvalStatus
+* **Payment / Invoice / Refund**
+* **DocumentTemplate / DocumentInstance**
+* **Hold/Block**
+* **NotificationLog**
+* **IncidentReport**
+* **AuditLog**
+
+---
+
+# 9) Admin configuration (must exist in UI)
+
+Admin must be able to configure without developer help:
+
+* Resources (modes, seats), capacities
+* Buffers and booking rules per resource
+* Member/public pricing
+* Booking horizons (member/public)
+* Approval requirements per resource
+* Deposit requirements per resource
+* Operating hours
+* Document requirements per resource
+* Notification templates (basic)
+
+---
+
+# 10) MVP screen list (build-ready)
+
+## Public
+
+* Home / Book Now
+* Resource page (mode detail + photos + pricing + rules)
+* Availability calendar
+* Checkout / account creation
+* Booking confirmation + manage booking
+* Documents (waiver/terms)
+
+## Member
+
+* Dashboard (next booking, quick book)
+* Booking calendar (expanded horizon)
+* Membership & billing
+* Invoices/receipts
+* Profile
+
+## Staff/Admin
+
+* Today view (timeline + arrivals + mode change indicators)
+* Bookings list + filters
+* Approvals queue
+* Holds/blocks
+* Resource/policy/pricing settings
+* Users & roles
+* Reports
+* Incident logs
+* Audit log viewer (admin)
+
+---
+
+# 11) Release plan
+
+## MVP (launchable)
+
+* Core booking + dual pricing + horizons + conflict prevention
+* Stripe (subs + one-off)
+* Holds/blocks
+* Email notifications
+* Lightweight e-sign
+* Basic reporting + audit logs
+* Staff today view + approvals (if enabled)
+
+## V1 (operational leverage)
+
+* Full calendar integrations (Google/Outlook)
+* SMS reminders
+* Waitlist + member-first notifications
+* Gift cards, review prompts
+* Add-on inventory constraints (if needed)
+* Better dashboards + conversion tracking public→member
+
+## V2 (scale)
+
+* Access control integrations
+* Accounting + CRM sync
+* Multi-location support
+* Advanced pricing (peak/off-peak, demand pricing)
+* Public marketplace syndication integrations
+
+---
+
+# 12) Risks and mitigations
+
+* **Double booking due to concurrency** → enforce server-side atomic booking creation with locking/transactions.
+* **Calendar sync conflicts** → app as source of truth; import external only as holds.
+* **Public misuse (events, damage)** → deposits, approval workflow for high-risk, COI upload rules, incident tracking.
+* **Scope creep** → lock MVP to booking + pricing + horizons + payments + ops basics.
+
+---
+
+# 13) Backlog (epics → stories)
+
+## Epic A: Booking & availability
+
+* Story A1: As a public user, I can view availability within public horizon and book a mode.
+* Story A2: As a member, I can view extended availability and book at member rate.
+* Story A3: As the system, I prevent overlaps including buffers.
+
+## Epic B: Payments & billing
+
+* Story B1: As public, I pay at checkout to confirm booking.
+* Story B2: As member, I subscribe and autopay monthly.
+* Story B3: As admin, I can issue refunds/credits.
+
+## Epic C: Ops control
+
+* Story C1: As staff, I can approve pending bookings.
+* Story C2: As staff, I can block time for maintenance.
+* Story C3: As staff, I can view today’s schedule and check people in.
+
+## Epic D: Documents & compliance
+
+* Story D1: As public renter, I must sign waiver before confirmation (if required).
+* Story D2: As admin, I can require COI upload for events.
+
+## Epic E: Reporting
+
+* Story E1: As admin, I see utilization by mode and seat.
+* Story E2: As admin, I see member vs public revenue split.
+
+---
+
+If you want, I can turn this PRD into a **developer-ready implementation packet** next:
+
+1. database schema (Firestore or Postgres),
+2. API contract (endpoints + payloads),
+3. RBAC rules, and
+4. a sprint plan with ticket-level tasks.

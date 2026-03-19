@@ -1,0 +1,387 @@
+# Hi Coworking Ops — Product Requirements Document (PRD)
+
+**Version:** 1.0 (January 27, 2026)
+**Product Owner:** Jonathan / Accel Analysis
+
+## 1) Product description
+
+HiSpaceOps is an operations and booking platform for a **micro, reconfigurable coworking space** that runs as a **six-seat shared coworking layout** during standard use and can be converted on demand into **podcasting, live talks, conference setup, or small meetings (10+ attendees)**. The platform is the **source of truth** for availability and prevents double-booking across mutually exclusive space configurations while enabling **member priority pricing and booking** alongside **public rentals at public rates** on a **first-come, first-serve basis** within configured public booking horizons.
+
+---
+
+## 2) Problem statement
+
+Micro coworking spaces that host multiple use-cases are hard to operate with generic calendar tools. The core challenges are:
+
+* Managing a **single physical space** with **multiple mutually exclusive configurations**
+* Enforcing **member priority access** without creating manual scheduling conflicts
+* Enabling **public rentals** while controlling risk (payments, waivers, deposits, COI)
+* Coordinating ops needs (setup/teardown buffers, staff readiness, approvals)
+* Ensuring reliable **calendar, scheduling, and user management**
+* Supporting payments, reporting, integrations, and growth workflows (public → member)
+
+---
+
+## 3) Goals
+
+1. Provide a single operational system that prevents **double-bookings** across all modes and resources, including setup/teardown buffers and holds.
+2. Support clear, configurable business rules:
+
+   * **Member pricing vs public pricing**
+   * **Member priority booking** via advanced horizons and member-first waitlist notifications
+   * **Public rentals** for any rentable mode at public rates within public booking horizons
+3. Make booking and payment self-serve for both members and the public, while supporting approvals and compliance gating when required.
+4. Equip staff/admin with real-time operational control: holds, approvals, day-of view, incidents, and automation.
+5. Provide full reporting and integrations to support scale: calendar sync, access control, accounting, CRM, and marketplace syndication.
+
+---
+
+## 4) Success measures
+
+* Zero double-booking incidents in production (including buffers and holds).
+* 80%+ of bookings completed end-to-end without staff intervention.
+* Accurate pricing applied to 99%+ of bookings (member vs public, modifiers, add-ons).
+* Automated notification delivery success rate > 98% (email + SMS where opted-in).
+* Utilization and revenue dashboards available for weekly/monthly reporting.
+* Trackable conversion pipeline from public renters to members.
+
+---
+
+## 5) Scope
+
+HiSpaceOps includes the following capabilities as part of the initial platform release:
+
+### 5.1 Scheduling and resource management
+
+* Reconfigurable resource model: modes + seats + add-ons
+* Mutually exclusive configuration control
+* Setup/teardown buffers
+* Holds/blocks and operating hours
+* Waitlists and member-first slot notifications
+
+### 5.2 Identity, membership, and permissions
+
+* User accounts (member + public)
+* Roles: Admin/Owner, Staff, Member (tiered), Public/Guest
+* Optional company accounts for small teams
+* Membership plans with booking horizons and pricing entitlements
+
+### 5.3 Booking, pricing, and payments
+
+* Booking engine: hourly/half-day/full-day/recurring
+* Dual-rate pricing (member/public)
+* Advanced pricing rules (peak/off-peak, weekend uplift, demand modifiers)
+* Add-ons and equipment inventory constraints
+* Stripe subscriptions + one-off checkout
+* Deposits, refunds (partial and full), credits, coupons, taxes, invoice templates
+* Payment failure workflows (dunning, grace, auto-suspension)
+
+### 5.4 Compliance, documents, and risk controls
+
+* Document templates + auto-fill
+* Lightweight e-sign for waivers/contracts
+* Optional COI upload requirements by booking type/resource
+* Approval workflows per resource/booking type
+
+### 5.5 Communications and automation
+
+* Email notifications: confirmations, reminders, changes, receipts, dunning, doc requests
+* SMS reminders and notifications (opt-in)
+* Rules-based automation workflows (event checklist, podcast intake)
+* Broadcast announcements to members
+
+### 5.6 Integrations and syndication
+
+* Full calendar integrations: Google Calendar + Outlook (Microsoft Graph)
+* Access control integrations (time-bound door codes/credentials)
+* Accounting sync (e.g., QuickBooks)
+* CRM sync (e.g., HubSpot)
+* Public marketplace syndication integrations (availability feeds and/or partner flows)
+
+### 5.7 Operations and reporting
+
+* Staff “Today View” (timeline, arrivals, mode changes, buffers)
+* Approvals queue
+* Incident logs and no-show tracking
+* Reporting dashboards:
+
+  * Utilization by mode and seats
+  * Revenue split member vs public
+  * Add-on revenue
+  * Cancellations/no-shows
+  * Conversion: public renter → member
+* Full audit trail (who changed what and when)
+
+---
+
+## 6) Assumptions and policy decisions
+
+1. HiSpaceOps is the **source of truth** for availability.
+2. **Member priority** is enforced via:
+
+   * longer booking horizons for members
+   * member-first waitlist notifications
+3. Public rentals operate FCFS **within** a public booking horizon (public cannot block far-future member access).
+4. The space can be in **one mode at a time**; mode bookings are mutually exclusive with other modes and seat bookings.
+5. Certain booking types can require approvals, deposits, and documents based on configurable policies.
+
+---
+
+## 7) Personas
+
+* **Member (Solo):** books coworking seats and occasional modes, expects member pricing and easy scheduling.
+* **Member (Small Team):** books meeting/podcast blocks, may use company accounts, needs reliable billing.
+* **Public Renter (Creator):** books podcasting with add-ons; wants fast booking and clear instructions.
+* **Public Renter (Organizer):** books live talk/event; needs capacity management, deposit, and compliance flow.
+* **Staff:** manages approvals, day-of execution, holds, incidents, and no-shows.
+* **Admin/Owner:** configures pricing/rules/integrations and monitors business performance.
+
+---
+
+## 8) User journeys
+
+### 8.1 Public booking flow
+
+1. Discover resource/mode page (SEO)
+2. View availability (within public horizon)
+3. Provide required details (attendees, event type, add-ons)
+4. Accept/sign required documents; upload COI if required
+5. Pay (one-off; deposit if required)
+6. Receive confirmation + calendar invite + reminders + access instructions (if enabled)
+
+### 8.2 Member booking flow
+
+1. Login
+2. View priority availability (extended horizon)
+3. Book seat or mode with member pricing
+4. Receive confirmation + calendar invite + reminders
+
+### 8.3 Staff ops flow
+
+* Review approvals queue
+* Use Today View for schedule + mode transitions
+* Create holds/blocks
+* Check-ins / no-shows
+* Incident logging
+* Trigger operational messages if needed
+
+---
+
+## 9) Functional requirements (FR) and acceptance criteria
+
+### FR-1 Users, roles, identities
+
+**Requirements**
+
+* Support member and public accounts.
+* Implement RBAC: Admin, Staff, Member, Public.
+* Optional company accounts and team membership.
+* Profile completeness rules per booking type.
+
+**Acceptance criteria**
+
+* A public user can create an account during checkout and manage bookings.
+* Member pricing and priority availability are visible only to eligible members.
+* Staff cannot modify pricing rules unless granted permission.
+
+---
+
+### FR-2 Membership plans, tiers, priority rules
+
+**Requirements**
+
+* Plans define booking horizons, eligible pricing, discounts, included credits (if used).
+* Public and member horizons enforced server-side.
+* Waitlist supports member-first notifications.
+
+**Acceptance criteria**
+
+* Public cannot book outside public horizon; members can book further out.
+* A waitlist opening notifies members first for a configurable window.
+
+---
+
+### FR-3 Resource model for reconfigurable space
+
+**Requirements**
+
+* Resources include modes and seats; modes are mutually exclusive.
+* Mode templates enforce capacity, buffers, required details, and required documents.
+* Add-ons attach to applicable modes; equipment add-ons can be inventory-limited.
+
+**Acceptance criteria**
+
+* Booking Podcast Mode blocks Conference Mode and coworking seats in the same time window including buffers.
+* Booking a seat blocks that seat and cannot overlap a mode booking.
+
+---
+
+### FR-4 Booking and scheduling engine
+
+**Requirements**
+
+* Booking types: hourly, half-day, full-day, recurring.
+* Buffers applied automatically by resource.
+* Policies: notice periods, duration limits, cancellations/no-show rules.
+* Approvals: per resource, configurable.
+* Conflict detection includes buffers and holds.
+
+**Acceptance criteria**
+
+* System prevents any overlap after buffers are applied.
+* Cancellation inside policy window triggers configured fee and notifications.
+* Approval-required bookings remain pending until staff/admin decision.
+
+---
+
+### FR-5 Pricing, billing, payments
+
+**Requirements**
+
+* Dual pricing (member/public) per resource.
+* Advanced modifiers: peak/off-peak, weekend, demand-based adjustment.
+* Stripe supports subscriptions, one-offs, deposits, refunds, credits.
+* Coupons, gift cards, taxes, invoice templates.
+* Dunning, grace, and auto-suspension on payment failure.
+
+**Acceptance criteria**
+
+* Total price at checkout matches the server-generated quote snapshot.
+* Refunds and credits are reflected accurately in reports and audit logs.
+* Payment failure triggers correct dunning sequence and entitlement changes.
+
+---
+
+### FR-6 Calendar and availability
+
+**Requirements**
+
+* Member portal shows extended availability; public shows limited availability.
+* Google and Outlook sync supported for ops calendar and booking events.
+* Holds/blocks override availability.
+* Operating hours configurable by day.
+
+**Acceptance criteria**
+
+* Calendar events created/updated/deleted when bookings change.
+* Availability reflects holds immediately.
+
+---
+
+### FR-7 Communications and automation
+
+**Requirements**
+
+* Email + SMS (opt-in) confirmations, reminders, receipts, doc reminders, and changes.
+* Rules-based automations for booking types (podcast intake, event checklist).
+* Broadcast announcements to members.
+
+**Acceptance criteria**
+
+* Confirmations and reminders fire reliably with correct booking context.
+* Automation triggers are tied to booking type and executed consistently.
+
+---
+
+### FR-8 Contracts, waivers, and compliance
+
+**Requirements**
+
+* Document templates with auto-fill fields.
+* Lightweight e-sign capture with audit metadata.
+* COI upload requirement configurable by resource/booking type.
+
+**Acceptance criteria**
+
+* Bookings requiring documents cannot be confirmed until signed/uploaded (configurable).
+* Signed documents are stored and retrievable by staff/admin.
+
+---
+
+### FR-9 Access, check-in, onsite operations
+
+**Requirements**
+
+* Self check-in via QR or portal.
+* Staff Today View includes schedule, arrivals, and mode transitions.
+* Incident logs linked to bookings and users.
+* Access control integrations issue/revoke access in a time-bound manner.
+
+**Acceptance criteria**
+
+* Access is granted only for booking window (+ grace) and revoked on end/cancel.
+* Staff can mark no-shows and create incidents with attachments.
+
+---
+
+### FR-10 Reporting and audit control
+
+**Requirements**
+
+* Utilization by mode and seats.
+* Revenue split member/public, add-ons, deposits, refunds, fees.
+* Conversion tracking public → member.
+* Full audit trail for changes to bookings, policies, and financial actions.
+
+**Acceptance criteria**
+
+* Reports are exportable and match booking/payment records.
+* Every admin/staff action that changes state is logged with actor and timestamp.
+
+---
+
+### FR-11 Marketplace features and demand capture
+
+**Requirements**
+
+* SEO-friendly resource/mode pages with real-time availability.
+* Gift cards, review prompts post-visit.
+* Marketplace syndication integrations.
+
+**Acceptance criteria**
+
+* Public pages are indexable and bookable.
+* Syndication feeds/flows reflect availability accurately and safely.
+
+---
+
+### FR-12 Integrations and extensibility
+
+**Requirements**
+
+* Accounting sync (e.g., QuickBooks), CRM sync (e.g., HubSpot).
+* Zapier/Make/webhooks and public API support.
+* Integration health monitoring and retries.
+
+**Acceptance criteria**
+
+* Sync jobs are idempotent and retry-safe.
+* Integration failures do not break core booking/payment workflows.
+
+---
+
+## 10) Non-functional requirements
+
+* **Atomic booking creation** to prevent concurrency issues.
+* **Idempotent webhook handling** (Stripe, calendar, partners).
+* **Security:** server-side RBAC enforcement; least-privilege data access.
+* **Performance:** availability queries fast (<500ms typical range).
+* **Reliability:** scheduled jobs and retries for integrations.
+* **Auditability:** immutable audit logs for key actions.
+
+---
+
+## 11) Platform screens (release set)
+
+**Public:** resource pages, availability, checkout, booking management, documents, gift card purchase.
+**Member:** dashboard, booking calendar, membership & billing, invoices/receipts, profile, waitlist management.
+**Staff/Admin:** Today View, approvals queue, holds/blocks, resource/policy/pricing config, users, reports, incidents, audit logs, integration settings, marketplace settings.
+
+---
+
+## 12) Risks and mitigations
+
+* **Concurrency double-booking:** enforce slot-locking transactions and server-only booking writes.
+* **Calendar conflict drift:** nightly reconciliation + app as source of truth.
+* **Public booking risk:** deposits + approvals + doc/COI gating; incident tracking.
+* **Integration failures:** job queue with retries and idempotency keys.
