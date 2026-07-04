@@ -236,6 +236,11 @@ export const createBookingQuote = onCall(async (request) => {
   };
 });
 
+// WARNING: Legacy booking callable. This is not production billing safe because it
+// creates a confirmed booking directly. Normal paid customer booking should move
+// to a future booking_createCheckoutSession flow where the booking starts as
+// PENDING, payment is collected by Stripe Checkout, and the webhook confirms the
+// booking and creates the access grant.
 export const createBooking = onCall(async (request) => {
   // 1. Auth & Input Validation
   if (!request.auth) {
