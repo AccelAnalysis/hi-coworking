@@ -195,10 +195,10 @@ Firestore mirrors do not. Firestore and Storage rules enforce least-privilege
 reads and deny protected client writes. Callable Functions parse strict Zod
 inputs, re-read authoritative state, validate exact organization and entity
 relationships, and transact related writes. Canonical Storage paths, short-lived
-upload grants, submitted-response markers, exact team membership guards,
-request fingerprints, optimistic versions, deterministic identities, and
-append-only audit records narrow replay and confused-deputy risks. Missing or
-ambiguous authority fails closed.
+exact upload/read/evidence grants, submitted-response markers, exact team
+membership guards, request fingerprints, optimistic versions, deterministic
+identities, and append-only audit records narrow replay and confused-deputy
+risks. Missing or ambiguous authority fails closed.
 
 Residual risks are listed in section 36 and must be considered before production
 release.
@@ -299,12 +299,18 @@ response. Direct Firestore RFx writes are denied.
 `rfx_listManaged` replaces creator-only management discovery. It returns an
 allowlisted representation of individually owned RFx and organization RFx only
 for current active owner/admin memberships. An organization-scoped RFx never
-falls back to stale creator identity.
+falls back to stale creator identity. Its optional dashboard metrics also count
+active bids through current individual/organization participation and received
+responses only for currently manageable RFx; bounded scans expose truncation
+instead of allowing a historical denied record to fail a client query.
 
 ## 13. RFx response flow
 
 `rfx_submitResponse` creates one immutable submitted response per RFx and
-respondent subject:
+authenticated submitter UID. The actor may choose their individual identity or
+one currently managed organization as the response subject, but cannot submit
+again under another subject because attachment authority has one marker per
+submitter UID:
 
 1. The client first calls `rfx_prepareResponseUploads` for each proposed canonical
    `rfxResponses/{rfxId}/{actorUid}/...` path. The callable repeats eligibility,
@@ -313,9 +319,12 @@ respondent subject:
    `rfxResponseUploadGrantScopes/{rfxId}/uploadGrants/{uid}`. A grant lasts two
    hours, is cumulative only while still valid, and allows at most 26 unique
    paths.
-3. Storage rules permit create only for the path-bound UID, approved/open RFx,
-   unexpired deadline, non-issuer, unsubmitted response, valid exact-path grant,
-   permitted MIME type, and maximum 25 MiB object.
+3. The callable proves the non-issuer/unsubmitted/current-org conditions before
+   issuing the grant. `exchange_privateStorage` then revalidates the exact active
+   grant, canonical path, RFx state/deadline, path-bound UID, MIME type, and
+   maximum 25 MiB body before a token-free Admin GCS create. Direct client
+   Storage reads and creates are denied. PDF, Word, Excel/XLSX, plain-text, CSV,
+   JPEG, and PNG are accepted; WebP and unrelated private-document types are not.
 4. Submission validates its strict input, canonical path/metadata, required RFx
    documents, and actual stored object metadata. It rechecks the clock before
    entering and immediately before staging the write.
@@ -329,12 +338,19 @@ respondent subject:
    `rfxResponseAccess/{rfxId}/respondents/{submitterUid}` with the exact submitted
    attachment paths and optional respondent organization.
 
-The marker is the post-submit Storage authority source. Sibling files that were
-uploaded but not referenced in the submitted response remain unreadable. Current
-respondent-organization membership, rather than the historical submitter alone,
-governs organization response reads. Expired grants are scanned hourly in bounded
-batches; if no response marker exists, the worker removes grant-listed orphan
-objects.
+The marker is the server-side source for post-submit attachment identity.
+`rfx_prepareResponseDownload` re-reads that marker, the RFx, and current
+individual/organization authority before materializing an exact one-minute read
+grant under `rfxResponseReadGrantScopes/{rfxId}/readGrants/{uid}`. The private
+byte-transfer Function consumes that decision and streams bytes with private/
+no-store headers; it never returns a durable object URL. Sibling files that were
+uploaded but not referenced remain unreadable. Current respondent-organization
+membership, including presence-aware canonical/legacy organization fields,
+rather than the historical submitter alone, governs grant issuance. Expired
+upload/read grants are scanned hourly in bounded batches. The worker does not
+delete objects after dropping a grant because doing so would race a concurrent
+grant refresh or submission; inaccessible orphan retention is an operational
+limitation in section 36.
 
 The response cap is 400 per RFx so award transactions remain within Firestore
 write limits. Direct Firestore response creation, score/status mutation, and
@@ -452,6 +468,15 @@ Legacy commercial actions remain provider/provider-organization-bound. Only an
 admin/master may verify a legacy settlement, and the former payout checkout now
 fails closed because it collected funds without proving disbursement.
 
+When a legacy or new referral side contains an organization field, current exact
+organization membership supersedes the historical participant UID. A former
+provider/referrer/recipient cannot retain access or lifecycle authority merely
+because that UID remains stored. Legacy mixed records containing any platform-
+invite discriminator (including `referredUid`) plus business-provider/contact
+identity are ambiguous and fail closed. Admin/master has no implicit legacy
+provider-lifecycle bypass; administrative power is limited to the separately
+audited settlement-verification operation.
+
 ### 15.6 Privacy and consent assumptions
 
 The main `businessReferrals` record contains a minimized party summary. Names,
@@ -492,7 +517,8 @@ draft|sent -> withdrawn
 sent       -> expired
 ```
 
-Sending establishes a 30-day expiry. A bounded hourly worker moves unanswered,
+Sending establishes a 30-day expiry. The response transaction itself rejects an
+overdue or malformed expiry, while a bounded hourly worker moves unanswered,
 expired `sent` records to `expired`. `converted` requires a `converted` outcome;
 `closed` requires a non-converted outcome. Outcome actor and timestamp are
 server-assigned. Active disputes block progress.
@@ -527,13 +553,14 @@ The script is dry-run by default, paginated, idempotent, and requires exact
 project confirmation in apply mode. Production source/target counts remain
 **UNKNOWN**. Exact commands and release gates are in section 32.
 
-### 15.10 Referral items deferred to Run 2
+### 15.10 Referral items deferred beyond the Run 2 workspace foundation
 
-Run 2 must build the responsive business-referral Exchange workspace: sent and
-received lists, creation, accept/decline, contact reveal, progress, conversion,
-closure, private timeline and notes, business-profile integration, RFx/team/
-opportunity links, Attention Center notifications, and usable error/loading
-states. Platform invite incentives must appear separately from that workspace.
+The authoritative Run 2 scope intentionally does **not** build the complete
+business-referral workspace. It builds a reusable `/exchange` shell for current
+RFx and territories only. A later approved run may add sent/received referral
+lists, creation, accept/decline, contact reveal, progress, conversion, closure,
+private timeline/notes, and notifications without merging platform invitations
+back into business referrals.
 
 ### 15.11 Referral items deferred to Run 3
 
@@ -639,9 +666,16 @@ organization-platform redesign are deferred.
 ## 20. Storage authorization model
 
 New sensitive records store canonical Storage paths, not permanent download URLs,
-as their authorization source. The client reads authorized objects with the
-authenticated Firebase SDK into short-lived in-memory blob URLs. The rules end
-with default deny.
+as their authorization source. For RFx and referral evidence, a callable first
+evaluates the full current authority graph and materializes an exact user/path
+grant. The authenticated `exchange_privateStorage` HTTPS Function consumes that
+grant for raw-byte upload or download. New high-risk objects are created through
+the Admin GCS API without Firebase download-token metadata; downloads are
+streamed with private/no-store headers and never return a reusable URL. Direct
+client Storage reads and creates for those namespaces are denied. A deterministic,
+SHA-256-bound `privateStorageUploads` receipt makes exact upload retries
+idempotent and blocks same-path content replacement. The rules end with default
+deny.
 
 | Path | Read authority | Create authority and limits | Mutation policy |
 | --- | --- | --- | --- |
@@ -649,17 +683,27 @@ with default deny.
 | `profilePhotos/{uid}/{file}` | owner/staff, or anonymous only for the exact selected photo/poster | owner; image allowlist; 5 MiB | no overwrite; owner/admin delete |
 | `profileVideos/{uid}/{raw|processed|posters}/{file}` | owner/staff; anonymous only for exact selected processed video or poster | owner; video allowlist; 100 MiB | no overwrite; owner/admin delete; raw history stays private |
 | `verificationDocs/{uid}/{type}/...` | owner and staff/admin | path-bound owner; private-document allowlist; 15 MiB | no overwrite; owner cannot delete after evidence lock; admin may delete |
-| `rfxResponses/{rfxId}/{uid}/...` | pre-submit uploader draft; after submit, only exact marker paths for current respondent side, issuer side, or staff/admin | path-bound UID with valid exact upload grant; 25 MiB | no overwrite; submitter delete only before submission; admin delete |
+| `rfxResponses/{rfxId}/{uid}/...` | authenticated byte Function after exact one-minute marker/current-authority grant | authenticated byte Function after exact upload grant; path UID, open/approved/deadline, MIME and 25 MiB enforced | deterministic create receipt; no overwrite; direct client read/create denied; admin delete |
 | `teamDocuments/{teamId}/{uid}/...` | exact current guarded team members/staff | guarded member/uploader; 25 MiB | no overwrite; uploader while member or admin delete |
-| `businessReferralEvidence/{referralId}/{uid}/...` | referrer, assigned staff/admin, or consent-authorized recipient | exact referral party/uploader; 15 MiB | no overwrite; referrer-uploader may delete only in draft; admin delete |
-| `businessReferralDisputeEvidence/{referralId}/{uid}/...` | same consent-sensitive party model | exact party/uploader; 15 MiB | no overwrite; admin delete |
+| `businessReferralEvidence/{referralId}/{uid}/...` | authenticated byte Function after exact consent-aware one-minute grant | authenticated byte Function after exact party/upload grant; 15 MiB | deterministic receipt; direct client read/create denied; admin delete |
+| `businessReferralDisputeEvidence/{referralId}/{uid}/...` | same consent-sensitive byte-transfer model | authenticated byte Function after exact party/upload grant; 15 MiB | deterministic receipt; direct client read/create denied; admin delete |
 
-Legacy `/proposals/{rfxId}/{responseId}/...` remains read-only for exact response
-participants. Client-era `rfxProposals/{rfxId}/{respondentUid}/...` and
-`rfxDocuments/{rfxId}/{respondentUid}/...` are also read-only and only when the
-response-marker migration proves the exact response, respondent, optional
+Legacy `/proposals/{rfxId}/{responseId}/...` is explicitly unsupported and
+default-denied in Run 1. Its response-ID path does not prove a respondent, and
+the callable, client helper, and migration therefore do not issue grants for it;
+production inventory plus a separately reviewed binding migration are required
+before support can be added. Client-era
+`rfxProposals/{rfxId}/{respondentUid}/...` and
+`rfxDocuments/{rfxId}/{respondentUid}/...` are byte-stream-compatible only when
+the response-marker migration proves the exact response, respondent, optional
 organization, and referenced object path. Siblings and URL-only records remain
 denied. New writes use `rfxResponses` only.
+
+The `exchange_normalizeSensitiveStorageMetadata` finalize trigger is defense in
+depth for remaining direct client upload namespaces (profile, verification, and
+team assets): it removes Firebase download-token custom metadata and normalizes
+cache control, content disposition, encoding, and custom metadata. Existing
+production tokens still require an authorized inventory/rotation plan.
 
 ## 21. Audit model
 
@@ -702,6 +746,9 @@ High-risk strategies are:
   idempotency, and no URL assertion.
 - Verification submission: request-bound idempotency and deterministic evidence
   document IDs/locks.
+- Private RFx/referral upload: deterministic path receipt plus SHA-256, size,
+  content-type, and caller binding; an exact retry returns the existing result
+  and a different body cannot replace the object.
 - RFx/verification mutable decisions: optimistic versions and terminal-state
   checks.
 - Saved RFx: deterministic `{uid}_rfx_{entityId}` document identity.
@@ -724,6 +771,9 @@ is a later operational item.
 - `savedExchangeItems`
 - `rfxResponseAccess/{rfxId}/respondents`
 - `rfxResponseUploadGrantScopes/{rfxId}/uploadGrants`
+- `rfxResponseReadGrantScopes/{rfxId}/readGrants`
+- `businessReferralStorageGrantScopes/{referralId}/storageGrants`
+- `privateStorageUploads`
 - `rfxTeamInviteGuards`
 - `rfxTeamMemberships/{teamId}/members`
 - `rfxTeamInviteReviews`
@@ -788,8 +838,12 @@ worker recognize legacy Firestore Timestamp values.
 
 - `rfx_publish`, `rfx_update`, `rfx_moderate`, `rfx_cancel`
 - `rfx_prepareResponseUploads`, `rfx_submitResponse`,
-  `rfx_cleanupResponseUploadGrants`
+  `rfx_prepareResponseDownload`, `rfx_cleanupResponseUploadGrants`
 - `rfx_evaluateResponse`, `rfx_listManaged`, `rfx_backfillGeo`
+- `exchange_privateStorage`: authenticated, grant-bound, token-free raw-byte
+  upload/download for private RFx and business-referral objects.
+- `exchange_normalizeSensitiveStorageMetadata`: finalize-time token/cache/
+  disposition normalization for sensitive Storage namespaces.
 
 Their behavior is described in sections 12–14 and 18. Legacy competing protected
 client writes were removed from active call sites.
@@ -811,8 +865,9 @@ legal invitation state, atomic membership, and fail-closed legacy review.
 - Primary business domain: `businessReferral_create`, `businessReferral_send`,
   `businessReferral_respond`, `businessReferral_progress`,
   `businessReferral_updateConsent`, `businessReferral_confirmConsent`,
-  `businessReferral_withdrawConsent`, `businessReferral_createDispute`,
-  `businessReferral_resolveDispute`, and `businessReferral_expireSent`.
+  `businessReferral_withdrawConsent`, `businessReferral_prepareEvidenceAccess`,
+  `businessReferral_createDispute`, `businessReferral_resolveDispute`, and
+  `businessReferral_expireSent`.
 
 ### Runtime integration
 
@@ -847,7 +902,7 @@ referral authority, and guarded team membership.
 - verification: owner/staff evidence and history reads; staff flags; server-only
   writes.
 - `exchangeAudit`: staff read, server write. Idempotency, usage, response markers,
-  upload grants, and evidence locks are client-inaccessible.
+  upload/read/evidence grants, and evidence locks are client-inaccessible.
 - saved items: own deterministic RFx records only; referenced RFx must exist;
   update denied.
 - notifications: owner may change only `read` and `readAt`.
@@ -862,18 +917,24 @@ The final rules match actual canonical client paths, validate exact entity
 relationships, distinguish create/update/delete, enforce MIME and size limits,
 and deny fallback paths. Key decisions are in section 20.
 
-Two controls deserve explicit deployment attention:
+Three controls deserve explicit deployment attention:
 
-1. submitted RFx file access requires an exact `rfxResponseAccess` marker and
-   exact listed path;
-2. public profile asset access grants anonymous rules access to exactly the
+1. submitted RFx and referral-evidence access requires a server-issued,
+   UID-bound, exact-path grant; grant callables re-read current organization and
+   entity authority before every issuance;
+2. direct Storage reads/creates for RFx and referral evidence are always denied;
+   the authenticated byte Function consumes grants server-side, creates objects
+   without Firebase bearer tokens, and returns bytes rather than URLs;
+3. public profile asset access grants anonymous rules access to exactly the
    selected canonical immutable object in a published `publicProfiles` record.
 
 Publishing or unpublishing therefore changes rules-based profile access without
 making sibling/history objects public. Raw video is never the public video path.
-Possession of an already issued Firebase download token remains a separate legacy
-risk because a token can bypass the intended application read flow; rules alone
-do not revoke it.
+Client-created profile, verification, and team uploads reject arbitrary custom
+metadata and are normalized by the finalize trigger. Possession of an already
+issued production Firebase download token remains a separate legacy risk because
+a token can bypass rules; the new trigger and byte path do not retroactively
+inventory historical objects.
 
 ## 28. Client paths changed
 
@@ -885,10 +946,13 @@ do not revoke it.
 - RFx create sends only allowlisted publisher fields with an idempotency key.
 - RFx owner/admin screens use update/moderate/cancel callables and version data;
   server-filtered `rfx_listManaged` supplies individual and current organization
-  authority.
-- Response form prepares exact upload grants before upload and submits through
-  `rfx_submitResponse`; evaluator downloads canonical private paths through the
-  authenticated SDK and evaluates through the callable.
+  authority plus bounded dashboard bid/response metrics. Former organization
+  creator/respondent identities do not preserve access.
+- Response form prepares exact upload grants, transfers bytes through
+  `exchange_privateStorage`, and submits through `rfx_submitResponse`; evaluator
+  first requests an exact one-minute read grant, downloads bytes through the
+  same authenticated endpoint, and evaluates through the callable. No durable
+  Firebase download URL is requested or persisted.
 - RFx browse/recommendation/map queries require approved/open state and use the
   versioned indexes/geohash fields.
 - Saved RFx state moved behind `savedExchange.ts` to deterministic Firestore
@@ -913,21 +977,24 @@ The new Vitest/Firebase Emulator foundation includes:
 - 8 Firestore rules scenarios covering user self-escalation, profile projection,
   RFx/response server authority, legacy/new referral party and consent access,
   team/invitation privacy, saved-item identity, and verification privacy;
-- 5 Storage rules scenarios covering exact upload grants/response paths,
-  selected public profile assets, current organization response access,
-  verification locks, team guards, referral consent/evidence, size, MIME, and
-  cross-user denial;
-- 20 emulator-backed callable cases for RFx authority, managed org scope,
-  quota, upload grants, geo cursor, atomic response/count, high-cardinality award,
+- 6 Storage rules scenarios covering direct denial for server-mediated RFx and
+  referral bytes, selected public profile assets, safe legacy sensitive-upload
+  metadata, current organization response access, verification locks, team
+  guards, referral consent/evidence, size, MIME, and cross-user denial, plus a
+  static access-budget regression;
+- 22 emulator-backed callable blocks for RFx authority, managed org scope and
+  dashboard metrics, quota, exact private upload/read grants and byte transfer,
+  replay-safe upload receipts, geo cursor, atomic response/count, high-cardinality award,
   team identity/expiry, referral domain separation/redaction/settlement,
-  business-referral consent/outcome, and verification owner/reviewer identity;
-- 10 pure contract/projection scenarios for strict HTTP(S)/canonical assets,
+  business-referral consent/outcome/evidence grants, and verification owner/reviewer identity;
+- 13 generated contract/projection cases for strict HTTP(S)/canonical assets,
   public allowlisting, cross-account paths, business-referral lifecycle/outcome/
   consent/disputes, and RFx/team persisted shapes;
-- 18 migration scenarios across legacy referral classification, team invitation
-  links, Timestamp expiry, team membership guards, public profile projections,
-  and RFx response-access markers, including dry-run, ambiguity, cursor,
-  idempotency, and exact project confirmation.
+- 22 migration/index scenarios across legacy referral classification, team
+  invitation links, Timestamp expiry, team membership guards, public profile
+  projections, RFx response-access markers, and required collection-group
+  indexes, including dry-run, ambiguity, cursor, idempotency, and exact project
+  confirmation.
 
 The root scripts are:
 
@@ -947,10 +1014,10 @@ CI runs Node 20, Java 21, clean install, both builds, lint, the complete emulato
 security suite, a static web build with demo Firebase values, and whitespace
 validation. Current exact results are:
 
-- `npm run test:functions`: **PASS**, 2 files and 30/30 tests.
-- `npm run test:rules`: **PASS**, 2 files and 13/13 tests.
-- `npm run test:migrations`: **PASS**, 2 files and 18/18 tests.
-- `npm run test:security`: **PASS**, 6 files and 61/61 tests in 36.37 seconds,
+- `npm run test:functions`: **PASS**, 2 files and 35/35 tests in 26.19 seconds.
+- `npm run test:rules`: **PASS**, 2 files and 14/14 tests in 6.27 seconds.
+- `npm run test:migrations`: **PASS**, 3 files and 22/22 tests in 2.45 seconds.
+- `npm run test:security`: **PASS**, 7 files and 71/71 tests in 33.06 seconds,
   including the shared and Functions builds plus Authentication, Firestore,
   Functions, and Storage emulator coverage.
 - demo-environment `npm run build`: **PASS**, including the Next.js TypeScript
@@ -969,12 +1036,13 @@ validation. Current exact results are:
   web build's TypeScript phase passed, and the Functions TypeScript build is a
   separate required gate.
 
-The hosted CI run remains to be recorded after push/PR; this document does not
-fabricate it. No test contacted production.
+Hosted CI is tracked on the draft PR recorded in section 37; this document does
+not turn a pending run into a pass. No test contacted production.
 
 ## 30. Index changes
 
-`firestore.indexes.json` now versions 27 composite indexes:
+`firestore.indexes.json` now versions 27 composite indexes plus the explicit
+collection-group single-field overrides listed below:
 
 - `publicProfiles`: published + business name.
 - `rfx`: discovery by status/approval/date; map by status/approval/geohash;
@@ -987,7 +1055,15 @@ fabricate it. No test contacted production.
 - `territories`: status/name and status/release date.
 - `exchangeAudit`: entity type/entity ID/date.
 - `savedExchangeItems`: UID/date.
-- collection-group `uploadGrants`: grant type/expiry for orphan cleanup.
+- collection-group `uploadGrants`: grant type/expiry for bounded grant cleanup.
+- collection-group `readGrants` and `storageGrants`: ascending `expiresAt`
+  single-field indexes for bounded expiry cleanup.
+- collection-group `members`: ascending `uid` single-field index for
+  `team_listMine` current-membership lookup.
+
+The one-minute grant cleanup scans do not rely on collection-scope automatic
+indexes: their `COLLECTION_GROUP` field overrides are versioned and must reach
+`READY` before the schedulers are deployed.
 
 Indexes must be deployed and reach `READY` before Functions, rules, schedulers, or
 clients issue the dependent production queries.
@@ -1175,16 +1251,17 @@ No step below was executed in production. After merge, use this exact order:
    Wait until all 27 required indexes report `READY`.
 4. Deploy the reviewed Run 1 Functions before any client or restrictive rules.
    The release set is the Functions listed in section 25, including all new
-   RFx/referral/team/profile/verification callables and the three new schedulers.
+   RFx/referral/team/profile/verification callables, the private byte-transfer/
+   metadata-normalization Functions, and the three new schedulers.
    Use the explicit selection below and review Firebase's planned manifest before
    confirming:
 
    ```bash
    RUN1_FUNCTIONS="functions:profile_update,functions:verification_submit,functions:verification_review,functions:verification_flag,functions:territory_create,functions:territory_update,"
-   RUN1_FUNCTIONS+="functions:rfx_publish,functions:rfx_update,functions:rfx_moderate,functions:rfx_cancel,functions:rfx_prepareResponseUploads,functions:rfx_submitResponse,functions:rfx_evaluateResponse,functions:rfx_listManaged,functions:rfx_backfillGeo,functions:rfx_cleanupResponseUploadGrants,"
+   RUN1_FUNCTIONS+="functions:rfx_publish,functions:rfx_update,functions:rfx_moderate,functions:rfx_cancel,functions:rfx_prepareResponseUploads,functions:rfx_prepareResponseDownload,functions:rfx_submitResponse,functions:rfx_evaluateResponse,functions:rfx_listManaged,functions:rfx_backfillGeo,functions:rfx_cleanupResponseUploadGrants,functions:exchange_privateStorage,functions:exchange_normalizeSensitiveStorageMetadata,"
    RUN1_FUNCTIONS+="functions:team_listMine,functions:team_create,functions:team_invite,functions:team_respond_invite,functions:team_revoke_invite,functions:team_manage_member,functions:team_expire_invites,"
    RUN1_FUNCTIONS+="functions:referral_create,functions:platformInvite_listReceived,functions:legacyBusinessReferral_listReceived,functions:referral_contact,functions:referral_accept,functions:referral_decline,functions:referral_convert,functions:referral_markPaid,functions:referral_createPayoutCheckout,"
-   RUN1_FUNCTIONS+="functions:businessReferral_create,functions:businessReferral_send,functions:businessReferral_respond,functions:businessReferral_progress,functions:businessReferral_updateConsent,functions:businessReferral_confirmConsent,functions:businessReferral_withdrawConsent,functions:businessReferral_createDispute,functions:businessReferral_resolveDispute,functions:businessReferral_expireSent"
+   RUN1_FUNCTIONS+="functions:businessReferral_create,functions:businessReferral_send,functions:businessReferral_respond,functions:businessReferral_progress,functions:businessReferral_updateConsent,functions:businessReferral_confirmConsent,functions:businessReferral_withdrawConsent,functions:businessReferral_prepareEvidenceAccess,functions:businessReferral_createDispute,functions:businessReferral_resolveDispute,functions:businessReferral_expireSent"
    firebase deploy --project hi-coworking-plat --only "$RUN1_FUNCTIONS"
    ```
 
@@ -1216,8 +1293,9 @@ No step below was executed in production. After merge, use this exact order:
    firebase deploy --project hi-coworking-plat --only storage
    ```
 
-   Smoke-test selected public profile assets; private verification; upload-grant,
-   pre-submit, submitted exact-path, issuer, and unrelated RFx attachment access;
+   Smoke-test selected public profile assets; private verification; direct-client
+   denial plus authenticated upload/download for pre-submit and submitted RFx
+   attachments; token-free object metadata; issuer and unrelated-user denial;
    current/removed team member access; and referral consent access.
 10. Build and deploy the reviewed web client:
 
@@ -1268,29 +1346,19 @@ the baseline broad access merely to restore convenience.
 
 ## 35. Deferred Run 2 items
 
-Run 2, **Complete Exchange command-center MVP**, must build on these boundaries
-rather than reintroducing direct protected writes. Its prerequisites and scope
-include:
+Run 2, **Exchange workspace foundation**, builds on these boundaries without
+reintroducing protected client writes. Its deliberately narrowed scope is a
+unified responsive `/exchange` shell, reducer/URL state, reusable single-lifecycle
+Mapbox modules, current approved/open RFx, and released/scheduled territories.
+It preserves `/rfx`, `/directory`, and `/referrals` and does not expose an
+unfinished business-referral or settlement workspace.
 
-- a unified `/exchange` command center and responsive navigation/command bar;
-- complete business-referral sent, received, create, accept/decline, contact,
-  progress, conversion, closure, timeline, notes, and notification experience;
-- business-profile, RFx, team, and future opportunity linking;
-- platform-invitation incentives displayed separately from business referrals;
-- Attention Center integration;
-- managed saved/watch experiences beyond RFx and any approved local-import UX;
-- admin review queues for ambiguous legacy referrals, team links/memberships,
-  response markers, and Storage compatibility;
-- organization-aware UX for choosing and explaining ownership/billing scope;
-- explicit remote/service-area/multi-territory product decisions;
-- operational dashboards for audit, scheduler backlog, permission failures, and
-  compatibility adoption.
-
-Run 3 remains responsible for generalized opportunity/grant/loan/incentive/
-technical-assistance/workforce/property/site directories, relationship graph,
-analytics/AI matching, policy-approved data-subject operations and retention,
-compensation amendment/settlement, legacy retirement, and deeper payment/provider
-hardening outside this Run 1 boundary.
+Complete business-referral UX, managed multi-domain watch experiences, Attention
+Center, admin compatibility queues, organization billing UX, audit operations,
+generalized opportunity/grant/loan/incentive/technical-assistance/workforce/
+property/site directories, relationship graph, analytics/AI matching, retention,
+settlement, legacy retirement, and deeper provider hardening remain later,
+separately authorized work.
 
 ## 36. Known limitations
 
@@ -1305,21 +1373,38 @@ hardening outside this Run 1 boundary.
   than an unreviewed downgrade in the release path.
 - Existing Firebase download URLs remain bearer tokens. Public-profile projection
   keeps a validated legacy HTTP(S) URL only when no canonical path exists, and
-  tightening rules does not revoke previously issued tokens. Inventory and token
-  rotation need explicit owner approval.
+  tightening rules does not revoke previously issued tokens. New RFx/referral
+  objects use token-free server upload and authenticated byte download; other
+  sensitive client uploads receive finalize-time token/metadata normalization.
+  Historical inventory and token rotation still need explicit owner approval.
 - New profile video uploads are raw/private. A processing pipeline must create a
   canonical `processed` object before it can be the exact publicly selected video;
   Run 1 does not implement transcoding.
-- Exact, response-referenced `rfxProposals` and `rfxDocuments` objects can remain
-  read-compatible through a migrated response marker, but all writes and sibling
-  reads are denied. URL-only or noncanonical response attachments still require
-  inventory/remediation before the new Storage boundary can replace legacy access.
+- Exact, response-referenced `rfxProposals` and `rfxDocuments` objects can be
+  streamed through the authenticated byte endpoint after a migrated response
+  marker, but all direct client reads/writes and sibling reads are denied. URL-
+  only or noncanonical response attachments still require inventory/remediation.
+- Response-ID-keyed `/proposals/{rfxId}/{responseId}/...` objects remain
+  default-denied and are excluded from the client helper and marker migration;
+  production inventory and an explicit respondent-binding migration are Run 2
+  prerequisites if those objects must be recovered.
 - The response marker is keyed by RFx and submitter UID. Duplicate legacy
   responses for that key fail migration as ambiguous. RFx response/award capacity
   is intentionally capped at 400 for transactional safety.
-- Upload grants expire after two hours; cleanup scans at most 100 per hourly run.
-  Storage deletion is best-effort, so operational orphan monitoring is still
-  needed.
+- RFx upload grants expire after two hours; cleanup scans at most 100 per hourly
+  run. Cleanup removes only the expired grant. It deliberately does not delete
+  objects because deletion after a grant transaction can race a refreshed grant
+  or completed submission. Inaccessible orphan retention/monitoring and
+  `privateStorageUploads` receipt retention remain operational work.
+- RFx response reads and business-referral evidence operations use exact
+  one-minute grants consumed by the authenticated byte Function. Organization
+  suspension/removal can therefore leave an already
+  issued grant usable for at most the remainder of that minute; every new grant
+  request rechecks current authority. Expired grant documents are removed in
+  bounded hourly scans.
+- Dashboard metrics scan at most 1,000 currently managed RFx and 5,000 responses
+  per bounded query; the UI displays `+` when a result is truncated rather than
+  presenting an exact but incomplete count.
 - Business-referral and dispute evidence can be uploaded before the final
   Firestore record/action. Run 1 has validation but no general orphan-retention
   worker for those prefixes.
@@ -1354,6 +1439,36 @@ hardening outside this Run 1 boundary.
   delays. Deployment must wait for index readiness and refreshed claims.
 - Adjacent payment/OAuth/webhook findings require separate scoped review. This
   document does not claim that all non-Exchange platform security is remediated.
+
+## 37. Final Git closure
+
+Run 1 was closed on 2026-07-13 with the following reviewable Git evidence:
+
+- branch: `codex/exchange-run-1-secure-foundation`;
+- PR base: `main`;
+- final security implementation commit: `5587c68` (`fix(exchange): close
+  authority and private storage gaps`);
+- draft PR: [AccelAnalysis/hi-coworking#1](https://github.com/AccelAnalysis/hi-coworking/pull/1);
+- local clean-install retry: **PASS**, 1,170 packages installed from the
+  committed lockfile;
+- production dependency audit: **PASS**, zero vulnerabilities;
+- shared and Functions TypeScript builds: **PASS**;
+- lint: **PASS**, zero errors and five pre-existing warnings;
+- demo-environment Next.js production build: **PASS**, 51/51 routes;
+- Functions suite: **PASS**, 35/35 tests;
+- Firestore/Storage rules suite: **PASS**, 14/14 tests;
+- migration/index suite: **PASS**, 22/22 tests;
+- combined emulator security suite: **PASS**, 71/71 tests;
+- whitespace and changed-file credential-pattern checks: **PASS**;
+- hosted Node 20/Java 21 verification: tracked on the PR because the run was in
+  progress when this immutable local evidence was written;
+- deployment, migration, production-data access, secret rotation, billing, and
+  credit mutations: **not performed**.
+
+The documentation-closure commit that contains this section is intentionally
+not self-referential. The pushed branch tip and PR metadata are authoritative
+for that commit. Immediately after committing this record, the Run 1 worktree
+must be clean before Run 2 is branched from its exact `HEAD`.
 
 ## Appendix A — Pre-implementation security and dependency assessment
 
