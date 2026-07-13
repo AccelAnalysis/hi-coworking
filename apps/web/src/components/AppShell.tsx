@@ -17,12 +17,26 @@ import {
   ChevronDown,
   Gift,
   Building2,
+  Compass,
 } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import { useEffect, useState, useRef } from "react";
 import { subscribeToUnreadCount } from "@/lib/firestore";
+import {
+  resolveAppShellLayout,
+  type AppShellVariant,
+} from "./appShellContract";
 
-export function AppShell({ children, fullWidth = false }: { children: React.ReactNode; fullWidth?: boolean }) {
+export type { AppShellVariant } from "./appShellContract";
+
+interface AppShellProps {
+  children: React.ReactNode;
+  /** Retained for existing routes. Prefer `variant="workspace"` for full-viewport tools. */
+  fullWidth?: boolean;
+  variant?: AppShellVariant;
+}
+
+export function AppShell({ children, fullWidth = false, variant = "site" }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, role, signOut } = useAuth();
@@ -30,6 +44,9 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const drawerTriggerRef = useRef<HTMLButtonElement>(null);
+  const shellLayout = resolveAppShellLayout(variant, fullWidth);
 
   useEffect(() => {
     if (!user) return;
@@ -54,6 +71,64 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
     setAvatarOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    const desktopNavigation = window.matchMedia("(min-width: 1280px)");
+    const closeDrawerAtDesktop = () => {
+      if (desktopNavigation.matches) setDrawerOpen(false);
+    };
+    closeDrawerAtDesktop();
+    desktopNavigation.addEventListener("change", closeDrawerAtDesktop);
+    return () => desktopNavigation.removeEventListener("change", closeDrawerAtDesktop);
+  }, []);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const drawer = drawerRef.current;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : drawerTriggerRef.current;
+
+    document.body.style.overflow = "hidden";
+    const focusable = () => Array.from(
+      drawer?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute("hidden"));
+
+    requestAnimationFrame(() => focusable()[0]?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDrawerOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [drawerOpen]);
+
   const handleSignOut = async () => {
     setAvatarOpen(false);
     setDrawerOpen(false);
@@ -74,6 +149,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
   const memberLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/book", label: "Book Space", icon: Calendar },
+    { href: "/exchange", label: "Exchange", icon: Compass },
     { href: "/rfx", label: "RFx", icon: ClipboardList },
     { href: "/directory", label: "Directory", icon: Users },
     { href: "/referrals", label: "Referrals", icon: Gift },
@@ -105,7 +181,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
   );
 
   return (
-    <div className="min-h-dvh flex flex-col">
+    <div className={shellLayout.rootClassName}>
       {/* ── Top Nav ── */}
       <nav className="bg-slate-900 text-white shadow-lg sticky top-0 z-50">
         <div className="max-w-7xl mx-auto flex justify-between items-center w-full px-4 h-16">
@@ -116,7 +192,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
               <span className="font-bold text-xl tracking-tight">Coworking</span>
             </Link>
 
-            <div className="hidden lg:flex gap-5">
+            <div className="hidden xl:flex gap-5">
               {publicLinks.map((item) => (
                 <NavLink key={item.href} href={item.href} label={item.label} />
               ))}
@@ -130,7 +206,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
                 {user ? (
                   <>
                     {/* Desktop member links */}
-                    <div className="hidden lg:flex items-center gap-4 text-sm font-medium border-r border-slate-700 pr-4 mr-1">
+                    <div className="hidden xl:flex items-center gap-4 text-sm font-medium border-r border-slate-700 pr-4 mr-1">
                       {memberLinks.map((item) => (
                         <NavLink key={item.href} href={item.href} label={item.label} />
                       ))}
@@ -161,6 +237,8 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
                       <button
                         onClick={() => setAvatarOpen(!avatarOpen)}
                         className="flex items-center gap-1.5 p-1 rounded-full hover:bg-slate-800 transition"
+                        aria-expanded={avatarOpen}
+                        aria-label="Open account menu"
                       >
                         <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white ring-2 ring-slate-600">
                           {user.displayName ? user.displayName[0].toUpperCase() : <User className="h-4 w-4" />}
@@ -208,9 +286,12 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
 
                     {/* Mobile hamburger */}
                     <button
+                      ref={drawerTriggerRef}
                       onClick={() => setDrawerOpen(true)}
-                      className="lg:hidden p-1.5 text-slate-400 hover:text-white transition"
+                      className="xl:hidden p-1.5 text-slate-400 hover:text-white transition"
                       aria-label="Open menu"
+                      aria-expanded={drawerOpen}
+                      aria-controls="app-navigation-drawer"
                     >
                       <Menu className="h-6 w-6" />
                     </button>
@@ -227,9 +308,12 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
                     </div>
                     {/* Mobile hamburger for logged-out */}
                     <button
+                      ref={drawerTriggerRef}
                       onClick={() => setDrawerOpen(true)}
-                      className="sm:hidden p-1.5 text-slate-400 hover:text-white transition"
+                      className="xl:hidden p-1.5 text-slate-400 hover:text-white transition"
                       aria-label="Open menu"
+                      aria-expanded={drawerOpen}
+                      aria-controls="app-navigation-drawer"
                     >
                       <Menu className="h-6 w-6" />
                     </button>
@@ -246,17 +330,30 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 lg:hidden"
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 xl:hidden"
             onClick={() => setDrawerOpen(false)}
+            aria-hidden="true"
           />
           {/* Drawer panel */}
-          <div className="fixed top-0 right-0 bottom-0 w-72 bg-white z-50 shadow-2xl lg:hidden overflow-y-auto animate-in slide-in-from-right duration-200">
+          <div
+            id="app-navigation-drawer"
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="app-navigation-title"
+            className="fixed top-0 right-0 bottom-0 w-72 bg-white z-50 shadow-2xl xl:hidden overflow-y-auto animate-in slide-in-from-right duration-200"
+          >
             <div className="flex items-center justify-between p-4 border-b border-slate-100">
               <Link href="/" className="flex items-center gap-2" onClick={() => setDrawerOpen(false)}>
                 <div className="w-7 h-7 bg-slate-900 rounded-xl rounded-bl-none flex items-center justify-center text-white text-xs font-bold">Hi</div>
-                <span className="font-bold text-lg text-slate-900">Coworking</span>
+                <span id="app-navigation-title" className="font-bold text-lg text-slate-900">Coworking</span>
               </Link>
-              <button onClick={() => setDrawerOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600"
+                aria-label="Close menu"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -368,12 +465,12 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
         </>
       )}
 
-      <main className={cn("flex-1 w-full", !fullWidth && "max-w-7xl mx-auto px-6 py-8", fullWidth && "bg-slate-50")}>
+      <main className={shellLayout.mainClassName}>
         {children}
       </main>
 
       {/* ── Footer ── */}
-      <footer className="bg-slate-50 border-t border-slate-200 mt-auto">
+      {shellLayout.showFooter ? <footer className="bg-slate-50 border-t border-slate-200 mt-auto">
         <div className="max-w-7xl mx-auto px-6 py-12">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
             {/* Brand */}
@@ -433,7 +530,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
             </p>
           </div>
         </div>
-      </footer>
+      </footer> : null}
     </div>
   );
 }
