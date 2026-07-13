@@ -1,552 +1,774 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
-import * as admin from "firebase-admin";
-import * as logger from "firebase-functions/logger";
+import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
+import { z } from "zod";
 import { CREDIT_COSTS, MEMBERSHIP_TIERS } from "./config";
-import { createPayment } from "./payments/ledger";
-import { StripeProvider } from "./payments/stripeProvider";
+import {
+  idempotencyKeySchema,
+  legacyReferralActionInputSchema,
+  legacyReferralCreateInputSchema,
+  parseCallableInput,
+} from "./exchange/contracts";
+import {
+  getAuthorizedActor,
+  getDb,
+  fingerprintRequest,
+  idempotencyRef,
+  loadOrgAuthority,
+  requireAdmin,
+  setCompletedIdempotency,
+  writeExchangeAudit,
+  type AuthorizedActor,
+} from "./exchange/security";
 
-const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
-const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
+type LegacyReferralStatus =
+  | "pending"
+  | "contacted"
+  | "accepted"
+  | "declined"
+  | "converted"
+  | "expired"
+  | "disputed"
+  | "paid";
 
-// MIRROR of @hi/shared types — kept inline because @hi/shared is ESM-only.
-export type ReferralType = "platform_invite" | "business_intro";
-
-export interface ReferralDoc {
+interface LegacyReferralDoc {
   id: string;
-  type: ReferralType;
+  type?: "platform_invite" | "business_intro";
   referrerUid: string;
+  referrerOrgId?: string;
   referredEmail?: string;
+  invitedEmail?: string;
   referredName?: string;
+  invitedName?: string;
+  inviteStatus?: string;
+  inviteeUid?: string;
+  referredUid?: string;
+  claimedByUid?: string;
+  cancelledByUid?: string;
+  claimedAt?: number;
+  cancelledAt?: number;
   providerUid?: string;
+  providerOrgId?: string;
   clientName?: string;
   clientEmail?: string;
   clientPhone?: string;
   clientCompany?: string;
-  status: "pending" | "contacted" | "accepted" | "declined" | "converted" | "expired" | "disputed" | "paid";
+  status: LegacyReferralStatus;
   note?: string;
-  viewedByProvider: boolean;
   createdAt: number;
   updatedAt?: number;
-  // Payout fields
-  payoutMethod?: "manual" | "platform";
-  payoutProofUrl?: string;
-  payoutPaymentId?: string;
+  acceptedAt?: number;
   convertedAt?: number;
   paidAt?: number;
-  policySnapshot?: {
-    template: "flat_fee" | "percentage_first_invoice" | "recurring" | "tiered";
-    terms: string;
-    amountCents?: number;
-    percentage?: number;
-    currency: string;
-    attributionWindowDays: number;
-    payoutTrigger?: string;
-  };
+  payoutMethod?: "manual" | "platform";
+  payoutPaymentId?: string;
+  policySnapshot?: Record<string, unknown>;
+  expiresAt?: number;
+  settlementReference?: string;
+  settlementVerifiedAt?: number;
+  settlementVerifiedByUid?: string;
+  settlementVerificationNote?: string;
+  consentStatus?: "not_required" | "pending" | "confirmed" | "withdrawn" | "unknown_legacy";
+  recipientDisclosureAllowed?: boolean;
 }
 
-function getDb() {
-  return admin.firestore();
+const legacySettlementInputSchema = z
+  .object({
+    referralId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
+    idempotencyKey: idempotencyKeySchema,
+    settlementReference: z
+      .string()
+      .trim()
+      .min(3)
+      .max(160)
+      .regex(/^[A-Za-z0-9_.:@\-/ ]+$/)
+      .refine(
+        (value) => !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value) && !/^www\./i.test(value),
+        "A ledger reference, not a URL, is required",
+      ),
+    note: z.string().trim().max(2_000).optional(),
+  })
+  .strict();
+
+function completedIdempotentResult(
+  snapshot: FirebaseFirestore.DocumentSnapshot,
+  actorUid: string,
+  action: string,
+  requestFingerprint: string,
+): Record<string, unknown> | null {
+  if (!snapshot.exists) return null;
+  const data = snapshot.data();
+  if (data?.uid !== actorUid || data.action !== action || data.status !== "completed") {
+    throw new HttpsError("already-exists", "The idempotency key is already in use");
+  }
+  if (data.requestFingerprint !== requestFingerprint) {
+    throw new HttpsError("already-exists", "The idempotency key belongs to a different request");
+  }
+  return (data.result as Record<string, unknown> | undefined) ?? { id: data.entityId };
+}
+
+async function hasLegacyOrgAuthority(
+  transaction: FirebaseFirestore.Transaction,
+  orgId: unknown,
+  actor: AuthorizedActor,
+): Promise<boolean> {
+  if (typeof orgId !== "string" || !orgId) return false;
+  try {
+    await loadOrgAuthority(transaction, getDb(), orgId, actor.uid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function requireLegacyProviderAuthority(
+  transaction: FirebaseFirestore.Transaction,
+  referral: LegacyReferralDoc,
+  actor: AuthorizedActor,
+): Promise<void> {
+  if (Object.prototype.hasOwnProperty.call(referral, "providerOrgId")) {
+    if (await hasLegacyOrgAuthority(transaction, referral.providerOrgId, actor)) return;
+  } else if (referral.providerUid === actor.uid) {
+    return;
+  }
+  throw new HttpsError("permission-denied", "Only the receiving provider may perform this action");
+}
+
+function requireLegacyBusinessReferral(referral: LegacyReferralDoc): void {
+  if (getLegacyReferralDomain(referral) !== "business_intro") {
+    throw new HttpsError(
+      "failed-precondition",
+      "This record is not an unambiguous legacy business referral",
+    );
+  }
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function getLegacyReferralDomain(
+  referral: LegacyReferralDoc,
+): "platform_invite" | "business_intro" | "unknown" {
+  const platformIdentityFields = [
+    "referredEmail",
+    "invitedEmail",
+    "inviteeUid",
+    "referredUid",
+  ] as const;
+  const platformFields = [
+    ...platformIdentityFields,
+    "claimedByUid",
+    "cancelledByUid",
+  ] as const;
+  const businessFields = [
+    "providerUid",
+    "providerOrgId",
+    "clientName",
+    "clientEmail",
+    "clientPhone",
+    "clientCompany",
+  ] as const;
+  const hasField = (field: keyof LegacyReferralDoc) => (
+    Object.prototype.hasOwnProperty.call(referral, field)
+  );
+  const malformedIdentityField = [...platformFields, ...businessFields]
+    .some((field) => hasField(field) && !nonEmptyString(referral[field]));
+  if (malformedIdentityField) return "unknown";
+
+  const hasPlatformIdentity = platformIdentityFields
+    .some((field) => nonEmptyString(referral[field]));
+  const hasPlatformField = platformFields.some(hasField);
+  const hasBusinessIdentity = businessFields.some((field) => nonEmptyString(referral[field]));
+
+  if (!hasPlatformIdentity && !hasBusinessIdentity) return "unknown";
+  if ((hasPlatformField && hasBusinessIdentity) || (hasPlatformIdentity && hasBusinessIdentity)) {
+    return "unknown";
+  }
+  const inferred = hasPlatformIdentity ? "platform_invite" : "business_intro";
+  return referral.type && referral.type !== inferred ? "unknown" : inferred;
+}
+
+function safePlatformInvitePayload(
+  id: string,
+  referral: LegacyReferralDoc,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    id,
+    type: "platform_invite",
+    referrerUid: referral.referrerUid,
+    status: referral.status,
+    createdAt: referral.createdAt,
+  };
+  const optionalFields: Array<keyof LegacyReferralDoc> = [
+    "referredEmail",
+    "invitedEmail",
+    "referredName",
+    "invitedName",
+    "inviteStatus",
+    "inviteeUid",
+    "referredUid",
+    "claimedByUid",
+    "cancelledByUid",
+    "claimedAt",
+    "cancelledAt",
+    "note",
+    "updatedAt",
+    "acceptedAt",
+    "expiresAt",
+  ];
+  for (const field of optionalFields) {
+    if (referral[field] !== undefined) payload[field] = referral[field];
+  }
+  return payload;
+}
+
+function legacyBusinessContactMayBeDisclosed(referral: LegacyReferralDoc): boolean {
+  return referral.consentStatus === "confirmed" || referral.recipientDisclosureAllowed === true;
+}
+
+function safeLegacyBusinessPayload(
+  id: string,
+  referral: LegacyReferralDoc,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    id,
+    type: "business_intro",
+    referrerUid: referral.referrerUid,
+    providerUid: referral.providerUid,
+    status: referral.status,
+    createdAt: referral.createdAt,
+  };
+  const alwaysVisible: Array<keyof LegacyReferralDoc> = [
+    "referrerOrgId",
+    "providerOrgId",
+    "note",
+    "updatedAt",
+    "acceptedAt",
+    "convertedAt",
+    "paidAt",
+    "policySnapshot",
+    "consentStatus",
+    "recipientDisclosureAllowed",
+  ];
+  for (const field of alwaysVisible) {
+    if (referral[field] !== undefined) payload[field] = referral[field];
+  }
+
+  if (legacyBusinessContactMayBeDisclosed(referral)) {
+    const contactFields: Array<keyof LegacyReferralDoc> = [
+      "clientName",
+      "clientEmail",
+      "clientPhone",
+      "clientCompany",
+    ];
+    for (const field of contactFields) {
+      if (referral[field] !== undefined) payload[field] = referral[field];
+    }
+  } else {
+    payload.contactRedacted = true;
+  }
+  return payload;
+}
+
+async function activeActorOrgIds(
+  db: FirebaseFirestore.Firestore,
+  actorUid: string,
+): Promise<string[]> {
+  const membershipSnapshot = await db.collection("orgMembers")
+    .where("uid", "==", actorUid)
+    .limit(100)
+    .get();
+  const candidates = membershipSnapshot.docs
+    .map((document) => {
+      const data = document.data() as { uid?: unknown; orgId?: unknown; status?: unknown };
+      return {
+        documentId: document.id,
+        uid: data.uid,
+        orgId: data.orgId,
+        status: data.status,
+      };
+    })
+    .filter((membership) => (
+      membership.uid === actorUid
+      && typeof membership.orgId === "string"
+      && membership.orgId.length > 0
+      && membership.documentId === `${membership.orgId}_${actorUid}`
+    ))
+    .filter((membership) => membership.status === undefined || membership.status === "active")
+    .map((membership) => membership.orgId as string)
+    .filter((orgId, index, all) => all.indexOf(orgId) === index);
+  if (candidates.length === 0) return [];
+
+  const orgSnapshots = await db.getAll(
+    ...candidates.map((orgId) => db.collection("orgs").doc(orgId)),
+  );
+  return orgSnapshots
+    .filter((snapshot) => snapshot.exists && snapshot.get("status") === "active")
+    .map((snapshot) => snapshot.id);
 }
 
 /**
- * Create a new Referral.
- * Handles monetization: checks referral limits and deducts credits if necessary.
+ * Server-mediated inbox for typed and safely inferred legacy platform invites.
+ * A direct Firestore query cannot prove that an email-matched document lacks
+ * business-referral fields, so filtering happens at this trusted boundary.
  */
-export const referral_create = onCall(async (request) => {
-  // 1. Auth Check
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in to create a referral");
-  }
-  
-  const uid = request.auth.uid;
-  const data = request.data as Partial<ReferralDoc>;
-  
-  // Basic validation
-  if (!data.referredEmail && !data.clientEmail) {
-    throw new HttpsError("invalid-argument", "Email is required");
+export const platformInvite_listReceived = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const db = getDb();
+  const queries: Array<Promise<FirebaseFirestore.QuerySnapshot>> = [
+    db.collection("referrals").where("inviteeUid", "==", actor.uid).limit(200).get(),
+    db.collection("referrals").where("referredUid", "==", actor.uid).limit(200).get(),
+    db.collection("referrals").where("claimedByUid", "==", actor.uid).limit(200).get(),
+  ];
+  const email = actor.email?.trim().toLowerCase();
+  if (request.auth?.token.email_verified === true && email) {
+    queries.push(
+      db.collection("referrals").where("referredEmail", "==", email).limit(200).get(),
+      db.collection("referrals").where("invitedEmail", "==", email).limit(200).get(),
+    );
   }
 
-  const db = getDb();
-  
-  // 2. Monetization Check (Transactional)
-  return await db.runTransaction(async (t) => {
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await t.get(userRef);
-    
-    if (!userDoc.exists) {
-      throw new HttpsError("not-found", "User profile not found");
+  const snapshots = await Promise.all(queries);
+  const invitations = new Map<string, Record<string, unknown>>();
+  for (const snapshot of snapshots) {
+    for (const document of snapshot.docs) {
+      const referral = document.data() as LegacyReferralDoc;
+      if (getLegacyReferralDomain(referral) !== "platform_invite") continue;
+      const boundUid = referral.claimedByUid
+        ?? referral.cancelledByUid
+        ?? referral.inviteeUid
+        ?? referral.referredUid;
+      const invitedEmail = (referral.invitedEmail ?? referral.referredEmail)?.trim().toLowerCase();
+      const uidMatch = nonEmptyString(boundUid) && boundUid === actor.uid;
+      const emailMatch = request.auth?.token.email_verified === true
+        && Boolean(email)
+        && invitedEmail === email;
+      if (!uidMatch && !emailMatch) continue;
+      invitations.set(document.id, safePlatformInvitePayload(document.id, referral));
     }
-    
-    const userData = userDoc.data();
-    const planId = userData?.plan;
-    const role = userData?.role;
-    
-    // Admins bypass limits
-    if (role === "admin" || role === "master") {
-      logger.info(`Admin ${uid} bypassing referral limits`);
+  }
+
+  return {
+    invitations: [...invitations.values()]
+      .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+      .slice(0, 200),
+  };
+});
+
+/**
+ * Server-mediated legacy business-introduction inbox. Inline third-party
+ * contact fields are removed unless the legacy record proves disclosure
+ * consent; the primary Run 1 business-referral domain stores contacts in its
+ * separate consent-gated collection.
+ */
+export const legacyBusinessReferral_listReceived = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const db = getDb();
+  const orgIds = await activeActorOrgIds(db, actor.uid);
+  const snapshots = await Promise.all([
+    db.collection("referrals").where("providerUid", "==", actor.uid).limit(200).get(),
+    ...orgIds.map((orgId) => db.collection("referrals")
+      .where("providerOrgId", "==", orgId)
+      .limit(200)
+      .get()),
+  ]);
+
+  const referrals = new Map<string, Record<string, unknown>>();
+  for (const snapshot of snapshots) {
+    for (const document of snapshot.docs) {
+      const referral = document.data() as LegacyReferralDoc;
+      if (getLegacyReferralDomain(referral) !== "business_intro") continue;
+      const hasProviderOrgScope = Object.prototype.hasOwnProperty.call(referral, "providerOrgId");
+      const individuallyAuthorized = !hasProviderOrgScope && referral.providerUid === actor.uid;
+      const organizationallyAuthorized = hasProviderOrgScope
+        && nonEmptyString(referral.providerOrgId)
+        && orgIds.includes(referral.providerOrgId);
+      if (!individuallyAuthorized && !organizationallyAuthorized) continue;
+      referrals.set(document.id, safeLegacyBusinessPayload(document.id, referral));
+    }
+  }
+
+  return {
+    referrals: [...referrals.values()]
+      .sort((left, right) => Number(right.createdAt ?? 0) - Number(left.createdAt ?? 0))
+      .slice(0, 200),
+  };
+});
+
+function requirePlatformInviteeAuthority(
+  request: CallableRequest<unknown>,
+  referral: LegacyReferralDoc,
+  actor: AuthorizedActor,
+): void {
+  const boundUid = referral.claimedByUid
+    ?? referral.cancelledByUid
+    ?? referral.inviteeUid
+    ?? referral.referredUid;
+  if (nonEmptyString(boundUid)) {
+    if (boundUid === actor.uid) return;
+    throw new HttpsError("permission-denied", "Only the invited account may respond");
+  }
+
+  const invitedEmail = referral.invitedEmail ?? referral.referredEmail;
+  const actorEmail = actor.email?.trim().toLowerCase();
+  const emailVerified = request.auth?.token.email_verified === true;
+  if (!emailVerified || !actorEmail || !nonEmptyString(invitedEmail)
+    || invitedEmail.trim().toLowerCase() !== actorEmail) {
+    throw new HttpsError("permission-denied", "A verified invited email is required to respond");
+  }
+}
+
+async function transitionLegacyReferral(
+  request: CallableRequest<unknown>,
+  params: {
+    targetStatus: "contacted" | "accepted" | "declined" | "converted";
+    allowedStatuses: LegacyReferralStatus[];
+    action: string;
+    timestampField?: "contactedAt" | "acceptedAt" | "convertedAt";
+    responseNoteField?: "providerContactNote" | "providerResponseNote" | "conversionNote";
+  },
+): Promise<{ success: boolean; idempotent?: true; expired?: true }> {
+  const actor = getAuthorizedActor(request);
+  const input = parseCallableInput(legacyReferralActionInputSchema, request.data);
+  const db = getDb();
+  const referralRef = db.collection("referrals").doc(input.referralId);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(referralRef);
+    if (!snapshot.exists) throw new HttpsError("not-found", "Referral not found");
+    const referral = snapshot.data() as LegacyReferralDoc;
+    const domain = getLegacyReferralDomain(referral);
+    if (domain === "unknown") {
+      throw new HttpsError("failed-precondition", "The legacy referral domain is ambiguous");
+    }
+
+    if (domain === "platform_invite") {
+      if (params.targetStatus !== "accepted" && params.targetStatus !== "declined") {
+        throw new HttpsError(
+          "failed-precondition",
+          "Platform membership invitations cannot enter the business-referral lifecycle",
+        );
+      }
+      requirePlatformInviteeAuthority(request, referral, actor);
     } else {
-      // Get Plan Limits
-      const tier = MEMBERSHIP_TIERS.find(t => t.id === planId);
-      const limit = tier?.limits.referralsSentPerMonth ?? 0; // Default to 0
-      
-      // Count referrals sent THIS MONTH
-      // We need a query for this.
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      
-      const sentQuery = db.collection("referrals")
-        .where("referrerUid", "==", uid)
-        .where("createdAt", ">=", startOfMonth);
-        
-      const sentSnap = await t.get(sentQuery);
-      const currentSent = sentSnap.size;
-      
-      if (currentSent < limit) {
-        logger.info(`User ${uid} within referral limit (${currentSent}/${limit}). Creating for free.`);
+      await requireLegacyProviderAuthority(transaction, referral, actor);
+    }
+
+    if (referral.status === params.targetStatus) {
+      return { success: true, idempotent: true };
+    }
+    if (!params.allowedStatuses.includes(referral.status)) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Referral cannot transition from ${referral.status} to ${params.targetStatus}`,
+      );
+    }
+
+    const now = Date.now();
+    if (domain === "platform_invite" && typeof referral.expiresAt === "number" && referral.expiresAt <= now) {
+      transaction.update(referralRef, {
+        status: "expired",
+        inviteStatus: "expired",
+        updatedAt: now,
+        lifecycleVersion: typeof snapshot.get("lifecycleVersion") === "number"
+          ? snapshot.get("lifecycleVersion") + 1
+          : 1,
+      });
+      writeExchangeAudit(transaction, db, {
+        actorUid: actor.uid,
+        actorRole: actor.role,
+        action: "platform_invite.expired_on_response",
+        entityType: "platformInvite",
+        entityId: input.referralId,
+        previousStatus: referral.status,
+        newStatus: "expired",
+        createdAt: now,
+      });
+      return { success: false, expired: true };
+    }
+
+    const updates: Record<string, unknown> = {
+      status: params.targetStatus,
+      viewedByProvider: true,
+      updatedAt: now,
+      lifecycleVersion: typeof snapshot.get("lifecycleVersion") === "number"
+        ? snapshot.get("lifecycleVersion") + 1
+        : 1,
+    };
+    if (params.timestampField) updates[params.timestampField] = now;
+    if (domain === "platform_invite") {
+      if (params.targetStatus === "accepted") {
+        updates.inviteStatus = "claimed";
+        updates.claimedByUid = actor.uid;
+        updates.claimedAt = now;
       } else {
-        // Over limit - charge credits
+        updates.inviteStatus = "cancelled";
+        updates.cancelledByUid = actor.uid;
+        updates.cancelledAt = now;
+      }
+      if (input.note) updates.inviteeResponseNote = input.note;
+    } else if (params.responseNoteField && input.note) {
+      updates[params.responseNoteField] = input.note;
+    }
+
+    transaction.update(referralRef, updates);
+    writeExchangeAudit(transaction, db, {
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      action: domain === "platform_invite"
+        ? `platform_invite.${params.targetStatus === "accepted" ? "claimed" : "cancelled"}`
+        : params.action,
+      entityType: domain === "platform_invite" ? "platformInvite" : "legacyBusinessReferral",
+      entityId: input.referralId,
+      orgId: domain === "business_intro" ? referral.providerOrgId : undefined,
+      previousStatus: referral.status,
+      newStatus: params.targetStatus,
+      createdAt: now,
+    });
+    return { success: true };
+  });
+}
+
+/**
+ * Creates only platform membership invitations in the legacy collection.
+ * New commercial referrals must use businessReferral_create.
+ */
+export const referral_create = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const input = parseCallableInput(legacyReferralCreateInputSchema, request.data);
+  const requestFingerprint = fingerprintRequest(input);
+  const db = getDb();
+  const action = "platform_invite.create";
+  const dedupeRef = idempotencyRef(db, actor.uid, action, input.idempotencyKey);
+  const inviteRef = db.collection("referrals").doc();
+  const normalizedEmail = input.referredEmail!.trim().toLowerCase();
+
+  if (actor.email?.trim().toLowerCase() === normalizedEmail) {
+    throw new HttpsError("invalid-argument", "You cannot invite your own account email");
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const [dedupeSnapshot, userSnapshot] = await Promise.all([
+      transaction.get(dedupeRef),
+      transaction.get(db.collection("users").doc(actor.uid)),
+    ]);
+    const priorResult = completedIdempotentResult(
+      dedupeSnapshot,
+      actor.uid,
+      action,
+      requestFingerprint,
+    );
+    if (priorResult) return { ...priorResult, idempotent: true };
+    if (!userSnapshot.exists) throw new HttpsError("failed-precondition", "Account state is unavailable");
+
+    const user = userSnapshot.data() ?? {};
+    if (!actor.isAdmin && user.membershipStatus !== "active" && user.membershipStatus !== "trial") {
+      throw new HttpsError("failed-precondition", "An active membership is required to invite members");
+    }
+
+    const now = Date.now();
+    const monthStart = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1).getTime();
+    const sentQuery = db
+      .collection("referrals")
+      .where("referrerUid", "==", actor.uid)
+      .where("type", "==", "platform_invite")
+      .where("createdAt", ">=", monthStart);
+    const sentSnapshot = await transaction.get(sentQuery);
+
+    if (!actor.isAdmin) {
+      const tier = MEMBERSHIP_TIERS.find((candidate) => candidate.id === user.plan);
+      const included = tier?.limits.referralsSentPerMonth ?? 0;
+      if (sentSnapshot.size >= included) {
         const cost = CREDIT_COSTS.REFERRAL_SEND_EXTRA;
-        const currentCredits = userData?.credits || 0;
-        
-        if (currentCredits < cost) {
+        const credits = typeof user.credits === "number" ? user.credits : 0;
+        if (credits < cost) {
           throw new HttpsError(
-            "resource-exhausted", 
-            `You have reached your monthly limit of ${limit} referrals. Sending another requires ${cost} credits, but you only have ${currentCredits}.`
+            "resource-exhausted",
+            `The monthly invite allowance is exhausted and ${cost} credits are required`,
           );
         }
-        
-        // Deduct credits
-        const newCreditBalance = currentCredits - cost;
-        t.update(userRef, { 
-          credits: newCreditBalance,
-          updatedAt: Date.now() 
-        });
-        
-        // Log transaction
-        const transRef = db.collection("creditTransactions").doc();
-        t.set(transRef, {
-          id: transRef.id,
-          userId: uid,
+        transaction.update(userSnapshot.ref, { credits: credits - cost, updatedAt: now });
+        const creditRef = db.collection("creditTransactions").doc();
+        transaction.create(creditRef, {
+          id: creditRef.id,
+          userId: actor.uid,
           amount: -cost,
           type: "usage",
-          referenceId: "pending_referral_creation",
-          description: `Send Referral: ${data.referredEmail || data.clientEmail}`,
-          createdAt: Date.now()
+          referenceId: inviteRef.id,
+          description: "Platform membership invitation",
+          createdAt: now,
         });
-        
-        logger.info(`User ${uid} over referral limit. Deducted ${cost} credits.`);
       }
     }
-    
-    // 3. Create Referral
-    const refRef = db.collection("referrals").doc();
-    
-    // Construct doc based on type
-    const now = Date.now();
-    const type: ReferralType = data.type || "platform_invite";
-    
-    const referralDoc: any = {
-      id: refRef.id,
-      type,
-      referrerUid: uid,
+
+    const invite: Record<string, unknown> = {
+      id: inviteRef.id,
+      schemaVersion: 1,
+      type: "platform_invite",
+      referrerUid: actor.uid,
+      inviterUid: actor.uid,
+      referredEmail: normalizedEmail,
+      invitedEmail: normalizedEmail,
       status: "pending",
-      note: data.note || undefined,
       viewedByProvider: false,
       createdAt: now,
       updatedAt: now,
+      expiresAt: now + 30 * 24 * 60 * 60 * 1_000,
     };
-
-    if (type === "platform_invite") {
-      referralDoc.referredEmail = data.referredEmail;
-      referralDoc.referredName = data.referredName;
-    } else {
-      // Business intro
-      referralDoc.providerUid = data.providerUid;
-      referralDoc.clientName = data.clientName;
-      referralDoc.clientEmail = data.clientEmail;
-      referralDoc.clientPhone = data.clientPhone;
-      referralDoc.clientCompany = data.clientCompany;
-      
-      // Look up policy if providerUid is set?
-      // For now, simple creation.
+    if (input.referredName) {
+      invite.referredName = input.referredName;
+      invite.invitedName = input.referredName;
     }
-    
-    t.set(refRef, referralDoc);
-    
-    return { id: refRef.id };
+    if (input.note) invite.note = input.note;
+
+    transaction.create(inviteRef, invite);
+    setCompletedIdempotency(transaction, dedupeRef, {
+      uid: actor.uid,
+      action,
+      entityId: inviteRef.id,
+      result: { id: inviteRef.id },
+      requestFingerprint,
+      createdAt: now,
+    });
+    writeExchangeAudit(transaction, db, {
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      action,
+      entityType: "platformInvite",
+      entityId: inviteRef.id,
+      newStatus: "pending",
+      createdAt: now,
+    });
+    return { id: inviteRef.id };
   });
 });
 
-/**
- * Provider marks a referral as "Converted".
- */
-export const referral_convert = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
-  }
-  
-  const { referralId, note } = request.data;
-  if (!referralId) {
-    throw new HttpsError("invalid-argument", "referralId is required");
-  }
+export const referral_accept = onCall((request) => transitionLegacyReferral(request, {
+  targetStatus: "accepted",
+  allowedStatuses: ["pending", "contacted"],
+  action: "legacy_business_referral.accept",
+  timestampField: "acceptedAt",
+  responseNoteField: "providerResponseNote",
+}));
 
-  const db = getDb();
-  const refRef = db.collection("referrals").doc(referralId);
-  const refSnap = await refRef.get();
-  
-  if (!refSnap.exists) {
-    throw new HttpsError("not-found", "Referral not found");
-  }
-  
-  const referral = refSnap.data() as ReferralDoc;
-  
-  // Only the provider can convert business intros
-  if (referral.type === "business_intro") {
-    if (referral.providerUid !== request.auth.uid) {
-      throw new HttpsError("permission-denied", "Only the assigned provider can convert this referral");
-    }
-  }
-  
-  await refRef.update({
-    status: "converted",
-    convertedAt: Date.now(),
-    note: note || referral.note,
-    updatedAt: Date.now()
-  });
-  
-  return { success: true };
-});
+export const referral_contact = onCall((request) => transitionLegacyReferral(request, {
+  targetStatus: "contacted",
+  allowedStatuses: ["pending"],
+  action: "legacy_business_referral.contact",
+  timestampField: "contactedAt",
+  responseNoteField: "providerContactNote",
+}));
+
+export const referral_decline = onCall((request) => transitionLegacyReferral(request, {
+  targetStatus: "declined",
+  allowedStatuses: ["pending", "contacted"],
+  action: "legacy_business_referral.decline",
+  responseNoteField: "providerResponseNote",
+}));
+
+export const referral_convert = onCall((request) => transitionLegacyReferral(request, {
+  targetStatus: "converted",
+  allowedStatuses: ["accepted"],
+  action: "legacy_business_referral.convert",
+  timestampField: "convertedAt",
+  responseNoteField: "conversionNote",
+}));
 
 /**
- * Provider marks a referral as "Paid" (Manual Payout).
- * Requires uploading proof of payment. Deducts 1 credit for processing/verification.
+ * Settlement is a financial assertion. Only a true admin/master claim may verify it.
+ * The endpoint accepts a bounded ledger reference and never accepts a URL.
  */
 export const referral_markPaid = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
-  }
-  
-  const { referralId, proofUrl, method } = request.data;
-  if (!referralId || !proofUrl) {
-    throw new HttpsError("invalid-argument", "referralId and proofUrl are required");
-  }
-
-  const uid = request.auth.uid;
+  const actor = getAuthorizedActor(request);
+  requireAdmin(actor);
+  const input = parseCallableInput(legacySettlementInputSchema, request.data);
+  const requestFingerprint = fingerprintRequest(input);
   const db = getDb();
-  
-  return await db.runTransaction(async (t) => {
-    // 1. Get Referral
-    const refRef = db.collection("referrals").doc(referralId);
-    const refSnap = await t.get(refRef);
-    
-    if (!refSnap.exists) {
-      throw new HttpsError("not-found", "Referral not found");
-    }
-    
-    const referral = refSnap.data() as ReferralDoc;
-    
-    if (referral.providerUid !== uid) {
-      throw new HttpsError("permission-denied", "Only the assigned provider can mark this as paid");
-    }
-    
-    if (referral.status !== "converted") {
-      throw new HttpsError("failed-precondition", "Referral must be converted before it can be paid");
-    }
+  const action = "legacy_business_referral.verify_settlement";
+  const dedupeRef = idempotencyRef(db, actor.uid, action, input.idempotencyKey);
+  const referralRef = db.collection("referrals").doc(input.referralId);
 
-    // 2. Charge Credit (1 credit for manual proof upload)
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await t.get(userRef);
-    const currentCredits = userDoc.data()?.credits || 0;
-    const cost = 1; // Manual proof upload fee
-
-    if (currentCredits < cost) {
-      throw new HttpsError("resource-exhausted", `Insufficient credits. Manual payout verification requires ${cost} credit.`);
-    }
-
-    // Deduct credits
-    t.update(userRef, {
-      credits: currentCredits - cost,
-      updatedAt: Date.now()
-    });
-
-    // Log credit transaction
-    const transRef = db.collection("creditTransactions").doc();
-    t.set(transRef, {
-      id: transRef.id,
-      userId: uid,
-      amount: -cost,
-      type: "usage",
-      referenceId: referralId,
-      description: "Manual Payout Verification Fee",
-      createdAt: Date.now()
-    });
-
-    // 3. Update Referral
-    t.update(refRef, {
-      status: "paid",
-      paidAt: Date.now(),
-      payoutMethod: method || "manual",
-      payoutProofUrl: proofUrl,
-      updatedAt: Date.now()
-    });
-
-    return { success: true };
-  });
-});
-
-/**
- * Provider accepts a referral.
- * Handles monetization: checks receive limits and deducts credits if necessary.
- */
-export const referral_accept = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
-  }
-  
-  const { referralId } = request.data;
-  if (!referralId) {
-    throw new HttpsError("invalid-argument", "referralId is required");
-  }
-
-  const uid = request.auth.uid;
-  const db = getDb();
-  
-  return await db.runTransaction(async (t) => {
-    // 1. Get Referral
-    const refRef = db.collection("referrals").doc(referralId);
-    const refSnap = await t.get(refRef);
-    
-    if (!refSnap.exists) {
-      throw new HttpsError("not-found", "Referral not found");
-    }
-    
-    const referral = refSnap.data() as ReferralDoc;
-    
-    if (referral.providerUid !== uid) {
-      throw new HttpsError("permission-denied", "Only the assigned provider can accept this referral");
-    }
-    
-    if (referral.status !== "pending" && referral.status !== "contacted") {
-      throw new HttpsError("failed-precondition", "Referral is not in a pending state");
-    }
-
-    // 2. Monetization Check
-    const userRef = db.collection("users").doc(uid);
-    const userDoc = await t.get(userRef);
-    const userData = userDoc.data();
-    const planId = userData?.plan;
-    const role = userData?.role;
-
-    if (role !== "admin" && role !== "master") {
-      const tier = MEMBERSHIP_TIERS.find(t => t.id === planId);
-      const limit = tier?.limits.referralsReceivedPerMonth ?? 0;
-
-      // Count accepted this month
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      
-      // Need query inside transaction? Firestore transactions require all reads before writes.
-      // But query cannot be dynamic based on userDoc read inside transaction easily unless we queried first.
-      // We can query outside transaction for approximate count? Or use a separate counter doc.
-      // For simplicity/correctness, we'll query inside.
-      const acceptedQuery = db.collection("referrals")
-        .where("providerUid", "==", uid)
-        .where("status", "in", ["accepted", "converted", "paid"])
-        .where("acceptedAt", ">=", startOfMonth);
-        
-      const acceptedSnap = await t.get(acceptedQuery);
-      const currentAccepted = acceptedSnap.size;
-
-      if (currentAccepted >= limit) {
-        // Charge credit
-        const cost = CREDIT_COSTS.REFERRAL_ACCEPT_EXTRA;
-        const currentCredits = userData?.credits || 0;
-        
-        if (currentCredits < cost) {
-          throw new HttpsError("resource-exhausted", `Monthly acceptance limit reached (${limit}). Accepting requires ${cost} credit.`);
-        }
-        
-        // Deduct
-        t.update(userRef, {
-          credits: currentCredits - cost,
-          updatedAt: Date.now()
-        });
-        
-        // Log
-        const transRef = db.collection("creditTransactions").doc();
-        t.set(transRef, {
-          id: transRef.id,
-          userId: uid,
-          amount: -cost,
-          type: "usage",
-          referenceId: referralId,
-          description: "Accept Referral Fee",
-          createdAt: Date.now()
-        });
-        
-        logger.info(`User ${uid} over acceptance limit. Deducted ${cost} credits.`);
-      }
-    }
-
-    // 3. Update Referral
-    t.update(refRef, {
-      status: "accepted",
-      acceptedAt: Date.now(),
-      viewedByProvider: true,
-      updatedAt: Date.now()
-    });
-
-    return { success: true };
-  });
-});
-
-/**
- * Provider declines a referral.
- */
-export const referral_decline = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
-  }
-  
-  const { referralId } = request.data;
-  if (!referralId) {
-    throw new HttpsError("invalid-argument", "referralId is required");
-  }
-
-  const db = getDb();
-  const refRef = db.collection("referrals").doc(referralId);
-  const refSnap = await refRef.get();
-  
-  if (!refSnap.exists) {
-    throw new HttpsError("not-found", "Referral not found");
-  }
-  
-  const referral = refSnap.data() as ReferralDoc;
-  
-  if (referral.providerUid !== request.auth.uid) {
-    throw new HttpsError("permission-denied", "Only the assigned provider can decline this referral");
-  }
-  
-  await refRef.update({
-    status: "declined",
-    viewedByProvider: true,
-    updatedAt: Date.now()
-  });
-  
-  return { success: true };
-});
-
-/**
- * Create a Stripe Checkout Session for a Provider to pay a referral fee.
- */
-export const referral_createPayoutCheckout = onCall(
-  { secrets: [stripeSecretKey, stripeWebhookSecret] },
-  async (request) => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Must be logged in");
-    }
-
-    const { referralId, successUrl, cancelUrl } = request.data;
-    if (!referralId || !successUrl || !cancelUrl) {
-      throw new HttpsError("invalid-argument", "referralId, successUrl, and cancelUrl are required");
-    }
-
-    const uid = request.auth.uid;
-    const db = getDb();
-    
-    // 1. Validate Referral
-    const refSnap = await db.collection("referrals").doc(referralId).get();
-    if (!refSnap.exists) {
-      throw new HttpsError("not-found", "Referral not found");
-    }
-    const referral = refSnap.data() as ReferralDoc;
-
-    if (referral.providerUid !== uid) {
-      throw new HttpsError("permission-denied", "Only the assigned provider can pay this referral");
-    }
-
-    if (referral.status !== "converted") {
-      throw new HttpsError("failed-precondition", "Referral must be converted before payout");
-    }
-
-    // Determine Amount from Policy Snapshot
-    // Fallback to manual input if snapshot missing? For now require snapshot or error.
-    const amountCents = referral.policySnapshot?.amountCents;
-    const percentage = referral.policySnapshot?.percentage; // We can't auto-calculate percentage of invoice without invoice amount input.
-    
-    // For now, only support fixed amount from snapshot or require manual input for percentage?
-    // Let's assume amountCents is populated (either fixed or calculated beforehand).
-    // If not, we might need an input for "invoice amount" to calc fee.
-    let finalAmount = amountCents;
-    
-    if (!finalAmount) {
-       // If percentage model, we need invoice amount. 
-       // For MVP, we'll assume fixed fee or throw if amount is missing.
-       throw new HttpsError("failed-precondition", "Referral fee amount is not defined on this referral. Use manual payout or update terms.");
-    }
-
-    // Platform Fee (5%, min $3, cap $150)
-    let feeCents = Math.round(finalAmount * 0.05);
-    if (feeCents < 300) feeCents = 300;
-    if (feeCents > 15000) feeCents = 15000;
-    
-    const totalCharge = finalAmount + feeCents; // Provider pays Referrer + Platform Fee? 
-    // Wait, usually Platform Fee is deducted from Payout if we are facilitating transfer.
-    // OR Provider pays Total, we keep Fee, and transfer rest to Referrer (Connect).
-    // WITHOUT Connect (Standard Stripe): 
-    // Provider pays Platform (Total). Platform pays Referrer manually or via separate Payout mechanism.
-    // This is "Platform-Managed Payout" (we collect funds).
-    // So we charge Provider `finalAmount`. We keep `feeCents`. We owe `finalAmount - feeCents` to referrer?
-    // OR: Provider pays `finalAmount`. We take fee FROM that. Referrer gets less.
-    // Plan says: "Platform service fee (take-rate): 5% of the referral payout"
-    // Usually means: Referrer gets $100. Provider pays $105? OR Provider pays $100, Referrer gets $95?
-    // "When a Provider pays a referral fee... Platform service fee... 5% of the referral payout"
-    // Let's assume Provider pays $Fee + $ServiceCharge.
-    // i.e. Total = ReferralFee * 1.05 (subject to min/cap).
-    
-    // Recalculate total to charge Provider
-    // Fee logic: 5% of referral payout amount.
-    // e.g. Referral = $100. Fee = $5. Total Charge = $105.
-    
-    // 2. Create Pending Payment Record
-    const payment = await createPayment({
-      uid,
-      provider: "stripe",
-      amount: finalAmount + feeCents,
-      currency: "usd",
-      purpose: "referral",
-      purposeRefId: referralId,
-      status: "pending",
-    });
-
-    // 3. Create Checkout Session
-    const provider = new StripeProvider(
-      stripeSecretKey.value(),
-      stripeWebhookSecret.value()
+  return db.runTransaction(async (transaction) => {
+    const [dedupeSnapshot, referralSnapshot] = await Promise.all([
+      transaction.get(dedupeRef),
+      transaction.get(referralRef),
+    ]);
+    const priorResult = completedIdempotentResult(
+      dedupeSnapshot,
+      actor.uid,
+      action,
+      requestFingerprint,
     );
+    if (priorResult) return { ...priorResult, success: true, idempotent: true };
+    if (!referralSnapshot.exists) throw new HttpsError("not-found", "Referral not found");
+    const referral = referralSnapshot.data() as LegacyReferralDoc;
+    requireLegacyBusinessReferral(referral);
+    if (referral.status !== "converted" && referral.status !== "paid") {
+      throw new HttpsError("failed-precondition", "Only a converted referral may be settled");
+    }
 
-    const session = await provider.createCheckoutSession({
-      uid,
-      amount: finalAmount + feeCents,
-      currency: "usd",
-      purpose: "referral",
-      purposeRefId: referralId,
-      successUrl,
-      cancelUrl,
-      mode: "payment", // One-time
-      lineItemLabel: `Referral Fee: ${referral.referredName || referral.clientName || "Client"}`,
-      metadata: {
-        referralId,
-        paymentId: payment.id,
-        // email: ... (optional)
-      },
-    });
+    const now = Date.now();
+    if (referral.status === "paid") {
+      if (referral.settlementReference !== input.settlementReference) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The settlement is already verified and cannot be rewritten",
+        );
+      }
+      setCompletedIdempotency(transaction, dedupeRef, {
+        uid: actor.uid,
+        action,
+        entityId: input.referralId,
+        result: { referralId: input.referralId, success: true },
+        requestFingerprint,
+        createdAt: now,
+      });
+      return { success: true, referralId: input.referralId, idempotent: true };
+    }
 
-    return {
-      sessionId: session.sessionId,
-      url: session.url,
-      paymentId: payment.id,
+    const updates: Record<string, unknown> = {
+      status: "paid",
+      payoutMethod: "manual",
+      settlementReference: input.settlementReference,
+      settlementVerifiedAt: now,
+      settlementVerifiedByUid: actor.uid,
+      updatedAt: now,
     };
-  }
-);
+    updates.paidAt = now;
+    if (input.note) updates.settlementVerificationNote = input.note;
+    transaction.update(referralRef, updates);
+
+    setCompletedIdempotency(transaction, dedupeRef, {
+      uid: actor.uid,
+      action,
+      entityId: input.referralId,
+      result: { referralId: input.referralId, success: true },
+      requestFingerprint,
+      createdAt: now,
+    });
+    writeExchangeAudit(transaction, db, {
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      action,
+      entityType: "legacyBusinessReferral",
+      entityId: input.referralId,
+      previousStatus: referral.status,
+      newStatus: "paid",
+      metadata: { settlementReference: input.settlementReference },
+      createdAt: now,
+    });
+    return { success: true, referralId: input.referralId };
+  });
+});
+
+/**
+ * The prior checkout collected funds without proving disbursement to the referrer.
+ * It remains exported for compatibility but fails closed until a reviewed settlement
+ * provider is implemented against the corrected business-referral compensation model.
+ */
+export const referral_createPayoutCheckout = onCall((request) => {
+  getAuthorizedActor(request);
+  throw new HttpsError(
+    "failed-precondition",
+    "Legacy referral checkout is disabled; compensation settlement requires the reviewed business-referral flow",
+  );
+});

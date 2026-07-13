@@ -28,47 +28,218 @@ service cloud.firestore {
       return isSignedIn(); // All authenticated users are at least members
     }
 
+    function isOrgMember(orgId) {
+      return isSignedIn()
+        && orgId is string
+        && exists(/databases/$(database)/documents/orgs/$(orgId))
+        && get(/databases/$(database)/documents/orgs/$(orgId)).data.status == "active"
+        && exists(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid))
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.orgId == orgId
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.uid == request.auth.uid;
+    }
+
+    function isOrgManager(orgId) {
+      return isOrgMember(orgId)
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.role in ["owner", "admin"];
+    }
+
+    function ownsRfx(rfxData) {
+      return isSignedIn()
+        && (("orgId" in rfxData && isOrgMember(rfxData.orgId))
+            || (!("orgId" in rfxData)
+                && (("ownerUid" in rfxData && rfxData.ownerUid == request.auth.uid)
+                    || ("createdBy" in rfxData && rfxData.createdBy == request.auth.uid))));
+    }
+
+    function canReadRfx(rfxData) {
+      return isStaff()
+        || ownsRfx(rfxData)
+        || (rfxData.status == "open"
+            && rfxData.adminApprovalStatus == "approved"
+            && (rfxData.memberOnly == false || isSignedIn()));
+    }
+
+    function canReadRfxById(rfxId) {
+      return exists(/databases/$(database)/documents/rfx/$(rfxId))
+        && canReadRfx(get(/databases/$(database)/documents/rfx/$(rfxId)).data);
+    }
+
+    function isLegacyReferralParty(referralData) {
+      return isSignedIn()
+        && ((("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
+              || (!("referrerOrgId" in referralData)
+                  && referralData.referrerUid == request.auth.uid))
+            || (isUnambiguousLegacyBusinessReferral(referralData)
+                && legacyBusinessContactMayBeDisclosed(referralData)
+                && !("providerOrgId" in referralData)
+                && "providerUid" in referralData
+                && referralData.providerUid == request.auth.uid)
+            || (isUnambiguousLegacyBusinessReferral(referralData)
+                && legacyBusinessContactMayBeDisclosed(referralData)
+                && "providerOrgId" in referralData
+                && isOrgMember(referralData.providerOrgId))
+            || (isUnambiguousLegacyPlatformInvite(referralData)
+                && "referredUid" in referralData
+                && referralData.referredUid == request.auth.uid)
+            || (isUnambiguousLegacyPlatformInvite(referralData)
+                && "referredEmail" in referralData
+                && request.auth.token.email_verified == true
+                && request.auth.token.email == referralData.referredEmail)
+            || (isUnambiguousLegacyPlatformInvite(referralData)
+                && "invitedEmail" in referralData
+                && request.auth.token.email_verified == true
+                && request.auth.token.email == referralData.invitedEmail));
+    }
+
+    function isRfxResponseRespondent(responseData) {
+      return isSignedIn()
+        && (("respondentOrgId" in responseData
+              && responseData.respondentOrgId is string
+              && (!("orgId" in responseData)
+                  || (responseData.orgId is string
+                      && responseData.orgId == responseData.respondentOrgId))
+              && isOrgMember(responseData.respondentOrgId))
+            || (!("respondentOrgId" in responseData)
+                && "orgId" in responseData
+                && responseData.orgId is string
+                && isOrgMember(responseData.orgId))
+            || (!("respondentOrgId" in responseData)
+                && !("orgId" in responseData)
+                && responseData.respondentUid == request.auth.uid));
+    }
+
+    function isUnambiguousLegacyPlatformInvite(referralData) {
+      return (!("type" in referralData) || referralData.type == "platform_invite")
+        && (("referredEmail" in referralData && referralData.referredEmail is string)
+            || ("invitedEmail" in referralData && referralData.invitedEmail is string)
+            || ("inviteeUid" in referralData && referralData.inviteeUid is string)
+            || ("referredUid" in referralData && referralData.referredUid is string))
+        && !("providerUid" in referralData)
+        && !("providerOrgId" in referralData)
+        && !("clientName" in referralData)
+        && !("clientEmail" in referralData)
+        && !("clientPhone" in referralData)
+        && !("clientCompany" in referralData);
+    }
+
+    function isUnambiguousLegacyBusinessReferral(referralData) {
+      return (!("type" in referralData) || referralData.type == "business_intro")
+        && (("providerUid" in referralData && referralData.providerUid is string)
+            || ("providerOrgId" in referralData && referralData.providerOrgId is string)
+            || ("clientName" in referralData && referralData.clientName is string)
+            || ("clientEmail" in referralData && referralData.clientEmail is string)
+            || ("clientPhone" in referralData && referralData.clientPhone is string)
+            || ("clientCompany" in referralData && referralData.clientCompany is string))
+        && !("referredEmail" in referralData)
+        && !("invitedEmail" in referralData)
+        && !("inviteeUid" in referralData)
+        && !("referredUid" in referralData)
+        && !("claimedByUid" in referralData)
+        && !("cancelledByUid" in referralData);
+    }
+
+    function legacyBusinessContactMayBeDisclosed(referralData) {
+      return (!("clientName" in referralData)
+              && !("clientEmail" in referralData)
+              && !("clientPhone" in referralData)
+              && !("clientCompany" in referralData))
+        || ("consentStatus" in referralData && referralData.consentStatus == "confirmed")
+        || ("recipientDisclosureAllowed" in referralData
+            && referralData.recipientDisclosureAllowed == true);
+    }
+
+    function isBusinessReferralParty(referralData) {
+      return isSignedIn()
+        && (isBusinessReferralReferrer(referralData)
+            || isBusinessReferralRecipient(referralData)
+            || isAssignedReferralStaff(referralData));
+    }
+
+    function isAssignedReferralStaff(referralData) {
+      return hasRole("staff")
+        && "assignedStaffUids" in referralData
+        && referralData.assignedStaffUids is list
+        && request.auth.uid in referralData.assignedStaffUids;
+    }
+
+    function isBusinessReferralReferrer(referralData) {
+      return isSignedIn()
+        && (("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
+            || (!("referrerOrgId" in referralData)
+                && referralData.referrerUid == request.auth.uid));
+    }
+
+    function isBusinessReferralRecipient(referralData) {
+      return isSignedIn()
+        && (("recipientOrgId" in referralData && isOrgMember(referralData.recipientOrgId))
+            || (!("recipientOrgId" in referralData)
+                && "recipientUid" in referralData
+                && referralData.recipientUid == request.auth.uid));
+    }
+
     function hasMemberUid(memberUids) {
       return memberUids is list && request.auth.uid in memberUids;
     }
 
-    function isTeamMemberDoc(teamData) {
+    function hasTeamMembershipGuard(teamId, rfxId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.id == request.auth.uid
+        && get(/databases/$(database)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.teamId == teamId
+        && get(/databases/$(database)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.rfxId == rfxId;
+    }
+
+    function isTeamMemberDoc(teamId, teamData) {
       return isSignedIn()
         && (isAdmin()
-            || teamData.primeUid == request.auth.uid
-            || hasMemberUid(teamData.memberUids));
+            || ("rfxId" in teamData
+                && teamData.rfxId is string
+                && hasMemberUid(teamData.memberUids)
+                && hasTeamMembershipGuard(teamId, teamData.rfxId)));
     }
 
     function isTeamMemberByTeamId(teamId) {
       return isSignedIn()
         && (isAdmin()
             || (exists(/databases/$(database)/documents/rfxTeams/$(teamId))
-                && (get(/databases/$(database)/documents/rfxTeams/$(teamId)).data.primeUid == request.auth.uid
-                    || hasMemberUid(get(/databases/$(database)/documents/rfxTeams/$(teamId)).data.memberUids))));
+                && isTeamMemberDoc(
+                  teamId,
+                  get(/databases/$(database)/documents/rfxTeams/$(teamId)).data
+                )));
     }
 
     // --- users/{uid} ---
     // Owner can read/update their own doc; admins can read/write any user doc.
     // User doc is created by the authBeforeCreate Cloud Function, not client-side.
     match /users/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
-      allow update: if isOwner(uid) || isAdmin();
+      allow read: if isOwner(uid) || isStaff();
+      allow update: if isAdmin()
+                    || (isOwner(uid)
+                        && request.resource.data.uid == resource.data.uid
+                        && request.resource.data.email == resource.data.email
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(["displayName", "membershipTrack", "updatedAt"]));
       allow create, delete: if false; // Only Cloud Functions create/delete user docs
     }
 
     // --- profiles/{uid} ---
-    // Owner read/write; admins can read any profile; public read for published profiles.
+    // Private authoritative profile. Public directory reads use publicProfiles.
     match /profiles/{uid} {
-      allow read: if isOwner(uid) || isAdmin()
-                  || (resource != null && resource.data.published == true);
-      allow create, update: if isOwner(uid);
-      allow delete: if isOwner(uid) || isAdmin();
+      allow read: if isOwner(uid) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    // Sanitized server-maintained directory projection.
+    match /publicProfiles/{uid} {
+      allow read: if resource.data.published == true;
+      allow create, update, delete: if false;
     }
 
     // --- orgs/{orgId} ---
     // Admins can manage orgs. Members can read orgs they belong to.
     match /orgs/{orgId} {
-      allow read: if isSignedIn();
+      allow read: if isStaff() || isOrgMember(orgId);
       allow create, update, delete: if isAdmin();
     }
 
@@ -76,7 +247,9 @@ service cloud.firestore {
     // Composite key doc: org admin or platform admin can manage; member can read own.
     match /orgMembers/{docId} {
       allow read: if isSignedIn()
-                  && (resource.data.uid == request.auth.uid || isAdmin());
+                  && (resource.data.uid == request.auth.uid
+                      || isOrgManager(resource.data.orgId)
+                      || isStaff());
       allow create, update, delete: if isAdmin();
     }
 
@@ -84,12 +257,8 @@ service cloud.firestore {
     // Public read if not member-only; member-only requires auth.
     // Authenticated users can create; owner or admin can update/delete.
     match /rfx/{rfxId} {
-      allow read: if isAdmin()
-                  || (resource.data.memberOnly == false)
-                  || (resource.data.memberOnly == true && isMember());
-      allow create: if isMember();
-      allow update, delete: if isSignedIn()
-                            && (resource.data.createdBy == request.auth.uid || isAdmin());
+      allow read: if canReadRfx(resource.data);
+      allow create, update, delete: if false;
     }
 
     // --- rfxResponses/{responseId} ---
@@ -97,20 +266,17 @@ service cloud.firestore {
     // RFx owner can update status (accept/decline); respondent can update their own.
     match /rfxResponses/{responseId} {
       allow read: if isSignedIn()
-                  && (resource.data.respondentUid == request.auth.uid
-                      || resource.data.rfxOwnerUid == request.auth.uid
-                      || isAdmin());
-      allow create: if isMember();
-      allow update: if isSignedIn()
-                    && (resource.data.respondentUid == request.auth.uid
-                        || resource.data.rfxOwnerUid == request.auth.uid);
-      allow delete: if isAdmin();
+                  && ((isRfxResponseRespondent(resource.data)
+                      || (exists(/databases/$(database)/documents/rfx/$(resource.data.rfxId))
+                          && ownsRfx(get(/databases/$(database)/documents/rfx/$(resource.data.rfxId)).data))
+                      || isStaff()));
+      allow create, update, delete: if false;
     }
 
     // --- rfxTeams/{teamId} ---
     // Team members (and admin) can read; writes are server-authoritative.
     match /rfxTeams/{teamId} {
-      allow read: if isTeamMemberDoc(resource.data);
+      allow read: if isTeamMemberDoc(teamId, resource.data);
       allow create, update, delete: if false;
     }
 
@@ -119,23 +285,84 @@ service cloud.firestore {
     match /teamDocuments/{docId} {
       allow read: if resource.data.teamId is string
                   && isTeamMemberByTeamId(resource.data.teamId);
-      allow create: if request.resource.data.teamId is string
-                    && request.resource.data.uploadedBy == request.auth.uid
-                    && isTeamMemberByTeamId(request.resource.data.teamId);
-      allow update, delete: if isAdmin()
-                            || (resource.data.teamId is string
-                                && resource.data.uploadedBy == request.auth.uid
-                                && isTeamMemberByTeamId(resource.data.teamId));
+      allow create, update, delete: if false;
     }
 
     // --- referrals/{referralId} ---
-    // Authenticated users can read/create referrals; owner or admin can update.
+    // Preserve legacy mixed records without granting unassigned staff access to
+    // third-party business-introduction data.
     match /referrals/{referralId} {
-      allow read: if isMember();
-      allow create: if isMember();
-      allow update: if isSignedIn()
-                    && (resource.data.referrerUid == request.auth.uid || isAdmin());
+      allow read: if isAdmin()
+                  || isLegacyReferralParty(resource.data)
+                  || isAssignedReferralStaff(resource.data)
+                  || (isUnambiguousLegacyPlatformInvite(resource.data) && isStaff());
+      allow create, update, delete: if false;
+    }
+
+    // New primary Exchange business-referral domain.
+    match /businessReferrals/{referralId} {
+      allow read: if isAdmin() || isBusinessReferralParty(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    // Third-party contact details remain hidden from recipients until consent.
+    match /businessReferralContacts/{referralId} {
+      allow read: if isAdmin()
+                  || isBusinessReferralReferrer(resource.data)
+                  || (exists(/databases/$(database)/documents/businessReferrals/$(referralId))
+                      && isAssignedReferralStaff(
+                        get(/databases/$(database)/documents/businessReferrals/$(referralId)).data
+                      ))
+                  || (resource.data.recipientDisclosureAllowed == true
+                      && isBusinessReferralRecipient(resource.data));
+      allow create, update, delete: if false;
+    }
+
+    match /platformInvites/{inviteId} {
+      allow read: if isStaff()
+                  || (isSignedIn()
+                      && (resource.data.inviterUid == request.auth.uid
+                          || (request.auth.token.email_verified == true
+                              && request.auth.token.email == resource.data.invitedEmail)));
+      allow create, update, delete: if false;
+    }
+
+    match /referralPolicies/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid)
+                    && request.resource.data.uid == uid
+                    && request.resource.data.id == uid
+                    && request.resource.data.keys().hasOnly([
+                      "id", "uid", "acceptingReferrals", "template", "terms",
+                      "attributionWindowDays", "payoutTrigger", "customTerms",
+                      "createdAt", "updatedAt"
+                    ]);
+      allow update: if isOwner(uid)
+                    && request.resource.data.uid == resource.data.uid
+                    && request.resource.data.id == resource.data.id
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                      "acceptingReferrals", "template", "terms", "attributionWindowDays",
+                      "payoutTrigger", "customTerms", "updatedAt"
+                    ]);
       allow delete: if isAdmin();
+    }
+
+    match /businessReferralDisputes/{disputeId} {
+      allow read: if isAdmin()
+                  || (exists(/databases/$(database)/documents/businessReferrals/$(resource.data.referralId))
+                      && isBusinessReferralParty(get(/databases/$(database)/documents/businessReferrals/$(resource.data.referralId)).data));
+      allow create, update, delete: if false;
+    }
+
+    // Compatibility boundary for any pre-Run-1 dispute records.
+    match /referralDisputes/{disputeId} {
+      allow read: if isAdmin()
+                  || (exists(/databases/$(database)/documents/businessReferrals/$(resource.data.referralId))
+                      && isBusinessReferralParty(get(/databases/$(database)/documents/businessReferrals/$(resource.data.referralId)).data))
+                  || (exists(/databases/$(database)/documents/referrals/$(resource.data.referralId))
+                      && isLegacyReferralParty(get(/databases/$(database)/documents/referrals/$(resource.data.referralId)).data));
+      allow create, update, delete: if false;
     }
 
     // --- events/{eventId} ---
@@ -235,7 +462,7 @@ service cloud.firestore {
     // Authenticated users can read territory metadata; admin/master manage.
     match /territories/{fips} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // --- verificationDocuments/{docId} ---
@@ -251,6 +478,11 @@ service cloud.firestore {
     match /verificationAuditLog/{auditId} {
       allow read: if isStaff()
                   || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    match /verificationFlags/{flagId} {
+      allow read: if isStaff();
       allow create, update, delete: if false;
     }
 
@@ -313,7 +545,11 @@ service cloud.firestore {
     // Owner read/update (mark read); Cloud Functions create.
     match /notifications/{notifId} {
       allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow update: if isSignedIn()
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == resource.data.uid
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(["read", "readAt"]);
       allow create, delete: if false; // Cloud Functions only
     }
 
@@ -337,11 +573,89 @@ service cloud.firestore {
       allow read: if isSignedIn()
                   && (resource.data.inviterUid == request.auth.uid
                       || resource.data.inviteeUid == request.auth.uid
-                      || isAdmin());
-      allow create: if isMember();
-      allow update: if isSignedIn()
-                    && (resource.data.inviteeUid == request.auth.uid || isAdmin());
-      allow delete: if isAdmin();
+                      || ("teamId" in resource.data && isTeamMemberByTeamId(resource.data.teamId))
+                      || isStaff());
+      allow create, update, delete: if false;
+    }
+
+    match /rfxTeamInviteAmbiguities/{ambiguityId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /rfxTeamInviteGuards/{guardId} {
+      allow read, write: if false;
+    }
+
+    // Authoritative membership guards are written only by trusted server
+    // transactions and the reviewed backfill. Team arrays alone grant nothing.
+    match /rfxTeamMemberships/{teamId} {
+      allow read, write: if false;
+
+      match /members/{uid} {
+        allow read, write: if false;
+      }
+    }
+
+    match /rfxTeamMembershipReviews/{teamId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /rfxTeamInviteReviews/{reviewId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeAudit/{auditId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeIdempotency/{idempotencyId} {
+      allow read, write: if false;
+    }
+
+    match /exchangeUsage/{uid} {
+      allow read, write: if false;
+    }
+
+    match /rfxResponseAccess/{rfxId} {
+      allow read, write: if false;
+
+      match /respondents/{respondentUid} {
+        allow read, write: if false;
+      }
+    }
+
+    match /rfxResponseUploadGrantScopes/{rfxId} {
+      allow read, write: if false;
+
+      match /uploadGrants/{respondentUid} {
+        allow read, write: if false;
+      }
+    }
+
+    match /verificationEvidenceLocks/{lockId} {
+      allow read, write: if false;
+    }
+
+    match /legacyReferralMappings/{legacyId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /savedExchangeItems/{itemId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.entityType == "rfx"
+                    && request.resource.data.id == itemId
+                    && itemId == request.auth.uid + "_rfx_" + request.resource.data.entityId
+                    && request.resource.data.keys().hasOnly(["id", "uid", "entityType", "entityId", "createdAt"])
+                    && exists(/databases/$(database)/documents/rfx/$(request.resource.data.entityId));
+      allow update: if false;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
     // --- books/{bookId} ---
@@ -357,8 +671,7 @@ service cloud.firestore {
     match /bookPurchases/{purchaseId} {
       allow read: if isSignedIn()
                   && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if true;
-      allow update, delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // --- bookAffiliateClicks/{clickId} ---

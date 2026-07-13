@@ -1,42 +1,258 @@
 import { httpsCallable } from "firebase/functions";
-import { functions } from "./firebase";
-import type { RfxDoc, ReferralDoc, TerritoryDoc } from "@hi/shared";
+import { app, auth, functions } from "./firebase";
+import type {
+  EvaluationCriterion,
+  ReferralDoc,
+  RequestedDocument,
+  RfxDoc,
+  RfxTeamDoc,
+  TerritoryDoc,
+} from "@hi/shared";
 
-// Define input/output types for functions if not shared
-type PublishRfxInput = Omit<RfxDoc, "id" | "createdAt" | "responseCount" | "updatedAt" | "geo"> & {
-  geoLat?: number;
-  geoLng?: number;
-};
+interface PublishRfxInput {
+  idempotencyKey: string;
+  orgId?: string;
+  title: string;
+  description: string;
+  naicsCodes?: string[];
+  location?: string;
+  territoryFips: string;
+  geoLat: number;
+  geoLng: number;
+  dueDate?: number;
+  budget?: string;
+  memberOnly?: boolean;
+  template?: string;
+  evaluationCriteria?: EvaluationCriterion[];
+  requestedDocuments?: RequestedDocument[];
+  adminOverrideReason?: string;
+}
 
 interface PublishRfxResult {
   id: string;
+  status: string;
+  adminApprovalStatus: string;
+  version: number;
+  creditCost: number;
 }
 
 export const publishRfx = httpsCallable<PublishRfxInput, PublishRfxResult>(functions, "rfx_publish");
-export const backfillRfxGeoFn = httpsCallable<
-  { maxDocs?: number },
-  { success: boolean; processed: number; updated: number; skipped: number }
->(functions, "rfx_backfillGeo");
-
-// Define input/output for referral creation
-type CreateReferralInput = Partial<ReferralDoc>;
-
-interface CreateReferralResult {
-  id: string;
+export interface ManagedRfxOrganization {
+  orgId: string;
+  name?: string;
+  role: "owner" | "admin";
 }
 
-export const createReferralFn = httpsCallable<CreateReferralInput, CreateReferralResult>(functions, "referral_create");
+export interface ManagedRfxResult {
+  rfx: RfxDoc[];
+  manageableRfxIds: string[];
+  managerOrganizations: ManagedRfxOrganization[];
+  activeCount: number;
+  publisherActiveCounts: {
+    individual: number;
+    organizations: Record<string, number>;
+  };
+  totalCount: number;
+  truncated: boolean;
+  dashboardMetrics?: {
+    activeBidCount: number;
+    activeBidCountTruncated: boolean;
+    receivedResponseCount: number;
+    receivedResponseCountTruncated: boolean;
+  };
+}
+
+export const listManagedRfxFn = httpsCallable<
+  { maxResults?: number; includeDashboardMetrics?: boolean },
+  ManagedRfxResult
+>(functions, "rfx_listManaged");
+
+export const updateRfxFn = httpsCallable<
+  {
+    rfxId: string;
+    expectedVersion: number;
+    title?: string;
+    description?: string;
+    naicsCodes?: string[];
+    location?: string;
+    dueDate?: number;
+    budget?: string;
+    memberOnly?: boolean;
+    evaluationCriteria?: EvaluationCriterion[];
+    requestedDocuments?: RequestedDocument[];
+  },
+  { id: string; status: string; version: number }
+>(functions, "rfx_update");
+export const moderateRfxFn = httpsCallable<
+  {
+    rfxId: string;
+    decision: "approve" | "reject";
+    reviewNote: string;
+    expectedVersion: number;
+  },
+  { id: string; status: string; adminApprovalStatus: string; version: number }
+>(functions, "rfx_moderate");
+export const cancelRfxFn = httpsCallable<
+  {
+    rfxId: string;
+    reason: string;
+    expectedVersion: number;
+    adminOverrideReason?: string;
+  },
+  { id: string; status: "cancelled"; version: number }
+>(functions, "rfx_cancel");
+export interface RfxResponseAttachmentInput {
+  requestedDocId?: string;
+  label: string;
+  storagePath: string;
+  fileName: string;
+  contentType?: string;
+  size?: number;
+}
+export const prepareRfxResponseUploadsFn = httpsCallable<
+  {
+    rfxId: string;
+    orgId?: string;
+    attachments: Array<{
+      storagePath: string;
+      contentType: string;
+      size: number;
+    }>;
+  },
+  { success: true; expiresAt: number; allowedPathCount: number }
+>(functions, "rfx_prepareResponseUploads");
+export const prepareRfxResponseDownloadFn = httpsCallable<
+  { rfxId: string; respondentUid: string; storagePath: string },
+  { success: true; expiresAt: number; storagePath: string }
+>(functions, "rfx_prepareResponseDownload");
+
+function privateStorageEndpointUrl(): string {
+  const projectId = app.options.projectId;
+  if (!projectId) throw new Error("Firebase project configuration is unavailable");
+  if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
+    return `http://127.0.0.1:5004/${projectId}/us-central1/exchange_privateStorage`;
+  }
+  return `https://us-central1-${projectId}.cloudfunctions.net/exchange_privateStorage`;
+}
+
+async function privateStorageRequest(
+  operation: "upload" | "download",
+  storagePath: string,
+  body?: Blob,
+): Promise<Response> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Authentication is required for private document access");
+  const token = await user.getIdToken();
+  const response = await fetch(privateStorageEndpointUrl(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Exchange-Storage-Operation": operation,
+      "X-Storage-Path": storagePath,
+      ...(body?.type ? { "Content-Type": body.type } : {}),
+    },
+    body,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    let message = "Private document processing failed";
+    try {
+      const payload = await response.json() as { error?: unknown };
+      if (typeof payload.error === "string") message = payload.error;
+    } catch {
+      // Keep the safe fallback; private endpoint failures never expose raw bodies.
+    }
+    throw new Error(message);
+  }
+  return response;
+}
+
+export async function uploadPrivateExchangeObject(
+  storagePath: string,
+  file: File,
+): Promise<{ storagePath: string; contentType: string; size: number }> {
+  const response = await privateStorageRequest("upload", storagePath, file);
+  return response.json() as Promise<{
+    storagePath: string;
+    contentType: string;
+    size: number;
+  }>;
+}
+
+export async function downloadPrivateExchangeObject(storagePath: string): Promise<Blob> {
+  const response = await privateStorageRequest("download", storagePath);
+  return response.blob();
+}
+export const submitRfxResponseFn = httpsCallable<
+  {
+    rfxId: string;
+    orgId?: string;
+    idempotencyKey: string;
+    bidAmount?: number;
+    experience?: number;
+    timeline?: number;
+    skills?: string;
+    pastPerformance?: string;
+    credentials?: string[];
+    references?: string;
+    proposalText?: string;
+    proposalStoragePath?: string;
+    uploadedDocuments?: RfxResponseAttachmentInput[];
+  },
+  { id: string; rfxId: string; status: string; version: number }
+>(functions, "rfx_submitResponse");
+export const evaluateRfxResponseFn = httpsCallable<
+  {
+    responseId: string;
+    transition: "under_review" | "accepted" | "declined";
+    criteriaScores?: Record<string, number>;
+    evaluationNotes?: string;
+    expectedRfxVersion?: number;
+  },
+  {
+    id: string;
+    rfxId: string;
+    status: string;
+    weightedScore?: number;
+    version: number;
+    rfxStatus: string;
+    rfxVersion: number;
+    declinedCompetitors?: number;
+  }
+>(functions, "rfx_evaluateResponse");
+export const createReferralFn = httpsCallable<
+  {
+    type?: "platform_invite";
+    idempotencyKey: string;
+    referredEmail: string;
+    referredName?: string;
+    note?: string;
+  },
+  { id: string; idempotent?: boolean }
+>(functions, "referral_create");
+export const listReceivedPlatformInvitesFn = httpsCallable<
+  Record<string, never>,
+  { invitations: ReferralDoc[] }
+>(functions, "platformInvite_listReceived");
+export const listReceivedLegacyBusinessReferralsFn = httpsCallable<
+  Record<string, never>,
+  { referrals: ReferralDoc[] }
+>(functions, "legacyBusinessReferral_listReceived");
 
 // Referral Actions
 interface ReferralActionInput {
   referralId: string;
   note?: string;
-  proofUrl?: string;
-  method?: "manual" | "platform";
 }
 
 export const convertReferralFn = httpsCallable<ReferralActionInput, { success: boolean }>(functions, "referral_convert");
-export const markReferralPaidFn = httpsCallable<ReferralActionInput, { success: boolean }>(functions, "referral_markPaid");
+export const markReferralPaidFn = httpsCallable<
+  ReferralActionInput & {
+    idempotencyKey: string;
+    settlementReference: string;
+  },
+  { success: boolean; referralId: string }
+>(functions, "referral_markPaid");
 
 interface CreatePayoutInput {
   referralId: string;
@@ -54,6 +270,7 @@ export const createPayoutCheckoutFn = httpsCallable<CreatePayoutInput, CreatePay
 
 export const acceptReferralFn = httpsCallable<{ referralId: string }, { success: boolean }>(functions, "referral_accept");
 export const declineReferralFn = httpsCallable<{ referralId: string }, { success: boolean }>(functions, "referral_decline");
+export const contactReferralFn = httpsCallable<ReferralActionInput, { success: boolean }>(functions, "referral_contact");
 
 // Event Actions
 interface RegisterFreeEventInput {
@@ -218,28 +435,64 @@ export const enrichmentLinkFn = httpsCallable<
   { success: boolean; matchId: string }
 >(functions, "enrichment_link");
 
+export interface ProfileUpdateInput {
+  businessName?: string;
+  bio?: string;
+  naicsCodes?: string[];
+  certifications?: string[];
+  uei?: string;
+  duns?: string;
+  cageCode?: string;
+  capabilityStatementUrl?: string | null;
+  capabilityStatementStoragePath?: string | null;
+  photoUrl?: string | null;
+  photoStoragePath?: string | null;
+  website?: string;
+  linkedin?: string;
+  videoIntroUrl?: string | null;
+  videoIntroStoragePath?: string | null;
+  videoIntroPosterUrl?: string | null;
+  videoIntroPosterStoragePath?: string | null;
+  published: boolean;
+}
+
+export const profileUpdateFn = httpsCallable<
+  ProfileUpdateInput,
+  {
+    success: boolean;
+    profileCompletenessScore: number;
+    readinessTier: string;
+    published: boolean;
+  }
+>(functions, "profile_update");
+
 export const verificationSubmitFn = httpsCallable<
   {
+    idempotencyKey: string;
     documents: Array<{
-      id?: string;
       type: "business_license" | "ein_letter" | "utility_bill" | "government_id" | "other";
       label: string;
       storagePath: string;
-      downloadUrl?: string;
     }>;
   },
-  { success: boolean; verificationStatus: string; documentIds: string[] }
+  {
+    success: boolean;
+    idempotentReplay: boolean;
+    verificationStatus: string;
+    documentIds: string[];
+  }
 >(functions, "verification_submit");
 
 export const verificationReviewFn = httpsCallable<
   {
     uid: string;
     documentId?: string;
-    status?: "approved" | "rejected";
+    documentStatus?: "approved" | "rejected";
     reviewNote?: string;
-    finalStatus?: "none" | "pending" | "verified" | "rejected";
+    finalStatus?: "pending" | "verified" | "rejected";
+    expectedProfileVersion?: number;
   },
-  { success: boolean; uid: string; verificationStatus: string }
+  { success: boolean; uid: string; verificationStatus: string; verificationVersion: number }
 >(functions, "verification_review");
 
 export const verificationFlagFn = httpsCallable<
@@ -248,20 +501,37 @@ export const verificationFlagFn = httpsCallable<
 >(functions, "verification_flag");
 
 // Teaming
+export const teamListMineFn = httpsCallable<
+  Record<string, never>,
+  { teams: RfxTeamDoc[]; truncated: boolean }
+>(functions, "team_listMine");
+
 export const teamCreateFn = httpsCallable<
-  { rfxId: string; name: string; internalNotes?: string },
-  { teamId: string }
+  { rfxId: string; name: string; internalNotes?: string; orgId?: string; idempotencyKey: string },
+  { teamId: string; replayed: boolean }
 >(functions, "team_create");
 
 export const teamInviteFn = httpsCallable<
-  { teamId: string; inviteeUid: string; role: "sub" | "estimator" | "compliance" | "proposal_writer"; note?: string },
-  { inviteId: string }
+  {
+    teamId: string;
+    rfxId: string;
+    inviteeUid: string;
+    role: "sub" | "estimator" | "compliance" | "proposal_writer";
+    note?: string;
+    expiresInDays?: number;
+  },
+  { inviteId: string; expiresAt: number }
 >(functions, "team_invite");
 
 export const teamRespondInviteFn = httpsCallable<
-  { inviteId: string; accept: boolean },
-  { success: boolean; teamId?: string }
+  { inviteId: string; response: "accepted" | "declined" },
+  { ok: boolean; teamId: string; status: "accepted" | "declined"; replayed: boolean }
 >(functions, "team_respond_invite");
+
+export const teamRevokeInviteFn = httpsCallable<
+  { inviteId: string; reason: string },
+  { ok: boolean; inviteId: string; status: "revoked"; replayed: boolean }
+>(functions, "team_revoke_invite");
 
 export const teamManageMemberFn = httpsCallable<
   {
@@ -273,6 +543,93 @@ export const teamManageMemberFn = httpsCallable<
   },
   { success: boolean }
 >(functions, "team_manage_member");
+
+export type BusinessReferralType =
+  | "customer_introduction"
+  | "business_lead"
+  | "project_opportunity"
+  | "service_need"
+  | "partner_introduction"
+  | "other";
+
+export const createBusinessReferralFn = httpsCallable<
+  {
+    idempotencyKey: string;
+    referrerOrgId?: string;
+    recipientUid?: string;
+    recipientOrgId?: string;
+    referralType: BusinessReferralType;
+    title: string;
+    needSummary: string;
+    category?: string;
+    naicsCodes?: string[];
+    territoryFips?: string;
+    consentStatus: "not_required" | "pending" | "confirmed";
+    referredParty?: {
+      type: "person" | "business";
+      name?: string;
+      companyName?: string;
+      email?: string;
+      phone?: string;
+    };
+    compensationPolicy?: {
+      type: "none" | "fixed" | "percentage" | "custom";
+      amountCents?: number;
+      percentageBasisPoints?: number;
+      terms?: string;
+    };
+    relatedRfxId?: string;
+    relatedTeamId?: string;
+  },
+  { referralId: string; version: number; idempotent?: boolean }
+>(functions, "businessReferral_create");
+
+export const sendBusinessReferralFn = httpsCallable<
+  { referralId: string; expectedVersion: number },
+  { success: boolean; version: number; idempotent?: boolean }
+>(functions, "businessReferral_send");
+
+export const respondBusinessReferralFn = httpsCallable<
+  {
+    referralId: string;
+    response: "accepted" | "declined";
+    expectedVersion: number;
+    note?: string;
+  },
+  { success: boolean; version: number; idempotent?: boolean }
+>(functions, "businessReferral_respond");
+
+export const progressBusinessReferralFn = httpsCallable<
+  {
+    referralId: string;
+    status: "in_progress" | "converted" | "closed" | "withdrawn";
+    expectedVersion: number;
+    outcome?: {
+      type: "converted" | "not_a_fit" | "unable_to_contact" | "declined_by_customer" | "duplicate" | "other";
+      summary?: string;
+    };
+  },
+  { success: boolean; version: number; idempotent?: boolean }
+>(functions, "businessReferral_progress");
+
+export const updateBusinessReferralConsentFn = httpsCallable<
+  { referralId: string; consentStatus: "confirmed" | "withdrawn"; expectedVersion: number },
+  { success: boolean; version: number; status: string }
+>(functions, "businessReferral_updateConsent");
+
+export const prepareBusinessReferralEvidenceAccessFn = httpsCallable<
+  {
+    referralId: string;
+    operation: "upload" | "read";
+    storagePaths: string[];
+  },
+  {
+    success: true;
+    operation: "upload" | "read";
+    expiresAt: number;
+    allowedPathCount: number;
+  }
+>(functions, "businessReferral_prepareEvidenceAccess");
 
 // RFx Suggestions
 export const refreshRfxSuggestionsFn = httpsCallable<

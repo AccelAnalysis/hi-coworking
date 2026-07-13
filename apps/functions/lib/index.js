@@ -33,14 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = exports.team_respond_invite = exports.team_invite = exports.team_create = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_processSocialPosts = exports.events_generateShareKits = exports.events_processCampaignJobs = exports.events_enqueueCampaignJobs = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_create = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_publish = exports.onReferralWritten = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
-exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = exports.rfx_createTeamInvite = exports.referral_onStatusChange = exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = void 0;
+exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.businessReferral_resolveDispute = exports.businessReferral_createDispute = exports.businessReferral_prepareEvidenceAccess = exports.businessReferral_withdrawConsent = exports.businessReferral_confirmConsent = exports.businessReferral_updateConsent = exports.businessReferral_progress = exports.businessReferral_respond = exports.businessReferral_send = exports.businessReferral_create = exports.legacyBusinessReferral_listReceived = exports.platformInvite_listReceived = exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_contact = exports.referral_create = exports.exchange_normalizeSensitiveStorageMetadata = exports.exchange_privateStorage = exports.rfx_listManaged = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_prepareResponseDownload = exports.rfx_prepareResponseUploads = exports.rfx_evaluateResponse = exports.rfx_submitResponse = exports.rfx_cancel = exports.rfx_moderate = exports.rfx_update = exports.rfx_publish = exports.access_seamWebhook = exports.access_adminGetDoorStatus = exports.access_adminResendPin = exports.access_adminUnlock = exports.access_adminRevoke = exports.access_getMyGrants = exports.onReferralWritten = exports.access_noShowRevoke = exports.access_expireGrants = exports.rfx_cleanupResponseUploadGrants = exports.businessReferral_expireSent = exports.team_expire_invites = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
+exports.referral_onStatusChange = exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = exports.team_revoke_invite = exports.team_respond_invite = exports.team_invite = exports.team_create = exports.team_listMine = exports.profile_update = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_processSocialPosts = exports.events_generateShareKits = exports.events_processCampaignJobs = exports.events_enqueueCampaignJobs = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = void 0;
+exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const identity_1 = require("firebase-functions/v2/identity");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const params_1 = require("firebase-functions/params");
 const admin = __importStar(require("firebase-admin"));
+const firestore_2 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 const payments_1 = require("./payments");
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
@@ -90,14 +92,37 @@ const monthlyAllocations_1 = require("./scheduled/monthlyAllocations");
 Object.defineProperty(exports, "allocateMonthlyCredits", { enumerable: true, get: function () { return monthlyAllocations_1.allocateMonthlyCredits; } });
 const rfx_1 = require("./rfx");
 Object.defineProperty(exports, "rfx_publish", { enumerable: true, get: function () { return rfx_1.rfx_publish; } });
+Object.defineProperty(exports, "rfx_update", { enumerable: true, get: function () { return rfx_1.rfx_update; } });
+Object.defineProperty(exports, "rfx_moderate", { enumerable: true, get: function () { return rfx_1.rfx_moderate; } });
+Object.defineProperty(exports, "rfx_cancel", { enumerable: true, get: function () { return rfx_1.rfx_cancel; } });
+Object.defineProperty(exports, "rfx_submitResponse", { enumerable: true, get: function () { return rfx_1.rfx_submitResponse; } });
+Object.defineProperty(exports, "rfx_evaluateResponse", { enumerable: true, get: function () { return rfx_1.rfx_evaluateResponse; } });
 Object.defineProperty(exports, "rfx_backfillGeo", { enumerable: true, get: function () { return rfx_1.rfx_backfillGeo; } });
+Object.defineProperty(exports, "rfx_prepareResponseUploads", { enumerable: true, get: function () { return rfx_1.rfx_prepareResponseUploads; } });
+Object.defineProperty(exports, "rfx_prepareResponseDownload", { enumerable: true, get: function () { return rfx_1.rfx_prepareResponseDownload; } });
+Object.defineProperty(exports, "rfx_cleanupResponseUploadGrants", { enumerable: true, get: function () { return rfx_1.rfx_cleanupResponseUploadGrants; } });
 const referrals_1 = require("./referrals");
 Object.defineProperty(exports, "referral_create", { enumerable: true, get: function () { return referrals_1.referral_create; } });
+Object.defineProperty(exports, "referral_contact", { enumerable: true, get: function () { return referrals_1.referral_contact; } });
 Object.defineProperty(exports, "referral_convert", { enumerable: true, get: function () { return referrals_1.referral_convert; } });
 Object.defineProperty(exports, "referral_markPaid", { enumerable: true, get: function () { return referrals_1.referral_markPaid; } });
 Object.defineProperty(exports, "referral_accept", { enumerable: true, get: function () { return referrals_1.referral_accept; } });
 Object.defineProperty(exports, "referral_decline", { enumerable: true, get: function () { return referrals_1.referral_decline; } });
 Object.defineProperty(exports, "referral_createPayoutCheckout", { enumerable: true, get: function () { return referrals_1.referral_createPayoutCheckout; } });
+Object.defineProperty(exports, "platformInvite_listReceived", { enumerable: true, get: function () { return referrals_1.platformInvite_listReceived; } });
+Object.defineProperty(exports, "legacyBusinessReferral_listReceived", { enumerable: true, get: function () { return referrals_1.legacyBusinessReferral_listReceived; } });
+const businessReferrals_1 = require("./businessReferrals");
+Object.defineProperty(exports, "businessReferral_create", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_create; } });
+Object.defineProperty(exports, "businessReferral_send", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_send; } });
+Object.defineProperty(exports, "businessReferral_respond", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_respond; } });
+Object.defineProperty(exports, "businessReferral_progress", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_progress; } });
+Object.defineProperty(exports, "businessReferral_updateConsent", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_updateConsent; } });
+Object.defineProperty(exports, "businessReferral_confirmConsent", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_confirmConsent; } });
+Object.defineProperty(exports, "businessReferral_withdrawConsent", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_withdrawConsent; } });
+Object.defineProperty(exports, "businessReferral_createDispute", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_createDispute; } });
+Object.defineProperty(exports, "businessReferral_prepareEvidenceAccess", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_prepareEvidenceAccess; } });
+Object.defineProperty(exports, "businessReferral_resolveDispute", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_resolveDispute; } });
+Object.defineProperty(exports, "businessReferral_expireSent", { enumerable: true, get: function () { return businessReferrals_1.businessReferral_expireSent; } });
 const referralTriggers_1 = require("./triggers/referralTriggers");
 Object.defineProperty(exports, "onReferralWritten", { enumerable: true, get: function () { return referralTriggers_1.onReferralWritten; } });
 const events_1 = require("./events");
@@ -133,14 +158,34 @@ const verification_1 = require("./verification");
 Object.defineProperty(exports, "verification_submit", { enumerable: true, get: function () { return verification_1.verification_submit; } });
 Object.defineProperty(exports, "verification_review", { enumerable: true, get: function () { return verification_1.verification_review; } });
 Object.defineProperty(exports, "verification_flag", { enumerable: true, get: function () { return verification_1.verification_flag; } });
+const profiles_1 = require("./profiles");
+Object.defineProperty(exports, "profile_update", { enumerable: true, get: function () { return profiles_1.profile_update; } });
 const teaming_1 = require("./teaming");
+Object.defineProperty(exports, "team_listMine", { enumerable: true, get: function () { return teaming_1.team_listMine; } });
 Object.defineProperty(exports, "team_create", { enumerable: true, get: function () { return teaming_1.team_create; } });
 Object.defineProperty(exports, "team_invite", { enumerable: true, get: function () { return teaming_1.team_invite; } });
 Object.defineProperty(exports, "team_respond_invite", { enumerable: true, get: function () { return teaming_1.team_respond_invite; } });
+Object.defineProperty(exports, "team_revoke_invite", { enumerable: true, get: function () { return teaming_1.team_revoke_invite; } });
 Object.defineProperty(exports, "team_manage_member", { enumerable: true, get: function () { return teaming_1.team_manage_member; } });
+Object.defineProperty(exports, "team_expire_invites", { enumerable: true, get: function () { return teaming_1.team_expire_invites; } });
 const rfxSuggestions_1 = require("./rfxSuggestions");
 Object.defineProperty(exports, "rfx_refreshSuggestions", { enumerable: true, get: function () { return rfxSuggestions_1.rfx_refreshSuggestions; } });
 Object.defineProperty(exports, "rfx_refreshSuggestions_scheduled", { enumerable: true, get: function () { return rfxSuggestions_1.rfx_refreshSuggestions_scheduled; } });
+const rfxQueries_1 = require("./rfxQueries");
+Object.defineProperty(exports, "rfx_listManaged", { enumerable: true, get: function () { return rfxQueries_1.rfx_listManaged; } });
+const exchangeStorage_1 = require("./exchangeStorage");
+Object.defineProperty(exports, "exchange_privateStorage", { enumerable: true, get: function () { return exchangeStorage_1.exchange_privateStorage; } });
+Object.defineProperty(exports, "exchange_normalizeSensitiveStorageMetadata", { enumerable: true, get: function () { return exchangeStorage_1.exchange_normalizeSensitiveStorageMetadata; } });
+const accessCleanup_1 = require("./scheduled/accessCleanup");
+Object.defineProperty(exports, "access_expireGrants", { enumerable: true, get: function () { return accessCleanup_1.access_expireGrants; } });
+Object.defineProperty(exports, "access_noShowRevoke", { enumerable: true, get: function () { return accessCleanup_1.access_noShowRevoke; } });
+const access_1 = require("./access");
+Object.defineProperty(exports, "access_getMyGrants", { enumerable: true, get: function () { return access_1.access_getMyGrants; } });
+Object.defineProperty(exports, "access_adminRevoke", { enumerable: true, get: function () { return access_1.access_adminRevoke; } });
+Object.defineProperty(exports, "access_adminUnlock", { enumerable: true, get: function () { return access_1.access_adminUnlock; } });
+Object.defineProperty(exports, "access_adminResendPin", { enumerable: true, get: function () { return access_1.access_adminResendPin; } });
+Object.defineProperty(exports, "access_adminGetDoorStatus", { enumerable: true, get: function () { return access_1.access_adminGetDoorStatus; } });
+Object.defineProperty(exports, "access_seamWebhook", { enumerable: true, get: function () { return access_1.access_seamWebhook; } });
 exports.health = (0, https_1.onCall)(async () => {
     return { ok: true, timestamp: Date.now() };
 });
@@ -276,11 +321,24 @@ exports.createBooking = (0, https_1.onCall)(async (request) => {
         };
         transaction.set(newBookingRef, newBooking);
         return { success: true, bookingId: newBookingRef.id, booking: newBooking };
+    }).then(async (result) => {
+        // Trigger access grant creation after booking is committed (non-blocking to the booking response)
+        (0, access_1.createAccessGrant)(result.bookingId, resourceId, userId, start, end).catch((err) => {
+            logger.error("createAccessGrant failed after booking", {
+                bookingId: result.bookingId,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        });
+        return result;
     });
 });
 // --- Auth Triggers (PR-02) ---
 exports.authBeforeCreate = (0, identity_1.beforeUserCreated)(async (event) => {
     const user = event.data;
+    if (!user) {
+        logger.error("Auth before-create event did not contain a user record");
+        throw new https_1.HttpsError("internal", "Account provisioning could not be verified");
+    }
     logger.info(`Creating user doc for ${user.uid} (${user.email})`);
     const now = Date.now();
     const userDoc = {
@@ -1101,7 +1159,7 @@ exports.referral_onStatusChange = (0, firestore_1.onDocumentCreated)("referrals/
         return;
     try {
         await db.collection("users").doc(referrerUid).update({
-            "stats.referralCount": admin.firestore.FieldValue.increment(1),
+            "stats.referralCount": firestore_2.FieldValue.increment(1),
             updatedAt: Date.now(),
         });
         await createNotification({
@@ -1123,46 +1181,6 @@ exports.referral_onStatusChange = (0, firestore_1.onDocumentCreated)("referrals/
             err,
         });
     }
-});
-/**
- * Callable: Create an RFx team invite.
- * Creates the invite doc and notifies the invitee.
- */
-exports.rfx_createTeamInvite = (0, https_1.onCall)(async (request) => {
-    if (!request.auth) {
-        throw new https_1.HttpsError("unauthenticated", "Must be logged in");
-    }
-    const { rfxId, inviteeUid, inviteeName, role, note } = request.data;
-    if (!rfxId || !inviteeUid) {
-        throw new https_1.HttpsError("invalid-argument", "rfxId and inviteeUid are required");
-    }
-    const inviteRef = db.collection("rfxTeamInvites").doc();
-    const invite = {
-        id: inviteRef.id,
-        rfxId,
-        inviterUid: request.auth.uid,
-        inviteeUid,
-        inviteeName: inviteeName || "",
-        role: role || "partner",
-        status: "pending",
-        note: note || "",
-        createdAt: Date.now(),
-    };
-    await inviteRef.set(invite);
-    await createNotification({
-        uid: inviteeUid,
-        type: "system",
-        title: "Team invitation received",
-        body: `You've been invited to join an RFx team as ${role || "partner"}.`,
-        linkTo: "/referrals?tab=team",
-    });
-    logger.info("RFx team invite created", {
-        inviteId: inviteRef.id,
-        rfxId,
-        inviterUid: request.auth.uid,
-        inviteeUid,
-    });
-    return { inviteId: inviteRef.id };
 });
 // --- Corporate Org (PR-17) ---
 /**
@@ -1235,7 +1253,7 @@ exports.org_purchaseSeats = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError("permission-denied", "Only org owners/admins can purchase seats");
     }
     await db.collection("orgs").doc(orgId).update({
-        seatsPurchased: admin.firestore.FieldValue.increment(seats),
+        seatsPurchased: firestore_2.FieldValue.increment(seats),
         updatedAt: Date.now(),
     });
     logger.info("Seats purchased", { orgId, seats, purchasedBy: request.auth.uid });

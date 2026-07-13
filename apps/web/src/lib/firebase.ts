@@ -45,23 +45,23 @@ if (!getApps().length) {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
-  functions = getFunctions(app);
+  functions = getFunctions(app, "us-central1");
   storage = getStorage(app);
 
   // Connect to emulators if in development mode and explicitly enabled
   // You can toggle this via an env var if you want to test against live prod in dev
   if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
     console.log("Connecting to Firebase Emulators...");
-    connectAuthEmulator(auth, "http://127.0.0.1:9099");
-    connectFirestoreEmulator(db, "127.0.0.1", 8080);
-    connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+    connectAuthEmulator(auth, "http://127.0.0.1:9100");
+    connectFirestoreEmulator(db, "127.0.0.1", 8081);
+    connectFunctionsEmulator(functions, "127.0.0.1", 5004);
     connectStorageEmulator(storage, "127.0.0.1", 9199);
   }
 } else {
   app = getApps()[0];
   auth = getAuth(app);
   db = getFirestore(app);
-  functions = getFunctions(app);
+  functions = getFunctions(app, "us-central1");
   storage = getStorage(app);
 }
 

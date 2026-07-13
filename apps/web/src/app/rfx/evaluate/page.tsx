@@ -8,10 +8,11 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import {
   getRfxFromFirestore,
+  getRfxManagementAuthority,
   subscribeToRfxResponses,
-  updateRfxResponseStatus,
-  updateRfxInFirestore,
+  downloadPrivateStorageObject,
 } from "@/lib/firestore";
+import { cancelRfxFn, evaluateRfxResponseFn } from "@/lib/functions";
 import { computeRfxScores } from "@hi/shared";
 import type { RfxDoc, RfxResponseDoc, EvaluationCriterion } from "@hi/shared";
 import {
@@ -19,7 +20,6 @@ import {
   ArrowLeft,
   Check,
   X,
-  Trophy,
   FileText,
   ExternalLink,
   ChevronDown,
@@ -76,27 +76,58 @@ function EvaluateContent() {
   const rfxId = searchParams.get("id") ?? "";
 
   const [rfx, setRfx] = useState<RfxDoc | null>(null);
+  const [canManageRfx, setCanManageRfx] = useState(false);
   const [responses, setResponses] = useState<RfxResponseDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!rfxId) return;
-    getRfxFromFirestore(rfxId).then((data) => {
-      setRfx(data);
-      setLoading(false);
-    });
-  }, [rfxId]);
+  const downloadPrivateDocument = useCallback(async (storagePath: string, fileName: string) => {
+    try {
+      setError(null);
+      await downloadPrivateStorageObject(storagePath, fileName);
+    } catch (downloadError) {
+      console.error("Failed to download private RFx document", downloadError);
+      setError("The document could not be downloaded. Confirm that you still have access and try again.");
+    }
+  }, []);
 
   useEffect(() => {
-    if (!rfxId) return;
+    if (!rfxId || !user) return;
+    let cancelled = false;
+    async function loadRfxAuthority() {
+      try {
+        const data = await getRfxFromFirestore(rfxId);
+        const authority = data
+          ? await getRfxManagementAuthority(data, user!.uid)
+          : { canManage: false };
+        if (!cancelled) {
+          setRfx(data);
+          setCanManageRfx(authority.canManage);
+          if (!authority.canManage) setResponses([]);
+        }
+      } catch (loadError) {
+        console.error("Failed to load RFx management authority:", loadError);
+        if (!cancelled) {
+          setRfx(null);
+          setCanManageRfx(false);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void loadRfxAuthority();
+    return () => { cancelled = true; };
+  }, [rfxId, user]);
+
+  useEffect(() => {
+    if (!rfxId || !canManageRfx) return;
     const unsub = subscribeToRfxResponses(rfxId, (data) => {
       setResponses(data);
     });
     return () => unsub();
-  }, [rfxId]);
+  }, [canManageRfx, rfxId]);
 
   const scoredResponses = useMemo(() => {
     if (!rfx || responses.length === 0) return [];
@@ -118,10 +149,17 @@ function EvaluateContent() {
       setActionLoading(resp.id);
       setError(null);
       try {
-        await updateRfxResponseStatus(resp.id, "accepted", {
+        const { data } = await evaluateRfxResponseFn({
+          responseId: resp.id,
+          transition: "accepted",
           criteriaScores: resp.criteriaScores ?? {},
-          totalScore: resp.totalScore ?? 0,
+          expectedRfxVersion: rfx?.version,
         });
+        setRfx((previous) => previous ? {
+          ...previous,
+          status: data.rfxStatus as RfxDoc["status"],
+          version: data.rfxVersion,
+        } : previous);
       } catch (err) {
         console.error("Failed to accept response:", err);
         setError("Failed to update response status.");
@@ -129,14 +167,14 @@ function EvaluateContent() {
         setActionLoading(null);
       }
     },
-    []
+    [rfx?.version]
   );
 
   const handleDecline = useCallback(async (respId: string) => {
     setActionLoading(respId);
     setError(null);
     try {
-      await updateRfxResponseStatus(respId, "declined");
+      await evaluateRfxResponseFn({ responseId: respId, transition: "declined" });
     } catch (err) {
       console.error("Failed to decline response:", err);
       setError("Failed to update response status.");
@@ -145,22 +183,15 @@ function EvaluateContent() {
     }
   }, []);
 
-  const handleAwardRfx = useCallback(async () => {
-    if (!rfx) return;
-    try {
-      await updateRfxInFirestore(rfx.id, { status: "awarded" });
-      setRfx((prev) => (prev ? { ...prev, status: "awarded" } : prev));
-    } catch (err) {
-      console.error("Failed to award RFx:", err);
-      setError("Failed to update RFx status.");
-    }
-  }, [rfx]);
-
   const handleCloseRfx = useCallback(async () => {
     if (!rfx) return;
     try {
-      await updateRfxInFirestore(rfx.id, { status: "closed" });
-      setRfx((prev) => (prev ? { ...prev, status: "closed" } : prev));
+      const { data } = await cancelRfxFn({
+        rfxId: rfx.id,
+        reason: "Closed by RFx owner without an award",
+        expectedVersion: rfx.version ?? 0,
+      });
+      setRfx((prev) => (prev ? { ...prev, status: data.status, version: data.version } : prev));
     } catch (err) {
       console.error("Failed to close RFx:", err);
       setError("Failed to update RFx status.");
@@ -190,16 +221,15 @@ function EvaluateContent() {
     );
   }
 
-  const isOwner = rfx.createdBy === user?.uid;
-  const hasAccepted = scoredResponses.some((r) => r.status === "accepted");
-
-  if (!isOwner) {
+  if (!canManageRfx) {
     return (
       <AppShell>
         <div className="text-center py-20">
           <Lock className="h-12 w-12 text-slate-300 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-slate-900 mb-2">Access Restricted</h2>
-          <p className="text-slate-500 mb-4">Only the RFx issuer can access the evaluation view.</p>
+          <p className="text-slate-500 mb-4">
+            Only the current individual issuer or an active organization owner or administrator can evaluate responses.
+          </p>
           <Link href={`/rfx/detail?id=${rfx.id}`} className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
             ← View RFx Details
           </Link>
@@ -244,15 +274,6 @@ function EvaluateContent() {
           </div>
 
           <div className="flex gap-2">
-            {rfx.status === "open" && hasAccepted && (
-              <button
-                onClick={handleAwardRfx}
-                className="rounded-full px-5 py-2.5 bg-emerald-600 text-white text-sm font-medium shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center gap-1.5"
-              >
-                <Trophy className="h-4 w-4" />
-                Award & Close
-              </button>
-            )}
             {rfx.status === "open" && (
               <button
                 onClick={handleCloseRfx}
@@ -504,13 +525,24 @@ function EvaluateContent() {
                         </div>
                       </div>
 
-                      {((resp.proposalUrl) || (resp.uploadedDocuments && resp.uploadedDocuments.length > 0)) && (
+                      {((resp.proposalStoragePath || resp.proposalUrl)
+                        || (resp.uploadedDocuments && resp.uploadedDocuments.length > 0)) && (
                         <div className="mt-4 pt-4 border-t border-slate-100">
                           <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                             Documents
                           </h4>
                           <div className="flex flex-wrap gap-2">
-                            {resp.proposalUrl && (
+                            {resp.proposalStoragePath ? (
+                              <button
+                                type="button"
+                                onClick={() => downloadPrivateDocument(resp.proposalStoragePath!, "proposal")}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                Proposal
+                                <ExternalLink className="h-3 w-3" />
+                              </button>
+                            ) : resp.proposalUrl ? (
                               <a
                                 href={resp.proposalUrl}
                                 target="_blank"
@@ -521,20 +553,31 @@ function EvaluateContent() {
                                 Proposal
                                 <ExternalLink className="h-3 w-3" />
                               </a>
-                            )}
-                            {resp.uploadedDocuments?.map((doc) => (
+                            ) : null}
+                            {resp.uploadedDocuments?.map((document) => document.storagePath ? (
+                              <button
+                                type="button"
+                                key={document.storagePath}
+                                onClick={() => downloadPrivateDocument(document.storagePath!, document.fileName)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                {document.label}
+                                <ExternalLink className="h-3 w-3" />
+                              </button>
+                            ) : document.url ? (
                               <a
-                                key={doc.requestedDocId}
-                                href={doc.url}
+                                key={document.url}
+                                href={document.url}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 transition-colors"
                               >
                                 <FileText className="h-3.5 w-3.5" />
-                                {doc.label}
+                                {document.label}
                                 <ExternalLink className="h-3 w-3" />
                               </a>
-                            ))}
+                            ) : null)}
                           </div>
                         </div>
                       )}

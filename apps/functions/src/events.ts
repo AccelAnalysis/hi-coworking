@@ -1,5 +1,6 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { createPayment } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
@@ -125,7 +126,7 @@ export const events_registerFree = onCall(async (request) => {
     };
 
     tx.set(registrationRef, registration);
-    tx.update(eventRef, { registrationCount: admin.firestore.FieldValue.increment(1) });
+    tx.update(eventRef, { registrationCount: FieldValue.increment(1) });
   });
 
   return { success: true };
@@ -160,7 +161,7 @@ export const events_cancelRegistration = onCall(async (request) => {
 
     tx.delete(registrationRef);
     tx.update(eventRef, {
-      registrationCount: admin.firestore.FieldValue.increment(-1),
+      registrationCount: FieldValue.increment(-1),
       updatedAt: Date.now(),
     });
   });

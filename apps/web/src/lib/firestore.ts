@@ -22,9 +22,14 @@ import {
   type QueryDocumentSnapshot,
   type DocumentData,
 } from "firebase/firestore";
+import { isLegacyPlatformInviteRecord } from "./referralDomains";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "./firebase";
-import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, MembershipTrack, PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose, ProductDoc, PaymentAuditEntry, EventDoc, EventRegistrationDoc, EventFormat, EventStatus, ReferralDoc, ReferralStatus, RfxTeamInviteDoc, OrgDoc, OrgMemberDoc, NotificationDoc, BookDoc, BookPurchaseDoc, BookAffiliateClickDoc, ReferralPolicyDoc, LocationDoc, FloorDoc, ShellDoc, LayoutVariant, EventCampaignDoc, CampaignJobDoc, EventShareKitDoc, SocialPostDoc, EventMediaImage, EventSeriesDoc, DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
+import {
+  downloadPrivateExchangeObject,
+  prepareRfxResponseDownloadFn,
+} from "./functions";
+import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, MembershipTrack, PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose, ProductDoc, PaymentAuditEntry, EventDoc, EventRegistrationDoc, EventFormat, EventStatus, ReferralDoc, RfxTeamInviteDoc, OrgDoc, OrgMemberDoc, NotificationDoc, BookDoc, BookPurchaseDoc, BookAffiliateClickDoc, ReferralPolicyDoc, LocationDoc, FloorDoc, ShellDoc, LayoutVariant, EventCampaignDoc, CampaignJobDoc, EventShareKitDoc, SocialPostDoc, EventMediaImage, EventSeriesDoc, DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 
 export interface PublicSiteSettingsDoc {
   id: "public";
@@ -381,21 +386,9 @@ export async function getProfileFromFirestore(uid: string): Promise<ProfileDoc |
   return snap.exists() ? (snap.data() as ProfileDoc) : null;
 }
 
-export async function saveProfileToFirestore(uid: string, data: Partial<ProfileDoc>): Promise<void> {
-  const ref = doc(db, "profiles", uid);
-  const existing = await getDoc(ref);
-
-  if (existing.exists()) {
-    await setDoc(ref, { ...data, uid, updatedAt: Date.now() }, { merge: true });
-  } else {
-    await setDoc(ref, {
-      ...data,
-      uid,
-      published: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-  }
+export async function getPublicProfileFromFirestore(uid: string): Promise<ProfileDoc | null> {
+  const snap = await getDoc(doc(db, "publicProfiles", uid));
+  return snap.exists() ? (snap.data() as ProfileDoc) : null;
 }
 
 /**
@@ -404,7 +397,7 @@ export async function saveProfileToFirestore(uid: string, data: Partial<ProfileD
  *   businessName: 15, bio: 10, website: 5, linkedin: 5,
  *   naicsCodes (≥1): 15, certifications (≥1): 10,
  *   uei: 10, duns: 5, cageCode: 5,
- *   capabilityStatementUrl: 15, photoUrl: 5
+ *   capability statement URL/path: 15, photo URL/path: 5
  */
 export function computeProfileCompleteness(profile: Partial<ProfileDoc> | null): number {
   if (!profile) return 0;
@@ -418,8 +411,8 @@ export function computeProfileCompleteness(profile: Partial<ProfileDoc> | null):
   if (profile.uei) score += 10;
   if (profile.duns) score += 5;
   if (profile.cageCode) score += 5;
-  if (profile.capabilityStatementUrl) score += 15;
-  if (profile.photoUrl) score += 5;
+  if (profile.capabilityStatementStoragePath || profile.capabilityStatementUrl) score += 15;
+  if (profile.photoStoragePath || profile.photoUrl) score += 5;
   return score;
 }
 
@@ -452,7 +445,7 @@ export async function getPublishedProfiles(
   pageSize = 12,
   afterDoc?: QueryDocumentSnapshot<DocumentData> | null
 ): Promise<DirectoryPage> {
-  const col = collection(db, "profiles");
+  const col = collection(db, "publicProfiles");
   const q = afterDoc
     ? query(col, where("published", "==", true), orderBy("businessName"), startAfter(afterDoc), limit(pageSize + 1))
     : query(col, where("published", "==", true), orderBy("businessName"), limit(pageSize + 1));
@@ -501,7 +494,7 @@ export async function countPublishedProfilesByNaics(
 ): Promise<number> {
   if (naicsCodes.length === 0) return 0;
   const q = query(
-    collection(db, "profiles"),
+    collection(db, "publicProfiles"),
     where("published", "==", true)
   );
   const snap = await getDocs(q);
@@ -630,7 +623,7 @@ export async function getSuggestedConnections(
 ): Promise<ProfileDoc[]> {
   if (naicsCodes.length === 0) return [];
   const q = query(
-    collection(db, "profiles"),
+    collection(db, "publicProfiles"),
     where("published", "==", true)
   );
   const snap = await getDocs(q);
@@ -647,28 +640,43 @@ export async function getSuggestedConnections(
 }
 
 /**
- * Count how many RFx responses the user has submitted (active bids).
+ * Download a private Storage object through the authenticated SDK. The
+ * application persists only the canonical Storage path, never a bearer URL.
  */
-export async function getUserActiveBidCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("respondentUid", "==", uid),
-    where("status", "==", "pending")
-  );
-  const snap = await getDocs(q);
-  return snap.size;
-}
-
-/**
- * Count how many responses have been received on the user's own RFxs.
- */
-export async function getReceivedResponseCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("rfxOwnerUid", "==", uid)
-  );
-  const snap = await getDocs(q);
-  return snap.size;
+export async function downloadPrivateStorageObject(
+  storagePath: string,
+  fileName: string,
+): Promise<void> {
+  if (!storagePath || storagePath.includes("..") || storagePath.includes("\\")) {
+    throw new Error("Invalid private document path");
+  }
+  const pathSegments = storagePath.split("/");
+  if (
+    pathSegments.length < 4
+    || !["rfxResponses", "rfxProposals", "rfxDocuments"].includes(pathSegments[0])
+    || !pathSegments[1]
+    || !pathSegments[2]
+  ) {
+    throw new Error("Unsupported private RFx document path");
+  }
+  await prepareRfxResponseDownloadFn({
+    rfxId: pathSegments[1],
+    respondentUid: pathSegments[2],
+    storagePath,
+  });
+  const blob = await downloadPrivateExchangeObject(storagePath);
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = fileName || "exchange-document";
+    anchor.rel = "noopener noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+  }
 }
 
 // --- UserDoc helpers (PR-08) ---
@@ -690,18 +698,76 @@ export async function updateUserMembershipTrack(
 
 // --- RFx (PR-06) ---
 
-export async function createRfxInFirestore(
-  data: Omit<RfxDoc, "id" | "createdAt" | "responseCount">
-): Promise<RfxDoc> {
-  const rfxRef = doc(collection(db, "rfx"));
-  const rfx: RfxDoc = {
-    ...data,
-    id: rfxRef.id,
-    responseCount: 0,
-    createdAt: Date.now(),
-  };
-  await setDoc(rfxRef, rfx);
-  return rfx;
+export interface RfxManagementAuthority {
+  canManage: boolean;
+  isActiveOrgMember: boolean;
+  scope: "individual" | "organization" | "none";
+  orgId?: string;
+  role?: OrgMemberDoc["role"];
+}
+
+/**
+ * Individual ownership applies only when the RFx has no organization scope.
+ * Once orgId is present, current exact active organization authority replaces
+ * creator identity for all management decisions.
+ */
+export function isIndividualRfxManager(rfx: RfxDoc, uid: string): boolean {
+  if (Object.prototype.hasOwnProperty.call(rfx, "orgId")) return false;
+  return (rfx.ownerUid || rfx.createdBy) === uid;
+}
+
+export async function getRfxManagementAuthority(
+  rfx: RfxDoc,
+  uid: string,
+): Promise<RfxManagementAuthority> {
+  if (!Object.prototype.hasOwnProperty.call(rfx, "orgId")) {
+    const canManage = isIndividualRfxManager(rfx, uid);
+    return {
+      canManage,
+      isActiveOrgMember: false,
+      scope: canManage ? "individual" : "none",
+    };
+  }
+
+  const orgId = typeof rfx.orgId === "string" && rfx.orgId.length > 0
+    ? rfx.orgId
+    : undefined;
+  if (!orgId) {
+    return { canManage: false, isActiveOrgMember: false, scope: "none" };
+  }
+
+  try {
+    const membershipId = `${orgId}_${uid}`;
+    const [organizationSnapshot, membershipSnapshot] = await Promise.all([
+      getDoc(doc(db, "orgs", orgId)),
+      getDoc(doc(db, "orgMembers", membershipId)),
+    ]);
+    if (!organizationSnapshot.exists() || !membershipSnapshot.exists()) {
+      return { canManage: false, isActiveOrgMember: false, scope: "none", orgId };
+    }
+
+    const organization = organizationSnapshot.data() as OrgDoc;
+    const membership = membershipSnapshot.data() as OrgMemberDoc;
+    const isExactActiveMember = organization.status === "active"
+      && membershipSnapshot.id === membershipId
+      && membership.orgId === orgId
+      && membership.uid === uid;
+    if (!isExactActiveMember) {
+      return { canManage: false, isActiveOrgMember: false, scope: "none", orgId };
+    }
+
+    const canManage = membership.role === "owner" || membership.role === "admin";
+    return {
+      canManage,
+      isActiveOrgMember: true,
+      scope: canManage ? "organization" : "none",
+      orgId,
+      role: membership.role,
+    };
+  } catch {
+    // Missing, suspended, or rules-denied organization authority fails closed.
+    return { canManage: false, isActiveOrgMember: false, scope: "none", orgId };
+  }
 }
 
 export async function getRfxFromFirestore(rfxId: string): Promise<RfxDoc | null> {
@@ -848,54 +914,7 @@ export async function getOpenRfxByViewportGeohash(
     .slice(0, maxResults);
 }
 
-export async function getUserRfxListFromFirestore(
-  uid: string,
-  maxResults = 50
-): Promise<RfxDoc[]> {
-  const q = query(
-    collection(db, "rfx"),
-    where("createdBy", "==", uid),
-    orderBy("createdAt", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as RfxDoc);
-}
-
-export async function getUserActiveRfxCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfx"),
-    where("createdBy", "==", uid),
-    where("status", "==", "open")
-  );
-  const snap = await getDocs(q);
-  return snap.size;
-}
-
-export async function updateRfxInFirestore(
-  rfxId: string,
-  data: Partial<RfxDoc>
-): Promise<void> {
-  await updateDoc(doc(db, "rfx", rfxId), { ...data, updatedAt: Date.now() });
-}
-
 // --- RFx Responses ---
-
-export async function createRfxResponseInFirestore(
-  data: Omit<RfxResponseDoc, "id" | "submittedAt" | "status">
-): Promise<RfxResponseDoc> {
-  const respRef = doc(collection(db, "rfxResponses"));
-  const resp: RfxResponseDoc = {
-    ...data,
-    id: respRef.id,
-    status: "pending",
-    submittedAt: Date.now(),
-  };
-  await setDoc(respRef, resp);
-  // Increment response count on the parent RFx
-  await updateDoc(doc(db, "rfx", data.rfxId), { responseCount: increment(1) });
-  return resp;
-}
 
 export async function getRfxResponsesFromFirestore(
   rfxId: string
@@ -927,31 +946,6 @@ export function subscribeToRfxResponses(
       console.error("subscribeToRfxResponses error:", err);
     }
   );
-}
-
-export async function updateRfxResponseStatus(
-  responseId: string,
-  status: "accepted" | "declined",
-  scores?: { criteriaScores: Record<string, number>; totalScore: number }
-): Promise<void> {
-  const data: Record<string, unknown> = { status };
-  if (scores) {
-    data.criteriaScores = scores.criteriaScores;
-    data.totalScore = scores.totalScore;
-  }
-  await updateDoc(doc(db, "rfxResponses", responseId), data);
-}
-
-export async function getUserRfxResponsesFromFirestore(
-  uid: string
-): Promise<RfxResponseDoc[]> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("respondentUid", "==", uid),
-    orderBy("submittedAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as RfxResponseDoc);
 }
 
 // --- Payments Ledger (PR-09) ---
@@ -1282,41 +1276,7 @@ export async function getReferralsSentThisMonthCount(uid: string): Promise<numbe
     where("createdAt", ">=", startOfMonth)
   );
   const snap = await getDocs(q);
-  return snap.size;
-}
-
-export async function getReferralsReceived(email: string): Promise<ReferralDoc[]> {
-  const q = query(
-    collection(db, "referrals"),
-    where("referredEmail", "==", email),
-    orderBy("createdAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as ReferralDoc);
-}
-
-export async function getProviderReferrals(uid: string): Promise<ReferralDoc[]> {
-  const q = query(
-    collection(db, "referrals"),
-    where("providerUid", "==", uid),
-    orderBy("createdAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as ReferralDoc);
-}
-
-export async function createReferral(referral: ReferralDoc): Promise<void> {
-  await setDoc(doc(db, "referrals", referral.id), referral);
-}
-
-export async function updateReferralStatus(
-  referralId: string,
-  status: ReferralStatus
-): Promise<void> {
-  await updateDoc(doc(db, "referrals", referralId), {
-    status,
-    updatedAt: Date.now(),
-  });
+  return snap.docs.filter((document) => isLegacyPlatformInviteRecord(document.data())).length;
 }
 
 export async function getReferralCount(uid: string): Promise<number> {
@@ -1329,47 +1289,7 @@ export async function getReferralCount(uid: string): Promise<number> {
   return snap.size;
 }
 
-export async function getReferralLeaderboard(): Promise<{ uid: string; count: number; displayName?: string }[]> {
-  const q = query(collection(db, "referrals"), where("status", "==", "converted"));
-  const snap = await getDocs(q);
-  const counts: Record<string, number> = {};
-  snap.docs.forEach((d) => {
-    const uid = (d.data() as ReferralDoc).referrerUid;
-    counts[uid] = (counts[uid] || 0) + 1;
-  });
-  const sorted = Object.entries(counts)
-    .map(([uid, count]) => ({ uid, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
-
-  // Resolve display names from user docs
-  const results = await Promise.all(
-    sorted.map(async (entry) => {
-      try {
-        const userSnap = await getDoc(doc(db, "users", entry.uid));
-        const displayName = userSnap.exists() ? (userSnap.data().displayName as string) || undefined : undefined;
-        return { ...entry, displayName };
-      } catch {
-        return entry;
-      }
-    })
-  );
-  return results;
-}
-
 // --- RFx Team Invites (PR-16) ---
-
-export async function getTeamInvitesForRfx(
-  rfxId: string
-): Promise<RfxTeamInviteDoc[]> {
-  const q = query(
-    collection(db, "rfxTeamInvites"),
-    where("rfxId", "==", rfxId),
-    orderBy("createdAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as RfxTeamInviteDoc);
-}
 
 export async function getTeamInvitesReceived(
   uid: string
@@ -1381,22 +1301,6 @@ export async function getTeamInvitesReceived(
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => d.data() as RfxTeamInviteDoc);
-}
-
-export async function createTeamInvite(
-  invite: RfxTeamInviteDoc
-): Promise<void> {
-  await setDoc(doc(db, "rfxTeamInvites", invite.id), invite);
-}
-
-export async function updateTeamInviteStatus(
-  inviteId: string,
-  status: "accepted" | "declined"
-): Promise<void> {
-  await updateDoc(doc(db, "rfxTeamInvites", inviteId), {
-    status,
-    updatedAt: Date.now(),
-  });
 }
 
 // --- Organizations (PR-17) ---

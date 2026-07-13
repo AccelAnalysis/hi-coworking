@@ -9,10 +9,13 @@ import { useAuth } from "@/lib/authContext";
 import {
   getRfxFromFirestore,
   getProfileFromFirestore,
-  createRfxResponseInFirestore,
+  getRfxManagementAuthority,
 } from "@/lib/firestore";
-import { storage } from "@/lib/firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import {
+  prepareRfxResponseUploadsFn,
+  submitRfxResponseFn,
+  uploadPrivateExchangeObject,
+} from "@/lib/functions";
 import type { RfxDoc, ProfileDoc, RequestedDocument, UploadedDocument } from "@hi/shared";
 import {
   Loader2,
@@ -50,6 +53,8 @@ function RfxDetailContent() {
 
   const [rfx, setRfx] = useState<RfxDoc | null>(null);
   const [profile, setProfile] = useState<ProfileDoc | null>(null);
+  const [canManageRfx, setCanManageRfx] = useState(false);
+  const [isActiveIssuerOrgMember, setIsActiveIssuerOrgMember] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showResponseForm, setShowResponseForm] = useState(false);
 
@@ -63,9 +68,14 @@ function RfxDetailContent() {
           getRfxFromFirestore(rfxId),
           getProfileFromFirestore(user!.uid),
         ]);
+        const authority = rfxData
+          ? await getRfxManagementAuthority(rfxData, user!.uid)
+          : { canManage: false, isActiveOrgMember: false };
         if (!cancelled) {
           setRfx(rfxData);
           setProfile(profileData);
+          setCanManageRfx(authority.canManage);
+          setIsActiveIssuerOrgMember(authority.isActiveOrgMember);
         }
       } catch (err) {
         console.error("Failed to load RFx:", err);
@@ -102,9 +112,13 @@ function RfxDetailContent() {
     );
   }
 
-  const isOwner = rfx.createdBy === user?.uid;
+  const isRecordedOwner = (rfx.ownerUid || rfx.createdBy) === user?.uid;
   const isPastDue = rfx.dueDate ? rfx.dueDate < Date.now() : false;
-  const canSubmit = rfx.status === "open" && !isOwner && !isPastDue;
+  const canSubmit = rfx.status === "open"
+    && !canManageRfx
+    && !isActiveIssuerOrgMember
+    && !isRecordedOwner
+    && !isPastDue;
 
   return (
     <AppShell>
@@ -252,7 +266,7 @@ function RfxDetailContent() {
               </div>
             )}
 
-            {isOwner && (
+            {canManageRfx && (
               <Link
                 href={`/rfx/evaluate?id=${rfx.id}`}
                 className="block p-5 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 hover:shadow-md transition-all group"
@@ -269,7 +283,7 @@ function RfxDetailContent() {
               </Link>
             )}
 
-            {isPastDue && !isOwner && (
+            {isPastDue && !canManageRfx && (
               <div className="p-5 rounded-xl bg-red-50 ring-1 ring-red-200">
                 <h3 className="font-bold text-red-700 mb-1">Submissions Closed</h3>
                 <p className="text-sm text-red-600">
@@ -311,7 +325,6 @@ function RfxDetailContent() {
               rfx={rfx}
               profile={profile}
               userId={user.uid}
-              userName={user.displayName || user.email?.split("@")[0] || "Unknown"}
               onClose={() => setShowResponseForm(false)}
               onSuccess={() => {
                 setShowResponseForm(false);
@@ -331,12 +344,11 @@ interface ResponseFormProps {
   rfx: RfxDoc;
   profile: ProfileDoc | null;
   userId: string;
-  userName: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: ResponseFormProps) {
+function ResponseForm({ rfx, profile, userId, onClose, onSuccess }: ResponseFormProps) {
   const [bidAmount, setBidAmount] = useState("");
   const [experience, setExperience] = useState("");
   const [timeline, setTimeline] = useState("");
@@ -348,7 +360,7 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [proposalUrl, setProposalUrl] = useState<string | null>(null);
+  const [proposalStoragePath, setProposalStoragePath] = useState<string | null>(null);
   const [proposalFileName, setProposalFileName] = useState<string | null>(null);
   const [uploadingProposal, setUploadingProposal] = useState(false);
   const proposalFileRef = useRef<HTMLInputElement>(null);
@@ -356,22 +368,26 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const docFileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const submitRequestKeyRef = useRef<string | null>(null);
 
   const handleProposalUpload = useCallback(
     async (file: File) => {
       setUploadingProposal(true);
       setError(null);
       try {
-        const storageRef = ref(storage, `rfxProposals/${rfx.id}/${userId}/${file.name}`);
-        const task = uploadBytesResumable(storageRef, file);
-        await new Promise<void>((resolve, reject) => {
-          task.on("state_changed", null, reject, async () => {
-            const url = await getDownloadURL(task.snapshot.ref);
-            setProposalUrl(url);
-            setProposalFileName(file.name);
-            resolve();
-          });
+        const safeFileName = file.name.replace(/[\\/]/g, "_");
+        const storagePath = `rfxResponses/${rfx.id}/${userId}/proposal/${Date.now()}_${safeFileName}`;
+        await prepareRfxResponseUploadsFn({
+          rfxId: rfx.id,
+          attachments: [{
+            storagePath,
+            contentType: file.type,
+            size: file.size,
+          }],
         });
+        await uploadPrivateExchangeObject(storagePath, file);
+        setProposalStoragePath(storagePath);
+        setProposalFileName(file.name);
       } catch (err) {
         console.error("Upload error:", err);
         setError("Failed to upload proposal file.");
@@ -387,20 +403,30 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
       setUploadingDocId(reqDoc.id);
       setError(null);
       try {
-        const storageRef = ref(storage, `rfxDocuments/${rfx.id}/${userId}/${reqDoc.id}/${file.name}`);
-        const task = uploadBytesResumable(storageRef, file);
-        await new Promise<void>((resolve, reject) => {
-          task.on("state_changed", null, reject, async () => {
-            const url = await getDownloadURL(task.snapshot.ref);
-            setUploadedDocs((prev) => {
-              const filtered = prev.filter((d) => d.requestedDocId !== reqDoc.id);
-              return [
-                ...filtered,
-                { requestedDocId: reqDoc.id, label: reqDoc.label, url, fileName: file.name },
-              ];
-            });
-            resolve();
-          });
+        const safeFileName = file.name.replace(/[\\/]/g, "_");
+        const storagePath = `rfxResponses/${rfx.id}/${userId}/requested/${reqDoc.id}/${Date.now()}_${safeFileName}`;
+        await prepareRfxResponseUploadsFn({
+          rfxId: rfx.id,
+          attachments: [{
+            storagePath,
+            contentType: file.type,
+            size: file.size,
+          }],
+        });
+        await uploadPrivateExchangeObject(storagePath, file);
+        setUploadedDocs((prev) => {
+          const filtered = prev.filter((d) => d.requestedDocId !== reqDoc.id);
+          return [
+            ...filtered,
+            {
+              requestedDocId: reqDoc.id,
+              label: reqDoc.label,
+              storagePath,
+              fileName: file.name,
+              contentType: file.type,
+              size: file.size,
+            },
+          ];
         });
       } catch (err) {
         console.error("Upload error:", err);
@@ -425,12 +451,11 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
 
     setSubmitting(true);
     try {
-      await createRfxResponseInFirestore({
+      const idempotencyKey = submitRequestKeyRef.current ?? crypto.randomUUID();
+      submitRequestKeyRef.current = idempotencyKey;
+      await submitRfxResponseFn({
         rfxId: rfx.id,
-        rfxOwnerUid: rfx.createdBy,
-        respondentUid: userId,
-        respondentName: userName,
-        respondentBusinessName: profile?.businessName || undefined,
+        idempotencyKey,
         bidAmount: bidAmount ? parseFloat(bidAmount) : undefined,
         experience: experience ? parseFloat(experience) : undefined,
         timeline: timeline ? parseFloat(timeline) : undefined,
@@ -439,9 +464,17 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
         credentials: credentials.length > 0 ? credentials : undefined,
         references: references || undefined,
         proposalText: proposalText || undefined,
-        proposalUrl: proposalUrl || undefined,
-        uploadedDocuments: uploadedDocs,
+        proposalStoragePath: proposalStoragePath || undefined,
+        uploadedDocuments: uploadedDocs.map((document) => ({
+          requestedDocId: document.requestedDocId,
+          label: document.label,
+          storagePath: document.storagePath!,
+          fileName: document.fileName,
+          contentType: document.contentType,
+          size: document.size,
+        })),
       });
+      submitRequestKeyRef.current = null;
       onSuccess();
     } catch (err) {
       console.error("Failed to submit response:", err);
@@ -609,7 +642,7 @@ function ResponseForm({ rfx, profile, userId, userName, onClose, onSuccess }: Re
               <span className="font-medium text-emerald-700 truncate">{proposalFileName}</span>
               <button
                 onClick={() => {
-                  setProposalUrl(null);
+                  setProposalStoragePath(null);
                   setProposalFileName(null);
                 }}
                 className="ml-auto text-slate-400 hover:text-red-500"

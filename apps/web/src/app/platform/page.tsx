@@ -362,7 +362,7 @@ export default function PlatformPage() {
                     <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 font-bold text-xl flex items-center justify-center mb-4">4</div>
                     <Zap className="h-8 w-8 text-slate-400 mb-3" />
                     <h4 className="font-bold text-slate-900 mb-2">Smart Access Granted</h4>
-                    <p className="text-sm text-slate-600">Receive your access code instantly and walk in when you're ready.</p>
+                    <p className="text-sm text-slate-600">Receive your access code instantly and walk in when you&apos;re ready.</p>
                   </div>
                 </div>
               </div>
@@ -553,7 +553,7 @@ export default function PlatformPage() {
               <div className="p-6 rounded-2xl bg-emerald-900/30 border border-emerald-700/50">
                 <Lock className="h-8 w-8 text-emerald-400 mb-3" />
                 <p className="text-slate-200 italic">
-                  "Our verification process includes identity confirmation, business license validation, and EIN verification—ensuring every member in the directory is a real, trusted professional. This creates a procurement-ready network where connections lead to real business opportunities."
+                  &ldquo;Our verification process includes identity confirmation, business license validation, and EIN verification—ensuring every member in the directory is a real, trusted professional. This creates a procurement-ready network where connections lead to real business opportunities.&rdquo;
                 </p>
               </div>
             </div>
@@ -869,7 +869,7 @@ export default function PlatformPage() {
                 Partner With Hi Coworking
               </h2>
               <p className="text-xl text-slate-200 mb-4 leading-relaxed">
-                Whether you're a professional seeking workspace and community, a business looking for procurement opportunities, or an investor interested in the future of micro-coworking—we'd love to connect.
+                Whether you&apos;re a professional seeking workspace and community, a business looking for procurement opportunities, or an investor interested in the future of micro-coworking—we&apos;d love to connect.
               </p>
               <p className="text-lg text-slate-300 mb-10 leading-relaxed">
                 Join us in building a platform that proves premium coworking can thrive in underserved markets, creating value for members, partners, and communities alike.

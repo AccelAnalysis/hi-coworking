@@ -1,5 +1,82 @@
 import { z } from "zod";
 
+/** Browser-navigable URL. Explicitly excludes executable and local protocols. */
+export const httpUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "URL must use the http or https protocol");
+
+// Canonical profile assets are authorized by exact Storage object path. The
+// legacy URL fields remain in the profile contract for existing records, but
+// new uploads should persist one of these paths instead of a bearer download
+// URL.
+const storageLeaf = String.raw`[^/\u0000-\u001f\u007f]+`;
+
+export const capabilityStatementStoragePathSchema = z
+  .string()
+  .min(1)
+  .max(1_024)
+  .regex(new RegExp(`^capabilityStatements/${storageLeaf}/${storageLeaf}$`));
+
+export const profilePhotoStoragePathSchema = z
+  .string()
+  .min(1)
+  .max(1_024)
+  .regex(new RegExp(`^profilePhotos/${storageLeaf}/${storageLeaf}$`));
+
+export const profileVideoStoragePathSchema = z
+  .string()
+  .min(1)
+  .max(1_024)
+  .regex(new RegExp(`^profileVideos/${storageLeaf}/(?:raw|processed)/${storageLeaf}$`));
+
+export const profileVideoPosterStoragePathSchema = z.union([
+  profilePhotoStoragePathSchema,
+  z
+    .string()
+    .min(1)
+    .max(1_024)
+    .regex(new RegExp(`^profileVideos/${storageLeaf}/posters/${storageLeaf}$`)),
+]);
+
+export const profileAssetStoragePathFields = [
+  "capabilityStatementStoragePath",
+  "photoStoragePath",
+  "videoIntroStoragePath",
+  "videoIntroPosterStoragePath",
+] as const;
+
+export type ProfileAssetStoragePathField =
+  (typeof profileAssetStoragePathFields)[number];
+
+/** Ensures a syntactically canonical asset path is owned by the profile UID. */
+export function profileAssetStoragePathBelongsToUid(
+  field: ProfileAssetStoragePathField,
+  storagePath: string,
+  uid: string,
+): boolean {
+  const parts = storagePath.split("/");
+  if (parts[1] !== uid) return false;
+
+  switch (field) {
+    case "capabilityStatementStoragePath":
+      return capabilityStatementStoragePathSchema.safeParse(storagePath).success;
+    case "photoStoragePath":
+      return profilePhotoStoragePathSchema.safeParse(storagePath).success;
+    case "videoIntroStoragePath":
+      return profileVideoStoragePathSchema.safeParse(storagePath).success;
+    case "videoIntroPosterStoragePath":
+      return profileVideoPosterStoragePathSchema.safeParse(storagePath).success;
+  }
+}
+
 export const doorTypeSchema = z.enum([
   "OPENING",
   "STANDARD",
@@ -340,13 +417,16 @@ export const profileDocSchema = z.object({
   bio: z.string().optional(),
   naicsCodes: z.array(z.string()).optional(),
   certifications: z.array(z.string()).optional(),   // e.g. ["8(a)", "WOSB", "HUBZone"]
+  verifiedCertifications: z.array(z.string()).optional(), // Server-reviewed; owners edit certifications only
   uei: z.string().optional(),                       // Unique Entity Identifier
   duns: z.string().optional(),
   cageCode: z.string().optional(),
-  capabilityStatementUrl: z.string().optional(),
-  photoUrl: z.string().optional(),
-  website: z.string().url().optional(),
-  linkedin: z.string().url().optional(),
+  capabilityStatementUrl: httpUrlSchema.optional(),
+  capabilityStatementStoragePath: capabilityStatementStoragePathSchema.optional(),
+  photoUrl: httpUrlSchema.optional(),
+  photoStoragePath: profilePhotoStoragePathSchema.optional(),
+  website: httpUrlSchema.optional(),
+  linkedin: httpUrlSchema.optional(),
   profileCompletenessScore: z.number().min(0).max(100).optional(),
   
   // Trust & Badges
@@ -376,14 +456,30 @@ export const profileDocSchema = z.object({
 
   // Profile readiness + video
   readinessTier: z.enum(["seat_ready", "bid_ready", "procurement_ready"]).optional(),
-  videoIntroUrl: z.string().optional(),
-  videoIntroPosterUrl: z.string().optional(),
+  videoIntroUrl: httpUrlSchema.optional(),
+  videoIntroStoragePath: profileVideoStoragePathSchema.optional(),
+  videoIntroPosterUrl: httpUrlSchema.optional(),
+  videoIntroPosterStoragePath: profileVideoPosterStoragePathSchema.optional(),
   videoIntroDurationSec: z.number().optional(),
   videoIntroStatus: z.enum(["processing", "ready", "failed"]).optional(),
 
   published: z.boolean().default(false),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
+}).superRefine((profile, context) => {
+  for (const field of profileAssetStoragePathFields) {
+    const storagePath = profile[field];
+    if (
+      typeof storagePath === "string"
+      && !profileAssetStoragePathBelongsToUid(field, storagePath, profile.uid)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: [field],
+        message: "Profile asset path must be canonical and owned by the profile UID",
+      });
+    }
+  }
 });
 
 export type ProfileDoc = z.infer<typeof profileDocSchema>;
@@ -403,7 +499,9 @@ export function computeReadinessTier(
   if (!profile) return "seat_ready";
 
   const isVerified = profile.verificationStatus === "verified";
-  const hasCapabilityStatement = Boolean(profile.capabilityStatementUrl);
+  const hasCapabilityStatement = Boolean(
+    profile.capabilityStatementStoragePath || profile.capabilityStatementUrl
+  );
   const isBidReady = isVerified && hasCapabilityStatement;
   if (!isBidReady) return "seat_ready";
 
@@ -537,7 +635,15 @@ export function canTransact(input: TransactCheckInput): TransactCheckResult {
 
 // --- RFx (PR-06) ---
 
-export const rfxStatusSchema = z.enum(["draft", "under_review", "open", "closed", "awarded", "cancelled"]);
+export const rfxStatusSchema = z.enum([
+  "draft",
+  "under_review",
+  "open",
+  "closed",
+  "awarded",
+  "rejected",
+  "cancelled",
+]);
 export type RfxStatus = z.infer<typeof rfxStatusSchema>;
 
 export const rfxAdminApprovalSchema = z.enum(["pending", "approved", "rejected"]);
@@ -569,6 +675,7 @@ export type RequestedDocument = z.infer<typeof requestedDocumentSchema>;
 
 export const rfxDocSchema = z.object({
   id: z.string(),
+  schemaVersion: z.number().int().optional(),
   title: z.string(),
   description: z.string(),
   naicsCodes: z.array(z.string()).optional(),
@@ -586,37 +693,60 @@ export const rfxDocSchema = z.object({
   memberOnly: z.boolean().default(false),
   status: rfxStatusSchema,
   createdBy: z.string(),                         // uid
+  ownerUid: z.string().optional(),               // v2 authoritative owner; createdBy retained for legacy
+  orgId: z.string().optional(),
   createdByName: z.string().optional(),          // Denormalized display name
+  visibility: z.enum(["public", "members"]).optional(),
   template: z.string().optional(),               // Template ID used
   evaluationCriteria: z.array(evaluationCriterionSchema).default([]),
   requestedDocuments: z.array(requestedDocumentSchema).default([]),
   adminApprovalStatus: rfxAdminApprovalSchema.default("pending"),
   adminReviewNote: z.string().optional(),
+  approvedAt: z.number().optional(),
+  approvedBy: z.string().optional(),
+  rejectedAt: z.number().optional(),
+  rejectedBy: z.string().optional(),
+  cancelledAt: z.number().optional(),
+  cancelledBy: z.string().optional(),
+  cancellationReason: z.string().optional(),
+  awardedResponseId: z.string().optional(),
   responseCount: z.number().default(0),
+  version: z.number().int().nonnegative().optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
 
 export type RfxDoc = z.infer<typeof rfxDocSchema>;
 
-export const rfxResponseStatusSchema = z.enum(["pending", "accepted", "declined"]);
+export const rfxResponseStatusSchema = z.enum([
+  "pending", // legacy submitted state
+  "submitted",
+  "under_review",
+  "accepted",
+  "declined",
+]);
 export type RfxResponseStatus = z.infer<typeof rfxResponseStatusSchema>;
 
 /** A single uploaded document matching a requestedDocument */
 export const uploadedDocumentSchema = z.object({
-  requestedDocId: z.string(),                    // Links to requestedDocument.id
+  requestedDocId: z.string().optional(),         // Links to requestedDocument.id when RFx requested it
   label: z.string(),
-  url: z.string(),                               // Firebase Storage download URL
+  storagePath: z.string().optional(),             // v2 canonical authorization source
+  url: z.string().optional(),                     // legacy bearer URL; never authoritative
   fileName: z.string(),
+  contentType: z.string().optional(),
+  size: z.number().int().positive().optional(),
 });
 
 export type UploadedDocument = z.infer<typeof uploadedDocumentSchema>;
 
 export const rfxResponseDocSchema = z.object({
   id: z.string(),
+  schemaVersion: z.number().int().optional(),
   rfxId: z.string(),
   rfxOwnerUid: z.string(),
   respondentUid: z.string(),
+  respondentOrgId: z.string().optional(),
   respondentName: z.string().optional(),
   respondentBusinessName: z.string().optional(), // From ProfileDoc
   // Structured bid fields
@@ -629,12 +759,18 @@ export const rfxResponseDocSchema = z.object({
   references: z.string().optional(),                  // References description
   proposalText: z.string().optional(),                // Free-form approach description
   proposalUrl: z.string().optional(),                 // Main proposal file (Storage URL)
+  proposalStoragePath: z.string().optional(),         // v2 canonical private path
   uploadedDocuments: z.array(uploadedDocumentSchema).default([]),
   // Scoring (computed by evaluation)
   criteriaScores: z.record(z.string(), z.number()).optional(),
   totalScore: z.number().optional(),
+  evaluationNotes: z.string().optional(),
+  evaluatedBy: z.string().optional(),
+  evaluatedAt: z.number().optional(),
   status: rfxResponseStatusSchema.default("pending"),
   submittedAt: z.number(),
+  updatedAt: z.number().optional(),
+  version: z.number().int().nonnegative().optional(),
 });
 
 export type RfxResponseDoc = z.infer<typeof rfxResponseDocSchema>;
@@ -805,7 +941,8 @@ export const referralPolicyDocSchema = z.object({
 });
 export type ReferralPolicyDoc = z.infer<typeof referralPolicyDocSchema>;
 
-export const referralDisputeDocSchema = z.object({
+/** Legacy mixed-referral dispute document retained for compatibility. */
+export const legacyReferralDisputeDocSchema = z.object({
   id: z.string(),
   referralId: z.string(),
   openerUid: z.string(),
@@ -816,7 +953,12 @@ export const referralDisputeDocSchema = z.object({
   resolutionAt: z.number().optional(),
   createdAt: z.number(),
 });
-export type ReferralDisputeDoc = z.infer<typeof referralDisputeDocSchema>;
+export type LegacyReferralDisputeDoc = z.infer<typeof legacyReferralDisputeDocSchema>;
+
+/** @deprecated Use a domain-specific dispute schema. */
+export const referralDisputeDocSchema = legacyReferralDisputeDocSchema;
+/** @deprecated Use LegacyReferralDisputeDoc or BusinessReferralDisputeDoc. */
+export type ReferralDisputeDoc = LegacyReferralDisputeDoc;
 
 // --- Referrals (PR-03) ---
 
@@ -882,6 +1024,212 @@ export const referralDocSchema = z.object({
 });
 
 export type ReferralDoc = z.infer<typeof referralDocSchema>;
+
+// --- Corrected Exchange referral domains (Run 1) ---
+
+/**
+ * Platform membership invitations are distinct from private business referrals.
+ * Legacy records may remain in `referrals` while callers use this contract.
+ */
+export const platformInviteStatusSchema = z.enum(["pending", "claimed", "expired", "cancelled"]);
+export type PlatformInviteStatus = z.infer<typeof platformInviteStatusSchema>;
+
+export const platformInviteDocSchema = z.object({
+  id: z.string(),
+  schemaVersion: z.literal(1).default(1),
+  inviterUid: z.string(),
+  invitedEmail: z.string().email(),
+  invitedName: z.string().optional(),
+  status: platformInviteStatusSchema,
+  attributionCode: z.string().optional(),
+  claimedByUid: z.string().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  claimedAt: z.number().optional(),
+  expiresAt: z.number().optional(),
+  legacyReferralId: z.string().optional(),
+});
+export type PlatformInviteDoc = z.infer<typeof platformInviteDocSchema>;
+
+export const businessReferralTypeSchema = z.enum([
+  "customer_introduction",
+  "business_lead",
+  "project_opportunity",
+  "service_need",
+  "partner_introduction",
+  "other",
+]);
+export type BusinessReferralType = z.infer<typeof businessReferralTypeSchema>;
+
+export const businessReferralConsentStatusSchema = z.enum([
+  "not_required",
+  "pending",
+  "confirmed",
+  "withdrawn",
+  "unknown_legacy",
+]);
+export type BusinessReferralConsentStatus = z.infer<typeof businessReferralConsentStatusSchema>;
+
+export const businessReferralStatusSchema = z.enum([
+  "draft",
+  "sent",
+  "accepted",
+  "declined",
+  "in_progress",
+  "converted",
+  "closed",
+  "withdrawn",
+  "expired",
+]);
+export type BusinessReferralStatus = z.infer<typeof businessReferralStatusSchema>;
+
+export const businessReferralCompensationStatusSchema = z.enum([
+  "none",
+  "proposed",
+  "agreed",
+  "due",
+  "processing",
+  "settled",
+  "disputed",
+  "cancelled",
+]);
+export type BusinessReferralCompensationStatus = z.infer<
+  typeof businessReferralCompensationStatusSchema
+>;
+
+export const businessReferralCompensationPolicySchema = z.object({
+  type: z.enum(["none", "fixed", "percentage", "custom"]).default("none"),
+  amountCents: z.number().int().positive().optional(),
+  percentageBasisPoints: z.number().int().min(1).max(10_000).optional(),
+  terms: z.string().optional(),
+  status: businessReferralCompensationStatusSchema.default("none"),
+  lockedAt: z.number().optional(),
+});
+export type BusinessReferralCompensationPolicy = z.infer<
+  typeof businessReferralCompensationPolicySchema
+>;
+
+export const businessReferralOutcomeSchema = z.object({
+  type: z.enum([
+    "converted",
+    "not_a_fit",
+    "unable_to_contact",
+    "declined_by_customer",
+    "duplicate",
+    "other",
+  ]),
+  summary: z.string().optional(),
+  recordedAt: z.number(),
+  recordedByUid: z.string(),
+});
+export type BusinessReferralOutcome = z.infer<typeof businessReferralOutcomeSchema>;
+
+/**
+ * Third-party contact data is stored separately in businessReferralContacts.
+ * The primary document deliberately contains only a minimized party summary.
+ */
+export const businessReferralDocSchema = z.object({
+  id: z.string(),
+  schemaVersion: z.literal(1).default(1),
+  referrerUid: z.string(),
+  referrerOrgId: z.string().optional(),
+  recipientUid: z.string().optional(),
+  recipientOrgId: z.string().optional(),
+  assignedStaffUids: z.array(z.string()).default([]),
+  referralType: businessReferralTypeSchema,
+  title: z.string(),
+  needSummary: z.string(),
+  category: z.string().optional(),
+  naicsCodes: z.array(z.string()).optional(),
+  territoryFips: z.string().optional(),
+  referredPartySummary: z
+    .object({
+      type: z.enum(["person", "business"]),
+      companyName: z.string().optional(),
+    })
+    .optional(),
+  consentStatus: businessReferralConsentStatusSchema,
+  consentConfirmedAt: z.number().optional(),
+  consentConfirmedByUid: z.string().optional(),
+  consentWithdrawnAt: z.number().optional(),
+  consentWithdrawnByUid: z.string().optional(),
+  status: businessReferralStatusSchema,
+  outcome: businessReferralOutcomeSchema.optional(),
+  compensationPolicy: businessReferralCompensationPolicySchema.default({ type: "none", status: "none" }),
+  relatedRfxId: z.string().optional(),
+  relatedTeamId: z.string().optional(),
+  relatedOpportunityId: z.string().optional(),
+  version: z.number().int().nonnegative().default(0),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  sentAt: z.number().optional(),
+  expiresAt: z.number().optional(),
+  expiredAt: z.number().optional(),
+  acceptedAt: z.number().optional(),
+  respondedAt: z.number().optional(),
+  respondedByUid: z.string().optional(),
+  recipientResponseNote: z.string().optional(),
+  inProgressAt: z.number().optional(),
+  closedAt: z.number().optional(),
+  withdrawnAt: z.number().optional(),
+  withdrawnByUid: z.string().optional(),
+  activeDisputeId: z.string().optional(),
+  compensationStatusBeforeDispute: businessReferralCompensationStatusSchema.optional(),
+  legacyCompensationReviewRequired: z.boolean().optional(),
+  legacyReferralId: z.string().optional(),
+});
+export type BusinessReferralDoc = z.infer<typeof businessReferralDocSchema>;
+
+export const businessReferralContactDocSchema = z.object({
+  id: z.string(), // Same as referral id
+  referralId: z.string(),
+  type: z.enum(["person", "business"]),
+  name: z.string().optional(),
+  companyName: z.string().optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  createdByUid: z.string(),
+  referrerUid: z.string(),
+  referrerOrgId: z.string().optional(),
+  recipientUid: z.string().optional(),
+  recipientOrgId: z.string().optional(),
+  consentStatus: businessReferralConsentStatusSchema,
+  recipientDisclosureAllowed: z.boolean(),
+  legacyReferralId: z.string().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type BusinessReferralContactDoc = z.infer<typeof businessReferralContactDocSchema>;
+
+export const businessReferralDisputeStatusSchema = z.enum([
+  "open",
+  "under_review",
+  "resolved_upheld",
+  "resolved_dismissed",
+  "resolved_agreement",
+]);
+export type BusinessReferralDisputeStatus = z.infer<typeof businessReferralDisputeStatusSchema>;
+
+/** Consent-aware business-referral dispute stored in businessReferralDisputes. */
+export const businessReferralDisputeDocSchema = z.object({
+  id: z.string(),
+  referralId: z.string(),
+  openerUid: z.string(),
+  referrerUid: z.string(),
+  recipientUid: z.string().nullable(),
+  referrerOrgId: z.string().nullable(),
+  recipientOrgId: z.string().nullable(),
+  assignedStaffUids: z.array(z.string()).default([]),
+  reason: z.string(),
+  evidenceStoragePaths: z.array(z.string()).default([]),
+  status: businessReferralDisputeStatusSchema,
+  resolutionNote: z.string().optional(),
+  resolvedAt: z.number().optional(),
+  resolvedByUid: z.string().optional(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+export type BusinessReferralDisputeDoc = z.infer<typeof businessReferralDisputeDocSchema>;
 
 // --- Events (PR-03) ---
 
@@ -1318,19 +1666,33 @@ export type PaymentAuditEntry = z.infer<typeof paymentAuditEntrySchema>;
 
 // --- RFx Team Invites (PR-16) ---
 
-export const rfxTeamInviteStatusSchema = z.enum(["pending", "accepted", "declined"]);
+export const rfxTeamInviteStatusSchema = z.enum([
+  "pending",
+  "accepted",
+  "declined",
+  "revoked",
+  "expired",
+]);
 export type RfxTeamInviteStatus = z.infer<typeof rfxTeamInviteStatusSchema>;
 
 export const rfxTeamInviteDocSchema = z.object({
   id: z.string(),
+  schemaVersion: z.number().int().optional(),
+  teamId: z.string(),
   rfxId: z.string(),
   inviterUid: z.string(),
   inviteeUid: z.string(),
   inviteeName: z.string().optional(),
-  role: z.string().optional(),                   // e.g. "sub", "lead", "partner"
+  role: z.enum(["sub", "estimator", "compliance", "proposal_writer"]),
   status: rfxTeamInviteStatusSchema,
   note: z.string().optional(),
   createdAt: z.number(),
+  expiresAt: z.number(),
+  respondedAt: z.number().optional(),
+  respondedByUid: z.string().optional(),
+  revokedAt: z.number().optional(),
+  revokedByUid: z.string().optional(),
+  revokeReason: z.string().optional(),
   updatedAt: z.number().optional(),
 });
 
@@ -1351,13 +1713,16 @@ export type RfxTeamMember = z.infer<typeof rfxTeamMemberSchema>;
 
 export const rfxTeamDocSchema = z.object({
   id: z.string(),
+  schemaVersion: z.number().int().optional(),
   rfxId: z.string(),
   name: z.string(),
   primeUid: z.string(),
+  orgId: z.string().optional(),
   members: z.array(rfxTeamMemberSchema),
   memberUids: z.array(z.string()).default([]),
   status: z.enum(["forming", "active", "submitted", "dissolved"]),
   internalNotes: z.string().optional(),
+  version: z.number().int().nonnegative().optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
@@ -1374,6 +1739,53 @@ export const teamDocumentSchema = z.object({
   uploadedAt: z.number(),
 });
 export type TeamDocument = z.infer<typeof teamDocumentSchema>;
+
+// --- Exchange audit, idempotency, and saved records ---
+
+export const exchangeAuditEventSchema = z.object({
+  id: z.string(),
+  actorUid: z.string(),
+  actorRole: z.string().optional(),
+  action: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  orgId: z.string().optional(),
+  previousStatus: z.string().optional(),
+  newStatus: z.string().optional(),
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  createdAt: z.number(),
+});
+export type ExchangeAuditEvent = z.infer<typeof exchangeAuditEventSchema>;
+
+export const transactionEligibilityReasonSchema = z.enum([
+  "ELIGIBLE",
+  "AUTH_REQUIRED",
+  "PROFILE_REQUIRED",
+  "VERIFICATION_REQUIRED",
+  "TERRITORY_UNKNOWN",
+  "TERRITORY_UNRELEASED",
+  "PLAN_REQUIRED",
+  "INSUFFICIENT_CREDITS",
+  "ORG_PERMISSION_REQUIRED",
+  "STATUS_NOT_ALLOWED",
+]);
+export type TransactionEligibilityReason = z.infer<typeof transactionEligibilityReasonSchema>;
+
+export const transactionEligibilitySchema = z.object({
+  allowed: z.boolean(),
+  reasonCode: transactionEligibilityReasonSchema,
+  message: z.string(),
+});
+export type TransactionEligibility = z.infer<typeof transactionEligibilitySchema>;
+
+export const savedExchangeItemDocSchema = z.object({
+  id: z.string(),
+  uid: z.string(),
+  entityType: z.literal("rfx"),
+  entityId: z.string(),
+  createdAt: z.number(),
+});
+export type SavedExchangeItemDoc = z.infer<typeof savedExchangeItemDocSchema>;
 
 // --- Credits & Monetization ---
 

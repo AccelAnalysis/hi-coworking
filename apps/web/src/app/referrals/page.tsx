@@ -6,14 +6,17 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import {
   getReferralsSent,
-  getReferralsReceived,
-  getProviderReferrals,
-  updateReferralStatus,
-  getReferralLeaderboard,
   getTeamInvitesReceived,
-  updateTeamInviteStatus,
 } from "@/lib/firestore";
-import { acceptReferralFn, declineReferralFn } from "@/lib/functions";
+import {
+  acceptReferralFn,
+  contactReferralFn,
+  declineReferralFn,
+  teamRespondInviteFn,
+  listReceivedPlatformInvitesFn,
+  listReceivedLegacyBusinessReferralsFn,
+} from "@/lib/functions";
+import { isLegacyPlatformInviteRecord } from "@/lib/referralDomains";
 import type { ReferralDoc, ReferralStatus, RfxTeamInviteDoc } from "@hi/shared";
 import { ReferralPolicyEditor } from "@/components/referrals/ReferralPolicyEditor";
 import { ReferralActionModal } from "@/components/referrals/ReferralActionModal";
@@ -58,12 +61,11 @@ export default function ReferralsPage() {
 }
 
 function ReferralsContent() {
-  const { user, userDoc } = useAuth();
-  const [tab, setTab] = useState<"sent" | "received" | "team" | "leaderboard" | "settings">("sent");
+  const { user } = useAuth();
+  const [tab, setTab] = useState<"sent" | "received" | "team" | "settings">("sent");
   const [sent, setSent] = useState<ReferralDoc[]>([]);
   const [received, setReceived] = useState<ReferralDoc[]>([]);
   const [teamInvites, setTeamInvites] = useState<RfxTeamInviteDoc[]>([]);
-  const [leaderboard, setLeaderboard] = useState<{ uid: string; count: number; displayName?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -75,12 +77,11 @@ function ReferralsContent() {
     if (!user) return;
     setLoading(true);
     try {
-      const [s, rInvites, rProvider, t, l] = await Promise.all([
+      const [s, rInvites, rProvider, t] = await Promise.all([
         getReferralsSent(user.uid),
-        getReferralsReceived(userDoc?.email || user.email || ""),
-        getProviderReferrals(user.uid),
+        listReceivedPlatformInvitesFn({}).then((result) => result.data.invitations),
+        listReceivedLegacyBusinessReferralsFn({}).then((result) => result.data.referrals),
         getTeamInvitesReceived(user.uid),
-        getReferralLeaderboard(),
       ]);
 
       setSent(s);
@@ -95,13 +96,12 @@ function ReferralsContent() {
       setReceived(mergedReceived.sort((a, b) => b.createdAt - a.createdAt));
 
       setTeamInvites(t);
-      setLeaderboard(l);
     } catch (err) {
       console.error("Failed to fetch referral data:", err);
     } finally {
       setLoading(false);
     }
-  }, [user, userDoc]);
+  }, [user]);
 
   useEffect(() => {
     fetchData();
@@ -118,7 +118,9 @@ function ReferralsContent() {
   const sentThisMonthCount = sent.filter(r => {
     const d = new Date(r.createdAt);
     const now = new Date();
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    return isLegacyPlatformInviteRecord(r)
+      && d.getMonth() === now.getMonth()
+      && d.getFullYear() === now.getFullYear();
   }).length;
 
   return (
@@ -178,7 +180,6 @@ function ReferralsContent() {
             { key: "sent", label: "Sent", icon: Send, count: sent.length },
             { key: "received", label: "Received", icon: Inbox, count: received.length },
             { key: "team", label: "Team Invites", icon: Handshake, count: teamInvites.filter((t) => t.status === "pending").length },
-            { key: "leaderboard", label: "Leaderboard", icon: Trophy },
             { key: "settings", label: "Settings", icon: Settings },
           ] as const).map((t) => (
             <button
@@ -225,7 +226,6 @@ function ReferralsContent() {
               />
             )}
             {tab === "team" && <TeamInvitesList invites={teamInvites} onUpdate={fetchData} />}
-            {tab === "leaderboard" && <Leaderboard entries={leaderboard} />}
             {tab === "settings" && <ReferralPolicyEditor />}
           </>
         )}
@@ -372,9 +372,9 @@ function ReferralList({
                 )}
 
                 {/* Actions for Sent Referrals (Referrer Flow) */}
-                {type === "sent" && ref.status === "pending" && (
+                {type === "sent" && ref.type === "business_intro" && ref.status === "pending" && (
                   <button
-                    onClick={async () => { await updateReferralStatus(ref.id, "contacted"); onUpdate(); }}
+                    onClick={async () => { await contactReferralFn({ referralId: ref.id }); onUpdate(); }}
                     className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
                   >
                     Mark Contacted
@@ -409,7 +409,7 @@ function TeamInvitesList({
 
   const handleRespond = async (inviteId: string, status: "accepted" | "declined") => {
     try {
-      await updateTeamInviteStatus(inviteId, status);
+      await teamRespondInviteFn({ inviteId, response: status });
       onUpdate();
     } catch (err) {
       console.error("Failed to update invite:", err);
@@ -471,43 +471,3 @@ function TeamInvitesList({
 }
 
 // --- Leaderboard ---
-
-function Leaderboard({ entries }: { entries: { uid: string; count: number; displayName?: string }[] }) {
-  if (entries.length === 0) {
-    return (
-      <div className="text-center py-16">
-        <Trophy className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-        <p className="text-sm text-slate-500">No converted referrals yet. Be the first!</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-100 text-xs font-medium text-slate-500 uppercase tracking-wide flex items-center gap-2">
-        <Trophy className="h-3.5 w-3.5" />
-        Top Referrers
-      </div>
-      <div className="divide-y divide-slate-100">
-        {entries.map((entry, idx) => (
-          <div key={entry.uid} className="flex items-center gap-4 px-5 py-3">
-            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-              idx === 0 ? "bg-amber-100 text-amber-700" :
-              idx === 1 ? "bg-slate-200 text-slate-600" :
-              idx === 2 ? "bg-orange-100 text-orange-700" :
-              "bg-slate-100 text-slate-500"
-            }`}>
-              {idx + 1}
-            </span>
-            <span className="text-sm font-medium text-slate-700 flex-1 truncate">
-              {entry.displayName || `Member ${entry.uid.slice(0, 8)}`}
-            </span>
-            <span className="text-sm font-bold text-slate-900">
-              {entry.count} referral{entry.count !== 1 ? "s" : ""}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}

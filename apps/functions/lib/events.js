@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.events_joinWaitlist = exports.events_cancelRegistration = exports.events_registerFree = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const admin = __importStar(require("firebase-admin"));
+const firestore_1 = require("firebase-admin/firestore");
 const params_1 = require("firebase-functions/params");
 const ledger_1 = require("./payments/ledger");
 const stripeProvider_1 = require("./payments/stripeProvider");
@@ -98,7 +99,7 @@ exports.events_registerFree = (0, https_1.onCall)(async (request) => {
             status: "active",
         };
         tx.set(registrationRef, registration);
-        tx.update(eventRef, { registrationCount: admin.firestore.FieldValue.increment(1) });
+        tx.update(eventRef, { registrationCount: firestore_1.FieldValue.increment(1) });
     });
     return { success: true };
 });
@@ -127,7 +128,7 @@ exports.events_cancelRegistration = (0, https_1.onCall)(async (request) => {
         }
         tx.delete(registrationRef);
         tx.update(eventRef, {
-            registrationCount: admin.firestore.FieldValue.increment(-1),
+            registrationCount: firestore_1.FieldValue.increment(-1),
             updatedAt: Date.now(),
         });
     });

@@ -12,24 +12,15 @@ interface CreateReferralFormProps {
 }
 
 export function CreateReferralForm({
-  uid,
   currentUsage,
   onCreated,
   onCancel,
 }: CreateReferralFormProps) {
-  const [type, setType] = useState<"platform_invite" | "business_intro">("platform_invite");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Fields
   const [referredEmail, setReferredEmail] = useState("");
   const [referredName, setReferredName] = useState("");
-  
-  const [clientName, setClientName] = useState("");
-  const [clientEmail, setClientEmail] = useState("");
-  const [clientCompany, setClientCompany] = useState("");
-  const [clientPhone, setClientPhone] = useState("");
-  
   const [note, setNote] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,26 +29,14 @@ export function CreateReferralForm({
     setLoading(true);
 
     try {
-      if (type === "platform_invite") {
-        if (!referredEmail) throw new Error("Email is required");
-        await createReferralFn({
-          type: "platform_invite",
-          referredEmail,
-          referredName,
-          note,
-        });
-      } else {
-        if (!clientName || !clientEmail) throw new Error("Client name and email are required");
-        await createReferralFn({
-          type: "business_intro",
-          providerUid: uid, 
-          clientName,
-          clientEmail,
-          clientCompany,
-          clientPhone,
-          note,
-        });
-      }
+      if (!referredEmail) throw new Error("Email is required");
+      await createReferralFn({
+        type: "platform_invite",
+        idempotencyKey: crypto.randomUUID(),
+        referredEmail,
+        referredName: referredName || undefined,
+        note: note || undefined,
+      });
       onCreated();
     } catch (err: unknown) {
       console.error("Error creating referral:", err);
@@ -80,24 +59,16 @@ export function CreateReferralForm({
       <div className="flex gap-4 mb-6">
         <button
           type="button"
-          onClick={() => setType("platform_invite")}
-          className={`flex-1 p-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 ${
-            type === "platform_invite"
-              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-          }`}
+          className="flex-1 p-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 bg-indigo-50 border-indigo-200 text-indigo-700"
         >
           <Mail className="h-4 w-4" />
           Invite to Platform
         </button>
         <button
           type="button"
-          onClick={() => setType("business_intro")}
-          className={`flex-1 p-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 ${
-            type === "business_intro"
-              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-          }`}
+          disabled
+          title="The consent-aware business-referral experience is scheduled for Run 2"
+          className="flex-1 p-3 rounded-xl border text-sm font-medium flex items-center justify-center gap-2 bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed"
         >
           <Briefcase className="h-4 w-4" />
           Business Intro
@@ -112,9 +83,11 @@ export function CreateReferralForm({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        {type === "platform_invite" ? (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+          Platform invitations are separate from private business referrals. The consent-aware
+          business-referral workspace will be introduced in Run 2.
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Email *</label>
                 <input
@@ -136,55 +109,7 @@ export function CreateReferralForm({
                   placeholder="Jane Doe"
                 />
               </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="p-3 bg-amber-50 text-amber-800 text-sm rounded-lg mb-2">
-              Note: To refer a client to a specific member, please go to the member&apos;s directory profile and click &quot;Refer&quot;. This form creates a general lead.
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Client Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Client Email *</label>
-                <input
-                  type="email"
-                  required
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Company</label>
-                <input
-                  type="text"
-                  value={clientCompany}
-                  onChange={(e) => setClientCompany(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  value={clientPhone}
-                  onChange={(e) => setClientPhone(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 outline-none"
-                />
-              </div>
-            </div>
-          </>
-        )}
+        </div>
 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">Note (Optional)</label>
