@@ -18,7 +18,7 @@ import {
   uploadBytes,
   type UploadMetadata,
 } from "firebase/storage";
-import { afterAll, beforeAll, beforeEach, describe, test } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 const PROJECT_ID = "demo-hi-coworking";
 const PDF = new TextEncoder().encode("%PDF-1.4\n% emulator fixture");
@@ -98,142 +98,55 @@ describe("Run 1 Storage authorization matrix", () => {
     });
   }
 
-  test("canonical RFx response files are writable by the path-bound respondent and readable by exact participants", async () => {
+  test("private RFx bytes deny every direct client read and write, even with a grant", async () => {
     const path = "rfxResponses/rfx-one/bob/proposal.pdf";
-    const disposablePath = "rfxResponses/rfx-one/bob/draft-to-remove.pdf";
-    const unreferencedPath = "rfxResponses/rfx-one/bob/abandoned.pdf";
-    const postSubmitPath = "rfxResponses/rfx-one/bob/post-submit.pdf";
-    const latePath = "rfxResponses/expired-rfx/bob/late.pdf";
     const legacyProposalPath = "rfxProposals/rfx-one/bob/legacy.pdf";
-    const legacySiblingPath = "rfxProposals/rfx-one/bob/unreferenced.pdf";
+    const legacyDocumentPath = "rfxDocuments/rfx-one/bob/legacy.pdf";
     await seedFirestore({
       "rfx/rfx-one": {
         ownerUid: "alice",
         createdBy: "alice",
-        orgId: "rfx-org",
         status: "open",
         adminApprovalStatus: "approved",
-        memberOnly: false,
-      },
-      "rfx/expired-rfx": {
-        ownerUid: "issuer",
-        createdBy: "issuer",
-        status: "open",
-        adminApprovalStatus: "approved",
-        memberOnly: false,
-        dueDate: Date.now() - 60_000,
-      },
-      "orgMembers/rfx-org_org-owner": {
-        orgId: "rfx-org",
-        uid: "org-owner",
-        role: "member",
       },
       "rfxResponseUploadGrantScopes/rfx-one/uploadGrants/bob": {
         id: "bob",
         grantType: "rfx_response_upload",
         rfxId: "rfx-one",
         respondentUid: "bob",
-        allowedStoragePaths: [path, disposablePath, unreferencedPath, postSubmitPath],
+        allowedStoragePaths: [path],
         expiresAt: Date.now() + 60_000,
       },
-      "rfxResponseUploadGrantScopes/expired-rfx/uploadGrants/bob": {
-        id: "bob",
-        grantType: "rfx_response_upload",
-        rfxId: "expired-rfx",
-        respondentUid: "bob",
-        allowedStoragePaths: [latePath],
-        expiresAt: Date.now() + 60_000,
-      },
-    });
-
-    const alice = authenticated("alice").storage();
-    const bob = authenticated("bob").storage();
-    const orgOwner = authenticated("org-owner").storage();
-    const outsider = authenticated("outsider").storage();
-    const staff = authenticated("staff", { role: "staff" }).storage();
-    await assertSucceeds(
-      uploadBytes(ref(bob, disposablePath), PDF, { contentType: "application/pdf" }),
-    );
-    await assertSucceeds(deleteObject(ref(bob, disposablePath)));
-
-    await assertSucceeds(
-      uploadBytes(ref(bob, path), PDF, { contentType: "application/pdf" }),
-    );
-    await assertSucceeds(
-      uploadBytes(ref(bob, unreferencedPath), PDF, { contentType: "application/pdf" }),
-    );
-    await assertFails(
-      uploadBytes(ref(bob, "rfxResponses/rfx-one/bob/not-granted.pdf"), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
-    await assertSucceeds(getMetadata(ref(bob, path)));
-    await assertFails(getMetadata(ref(alice, path)));
-    await assertFails(getMetadata(ref(orgOwner, path)));
-    await assertFails(getMetadata(ref(staff, path)));
-
-    await seedFirestore({
-      "rfxResponseAccess/rfx-one/respondents/bob": {
-        id: "bob",
+      "rfxResponseReadGrantScopes/rfx-one/readGrants/alice": {
+        id: "alice",
+        grantType: "rfx_response_read",
         rfxId: "rfx-one",
-        respondentUid: "bob",
-        responseId: "response-one",
-        attachmentStoragePaths: [path, legacyProposalPath],
+        accessorUid: "alice",
+        allowedStoragePaths: [path, legacyProposalPath, legacyDocumentPath],
+        expiresAt: Date.now() + 60_000,
       },
     });
     await Promise.all([
+      seedFile(path),
       seedFile(legacyProposalPath),
-      seedFile(legacySiblingPath),
+      seedFile(legacyDocumentPath),
     ]);
-    // The individual creator no longer owns an organization-issued RFx after
-    // losing organization membership.
-    await assertFails(getMetadata(ref(alice, path)));
-    await assertSucceeds(getMetadata(ref(orgOwner, path)));
-    await assertSucceeds(getMetadata(ref(staff, path)));
-    await assertFails(getMetadata(ref(outsider, path)));
-    await assertSucceeds(getMetadata(ref(bob, legacyProposalPath)));
-    await assertSucceeds(getMetadata(ref(orgOwner, legacyProposalPath)));
-    await assertSucceeds(getMetadata(ref(staff, legacyProposalPath)));
-    await assertFails(getMetadata(ref(outsider, legacyProposalPath)));
-    await assertFails(getMetadata(ref(bob, legacySiblingPath)));
-    for (const storage of [bob, alice, orgOwner, staff]) {
-      await assertFails(getMetadata(ref(storage, unreferencedPath)));
-    }
 
+    const bob = authenticated("bob").storage();
+    const alice = authenticated("alice").storage();
+    const staff = authenticated("staff", { role: "staff" }).storage();
+    const admin = authenticated("admin", { role: "admin" }).storage();
+    for (const storage of [bob, alice, staff, admin]) {
+      await assertFails(getMetadata(ref(storage, path)));
+      await assertFails(getMetadata(ref(storage, legacyProposalPath)));
+      await assertFails(getMetadata(ref(storage, legacyDocumentPath)));
+    }
     await assertFails(
-      uploadBytes(ref(alice, "rfxResponses/rfx-one/bob/owner-forged.pdf"), PDF, {
-        contentType: "application/pdf",
-      }),
+      uploadBytes(ref(bob, path), PDF, { contentType: "application/pdf" }),
     );
-    await assertFails(
-      uploadBytes(ref(outsider, "rfxResponses/rfx-one/bob/outsider-forged.pdf"), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
-    await assertFails(
-      uploadBytes(ref(bob, postSubmitPath), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
-    await assertFails(
-      uploadBytes(ref(bob, latePath), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
-    await assertFails(
-      uploadBytes(ref(bob, "rfxResponses/missing-rfx/bob/missing.pdf"), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
-    await assertFails(
-      updateMetadata(ref(bob, path), { customMetadata: { tampered: "true" } }),
-    );
-    await assertFails(
-      uploadBytes(ref(bob, "rfxProposals/rfx-one/bob/legacy.pdf"), PDF, {
-        contentType: "application/pdf",
-      }),
-    );
+    await assertFails(updateMetadata(ref(bob, path), { customMetadata: { tampered: "true" } }));
     await assertFails(deleteObject(ref(bob, path)));
+    await assertSucceeds(deleteObject(ref(admin, path)));
   });
 
   test("published profiles expose only selected immutable assets and unpublish revokes anonymous rules access", async () => {
@@ -291,6 +204,18 @@ describe("Run 1 Storage authorization matrix", () => {
       }),
     );
     await assertFails(
+      uploadBytes(ref(alice, "profilePhotos/alice/custom-metadata.png"), PNG, {
+        contentType: "image/png",
+        customMetadata: { publicCache: "true" },
+      }),
+    );
+    await assertFails(
+      uploadBytes(ref(alice, "profilePhotos/alice/unsafe-disposition.png"), PNG, {
+        contentType: "image/png",
+        contentDisposition: "inline; filename=unsafe.png",
+      }),
+    );
+    await assertFails(
       uploadBytes(
         ref(alice, "profilePhotos/alice/too-large.png"),
         new Uint8Array(5 * 1024 * 1024 + 1),
@@ -334,7 +259,7 @@ describe("Run 1 Storage authorization matrix", () => {
     await assertSucceeds(getMetadata(ref(alice, selectedPhotoPath)));
   });
 
-  test("organization responses follow current org membership and exact submitted paths", async () => {
+  test("organization response grants do not reopen direct Storage access", async () => {
     const path = "rfxResponses/org-response-rfx/bob/proposal/response.pdf";
     await seedFirestore({
       "rfx/org-response-rfx": {
@@ -361,6 +286,30 @@ describe("Run 1 Storage authorization matrix", () => {
         responseId: "org-response",
         attachmentStoragePaths: [path],
       },
+      "rfxResponseReadGrantScopes/org-response-rfx/readGrants/bob": {
+        id: "bob",
+        grantType: "rfx_response_read",
+        rfxId: "org-response-rfx",
+        accessorUid: "bob",
+        allowedStoragePaths: [path],
+        expiresAt: Date.now() + 60_000,
+      },
+      "rfxResponseReadGrantScopes/org-response-rfx/readGrants/carol": {
+        id: "carol",
+        grantType: "rfx_response_read",
+        rfxId: "org-response-rfx",
+        accessorUid: "carol",
+        allowedStoragePaths: [path],
+        expiresAt: Date.now() + 60_000,
+      },
+      "rfxResponseReadGrantScopes/org-response-rfx/readGrants/issuer": {
+        id: "issuer",
+        grantType: "rfx_response_read",
+        rfxId: "org-response-rfx",
+        accessorUid: "issuer",
+        allowedStoragePaths: [path],
+        expiresAt: Date.now() + 60_000,
+      },
     });
     await seedFile(path);
 
@@ -368,16 +317,22 @@ describe("Run 1 Storage authorization matrix", () => {
     const carol = authenticated("carol").storage();
     const issuer = authenticated("issuer").storage();
     const outsider = authenticated("outsider").storage();
-    await assertSucceeds(getMetadata(ref(bob, path)));
-    await assertSucceeds(getMetadata(ref(carol, path)));
-    await assertSucceeds(getMetadata(ref(issuer, path)));
+    await assertFails(getMetadata(ref(bob, path)));
+    await assertFails(getMetadata(ref(carol, path)));
+    await assertFails(getMetadata(ref(issuer, path)));
     await assertFails(getMetadata(ref(outsider, path)));
 
     await testEnv.withSecurityRulesDisabled(async (context) => {
-      await deleteDoc(doc(context.firestore(), "orgMembers/respondent-org_bob"));
+      await Promise.all([
+        deleteDoc(doc(context.firestore(), "orgMembers/respondent-org_bob")),
+        deleteDoc(doc(
+          context.firestore(),
+          "rfxResponseReadGrantScopes/org-response-rfx/readGrants/bob",
+        )),
+      ]);
     });
     await assertFails(getMetadata(ref(bob, path)));
-    await assertSucceeds(getMetadata(ref(carol, path)));
+    await assertFails(getMetadata(ref(carol, path)));
   });
 
   test("verification evidence is private, immutable, and bound to the submitting account", async () => {
@@ -401,6 +356,12 @@ describe("Run 1 Storage authorization matrix", () => {
     await assertFails(
       uploadBytes(ref(staff, "verificationDocs/alice/license/staff-write.pdf"), PDF, {
         contentType: "application/pdf",
+      }),
+    );
+    await assertFails(
+      uploadBytes(ref(alice, "verificationDocs/alice/license/custom.pdf"), PDF, {
+        contentType: "application/pdf",
+        customMetadata: { publicCache: "true" },
       }),
     );
     await assertFails(
@@ -451,6 +412,17 @@ describe("Run 1 Storage authorization matrix", () => {
         uid: "org-recipient",
         role: "member",
       },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/alice": {
+        id: "alice",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "alice",
+        allowedReadStoragePaths: [],
+        allowedCreateStoragePaths: [
+          "businessReferralEvidence/referral-one/alice/context.pdf",
+        ],
+        expiresAt: Date.now() + 60_000,
+      },
     });
 
     const alice = authenticated("alice").storage();
@@ -459,6 +431,7 @@ describe("Run 1 Storage authorization matrix", () => {
     const outsider = authenticated("outsider").storage();
     const staleArrayMember = authenticated("stale-array-member").storage();
     const mismatchedGuard = authenticated("mismatched-guard").storage();
+    const admin = authenticated("admin", { role: "admin" }).storage();
     const teamPath = "teamDocuments/team-one/bob/working-notes.pdf";
     const referralPath = "businessReferralEvidence/referral-one/alice/context.pdf";
     const disputePath =
@@ -478,9 +451,11 @@ describe("Run 1 Storage authorization matrix", () => {
       }),
     );
 
-    await assertSucceeds(
+    await assertFails(
       uploadBytes(ref(alice, referralPath), PDF, { contentType: "application/pdf" }),
     );
+    await seedFile(referralPath);
+    await assertFails(getMetadata(ref(alice, referralPath)));
     await assertFails(getMetadata(ref(bob, referralPath)));
     await assertFails(getMetadata(ref(orgRecipient, referralPath)));
     await assertFails(getMetadata(ref(outsider, referralPath)));
@@ -501,15 +476,63 @@ describe("Run 1 Storage authorization matrix", () => {
         consentStatus: "confirmed",
         status: "sent",
       },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/bob": {
+        id: "bob",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "bob",
+        allowedReadStoragePaths: [referralPath],
+        allowedCreateStoragePaths: [],
+        expiresAt: Date.now() + 60_000,
+      },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/org-recipient": {
+        id: "org-recipient",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "org-recipient",
+        allowedReadStoragePaths: [referralPath],
+        allowedCreateStoragePaths: [],
+        expiresAt: Date.now() + 60_000,
+      },
     });
-    await assertSucceeds(getMetadata(ref(bob, referralPath)));
-    await assertSucceeds(getMetadata(ref(orgRecipient, referralPath)));
+    await assertFails(getMetadata(ref(bob, referralPath)));
+    await assertFails(getMetadata(ref(orgRecipient, referralPath)));
 
-    await assertSucceeds(
+    await seedFirestore({
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/bob": {
+        id: "bob",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "bob",
+        allowedReadStoragePaths: [],
+        allowedCreateStoragePaths: [disputePath],
+        expiresAt: Date.now() + 60_000,
+      },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/alice": {
+        id: "alice",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "alice",
+        allowedReadStoragePaths: [disputePath],
+        allowedCreateStoragePaths: [],
+        expiresAt: Date.now() + 60_000,
+      },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/org-recipient": {
+        id: "org-recipient",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "org-recipient",
+        allowedReadStoragePaths: [referralPath, disputePath],
+        allowedCreateStoragePaths: [],
+        expiresAt: Date.now() + 60_000,
+      },
+    });
+    await assertFails(
       uploadBytes(ref(bob, disputePath), PDF, { contentType: "application/pdf" }),
     );
-    await assertSucceeds(getMetadata(ref(alice, disputePath)));
-    await assertSucceeds(getMetadata(ref(orgRecipient, disputePath)));
+    await seedFile(disputePath);
+    await assertFails(getMetadata(ref(alice, disputePath)));
+    await assertFails(getMetadata(ref(orgRecipient, disputePath)));
     await assertFails(getMetadata(ref(outsider, disputePath)));
     await assertFails(
       uploadBytes(
@@ -519,10 +542,40 @@ describe("Run 1 Storage authorization matrix", () => {
       ),
     );
     await assertFails(deleteObject(ref(bob, disputePath)));
+    await assertSucceeds(deleteObject(ref(admin, disputePath)));
 
     await seedFirestore({
       "orgs/recipient-org": { id: "recipient-org", status: "suspended" },
+      "businessReferralStorageGrantScopes/referral-one/storageGrants/org-recipient": {
+        id: "org-recipient",
+        grantType: "business_referral_storage",
+        referralId: "referral-one",
+        accessorUid: "org-recipient",
+        allowedReadStoragePaths: [referralPath, disputePath],
+        allowedCreateStoragePaths: [],
+        expiresAt: Date.now() - 1,
+      },
     });
     await assertFails(getMetadata(ref(orgRecipient, referralPath)));
+  });
+
+  test("high-risk private bytes never traverse the direct Storage rules surface", () => {
+    const rules = readFileSync(resolve("storage.rules"), "utf8");
+    expect(rules).not.toContain("rfxResponseReadGrantScopes");
+    expect(rules).not.toContain("rfxResponseUploadGrantScopes");
+    expect(rules).not.toContain("businessReferralStorageGrantScopes");
+    for (const namespace of [
+      "rfxResponses",
+      "rfxProposals",
+      "rfxDocuments",
+      "businessReferralEvidence",
+      "businessReferralDisputeEvidence",
+    ]) {
+      const matchStart = rules.indexOf(`match /${namespace}/`);
+      expect(matchStart).toBeGreaterThan(-1);
+      const matchSurface = rules.slice(matchStart, rules.indexOf("\n    }", matchStart) + 6);
+      expect(matchSurface).toMatch(/allow read(?:, (?:create|write))?: if false;/);
+    }
+    expect(rules).toContain("function hasSafeSensitiveCreateMetadata");
   });
 });

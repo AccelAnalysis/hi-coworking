@@ -40,6 +40,7 @@ interface LegacyReferralDoc {
   invitedName?: string;
   inviteStatus?: string;
   inviteeUid?: string;
+  referredUid?: string;
   claimedByUid?: string;
   cancelledByUid?: string;
   claimedAt?: number;
@@ -109,7 +110,6 @@ async function hasLegacyOrgAuthority(
   orgId: unknown,
   actor: AuthorizedActor,
 ): Promise<boolean> {
-  if (actor.isAdmin) return true;
   if (typeof orgId !== "string" || !orgId) return false;
   try {
     await loadOrgAuthority(transaction, getDb(), orgId, actor.uid);
@@ -124,8 +124,11 @@ async function requireLegacyProviderAuthority(
   referral: LegacyReferralDoc,
   actor: AuthorizedActor,
 ): Promise<void> {
-  if (actor.isAdmin || referral.providerUid === actor.uid) return;
-  if (await hasLegacyOrgAuthority(transaction, referral.providerOrgId, actor)) return;
+  if (Object.prototype.hasOwnProperty.call(referral, "providerOrgId")) {
+    if (await hasLegacyOrgAuthority(transaction, referral.providerOrgId, actor)) return;
+  } else if (referral.providerUid === actor.uid) {
+    return;
+  }
   throw new HttpsError("permission-denied", "Only the receiving provider may perform this action");
 }
 
@@ -145,19 +148,41 @@ function nonEmptyString(value: unknown): value is string {
 function getLegacyReferralDomain(
   referral: LegacyReferralDoc,
 ): "platform_invite" | "business_intro" | "unknown" {
-  const hasPlatformIdentity = nonEmptyString(referral.referredEmail)
-    || nonEmptyString(referral.invitedEmail)
-    || nonEmptyString(referral.inviteeUid)
-    || nonEmptyString(referral.claimedByUid)
-    || nonEmptyString(referral.cancelledByUid);
-  const hasBusinessIdentity = nonEmptyString(referral.providerUid)
-    || nonEmptyString(referral.providerOrgId)
-    || nonEmptyString(referral.clientName)
-    || nonEmptyString(referral.clientEmail)
-    || nonEmptyString(referral.clientPhone)
-    || nonEmptyString(referral.clientCompany);
+  const platformIdentityFields = [
+    "referredEmail",
+    "invitedEmail",
+    "inviteeUid",
+    "referredUid",
+  ] as const;
+  const platformFields = [
+    ...platformIdentityFields,
+    "claimedByUid",
+    "cancelledByUid",
+  ] as const;
+  const businessFields = [
+    "providerUid",
+    "providerOrgId",
+    "clientName",
+    "clientEmail",
+    "clientPhone",
+    "clientCompany",
+  ] as const;
+  const hasField = (field: keyof LegacyReferralDoc) => (
+    Object.prototype.hasOwnProperty.call(referral, field)
+  );
+  const malformedIdentityField = [...platformFields, ...businessFields]
+    .some((field) => hasField(field) && !nonEmptyString(referral[field]));
+  if (malformedIdentityField) return "unknown";
 
-  if (hasPlatformIdentity === hasBusinessIdentity) return "unknown";
+  const hasPlatformIdentity = platformIdentityFields
+    .some((field) => nonEmptyString(referral[field]));
+  const hasPlatformField = platformFields.some(hasField);
+  const hasBusinessIdentity = businessFields.some((field) => nonEmptyString(referral[field]));
+
+  if (!hasPlatformIdentity && !hasBusinessIdentity) return "unknown";
+  if ((hasPlatformField && hasBusinessIdentity) || (hasPlatformIdentity && hasBusinessIdentity)) {
+    return "unknown";
+  }
   const inferred = hasPlatformIdentity ? "platform_invite" : "business_intro";
   return referral.type && referral.type !== inferred ? "unknown" : inferred;
 }
@@ -180,6 +205,7 @@ function safePlatformInvitePayload(
     "invitedName",
     "inviteStatus",
     "inviteeUid",
+    "referredUid",
     "claimedByUid",
     "cancelledByUid",
     "claimedAt",
@@ -252,8 +278,21 @@ async function activeActorOrgIds(
     .limit(100)
     .get();
   const candidates = membershipSnapshot.docs
-    .map((document) => document.data() as { uid?: unknown; orgId?: unknown; status?: unknown })
-    .filter((membership) => membership.uid === actorUid && typeof membership.orgId === "string")
+    .map((document) => {
+      const data = document.data() as { uid?: unknown; orgId?: unknown; status?: unknown };
+      return {
+        documentId: document.id,
+        uid: data.uid,
+        orgId: data.orgId,
+        status: data.status,
+      };
+    })
+    .filter((membership) => (
+      membership.uid === actorUid
+      && typeof membership.orgId === "string"
+      && membership.orgId.length > 0
+      && membership.documentId === `${membership.orgId}_${actorUid}`
+    ))
     .filter((membership) => membership.status === undefined || membership.status === "active")
     .map((membership) => membership.orgId as string)
     .filter((orgId, index, all) => all.indexOf(orgId) === index);
@@ -277,6 +316,7 @@ export const platformInvite_listReceived = onCall(async (request) => {
   const db = getDb();
   const queries: Array<Promise<FirebaseFirestore.QuerySnapshot>> = [
     db.collection("referrals").where("inviteeUid", "==", actor.uid).limit(200).get(),
+    db.collection("referrals").where("referredUid", "==", actor.uid).limit(200).get(),
     db.collection("referrals").where("claimedByUid", "==", actor.uid).limit(200).get(),
   ];
   const email = actor.email?.trim().toLowerCase();
@@ -293,7 +333,10 @@ export const platformInvite_listReceived = onCall(async (request) => {
     for (const document of snapshot.docs) {
       const referral = document.data() as LegacyReferralDoc;
       if (getLegacyReferralDomain(referral) !== "platform_invite") continue;
-      const boundUid = referral.claimedByUid ?? referral.cancelledByUid ?? referral.inviteeUid;
+      const boundUid = referral.claimedByUid
+        ?? referral.cancelledByUid
+        ?? referral.inviteeUid
+        ?? referral.referredUid;
       const invitedEmail = (referral.invitedEmail ?? referral.referredEmail)?.trim().toLowerCase();
       const uidMatch = nonEmptyString(boundUid) && boundUid === actor.uid;
       const emailMatch = request.auth?.token.email_verified === true
@@ -334,8 +377,10 @@ export const legacyBusinessReferral_listReceived = onCall(async (request) => {
     for (const document of snapshot.docs) {
       const referral = document.data() as LegacyReferralDoc;
       if (getLegacyReferralDomain(referral) !== "business_intro") continue;
-      const individuallyAuthorized = referral.providerUid === actor.uid;
-      const organizationallyAuthorized = nonEmptyString(referral.providerOrgId)
+      const hasProviderOrgScope = Object.prototype.hasOwnProperty.call(referral, "providerOrgId");
+      const individuallyAuthorized = !hasProviderOrgScope && referral.providerUid === actor.uid;
+      const organizationallyAuthorized = hasProviderOrgScope
+        && nonEmptyString(referral.providerOrgId)
         && orgIds.includes(referral.providerOrgId);
       if (!individuallyAuthorized && !organizationallyAuthorized) continue;
       referrals.set(document.id, safeLegacyBusinessPayload(document.id, referral));
@@ -354,7 +399,10 @@ function requirePlatformInviteeAuthority(
   referral: LegacyReferralDoc,
   actor: AuthorizedActor,
 ): void {
-  const boundUid = referral.claimedByUid ?? referral.cancelledByUid ?? referral.inviteeUid;
+  const boundUid = referral.claimedByUid
+    ?? referral.cancelledByUid
+    ?? referral.inviteeUid
+    ?? referral.referredUid;
   if (nonEmptyString(boundUid)) {
     if (boundUid === actor.uid) return;
     throw new HttpsError("permission-denied", "Only the invited account may respond");

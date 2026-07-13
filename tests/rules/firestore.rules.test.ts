@@ -237,6 +237,28 @@ describe("Run 1 Firestore authorization matrix", () => {
         respondentUid: "bob",
         status: "submitted",
       },
+      "rfxResponses/legacy-org-response": {
+        rfxId: "public-rfx",
+        rfxOwnerUid: "alice",
+        respondentUid: "bob",
+        orgId: "respondent-org",
+        status: "submitted",
+      },
+      "rfxResponses/malformed-legacy-org-response": {
+        rfxId: "public-rfx",
+        rfxOwnerUid: "alice",
+        respondentUid: "bob",
+        orgId: null,
+        status: "submitted",
+      },
+      "rfxResponses/mismatched-org-response": {
+        rfxId: "public-rfx",
+        rfxOwnerUid: "alice",
+        respondentUid: "bob",
+        respondentOrgId: "respondent-org",
+        orgId: "different-org",
+        status: "submitted",
+      },
       "rfxResponses/org-response": {
         rfxId: "org-pending-rfx",
         rfxOwnerUid: "alice",
@@ -286,6 +308,11 @@ describe("Run 1 Firestore authorization matrix", () => {
 
     await assertFails(getDoc(doc(bob, "rfxResponses/response-one")));
     await assertSucceeds(getDoc(doc(bob, "rfxResponses/individual-response")));
+    await assertFails(getDoc(doc(bob, "rfxResponses/legacy-org-response")));
+    await assertSucceeds(getDoc(doc(dave, "rfxResponses/legacy-org-response")));
+    await assertFails(getDoc(doc(bob, "rfxResponses/malformed-legacy-org-response")));
+    await assertFails(getDoc(doc(bob, "rfxResponses/mismatched-org-response")));
+    await assertFails(getDoc(doc(dave, "rfxResponses/mismatched-org-response")));
     await assertSucceeds(getDoc(doc(alice, "rfxResponses/response-one")));
     await assertSucceeds(getDoc(doc(dave, "rfxResponses/response-one")));
     await assertSucceeds(getDoc(doc(staff, "rfxResponses/response-one")));
@@ -313,9 +340,19 @@ describe("Run 1 Firestore authorization matrix", () => {
         uid: "ref-org-user",
         role: "member",
       },
+      "orgMembers/referrer-org_alice": {
+        orgId: "referrer-org",
+        uid: "alice",
+        role: "owner",
+      },
       "orgMembers/recipient-org_rec-org-user": {
         orgId: "recipient-org",
         uid: "rec-org-user",
+        role: "member",
+      },
+      "orgMembers/recipient-org_bob": {
+        orgId: "recipient-org",
+        uid: "bob",
         role: "member",
       },
       "referrals/legacy-business": {
@@ -428,6 +465,23 @@ describe("Run 1 Firestore authorization matrix", () => {
     }
     await assertFails(getDoc(doc(unassignedStaff, "businessReferralDisputes/dispute-one")));
     await assertFails(getDoc(doc(outsider, "businessReferralDisputes/dispute-one")));
+
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        deleteDoc(doc(db, "orgMembers/referrer-org_alice")),
+        deleteDoc(doc(db, "orgMembers/recipient-org_bob")),
+      ]);
+    });
+    for (const formerMember of [alice, bob]) {
+      await assertFails(getDoc(doc(formerMember, "referrals/legacy-business")));
+      await assertFails(getDoc(doc(formerMember, "businessReferrals/business-one")));
+      await assertFails(getDoc(doc(formerMember, "businessReferralDisputes/dispute-one")));
+    }
+    await assertSucceeds(getDoc(doc(refOrgUser, "referrals/legacy-business")));
+    await assertSucceeds(getDoc(doc(recipientOrgUser, "referrals/legacy-business")));
+    await assertSucceeds(getDoc(doc(refOrgUser, "businessReferrals/business-one")));
+    await assertSucceeds(getDoc(doc(recipientOrgUser, "businessReferrals/business-one")));
     await assertFails(
       updateDoc(doc(bob, "businessReferralDisputes/dispute-one"), { status: "resolved" }),
     );
@@ -460,9 +514,19 @@ describe("Run 1 Firestore authorization matrix", () => {
         uid: "ref-org-user",
         role: "member",
       },
+      "orgMembers/referrer-org_alice": {
+        orgId: "referrer-org",
+        uid: "alice",
+        role: "owner",
+      },
       "orgMembers/recipient-org_rec-org-user": {
         orgId: "recipient-org",
         uid: "rec-org-user",
+        role: "member",
+      },
+      "orgMembers/recipient-org_bob": {
+        orgId: "recipient-org",
+        uid: "bob",
         role: "member",
       },
       "businessReferrals/contact-referral": {
@@ -519,6 +583,17 @@ describe("Run 1 Firestore authorization matrix", () => {
     await assertSucceeds(getDoc(doc(bob, "businessReferralContacts/contact-referral")));
     await assertSucceeds(getDoc(doc(recipientOrgUser, "businessReferralContacts/contact-referral")));
     await assertFails(getDoc(doc(outsider, "businessReferralContacts/contact-referral")));
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await Promise.all([
+        deleteDoc(doc(db, "orgMembers/referrer-org_alice")),
+        deleteDoc(doc(db, "orgMembers/recipient-org_bob")),
+      ]);
+    });
+    await assertFails(getDoc(doc(alice, "businessReferralContacts/contact-referral")));
+    await assertFails(getDoc(doc(bob, "businessReferralContacts/contact-referral")));
+    await assertSucceeds(getDoc(doc(refOrgUser, "businessReferralContacts/contact-referral")));
+    await assertSucceeds(getDoc(doc(recipientOrgUser, "businessReferralContacts/contact-referral")));
     await assertFails(
       updateDoc(doc(alice, "businessReferralContacts/contact-referral"), {
         email: "forged@example.test",

@@ -23,8 +23,12 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import { isLegacyPlatformInviteRecord } from "./referralDomains";
-import { deleteObject, getBlob, getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "./firebase";
+import {
+  downloadPrivateExchangeObject,
+  prepareRfxResponseDownloadFn,
+} from "./functions";
 import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, MembershipTrack, PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose, ProductDoc, PaymentAuditEntry, EventDoc, EventRegistrationDoc, EventFormat, EventStatus, ReferralDoc, RfxTeamInviteDoc, OrgDoc, OrgMemberDoc, NotificationDoc, BookDoc, BookPurchaseDoc, BookAffiliateClickDoc, ReferralPolicyDoc, LocationDoc, FloorDoc, ShellDoc, LayoutVariant, EventCampaignDoc, CampaignJobDoc, EventShareKitDoc, SocialPostDoc, EventMediaImage, EventSeriesDoc, DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 
 export interface PublicSiteSettingsDoc {
@@ -636,19 +640,6 @@ export async function getSuggestedConnections(
 }
 
 /**
- * Count how many RFx responses the user has submitted (active bids).
- */
-export async function getUserActiveBidCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("respondentUid", "==", uid),
-    where("status", "in", ["pending", "submitted", "under_review"])
-  );
-  const snap = await getDocs(q);
-  return snap.size;
-}
-
-/**
  * Download a private Storage object through the authenticated SDK. The
  * application persists only the canonical Storage path, never a bearer URL.
  */
@@ -659,7 +650,21 @@ export async function downloadPrivateStorageObject(
   if (!storagePath || storagePath.includes("..") || storagePath.includes("\\")) {
     throw new Error("Invalid private document path");
   }
-  const blob = await getBlob(ref(storage, storagePath), 25 * 1024 * 1024);
+  const pathSegments = storagePath.split("/");
+  if (
+    pathSegments.length < 4
+    || !["rfxResponses", "rfxProposals", "rfxDocuments"].includes(pathSegments[0])
+    || !pathSegments[1]
+    || !pathSegments[2]
+  ) {
+    throw new Error("Unsupported private RFx document path");
+  }
+  await prepareRfxResponseDownloadFn({
+    rfxId: pathSegments[1],
+    respondentUid: pathSegments[2],
+    storagePath,
+  });
+  const blob = await downloadPrivateExchangeObject(storagePath);
   const objectUrl = URL.createObjectURL(blob);
   try {
     const anchor = document.createElement("a");
@@ -672,18 +677,6 @@ export async function downloadPrivateStorageObject(
   } finally {
     window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
   }
-}
-
-/**
- * Count how many responses have been received on the user's own RFxs.
- */
-export async function getReceivedResponseCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("rfxOwnerUid", "==", uid)
-  );
-  const snap = await getDocs(q);
-  return snap.size;
 }
 
 // --- UserDoc helpers (PR-08) ---
@@ -921,30 +914,6 @@ export async function getOpenRfxByViewportGeohash(
     .slice(0, maxResults);
 }
 
-export async function getUserRfxListFromFirestore(
-  uid: string,
-  maxResults = 50
-): Promise<RfxDoc[]> {
-  const q = query(
-    collection(db, "rfx"),
-    where("createdBy", "==", uid),
-    orderBy("createdAt", "desc"),
-    limit(maxResults)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as RfxDoc);
-}
-
-export async function getUserActiveRfxCount(uid: string): Promise<number> {
-  const q = query(
-    collection(db, "rfx"),
-    where("createdBy", "==", uid),
-    where("status", "==", "open")
-  );
-  const snap = await getDocs(q);
-  return snap.size;
-}
-
 // --- RFx Responses ---
 
 export async function getRfxResponsesFromFirestore(
@@ -977,18 +946,6 @@ export function subscribeToRfxResponses(
       console.error("subscribeToRfxResponses error:", err);
     }
   );
-}
-
-export async function getUserRfxResponsesFromFirestore(
-  uid: string
-): Promise<RfxResponseDoc[]> {
-  const q = query(
-    collection(db, "rfxResponses"),
-    where("respondentUid", "==", uid),
-    orderBy("submittedAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as RfxResponseDoc);
 }
 
 // --- Payments Ledger (PR-09) ---

@@ -19,16 +19,6 @@ service firebase.storage {
       return isAdmin() || (isSignedIn() && request.auth.token.role == "staff");
     }
 
-    function isOrgMember(orgId) {
-      return isSignedIn()
-        && orgId is string
-        && firestore.exists(/databases/(default)/documents/orgs/$(orgId))
-        && firestore.get(/databases/(default)/documents/orgs/$(orgId)).data.status == "active"
-        && firestore.exists(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid))
-        && firestore.get(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.orgId == orgId
-        && firestore.get(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.uid == request.auth.uid;
-    }
-
     function isValidSize(maxBytes) {
       return request.resource.size > 0 && request.resource.size <= maxBytes;
     }
@@ -47,98 +37,18 @@ service firebase.storage {
       );
     }
 
-    function rfxExists(rfxId) {
-      return firestore.exists(/databases/(default)/documents/rfx/$(rfxId));
-    }
-
-    function ownsRfx(rfxId) {
-      return isSignedIn()
-        && rfxExists(rfxId)
-        && (("orgId" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data
-              && isOrgMember(firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.orgId))
-            || (!("orgId" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data)
-                && (("ownerUid" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data
-                      && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.ownerUid == request.auth.uid)
-                    || firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.createdBy == request.auth.uid)));
-    }
-
-    function hasSubmittedRfxResponse(rfxId, respondentUid) {
-      return firestore.exists(
-        /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-      );
-    }
-
-    function isSubmittedRfxAttachment(rfxId, respondentUid, storagePath) {
-      return hasSubmittedRfxResponse(rfxId, respondentUid)
-        && "attachmentStoragePaths" in firestore.get(
-          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-        ).data
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-        ).data.attachmentStoragePaths is list
-        && storagePath in firestore.get(
-          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-        ).data.attachmentStoragePaths;
-    }
-
-    function isCurrentRfxRespondent(rfxId, respondentUid) {
-      return hasSubmittedRfxResponse(rfxId, respondentUid)
-        && (("respondentOrgId" in firestore.get(
-              /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-            ).data
-              && isOrgMember(firestore.get(
-                /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-              ).data.respondentOrgId))
-            || (!("respondentOrgId" in firestore.get(
-                  /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
-                ).data)
-                && isOwner(respondentUid)));
-    }
-
-    function canReadSubmittedRfxFile(rfxId, respondentUid, storagePath) {
-      return isSubmittedRfxAttachment(rfxId, respondentUid, storagePath)
-        && (isCurrentRfxRespondent(rfxId, respondentUid) || isStaff() || ownsRfx(rfxId));
-    }
-
-    function canReadRfxResponseFiles(rfxId, respondentUid, storagePath) {
-      return (!hasSubmittedRfxResponse(rfxId, respondentUid) && isOwner(respondentUid))
-        || canReadSubmittedRfxFile(rfxId, respondentUid, storagePath);
-    }
-
-    function hasValidRfxResponseUploadGrant(rfxId, respondentUid, storagePath) {
-      return firestore.exists(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        )
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.grantType == "rfx_response_upload"
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.rfxId == rfxId
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.respondentUid == respondentUid
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.expiresAt > request.time.toMillis()
-        && firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.allowedStoragePaths is list
-        && storagePath in firestore.get(
-          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
-        ).data.allowedStoragePaths;
-    }
-
-    function canUploadRfxResponseFiles(rfxId, respondentUid, storagePath) {
-      return isOwner(respondentUid)
-        && rfxExists(rfxId)
-        && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.status == "open"
-        && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.adminApprovalStatus == "approved"
-        && (!("dueDate" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data)
-            || firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.dueDate > request.time.toMillis())
-        && !hasSubmittedRfxResponse(rfxId, respondentUid)
-        && !ownsRfx(rfxId)
-        && hasValidRfxResponseUploadGrant(rfxId, respondentUid, storagePath);
+    // Client-created legacy assets are normalized by a finalize trigger. New
+    // RFx/referral objects bypass this surface entirely and use the authenticated
+    // byte-transfer Function. Arbitrary cache/disposition metadata is forbidden.
+    function hasSafeSensitiveCreateMetadata() {
+      return request.resource.metadata.keys().hasOnly([])
+        && (request.resource.contentDisposition == null
+            || request.resource.contentDisposition == ""
+            || request.resource.contentDisposition == "attachment"
+            || request.resource.contentDisposition == "inline")
+        && (request.resource.contentEncoding == null
+            || request.resource.contentEncoding == ""
+            || request.resource.contentEncoding == "identity");
     }
 
     function isTeamMember(teamId) {
@@ -153,46 +63,6 @@ service firebase.storage {
                 && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.uid == request.auth.uid
                 && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.teamId == teamId
                 && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.rfxId == firestore.get(/databases/(default)/documents/rfxTeams/$(teamId)).data.rfxId));
-    }
-
-    function isBusinessReferralParty(referralId) {
-      return isSignedIn()
-        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
-        && (isAdmin()
-            || (request.auth.token.role == "staff"
-                && "assignedStaffUids" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-                && request.auth.uid in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.assignedStaffUids)
-            || firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerUid == request.auth.uid
-            || ("recipientUid" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-                && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.recipientUid == request.auth.uid)
-            || ("referrerOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerOrgId))
-            || ("recipientOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.recipientOrgId)));
-    }
-
-    function isBusinessReferralReferrer(referralId) {
-      return isSignedIn()
-        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
-        && (firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerUid == request.auth.uid
-            || ("referrerOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerOrgId)));
-    }
-
-    function isAssignedReferralStaff(referralId) {
-      return isSignedIn()
-        && request.auth.token.role == "staff"
-        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
-        && "assignedStaffUids" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
-        && request.auth.uid in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.assignedStaffUids;
-    }
-
-    function canReadSensitiveReferralEvidence(referralId) {
-      return isAdmin()
-        || isAssignedReferralStaff(referralId)
-        || isBusinessReferralReferrer(referralId)
-        || (isBusinessReferralParty(referralId)
-            && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.consentStatus in ["confirmed", "not_required"]);
     }
 
     function hasPublishedProfile(uid) {
@@ -235,7 +105,10 @@ service firebase.storage {
     // remain owner/staff private.
     match /capabilityStatements/{uid}/{fileName} {
       allow read: if isOwner(uid) || isStaff() || isSelectedCapabilityStatement(uid, fileName);
-      allow create: if isOwner(uid) && isValidSize(10 * 1024 * 1024) && isPrivateDocument();
+      allow create: if isOwner(uid)
+                    && isValidSize(10 * 1024 * 1024)
+                    && isPrivateDocument()
+                    && hasSafeSensitiveCreateMetadata();
       allow update: if false;
       allow delete: if isOwner(uid) || isAdmin();
     }
@@ -247,7 +120,10 @@ service firebase.storage {
 
     match /profilePhotos/{uid}/{fileName} {
       allow read: if isOwner(uid) || isStaff() || isSelectedProfilePhoto(uid, fileName);
-      allow create: if isOwner(uid) && isValidSize(5 * 1024 * 1024) && isImage();
+      allow create: if isOwner(uid)
+                    && isValidSize(5 * 1024 * 1024)
+                    && isImage()
+                    && hasSafeSensitiveCreateMetadata();
       allow update: if false;
       allow delete: if isOwner(uid) || isAdmin();
     }
@@ -259,7 +135,10 @@ service firebase.storage {
 
     match /profileVideos/{uid}/{variant}/{fileName} {
       allow read: if isOwner(uid) || isStaff() || isSelectedProfileVideo(uid, variant, fileName);
-      allow create: if isOwner(uid) && isValidSize(100 * 1024 * 1024) && isVideo();
+      allow create: if isOwner(uid)
+                    && isValidSize(100 * 1024 * 1024)
+                    && isVideo()
+                    && hasSafeSensitiveCreateMetadata();
       allow update: if false;
       allow delete: if isOwner(uid) || isAdmin();
     }
@@ -272,80 +151,58 @@ service firebase.storage {
     // Verification evidence is private and path-bound to the submitting account.
     match /verificationDocs/{uid}/{docType}/{allPaths=**} {
       allow read: if isOwner(uid) || isStaff();
-      allow create: if isOwner(uid) && isValidSize(15 * 1024 * 1024) && isPrivateDocument();
+      allow create: if isOwner(uid)
+                    && isValidSize(15 * 1024 * 1024)
+                    && isPrivateDocument()
+                    && hasSafeSensitiveCreateMetadata();
       allow update: if false;
       allow delete: if isAdmin()
                     || (isOwner(uid)
                         && !firestore.exists(/databases/(default)/documents/verificationEvidenceLocks/$(uid + "_" + docType)));
     }
 
-    // Canonical Run 1 response path. New response documents store this path,
-    // never a permanent download URL, as the authorization source.
+    // Private RFx bytes use exchange_privateStorage. Denying client reads and
+    // creates prevents Firebase bearer-token minting from bypassing a grant.
     match /rfxResponses/{rfxId}/{respondentUid}/{allPaths=**} {
-      allow read: if canReadRfxResponseFiles(
-        rfxId,
-        respondentUid,
-        resource.name
-      );
-      allow create: if canUploadRfxResponseFiles(rfxId, respondentUid, request.resource.name)
-                    && isValidSize(25 * 1024 * 1024)
-                    && isPrivateDocument();
+      allow read, create: if false;
       allow update: if false;
-      allow delete: if isAdmin()
-                    || (isOwner(respondentUid) && !hasSubmittedRfxResponse(rfxId, respondentUid));
+      allow delete: if isAdmin();
     }
 
     // Legacy RFx paths remain read-compatible for exact participants only.
     match /rfxProposals/{rfxId}/{respondentUid}/{allPaths=**} {
-      allow read: if canReadSubmittedRfxFile(rfxId, respondentUid, resource.name);
-      allow write: if false;
+      allow read, write: if false;
     }
 
     match /rfxDocuments/{rfxId}/{respondentUid}/{allPaths=**} {
-      allow read: if canReadSubmittedRfxFile(rfxId, respondentUid, resource.name);
-      allow write: if false;
+      allow read, write: if false;
     }
 
-    match /proposals/{rfxId}/{responseId}/{allPaths=**} {
-      allow read: if isStaff()
-                  || (isSignedIn()
-                      && firestore.exists(/databases/(default)/documents/rfxResponses/$(responseId))
-                      && (firestore.get(/databases/(default)/documents/rfxResponses/$(responseId)).data.respondentUid == request.auth.uid
-                          || ownsRfx(rfxId)));
-      allow write: if false;
-    }
+    // The older response-ID-keyed /proposals namespace has no trustworthy
+    // respondent identity in its path. It intentionally falls through to the
+    // final default deny until a separately reviewed migration can bind it.
 
     match /teamDocuments/{teamId}/{uploaderUid}/{allPaths=**} {
       allow read: if isTeamMember(teamId);
       allow create: if isOwner(uploaderUid)
                     && isTeamMember(teamId)
                     && isValidSize(25 * 1024 * 1024)
-                    && isPrivateDocument();
+                    && isPrivateDocument()
+                    && hasSafeSensitiveCreateMetadata();
       allow update: if false;
       allow delete: if (isOwner(uploaderUid) && isTeamMember(teamId)) || isAdmin();
     }
 
     match /businessReferralEvidence/{referralId}/{uploaderUid}/{allPaths=**} {
-      allow read: if canReadSensitiveReferralEvidence(referralId);
-      allow create: if isOwner(uploaderUid)
-                    && isBusinessReferralParty(referralId)
-                    && isValidSize(15 * 1024 * 1024)
-                    && isPrivateDocument();
+      allow read, create: if false;
       allow update: if false;
-      allow delete: if isAdmin()
-                    || (isOwner(uploaderUid)
-                        && isBusinessReferralReferrer(referralId)
-                        && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.status == "draft");
+      allow delete: if isAdmin();
     }
 
     // The caller uploads before the server allocates a dispute ID, so the
     // canonical pre-create path is bound to referral and uploader identity.
     match /businessReferralDisputeEvidence/{referralId}/{uploaderUid}/{allPaths=**} {
-      allow read: if canReadSensitiveReferralEvidence(referralId);
-      allow create: if isOwner(uploaderUid)
-                    && isBusinessReferralParty(referralId)
-                    && isValidSize(15 * 1024 * 1024)
-                    && isPrivateDocument();
+      allow read, create: if false;
       allow update: if false;
       allow delete: if isAdmin();
     }

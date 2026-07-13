@@ -31,15 +31,13 @@ import {
   getProfileFromFirestore,
   computeProfileCompleteness,
   isProcurementReady,
-  getUserRfxListFromFirestore,
   countPublishedProfilesByNaics,
   getRecommendedRfx,
   getSuggestedConnections,
-  getUserActiveBidCount,
-  getReceivedResponseCount,
   getUserDoc,
   updateUserMembershipTrack,
 } from "@/lib/firestore";
+import { listManagedRfxFn } from "@/lib/functions";
 import type { Booking, RfxDoc, ProfileDoc, MembershipTrack } from "@hi/shared";
 
 // --- Membership Track Metadata (PR-08) ---
@@ -122,6 +120,8 @@ function DashboardContent() {
   const [connectionsLoading, setConnectionsLoading] = useState(true);
   const [activeBids, setActiveBids] = useState<number>(0);
   const [receivedResponses, setReceivedResponses] = useState<number>(0);
+  const [activeBidsTruncated, setActiveBidsTruncated] = useState(false);
+  const [receivedResponsesTruncated, setReceivedResponsesTruncated] = useState(false);
   const [statsLoading, setStatsLoading] = useState(true);
   const [membershipTrack, setMembershipTrack] = useState<MembershipTrack | null>(null);
   const [trackSaving, setTrackSaving] = useState(false);
@@ -185,14 +185,17 @@ function DashboardContent() {
     async function fetchRfxStats() {
       if (!user) return;
       try {
-        const [mine, bids, received] = await Promise.all([
-          getUserRfxListFromFirestore(user.uid, 5),
-          getUserActiveBidCount(user.uid),
-          getReceivedResponseCount(user.uid),
-        ]);
-        setMyRfxList(mine);
-        setActiveBids(bids);
-        setReceivedResponses(received);
+        const result = await listManagedRfxFn({
+          maxResults: 5,
+          includeDashboardMetrics: true,
+        });
+        setMyRfxList(result.data.rfx);
+        setActiveBids(result.data.dashboardMetrics?.activeBidCount ?? 0);
+        setReceivedResponses(result.data.dashboardMetrics?.receivedResponseCount ?? 0);
+        setActiveBidsTruncated(result.data.dashboardMetrics?.activeBidCountTruncated ?? false);
+        setReceivedResponsesTruncated(
+          result.data.dashboardMetrics?.receivedResponseCountTruncated ?? false,
+        );
       } catch (error) {
         console.error("Failed to fetch RFx stats:", error);
       } finally {
@@ -464,7 +467,9 @@ function DashboardContent() {
                 <span className="text-[10px] font-medium text-slate-500 uppercase">Active Bids</span>
               </div>
               {statsLoading ? <Loader2 className="h-4 w-4 animate-spin text-slate-300" /> : (
-                <div className="text-xl font-bold text-slate-900">{activeBids}</div>
+                <div className="text-xl font-bold text-slate-900">
+                  {activeBids}{activeBidsTruncated ? "+" : ""}
+                </div>
               )}
             </div>
             <div className="p-3 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
@@ -473,7 +478,9 @@ function DashboardContent() {
                 <span className="text-[10px] font-medium text-slate-500 uppercase">Bids Received</span>
               </div>
               {statsLoading ? <Loader2 className="h-4 w-4 animate-spin text-slate-300" /> : (
-                <div className="text-xl font-bold text-slate-900">{receivedResponses}</div>
+                <div className="text-xl font-bold text-slate-900">
+                  {receivedResponses}{receivedResponsesTruncated ? "+" : ""}
+                </div>
               )}
             </div>
             <Link href="/directory" className="p-3 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 hover:ring-indigo-200 transition-colors group">

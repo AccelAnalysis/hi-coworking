@@ -52,6 +52,7 @@ interface BusinessReferralDocData {
 
 const MAX_REFERRAL_EVIDENCE_FILE_SIZE = 15 * 1024 * 1024;
 const BUSINESS_REFERRAL_SENT_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const BUSINESS_REFERRAL_STORAGE_GRANT_TTL_MS = 60 * 1_000;
 const MAX_REFERRAL_EXPIRATIONS_PER_RUN = 200;
 const ALLOWED_REFERRAL_EVIDENCE_CONTENT_TYPES = new Set([
   "application/pdf",
@@ -115,6 +116,14 @@ const disputeResolveInputSchema = z
   })
   .strict();
 
+const referralEvidenceAccessInputSchema = z
+  .object({
+    referralId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
+    operation: z.enum(["upload", "read"]),
+    storagePaths: z.array(z.string().trim().min(1).max(1_024)).min(1).max(10),
+  })
+  .strict();
+
 const RESTORABLE_COMPENSATION_STATUSES = new Set<BusinessReferralDocData["compensationPolicy"]["status"]>([
   "none",
   "proposed",
@@ -170,19 +179,39 @@ async function hasOrgAuthority(
   }
 }
 
+function hasOrganizationScope(
+  referral: BusinessReferralDocData,
+  field: "referrerOrgId" | "recipientOrgId",
+): boolean {
+  return Object.prototype.hasOwnProperty.call(referral, field);
+}
+
+function isIndividualReferrer(referral: BusinessReferralDocData, actorUid: string): boolean {
+  return !hasOrganizationScope(referral, "referrerOrgId")
+    && referral.referrerUid === actorUid;
+}
+
+function isIndividualRecipient(referral: BusinessReferralDocData, actorUid: string): boolean {
+  return !hasOrganizationScope(referral, "recipientOrgId")
+    && referral.recipientUid === actorUid;
+}
+
 async function requireReferrerAuthority(
   transaction: FirebaseFirestore.Transaction,
   referral: BusinessReferralDocData,
   actor: AuthorizedActor,
 ): Promise<void> {
-  if (referral.recipientUid === actor.uid) {
-    throw new HttpsError("permission-denied", "The recipient cannot act as the referrer");
+  const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
+    ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor, true)
+    : isIndividualReferrer(referral, actor.uid);
+  if (referrerAuthorized) return;
+  if (
+    isIndividualRecipient(referral, actor.uid)
+    || (hasOrganizationScope(referral, "recipientOrgId")
+      && await hasOrgAuthority(transaction, referral.recipientOrgId, actor))
+  ) {
+    throw new HttpsError("permission-denied", "Recipient authority cannot act for the referrer");
   }
-  if (referral.referrerUid === actor.uid) return;
-  if (await hasOrgAuthority(transaction, referral.recipientOrgId, actor)) {
-    throw new HttpsError("permission-denied", "Recipient-organization authority cannot act for the referrer");
-  }
-  if (await hasOrgAuthority(transaction, referral.referrerOrgId, actor, true)) return;
   throw new HttpsError("permission-denied", "Referrer authority is required");
 }
 
@@ -191,14 +220,16 @@ async function requireRecipientAuthority(
   referral: BusinessReferralDocData,
   actor: AuthorizedActor,
 ): Promise<void> {
-  if (referral.referrerUid === actor.uid) {
-    throw new HttpsError("permission-denied", "The referrer cannot act as the recipient");
+  const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
+    ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor)
+    : isIndividualReferrer(referral, actor.uid);
+  if (referrerAuthorized) {
+    throw new HttpsError("permission-denied", "Referrer authority cannot act for the recipient");
   }
-  if (referral.recipientUid === actor.uid) return;
-  if (await hasOrgAuthority(transaction, referral.referrerOrgId, actor)) {
-    throw new HttpsError("permission-denied", "Referring-organization authority cannot act for the recipient");
-  }
-  if (await hasOrgAuthority(transaction, referral.recipientOrgId, actor)) return;
+  const recipientAuthorized = hasOrganizationScope(referral, "recipientOrgId")
+    ? await hasOrgAuthority(transaction, referral.recipientOrgId, actor)
+    : isIndividualRecipient(referral, actor.uid);
+  if (recipientAuthorized) return;
   throw new HttpsError("permission-denied", "Recipient authority is required");
 }
 
@@ -207,14 +238,77 @@ async function requirePartyAuthority(
   referral: BusinessReferralDocData,
   actor: AuthorizedActor,
 ): Promise<void> {
-  if (
-    referral.referrerUid === actor.uid
-    || referral.recipientUid === actor.uid
-    || (actor.role === "staff" && referral.assignedStaffUids?.includes(actor.uid))
-  ) return;
-  if (await hasOrgAuthority(transaction, referral.referrerOrgId, actor)) return;
-  if (await hasOrgAuthority(transaction, referral.recipientOrgId, actor)) return;
+  if (actor.role === "staff" && referral.assignedStaffUids?.includes(actor.uid)) return;
+  const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
+    ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor)
+    : isIndividualReferrer(referral, actor.uid);
+  if (referrerAuthorized) return;
+  const recipientAuthorized = hasOrganizationScope(referral, "recipientOrgId")
+    ? await hasOrgAuthority(transaction, referral.recipientOrgId, actor)
+    : isIndividualRecipient(referral, actor.uid);
+  if (recipientAuthorized) return;
   throw new HttpsError("permission-denied", "Referral-party authority is required");
+}
+
+async function hasReferralOrgAuthority(
+  transaction: FirebaseFirestore.Transaction,
+  orgId: string | undefined,
+  actor: AuthorizedActor,
+): Promise<boolean> {
+  if (!orgId) return false;
+  try {
+    await loadOrgAuthority(transaction, getDb(), orgId, actor.uid);
+    return true;
+  } catch (error) {
+    if (error instanceof HttpsError && error.code === "permission-denied") return false;
+    throw error;
+  }
+}
+
+function requireReferralEvidenceGrantPaths(
+  referralId: string,
+  actorUid: string,
+  operation: "upload" | "read",
+  paths: string[],
+): void {
+  if (new Set(paths).size !== paths.length) {
+    throw new HttpsError("invalid-argument", "Referral evidence paths must be unique");
+  }
+  const basePrefixes = [
+    `businessReferralEvidence/${referralId}/`,
+    `businessReferralDisputeEvidence/${referralId}/`,
+  ];
+  const uploadPrefixes = basePrefixes.map((prefix) => `${prefix}${actorUid}/`);
+  const validPrefixes = operation === "upload" ? uploadPrefixes : basePrefixes;
+  if (paths.some((path) => {
+    const segments = path.split("/");
+    const matchedPrefix = validPrefixes.find(
+      (prefix) => path.startsWith(prefix) && path.length > prefix.length,
+    );
+    const lowered = path.toLowerCase();
+    return !matchedPrefix
+      || path.startsWith("/")
+      || path.includes("\\")
+      || path.includes("\0")
+      || segments.some((segment) => !segment || segment === "." || segment === "..")
+      || /^(?:https?:|gs:)/i.test(path)
+      || lowered.includes("%2f")
+      || lowered.includes("%5c")
+      || lowered.includes("%2e");
+  })) {
+    throw new HttpsError("invalid-argument", "Referral evidence path is not canonical");
+  }
+}
+
+function referralStorageGrantRef(
+  db: FirebaseFirestore.Firestore,
+  referralId: string,
+  uid: string,
+): FirebaseFirestore.DocumentReference {
+  return db.collection("businessReferralStorageGrantScopes")
+    .doc(referralId)
+    .collection("storageGrants")
+    .doc(uid);
 }
 
 function requireReferralSnapshot(
@@ -489,6 +583,16 @@ export const businessReferral_respond = onCall(async (request) => {
     }
 
     const now = Date.now();
+    if (
+      typeof referral.expiresAt !== "number"
+      || !Number.isFinite(referral.expiresAt)
+      || referral.expiresAt <= now
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "This referral has expired or has an invalid expiration and cannot be answered",
+      );
+    }
     const version = getVersion(referral) + 1;
     const updates: Record<string, unknown> = {
       status: input.response,
@@ -697,6 +801,82 @@ export const businessReferral_updateConsent = onCall((request) => updateConsent(
 export const businessReferral_confirmConsent = onCall((request) => updateConsent(request, "confirmed"));
 export const businessReferral_withdrawConsent = onCall((request) => updateConsent(request, "withdrawn"));
 
+/**
+ * Materialize a one-minute, exact-path Storage decision after evaluating the
+ * full current referral and organization authority graph server-side.
+ */
+export const businessReferral_prepareEvidenceAccess = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const input = parseCallableInput(referralEvidenceAccessInputSchema, request.data);
+  requireReferralEvidenceGrantPaths(
+    input.referralId,
+    actor.uid,
+    input.operation,
+    input.storagePaths,
+  );
+
+  const db = getDb();
+  const referralRef = db.collection("businessReferrals").doc(input.referralId);
+  const grantRef = referralStorageGrantRef(db, input.referralId, actor.uid);
+  return db.runTransaction(async (transaction) => {
+    const referralSnapshot = await transaction.get(referralRef);
+    const referral = requireReferralSnapshot(referralSnapshot);
+
+    if (input.operation === "upload") {
+      await requirePartyAuthority(transaction, referral, actor);
+    } else {
+      let mayReadWithoutConsent = actor.isAdmin
+        || (actor.role === "staff" && referral.assignedStaffUids?.includes(actor.uid))
+        || isIndividualReferrer(referral, actor.uid);
+      if (!mayReadWithoutConsent) {
+        mayReadWithoutConsent = await hasReferralOrgAuthority(
+          transaction,
+          referral.referrerOrgId,
+          actor,
+        );
+      }
+      if (!mayReadWithoutConsent) {
+        if (!(["confirmed", "not_required"] as string[]).includes(referral.consentStatus)) {
+          throw new HttpsError(
+            "permission-denied",
+            "Confirmed referral consent is required to read this evidence",
+          );
+        }
+        await requirePartyAuthority(transaction, referral, actor);
+      }
+    }
+
+    const now = Date.now();
+    const expiresAt = now + BUSINESS_REFERRAL_STORAGE_GRANT_TTL_MS;
+    transaction.set(grantRef, {
+      id: actor.uid,
+      grantType: "business_referral_storage",
+      referralId: input.referralId,
+      accessorUid: actor.uid,
+      allowedReadStoragePaths: input.operation === "read" ? input.storagePaths : [],
+      allowedCreateStoragePaths: input.operation === "upload" ? input.storagePaths : [],
+      createdAt: now,
+      updatedAt: now,
+      expiresAt,
+    });
+    writeExchangeAudit(transaction, db, {
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      action: `business_referral.evidence_${input.operation}_grant_prepared`,
+      entityType: "businessReferral",
+      entityId: input.referralId,
+      metadata: { pathCount: input.storagePaths.length },
+      createdAt: now,
+    });
+    return {
+      success: true,
+      operation: input.operation,
+      expiresAt,
+      allowedPathCount: input.storagePaths.length,
+    };
+  });
+});
+
 export const businessReferral_createDispute = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
   const input = parseCallableInput(referralDisputeCreateInputSchema, request.data);
@@ -876,6 +1056,26 @@ async function expireSentReferral(
   });
 }
 
+export async function cleanupExpiredBusinessReferralStorageGrantAt(
+  grantRef: FirebaseFirestore.DocumentReference,
+  now: number,
+  db: FirebaseFirestore.Firestore = getDb(),
+): Promise<boolean> {
+  return db.runTransaction(async (transaction) => {
+    const currentSnapshot = await transaction.get(grantRef);
+    if (!currentSnapshot.exists) return false;
+    const current = currentSnapshot.data() ?? {};
+    if (
+      current.grantType !== "business_referral_storage"
+      || typeof current.expiresAt !== "number"
+      || !Number.isFinite(current.expiresAt)
+      || current.expiresAt > now
+    ) return false;
+    transaction.delete(grantRef);
+    return true;
+  });
+}
+
 /** Bounded expiry worker for unanswered business introductions. */
 export const businessReferral_expireSent = onSchedule(
   { schedule: "every 60 minutes", timeZone: "UTC", retryCount: 3 },
@@ -891,10 +1091,22 @@ export const businessReferral_expireSent = onSchedule(
     const outcomes = await Promise.all(
       snapshot.docs.map((document) => expireSentReferral(document.ref, now)),
     );
+    const storageGrantSnapshot = await db.collectionGroup("storageGrants")
+      .where("expiresAt", "<=", now)
+      .orderBy("expiresAt", "asc")
+      .limit(MAX_REFERRAL_EXPIRATIONS_PER_RUN)
+      .get();
+    const storageGrantOutcomes = await Promise.all(
+      storageGrantSnapshot.docs.map((document) => (
+        cleanupExpiredBusinessReferralStorageGrantAt(document.ref, now, db)
+      )),
+    );
     logger.info("Business referral expiry completed", {
       scanned: snapshot.size,
       expired: outcomes.filter(Boolean).length,
       maxPerRun: MAX_REFERRAL_EXPIRATIONS_PER_RUN,
+      storageGrantsScanned: storageGrantSnapshot.size,
+      storageGrantsRemoved: storageGrantOutcomes.filter(Boolean).length,
     });
   },
 );

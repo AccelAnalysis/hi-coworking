@@ -83,6 +83,7 @@ import {
   rfx_evaluateResponse,
   rfx_backfillGeo,
   rfx_prepareResponseUploads,
+  rfx_prepareResponseDownload,
   rfx_cleanupResponseUploadGrants,
 } from "./rfx";
 import {
@@ -105,6 +106,7 @@ import {
   businessReferral_confirmConsent,
   businessReferral_withdrawConsent,
   businessReferral_createDispute,
+  businessReferral_prepareEvidenceAccess,
   businessReferral_resolveDispute,
   businessReferral_expireSent,
 } from "./businessReferrals";
@@ -149,6 +151,10 @@ import {
   rfx_refreshSuggestions_scheduled,
 } from "./rfxSuggestions";
 import { rfx_listManaged } from "./rfxQueries";
+import {
+  exchange_privateStorage,
+  exchange_normalizeSensitiveStorageMetadata,
+} from "./exchangeStorage";
 import { access_expireGrants, access_noShowRevoke } from "./scheduled/accessCleanup";
 import {
   createAccessGrant,
@@ -192,10 +198,12 @@ export {
   rfx_submitResponse,
   rfx_evaluateResponse,
   rfx_prepareResponseUploads,
+  rfx_prepareResponseDownload,
 };
 export { rfx_backfillGeo };
 export { rfx_refreshSuggestions };
 export { rfx_listManaged };
+export { exchange_privateStorage, exchange_normalizeSensitiveStorageMetadata };
 
 // Referral Functions
 export {
@@ -215,6 +223,7 @@ export {
   businessReferral_updateConsent,
   businessReferral_confirmConsent,
   businessReferral_withdrawConsent,
+  businessReferral_prepareEvidenceAccess,
   businessReferral_createDispute,
   businessReferral_resolveDispute,
 };

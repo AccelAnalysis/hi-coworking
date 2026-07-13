@@ -33,8 +33,6 @@ function completedIdempotentResult(snapshot, actorUid, action, requestFingerprin
     return data.result ?? { id: data.entityId };
 }
 async function hasLegacyOrgAuthority(transaction, orgId, actor) {
-    if (actor.isAdmin)
-        return true;
     if (typeof orgId !== "string" || !orgId)
         return false;
     try {
@@ -46,10 +44,13 @@ async function hasLegacyOrgAuthority(transaction, orgId, actor) {
     }
 }
 async function requireLegacyProviderAuthority(transaction, referral, actor) {
-    if (actor.isAdmin || referral.providerUid === actor.uid)
+    if (Object.prototype.hasOwnProperty.call(referral, "providerOrgId")) {
+        if (await hasLegacyOrgAuthority(transaction, referral.providerOrgId, actor))
+            return;
+    }
+    else if (referral.providerUid === actor.uid) {
         return;
-    if (await hasLegacyOrgAuthority(transaction, referral.providerOrgId, actor))
-        return;
+    }
     throw new https_1.HttpsError("permission-denied", "Only the receiving provider may perform this action");
 }
 function requireLegacyBusinessReferral(referral) {
@@ -61,19 +62,39 @@ function nonEmptyString(value) {
     return typeof value === "string" && value.trim().length > 0;
 }
 function getLegacyReferralDomain(referral) {
-    const hasPlatformIdentity = nonEmptyString(referral.referredEmail)
-        || nonEmptyString(referral.invitedEmail)
-        || nonEmptyString(referral.inviteeUid)
-        || nonEmptyString(referral.claimedByUid)
-        || nonEmptyString(referral.cancelledByUid);
-    const hasBusinessIdentity = nonEmptyString(referral.providerUid)
-        || nonEmptyString(referral.providerOrgId)
-        || nonEmptyString(referral.clientName)
-        || nonEmptyString(referral.clientEmail)
-        || nonEmptyString(referral.clientPhone)
-        || nonEmptyString(referral.clientCompany);
-    if (hasPlatformIdentity === hasBusinessIdentity)
+    const platformIdentityFields = [
+        "referredEmail",
+        "invitedEmail",
+        "inviteeUid",
+        "referredUid",
+    ];
+    const platformFields = [
+        ...platformIdentityFields,
+        "claimedByUid",
+        "cancelledByUid",
+    ];
+    const businessFields = [
+        "providerUid",
+        "providerOrgId",
+        "clientName",
+        "clientEmail",
+        "clientPhone",
+        "clientCompany",
+    ];
+    const hasField = (field) => (Object.prototype.hasOwnProperty.call(referral, field));
+    const malformedIdentityField = [...platformFields, ...businessFields]
+        .some((field) => hasField(field) && !nonEmptyString(referral[field]));
+    if (malformedIdentityField)
         return "unknown";
+    const hasPlatformIdentity = platformIdentityFields
+        .some((field) => nonEmptyString(referral[field]));
+    const hasPlatformField = platformFields.some(hasField);
+    const hasBusinessIdentity = businessFields.some((field) => nonEmptyString(referral[field]));
+    if (!hasPlatformIdentity && !hasBusinessIdentity)
+        return "unknown";
+    if ((hasPlatformField && hasBusinessIdentity) || (hasPlatformIdentity && hasBusinessIdentity)) {
+        return "unknown";
+    }
     const inferred = hasPlatformIdentity ? "platform_invite" : "business_intro";
     return referral.type && referral.type !== inferred ? "unknown" : inferred;
 }
@@ -92,6 +113,7 @@ function safePlatformInvitePayload(id, referral) {
         "invitedName",
         "inviteStatus",
         "inviteeUid",
+        "referredUid",
         "claimedByUid",
         "cancelledByUid",
         "claimedAt",
@@ -158,8 +180,19 @@ async function activeActorOrgIds(db, actorUid) {
         .limit(100)
         .get();
     const candidates = membershipSnapshot.docs
-        .map((document) => document.data())
-        .filter((membership) => membership.uid === actorUid && typeof membership.orgId === "string")
+        .map((document) => {
+        const data = document.data();
+        return {
+            documentId: document.id,
+            uid: data.uid,
+            orgId: data.orgId,
+            status: data.status,
+        };
+    })
+        .filter((membership) => (membership.uid === actorUid
+        && typeof membership.orgId === "string"
+        && membership.orgId.length > 0
+        && membership.documentId === `${membership.orgId}_${actorUid}`))
         .filter((membership) => membership.status === undefined || membership.status === "active")
         .map((membership) => membership.orgId)
         .filter((orgId, index, all) => all.indexOf(orgId) === index);
@@ -180,6 +213,7 @@ exports.platformInvite_listReceived = (0, https_1.onCall)(async (request) => {
     const db = (0, security_1.getDb)();
     const queries = [
         db.collection("referrals").where("inviteeUid", "==", actor.uid).limit(200).get(),
+        db.collection("referrals").where("referredUid", "==", actor.uid).limit(200).get(),
         db.collection("referrals").where("claimedByUid", "==", actor.uid).limit(200).get(),
     ];
     const email = actor.email?.trim().toLowerCase();
@@ -193,7 +227,10 @@ exports.platformInvite_listReceived = (0, https_1.onCall)(async (request) => {
             const referral = document.data();
             if (getLegacyReferralDomain(referral) !== "platform_invite")
                 continue;
-            const boundUid = referral.claimedByUid ?? referral.cancelledByUid ?? referral.inviteeUid;
+            const boundUid = referral.claimedByUid
+                ?? referral.cancelledByUid
+                ?? referral.inviteeUid
+                ?? referral.referredUid;
             const invitedEmail = (referral.invitedEmail ?? referral.referredEmail)?.trim().toLowerCase();
             const uidMatch = nonEmptyString(boundUid) && boundUid === actor.uid;
             const emailMatch = request.auth?.token.email_verified === true
@@ -233,8 +270,10 @@ exports.legacyBusinessReferral_listReceived = (0, https_1.onCall)(async (request
             const referral = document.data();
             if (getLegacyReferralDomain(referral) !== "business_intro")
                 continue;
-            const individuallyAuthorized = referral.providerUid === actor.uid;
-            const organizationallyAuthorized = nonEmptyString(referral.providerOrgId)
+            const hasProviderOrgScope = Object.prototype.hasOwnProperty.call(referral, "providerOrgId");
+            const individuallyAuthorized = !hasProviderOrgScope && referral.providerUid === actor.uid;
+            const organizationallyAuthorized = hasProviderOrgScope
+                && nonEmptyString(referral.providerOrgId)
                 && orgIds.includes(referral.providerOrgId);
             if (!individuallyAuthorized && !organizationallyAuthorized)
                 continue;
@@ -248,7 +287,10 @@ exports.legacyBusinessReferral_listReceived = (0, https_1.onCall)(async (request
     };
 });
 function requirePlatformInviteeAuthority(request, referral, actor) {
-    const boundUid = referral.claimedByUid ?? referral.cancelledByUid ?? referral.inviteeUid;
+    const boundUid = referral.claimedByUid
+        ?? referral.cancelledByUid
+        ?? referral.inviteeUid
+        ?? referral.referredUid;
     if (nonEmptyString(boundUid)) {
         if (boundUid === actor.uid)
             return;

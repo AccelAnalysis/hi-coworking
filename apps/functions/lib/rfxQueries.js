@@ -8,10 +8,13 @@ const security_1 = require("./exchange/security");
 const listManagedRfxInputSchema = zod_1.z
     .object({
     maxResults: zod_1.z.number().int().min(1).max(200).default(100),
+    includeDashboardMetrics: zod_1.z.boolean().default(false),
 })
     .strict();
 const MAX_ORG_MEMBERSHIPS = 100;
 const FIRESTORE_IN_LIMIT = 30;
+const MAX_DASHBOARD_MANAGED_RFX_SCAN = 1000;
+const MAX_DASHBOARD_RESPONSE_SCAN = 5000;
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value
@@ -154,6 +157,99 @@ function chunks(values, size) {
     }
     return result;
 }
+async function loadOrganizationAuthority(db, actorUid) {
+    const membershipSnapshot = await db
+        .collection("orgMembers")
+        .where("uid", "==", actorUid)
+        .limit(MAX_ORG_MEMBERSHIPS + 1)
+        .get();
+    if (membershipSnapshot.size > MAX_ORG_MEMBERSHIPS) {
+        throw new https_1.HttpsError("resource-exhausted", "Organization membership count exceeds the managed RFx query limit");
+    }
+    const canonicalMemberships = membershipSnapshot.docs.flatMap((document) => {
+        const member = asRecord(document.data());
+        const orgId = stringValue(member.orgId);
+        const role = stringValue(member.role);
+        const status = stringValue(member.status);
+        if (!orgId
+            || document.id !== `${orgId}_${actorUid}`
+            || member.uid !== actorUid
+            || !role
+            || !["owner", "admin", "member"].includes(role)
+            || (status !== undefined && status !== "active")) {
+            return [];
+        }
+        return [{ orgId, role: role }];
+    });
+    const organizationSnapshots = canonicalMemberships.length > 0
+        ? await db.getAll(...canonicalMemberships.map(({ orgId }) => db.collection("orgs").doc(orgId)))
+        : [];
+    const activeMemberships = organizationSnapshots.flatMap((snapshot, index) => {
+        const membership = canonicalMemberships[index];
+        const organization = asRecord(snapshot.data());
+        if (!snapshot.exists || organization.status !== "active" || snapshot.id !== membership.orgId) {
+            return [];
+        }
+        const name = stringValue(organization.name);
+        return [{
+                orgId: membership.orgId,
+                role: membership.role,
+                ...(name ? { name: name.slice(0, 200) } : {}),
+            }];
+    });
+    return {
+        participantOrgIds: activeMemberships.map(({ orgId }) => orgId),
+        managerOrganizations: activeMemberships.flatMap((membership) => ((0, security_1.isOrgManagementRole)(membership.role)
+            ? [{
+                    orgId: membership.orgId,
+                    role: membership.role,
+                    ...(membership.name ? { name: membership.name } : {}),
+                }]
+            : [])),
+    };
+}
+function hasResponseOrganizationScope(response) {
+    return Object.prototype.hasOwnProperty.call(response, "respondentOrgId")
+        || Object.prototype.hasOwnProperty.call(response, "orgId");
+}
+async function countActiveBids(db, actorUid, participantOrgIds) {
+    const responses = db.collection("rfxResponses");
+    const queryLimit = MAX_DASHBOARD_RESPONSE_SCAN + 1;
+    const organizationChunks = chunks(participantOrgIds, FIRESTORE_IN_LIMIT);
+    const snapshots = await Promise.all([
+        responses.where("respondentUid", "==", actorUid).limit(queryLimit).get(),
+        ...organizationChunks.map((orgIds) => (responses.where("respondentOrgId", "in", orgIds).limit(queryLimit).get())),
+        // Pre-Run-1 responses may have used `orgId` instead of `respondentOrgId`.
+        ...organizationChunks.map((orgIds) => (responses.where("orgId", "in", orgIds).limit(queryLimit).get())),
+    ]);
+    const participantOrgIdSet = new Set(participantOrgIds);
+    const activeStatuses = new Set(["pending", "submitted", "under_review"]);
+    const activeResponseIds = new Set();
+    for (const snapshot of snapshots) {
+        for (const document of snapshot.docs.slice(0, MAX_DASHBOARD_RESPONSE_SCAN)) {
+            const response = asRecord(document.data());
+            if (!activeStatuses.has(stringValue(response.status) ?? ""))
+                continue;
+            const responseOrgId = stringValue(response.respondentOrgId) ?? stringValue(response.orgId);
+            const authorized = hasResponseOrganizationScope(response)
+                ? Boolean(responseOrgId && participantOrgIdSet.has(responseOrgId))
+                : (stringValue(response.respondentUid) ?? stringValue(response.createdBy)) === actorUid;
+            if (authorized)
+                activeResponseIds.add(document.id);
+        }
+    }
+    return {
+        count: activeResponseIds.size,
+        truncated: snapshots.some((snapshot) => snapshot.size > MAX_DASHBOARD_RESPONSE_SCAN),
+    };
+}
+async function countReceivedResponses(db, managedRfxIds) {
+    if (managedRfxIds.length === 0)
+        return 0;
+    const responseCollection = db.collection("rfxResponses");
+    const countSnapshots = await Promise.all(chunks(managedRfxIds, FIRESTORE_IN_LIMIT).map((rfxIds) => (responseCollection.where("rfxId", "in", rfxIds).count().get())));
+    return countSnapshots.reduce((total, snapshot) => total + snapshot.data().count, 0);
+}
 /**
  * Server-filtered discovery for RFx management. Organization scope always
  * wins over creator identity: a former creator receives no organization RFx
@@ -170,61 +266,30 @@ exports.rfx_listManaged = (0, https_1.onCall)(async (request) => {
             })),
         });
     }
-    const { maxResults } = parsed.data;
+    const { maxResults, includeDashboardMetrics } = parsed.data;
     const db = (0, security_1.getDb)();
-    const membershipSnapshot = await db
-        .collection("orgMembers")
-        .where("uid", "==", actor.uid)
-        .limit(MAX_ORG_MEMBERSHIPS + 1)
-        .get();
-    if (membershipSnapshot.size > MAX_ORG_MEMBERSHIPS) {
-        throw new https_1.HttpsError("resource-exhausted", "Organization membership count exceeds the managed RFx query limit");
-    }
-    const managerMemberships = membershipSnapshot.docs.flatMap((document) => {
-        const member = asRecord(document.data());
-        const orgId = stringValue(member.orgId);
-        if (!orgId
-            || document.id !== `${orgId}_${actor.uid}`
-            || member.uid !== actor.uid
-            || !(0, security_1.isOrgManagementRole)(member.role)) {
-            return [];
-        }
-        return [{ orgId, role: member.role }];
-    });
-    const organizationSnapshots = managerMemberships.length > 0
-        ? await db.getAll(...managerMemberships.map(({ orgId }) => db.collection("orgs").doc(orgId)))
-        : [];
-    const managerOrganizations = organizationSnapshots.flatMap((snapshot, index) => {
-        const membership = managerMemberships[index];
-        const organization = asRecord(snapshot.data());
-        if (!snapshot.exists || organization.status !== "active" || snapshot.id !== membership.orgId) {
-            return [];
-        }
-        const name = stringValue(organization.name);
-        return [{
-                orgId: membership.orgId,
-                role: membership.role,
-                ...(name ? { name: name.slice(0, 200) } : {}),
-            }];
-    });
+    const { managerOrganizations, participantOrgIds } = await loadOrganizationAuthority(db, actor.uid);
     const managerOrgIds = managerOrganizations.map(({ orgId }) => orgId);
     const managerOrgIdSet = new Set(managerOrgIds);
+    const managedQueryLimit = includeDashboardMetrics
+        ? MAX_DASHBOARD_MANAGED_RFX_SCAN + 1
+        : maxResults;
     const rfxCollection = db.collection("rfx");
     const organizationQueries = chunks(managerOrgIds, FIRESTORE_IN_LIMIT).map((orgIds) => (rfxCollection
         .where("orgId", "in", orgIds)
         .orderBy("createdAt", "desc")
-        .limit(maxResults)
+        .limit(managedQueryLimit)
         .get()));
     const [ownerSnapshot, creatorSnapshot, ...organizationSnapshotsForRfx] = await Promise.all([
         rfxCollection
             .where("ownerUid", "==", actor.uid)
             .orderBy("createdAt", "desc")
-            .limit(maxResults)
+            .limit(managedQueryLimit)
             .get(),
         rfxCollection
             .where("createdBy", "==", actor.uid)
             .orderBy("createdAt", "desc")
-            .limit(maxResults)
+            .limit(managedQueryLimit)
             .get(),
         ...organizationQueries,
     ]);
@@ -263,6 +328,21 @@ exports.rfx_listManaged = (0, https_1.onCall)(async (request) => {
             publisherActiveCounts.individual += 1;
         }
     });
+    const managedScanTruncated = snapshots.some((snapshot) => snapshot.size === managedQueryLimit);
+    const managedForDashboard = managed.slice(0, MAX_DASHBOARD_MANAGED_RFX_SCAN);
+    const dashboardManagedTruncated = managedScanTruncated
+        || managed.length > MAX_DASHBOARD_MANAGED_RFX_SCAN;
+    const dashboardMetrics = includeDashboardMetrics
+        ? await Promise.all([
+            countActiveBids(db, actor.uid, participantOrgIds),
+            countReceivedResponses(db, managedForDashboard.map(([documentId]) => documentId)),
+        ]).then(([activeBids, receivedResponseCount]) => ({
+            activeBidCount: activeBids.count,
+            activeBidCountTruncated: activeBids.truncated,
+            receivedResponseCount,
+            receivedResponseCountTruncated: dashboardManagedTruncated,
+        }))
+        : undefined;
     return {
         rfx,
         manageableRfxIds: rfx.map((document) => document.id),
@@ -270,6 +350,7 @@ exports.rfx_listManaged = (0, https_1.onCall)(async (request) => {
         activeCount: managed.filter(([, value]) => activeStatuses.has(stringValue(value.source.status) ?? "")).length,
         publisherActiveCounts,
         totalCount: managed.length,
-        truncated: managed.length > maxResults || snapshots.some((snapshot) => snapshot.size === maxResults),
+        truncated: managed.length > maxResults || managedScanTruncated,
+        ...(dashboardMetrics ? { dashboardMetrics } : {}),
     };
 });

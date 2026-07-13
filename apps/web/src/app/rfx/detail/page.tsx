@@ -11,9 +11,11 @@ import {
   getProfileFromFirestore,
   getRfxManagementAuthority,
 } from "@/lib/firestore";
-import { prepareRfxResponseUploadsFn, submitRfxResponseFn } from "@/lib/functions";
-import { storage } from "@/lib/firebase";
-import { ref, uploadBytesResumable } from "firebase/storage";
+import {
+  prepareRfxResponseUploadsFn,
+  submitRfxResponseFn,
+  uploadPrivateExchangeObject,
+} from "@/lib/functions";
 import type { RfxDoc, ProfileDoc, RequestedDocument, UploadedDocument } from "@hi/shared";
 import {
   Loader2,
@@ -383,15 +385,9 @@ function ResponseForm({ rfx, profile, userId, onClose, onSuccess }: ResponseForm
             size: file.size,
           }],
         });
-        const storageRef = ref(storage, storagePath);
-        const task = uploadBytesResumable(storageRef, file);
-        await new Promise<void>((resolve, reject) => {
-          task.on("state_changed", null, reject, () => {
-            setProposalStoragePath(storagePath);
-            setProposalFileName(file.name);
-            resolve();
-          });
-        });
+        await uploadPrivateExchangeObject(storagePath, file);
+        setProposalStoragePath(storagePath);
+        setProposalFileName(file.name);
       } catch (err) {
         console.error("Upload error:", err);
         setError("Failed to upload proposal file.");
@@ -417,26 +413,20 @@ function ResponseForm({ rfx, profile, userId, onClose, onSuccess }: ResponseForm
             size: file.size,
           }],
         });
-        const storageRef = ref(storage, storagePath);
-        const task = uploadBytesResumable(storageRef, file);
-        await new Promise<void>((resolve, reject) => {
-          task.on("state_changed", null, reject, () => {
-            setUploadedDocs((prev) => {
-              const filtered = prev.filter((d) => d.requestedDocId !== reqDoc.id);
-              return [
-                ...filtered,
-                {
-                  requestedDocId: reqDoc.id,
-                  label: reqDoc.label,
-                  storagePath,
-                  fileName: file.name,
-                  contentType: file.type,
-                  size: file.size,
-                },
-              ];
-            });
-            resolve();
-          });
+        await uploadPrivateExchangeObject(storagePath, file);
+        setUploadedDocs((prev) => {
+          const filtered = prev.filter((d) => d.requestedDocId !== reqDoc.id);
+          return [
+            ...filtered,
+            {
+              requestedDocId: reqDoc.id,
+              label: reqDoc.label,
+              storagePath,
+              fileName: file.name,
+              contentType: file.type,
+              size: file.size,
+            },
+          ];
         });
       } catch (err) {
         console.error("Upload error:", err);

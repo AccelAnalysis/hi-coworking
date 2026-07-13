@@ -30,6 +30,15 @@ import {
   httpsCallable,
   type Functions,
 } from "firebase/functions";
+import {
+  connectStorageEmulator,
+  getDownloadURL,
+  getMetadata,
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  type FirebaseStorage,
+} from "firebase/storage";
 
 const PROJECT_ID = "demo-hi-coworking";
 const REGION = "us-central1";
@@ -51,6 +60,7 @@ interface TestActor {
   uid: string;
   auth: Auth;
   functions: Functions;
+  storage: FirebaseStorage;
 }
 
 interface CallableErrorLike {
@@ -64,6 +74,15 @@ let db: Firestore;
 let expireTeamInvitationsAt: typeof import(
   "../../apps/functions/src/teaming"
 ).expireTeamInvitationsAt;
+let cleanupExpiredResponseReadGrantAt: typeof import(
+  "../../apps/functions/src/rfx"
+).cleanupExpiredResponseReadGrantAt;
+let cleanupExpiredResponseUploadGrantAt: typeof import(
+  "../../apps/functions/src/rfx"
+).cleanupExpiredResponseUploadGrantAt;
+let cleanupExpiredBusinessReferralStorageGrantAt: typeof import(
+  "../../apps/functions/src/businessReferrals"
+).cleanupExpiredBusinessReferralStorageGrantAt;
 let clientSequence = 0;
 const clientApps: FirebaseApp[] = [];
 
@@ -145,7 +164,9 @@ async function createActor(
 
   const functions = getFunctions(app, REGION);
   connectFunctionsEmulator(functions, FUNCTIONS_EMULATOR_HOST, FUNCTIONS_EMULATOR_PORT);
-  return { uid, auth, functions };
+  const storage = getStorage(app);
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+  return { uid, auth, functions, storage };
 }
 
 async function callFunction<Result>(
@@ -155,6 +176,30 @@ async function callFunction<Result>(
 ): Promise<Result> {
   const callable = httpsCallable<Record<string, unknown>, Result>(actor.functions, name);
   return (await callable(data)).data;
+}
+
+async function privateStorageRequest(
+  actor: TestActor,
+  operation: "upload" | "download",
+  storagePath: string,
+  body?: Uint8Array,
+  contentType = "application/pdf",
+): Promise<Response> {
+  const token = await actor.auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Test actor is not authenticated");
+  return fetch(
+    `http://${FUNCTIONS_EMULATOR_HOST}:${FUNCTIONS_EMULATOR_PORT}/${PROJECT_ID}/${REGION}/exchange_privateStorage`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Exchange-Storage-Operation": operation,
+        "X-Storage-Path": storagePath,
+        ...(body ? { "Content-Type": contentType } : {}),
+      },
+      body: body ? Buffer.from(body) : undefined,
+    },
+  );
 }
 
 async function expectCallableError(
@@ -211,6 +256,13 @@ beforeAll(async () => {
   );
   db = getAdminFirestore(adminApp);
   ({ expireTeamInvitationsAt } = await import("../../apps/functions/src/teaming"));
+  ({
+    cleanupExpiredResponseReadGrantAt,
+    cleanupExpiredResponseUploadGrantAt,
+  } = await import("../../apps/functions/src/rfx"));
+  ({ cleanupExpiredBusinessReferralStorageGrantAt } = await import(
+    "../../apps/functions/src/businessReferrals"
+  ));
 });
 
 beforeEach(async () => {
@@ -305,7 +357,7 @@ describe("RFx callable authority and transaction boundaries", () => {
     );
   });
 
-  it("lists only individual ownership and exact active organization management authority", async () => {
+  it("lists and summarizes RFx only through current canonical organization authority", async () => {
     const manager = await createActor("rfx-org-manager");
     const formerCreator = await createActor("rfx-former-org-creator");
     const now = Date.now();
@@ -325,6 +377,12 @@ describe("RFx callable authority and transaction boundaries", () => {
         uid: manager.uid,
         role: "owner",
         joinedAt: now,
+      }),
+      db.collection("orgMembers").doc(`managed-org_${formerCreator.uid}`).set({
+        orgId: "managed-org",
+        uid: formerCreator.uid,
+        role: "owner",
+        joinedAt: now - 1,
       }),
       db.collection("orgMembers").doc(`suspended-org_${manager.uid}`).set({
         orgId: "suspended-org",
@@ -393,7 +451,46 @@ describe("RFx callable authority and transaction boundaries", () => {
         createdAt: now - 2,
         updatedAt: now,
       }),
+      // The former creator submitted this bid for the organization. It remains
+      // visible to current organization participants but must not follow the
+      // former member merely because respondentUid still names them.
+      db.collection("rfxResponses").doc("managed-org-active-bid").set({
+        id: "managed-org-active-bid",
+        rfxId: "external-rfx",
+        rfxOwnerUid: "external-owner",
+        respondentUid: formerCreator.uid,
+        respondentOrgId: "managed-org",
+        status: "submitted",
+        createdAt: now,
+      }),
+      db.collection("rfxResponses").doc("former-individual-active-bid").set({
+        id: "former-individual-active-bid",
+        rfxId: "external-rfx-two",
+        rfxOwnerUid: "external-owner",
+        respondentUid: formerCreator.uid,
+        status: "under_review",
+        createdAt: now,
+      }),
+      db.collection("rfxResponses").doc("managed-org-received-response").set({
+        id: "managed-org-received-response",
+        rfxId: "managed-org-rfx",
+        rfxOwnerUid: formerCreator.uid,
+        respondentUid: "outside-respondent-one",
+        status: "declined",
+        createdAt: now,
+      }),
+      db.collection("rfxResponses").doc("former-individual-received-response").set({
+        id: "former-individual-received-response",
+        rfxId: "former-creator-individual-rfx",
+        rfxOwnerUid: formerCreator.uid,
+        respondentUid: "outside-respondent-two",
+        status: "declined",
+        createdAt: now,
+      }),
     ]);
+    // Model the historical creator leaving the organization before opening the
+    // dashboard. Stale RFx/response identity fields must not preserve access.
+    await db.collection("orgMembers").doc(`managed-org_${formerCreator.uid}`).delete();
 
     const managerResult = await callFunction<{
       rfx: Array<Record<string, unknown>>;
@@ -401,7 +498,13 @@ describe("RFx callable authority and transaction boundaries", () => {
       managerOrganizations: Array<{ orgId: string; role: string; name?: string }>;
       activeCount: number;
       publisherActiveCounts: { individual: number; organizations: Record<string, number> };
-    }>(manager, "rfx_listManaged", { maxResults: 20 });
+      dashboardMetrics: {
+        activeBidCount: number;
+        activeBidCountTruncated: boolean;
+        receivedResponseCount: number;
+        receivedResponseCountTruncated: boolean;
+      };
+    }>(manager, "rfx_listManaged", { maxResults: 20, includeDashboardMetrics: true });
     expect(managerResult.manageableRfxIds).toEqual(["managed-org-rfx"]);
     expect(managerResult.managerOrganizations).toEqual([{
       orgId: "managed-org",
@@ -419,6 +522,12 @@ describe("RFx callable authority and transaction boundaries", () => {
       ownerUid: formerCreator.uid,
     });
     expect(managerResult.rfx[0]).not.toHaveProperty("internalOnly");
+    expect(managerResult.dashboardMetrics).toEqual({
+      activeBidCount: 1,
+      activeBidCountTruncated: false,
+      receivedResponseCount: 1,
+      receivedResponseCountTruncated: false,
+    });
 
     const formerCreatorResult = await callFunction<{
       rfx: Array<Record<string, unknown>>;
@@ -426,7 +535,13 @@ describe("RFx callable authority and transaction boundaries", () => {
       managerOrganizations: Array<{ orgId: string }>;
       activeCount: number;
       publisherActiveCounts: { individual: number; organizations: Record<string, number> };
-    }>(formerCreator, "rfx_listManaged", { maxResults: 20 });
+      dashboardMetrics: {
+        activeBidCount: number;
+        activeBidCountTruncated: boolean;
+        receivedResponseCount: number;
+        receivedResponseCountTruncated: boolean;
+      };
+    }>(formerCreator, "rfx_listManaged", { maxResults: 20, includeDashboardMetrics: true });
     expect(formerCreatorResult.manageableRfxIds).toEqual(["former-creator-individual-rfx"]);
     expect(formerCreatorResult.managerOrganizations).toEqual([]);
     expect(formerCreatorResult.activeCount).toBe(1);
@@ -437,6 +552,12 @@ describe("RFx callable authority and transaction boundaries", () => {
     expect(formerCreatorResult.rfx[0]).toMatchObject({
       id: "former-creator-individual-rfx",
       ownerUid: formerCreator.uid,
+    });
+    expect(formerCreatorResult.dashboardMetrics).toEqual({
+      activeBidCount: 1,
+      activeBidCountTruncated: false,
+      receivedResponseCount: 1,
+      receivedResponseCountTruncated: false,
     });
   });
 
@@ -519,6 +640,8 @@ describe("RFx callable authority and transaction boundaries", () => {
       publishInput({ idempotencyKey: "upload-grant-publish-0001" }),
     );
     const storagePath = `rfxResponses/${published.id}/${respondent.uid}/proposal/proposal.pdf`;
+    const spreadsheetPath = `rfxResponses/${published.id}/${respondent.uid}/requested/pricing.xls`;
+    const webpPath = `rfxResponses/${published.id}/${respondent.uid}/requested/preview.webp`;
 
     await expectCallableError(
       callFunction(respondent, "rfx_prepareResponseUploads", {
@@ -542,6 +665,13 @@ describe("RFx callable authority and transaction boundaries", () => {
       }),
       "failed-precondition",
     );
+    await expectCallableError(
+      callFunction(respondent, "rfx_prepareResponseUploads", {
+        rfxId: published.id,
+        attachments: [{ storagePath: webpPath, contentType: "image/webp", size: 10 }],
+      }),
+      "invalid-argument",
+    );
 
     const grant = await callFunction<{
       success: boolean;
@@ -549,9 +679,12 @@ describe("RFx callable authority and transaction boundaries", () => {
       allowedPathCount: number;
     }>(respondent, "rfx_prepareResponseUploads", {
       rfxId: published.id,
-      attachments: [{ storagePath, contentType: "application/pdf", size: 10 }],
+      attachments: [
+        { storagePath, contentType: "application/pdf", size: 10 },
+        { storagePath: spreadsheetPath, contentType: "application/vnd.ms-excel", size: 10 },
+      ],
     });
-    expect(grant).toMatchObject({ success: true, allowedPathCount: 1 });
+    expect(grant).toMatchObject({ success: true, allowedPathCount: 2 });
     expect(grant.expiresAt).toBeGreaterThan(Date.now());
     expect((await db.collection("rfxResponseUploadGrantScopes")
       .doc(published.id)
@@ -560,12 +693,64 @@ describe("RFx callable authority and transaction boundaries", () => {
       .get()).data()).toMatchObject({
       rfxId: published.id,
       respondentUid: respondent.uid,
-      allowedStoragePaths: [storagePath],
+      allowedStoragePaths: [storagePath, spreadsheetPath],
     });
 
-    await getAdminStorage(adminApp).bucket().file(storagePath).save(Buffer.from("proposal"), {
-      metadata: { contentType: "application/pdf" },
+    const spreadsheetUpload = await privateStorageRequest(
+      respondent,
+      "upload",
+      spreadsheetPath,
+      new TextEncoder().encode("spreadsheet"),
+      "application/vnd.ms-excel",
+    );
+    expect(spreadsheetUpload.status).toBe(201);
+    await db.collection("rfxResponseUploadGrantScopes").doc(published.id)
+      .collection("uploadGrants").doc(respondent.uid).update({
+        allowedStoragePaths: [storagePath, spreadsheetPath, webpPath],
+      });
+    const webpUpload = await privateStorageRequest(
+      respondent,
+      "upload",
+      webpPath,
+      new Uint8Array([0x52, 0x49, 0x46, 0x46]),
+      "image/webp",
+    );
+    expect(webpUpload.status).toBe(400);
+
+    await expect(
+      uploadBytes(
+        storageRef(respondent.storage, storagePath),
+        new TextEncoder().encode("proposal"),
+        { contentType: "application/pdf" },
+      ),
+    ).rejects.toBeDefined();
+    const uploadResponse = await privateStorageRequest(
+      respondent,
+      "upload",
+      storagePath,
+      new TextEncoder().encode("proposal"),
+    );
+    expect(uploadResponse.status).toBe(201);
+    expect(await uploadResponse.json()).toMatchObject({
+      success: true,
+      idempotent: false,
+      storagePath,
+      contentType: "application/pdf",
+      size: 8,
     });
+    const uploadReplay = await privateStorageRequest(
+      respondent,
+      "upload",
+      storagePath,
+      new TextEncoder().encode("proposal"),
+    );
+    expect(uploadReplay.status).toBe(200);
+    expect(await uploadReplay.json()).toMatchObject({ success: true, idempotent: true });
+    const [storedMetadata] = await getAdminStorage(adminApp).bucket().file(storagePath).getMetadata();
+    expect(storedMetadata.cacheControl).toContain("private");
+    expect(storedMetadata.metadata).not.toHaveProperty("firebaseStorageDownloadTokens");
+    await expect(getMetadata(storageRef(respondent.storage, storagePath))).rejects.toBeDefined();
+    await expect(getDownloadURL(storageRef(respondent.storage, storagePath))).rejects.toBeDefined();
     const submitted = await callFunction<{ id: string; status: string }>(
       respondent,
       "rfx_submitResponse",
@@ -588,6 +773,237 @@ describe("RFx callable authority and transaction boundaries", () => {
       .collection("respondents")
       .doc(respondent.uid)
       .get()).data()).toMatchObject({ attachmentStoragePaths: [storagePath] });
+
+    await callFunction(owner, "rfx_prepareResponseDownload", {
+      rfxId: published.id,
+      respondentUid: respondent.uid,
+      storagePath,
+    });
+    const downloadResponse = await privateStorageRequest(owner, "download", storagePath);
+    expect(downloadResponse.status).toBe(200);
+    expect(await downloadResponse.text()).toBe("proposal");
+  });
+
+  it("materializes exact short-lived response read grants from current authority", async () => {
+    const respondent = await createActor("rfx-read-respondent");
+    const respondentColleague = await createActor("rfx-read-colleague");
+    const issuerManager = await createActor("rfx-read-issuer-manager");
+    const malformedMember = await createActor("rfx-read-malformed-member");
+    const malformedFormerCreator = await createActor("rfx-read-malformed-former-creator");
+    const outsider = await createActor("rfx-read-outsider");
+    const rfxId = "rfx-read-grant";
+    const storagePath = `rfxResponses/${rfxId}/${respondent.uid}/proposal.pdf`;
+    const nullOrgRfxId = "rfx-null-org-scope";
+    const emptyOrgRfxId = "rfx-empty-org-scope";
+    const nullOrgPath = `rfxResponses/${nullOrgRfxId}/${respondent.uid}/proposal.pdf`;
+    const emptyOrgPath = `rfxResponses/${emptyOrgRfxId}/${respondent.uid}/proposal.pdf`;
+    const nullMarkerPath = `rfxResponses/${rfxId}/${outsider.uid}/null-marker.pdf`;
+    const emptyMarkerPath = `rfxResponses/${rfxId}/${malformedMember.uid}/empty-marker.pdf`;
+    await Promise.all([
+      db.collection("orgs").doc("read-respondent-org").set({
+        id: "read-respondent-org",
+        status: "active",
+      }),
+      db.collection("orgs").doc("read-issuer-org").set({
+        id: "read-issuer-org",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc(`read-respondent-org_${respondent.uid}`).set({
+        orgId: "read-respondent-org",
+        uid: respondent.uid,
+        role: "owner",
+      }),
+      db.collection("orgMembers").doc(`read-respondent-org_${respondentColleague.uid}`).set({
+        orgId: "read-respondent-org",
+        uid: respondentColleague.uid,
+        role: "member",
+      }),
+      db.collection("orgMembers").doc(`read-issuer-org_${issuerManager.uid}`).set({
+        orgId: "read-issuer-org",
+        uid: issuerManager.uid,
+        role: "owner",
+      }),
+      db.collection("orgMembers").doc("noncanonical-read-membership").set({
+        orgId: "read-respondent-org",
+        uid: malformedMember.uid,
+        role: "owner",
+      }),
+      db.collection("rfx").doc(rfxId).set({
+        id: rfxId,
+        schemaVersion: 2,
+        version: 1,
+        ownerUid: "former-issuer",
+        createdBy: "former-issuer",
+        orgId: "read-issuer-org",
+        status: "open",
+        adminApprovalStatus: "approved",
+        createdAt: Date.now(),
+      }),
+      db.collection("rfxResponseAccess").doc(rfxId)
+        .collection("respondents").doc(respondent.uid).set({
+          id: respondent.uid,
+          rfxId,
+          respondentUid: respondent.uid,
+          respondentOrgId: "read-respondent-org",
+          responseId: "read-response",
+          attachmentStoragePaths: [storagePath],
+          submittedAt: Date.now(),
+        }),
+      db.collection("rfx").doc(nullOrgRfxId).set({
+        id: nullOrgRfxId,
+        ownerUid: malformedFormerCreator.uid,
+        createdBy: malformedFormerCreator.uid,
+        orgId: null,
+        status: "open",
+        adminApprovalStatus: "approved",
+      }),
+      db.collection("rfx").doc(emptyOrgRfxId).set({
+        id: emptyOrgRfxId,
+        ownerUid: malformedFormerCreator.uid,
+        createdBy: malformedFormerCreator.uid,
+        orgId: "",
+        status: "open",
+        adminApprovalStatus: "approved",
+      }),
+      db.collection("rfxResponseAccess").doc(nullOrgRfxId)
+        .collection("respondents").doc(respondent.uid).set({
+          id: respondent.uid,
+          rfxId: nullOrgRfxId,
+          respondentUid: respondent.uid,
+          responseId: "null-org-response",
+          attachmentStoragePaths: [nullOrgPath],
+        }),
+      db.collection("rfxResponseAccess").doc(emptyOrgRfxId)
+        .collection("respondents").doc(respondent.uid).set({
+          id: respondent.uid,
+          rfxId: emptyOrgRfxId,
+          respondentUid: respondent.uid,
+          responseId: "empty-org-response",
+          attachmentStoragePaths: [emptyOrgPath],
+        }),
+      db.collection("rfxResponseAccess").doc(rfxId)
+        .collection("respondents").doc(outsider.uid).set({
+          id: outsider.uid,
+          rfxId,
+          respondentUid: outsider.uid,
+          respondentOrgId: null,
+          responseId: "null-marker-response",
+          attachmentStoragePaths: [nullMarkerPath],
+        }),
+      db.collection("rfxResponseAccess").doc(rfxId)
+        .collection("respondents").doc(malformedMember.uid).set({
+          id: malformedMember.uid,
+          rfxId,
+          respondentUid: malformedMember.uid,
+          respondentOrgId: "",
+          responseId: "empty-marker-response",
+          attachmentStoragePaths: [emptyMarkerPath],
+        }),
+    ]);
+
+    for (const actor of [respondent, respondentColleague, issuerManager]) {
+      const result = await callFunction<{
+        success: boolean;
+        expiresAt: number;
+        storagePath: string;
+      }>(actor, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath,
+      });
+      expect(result).toMatchObject({ success: true, storagePath });
+      expect(result.expiresAt).toBeGreaterThan(Date.now());
+      expect(result.expiresAt).toBeLessThanOrEqual(Date.now() + 60_000);
+    }
+
+    await expectCallableError(
+      callFunction(outsider, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath,
+      }),
+      "permission-denied",
+    );
+    await expectCallableError(
+      callFunction(malformedMember, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath,
+      }),
+      "permission-denied",
+    );
+    await expectCallableError(
+      callFunction(respondent, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath: `rfxResponses/${rfxId}/${respondent.uid}/unreferenced.pdf`,
+      }),
+      "permission-denied",
+    );
+    const existingMarkerProbe = await expectCallableError(
+      callFunction(outsider, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath: `rfxResponses/${rfxId}/${respondent.uid}/probe.pdf`,
+      }),
+      "permission-denied",
+    );
+    const missingMarkerProbe = await expectCallableError(
+      callFunction(outsider, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: "missing-respondent",
+        storagePath: `rfxResponses/${rfxId}/missing-respondent/probe.pdf`,
+      }),
+      "permission-denied",
+    );
+    expect(missingMarkerProbe.message).toBe(existingMarkerProbe.message);
+
+    for (const [actor, markerPath] of [
+      [outsider, nullMarkerPath],
+      [malformedMember, emptyMarkerPath],
+    ] as const) {
+      await expectCallableError(
+        callFunction(actor, "rfx_prepareResponseDownload", {
+          rfxId,
+          respondentUid: actor.uid,
+          storagePath: markerPath,
+        }),
+        "failed-precondition",
+      );
+    }
+
+    for (const [malformedRfxId, malformedPath] of [
+      [nullOrgRfxId, nullOrgPath],
+      [emptyOrgRfxId, emptyOrgPath],
+    ] as const) {
+      await expectCallableError(
+        callFunction(malformedFormerCreator, "rfx_prepareResponseDownload", {
+          rfxId: malformedRfxId,
+          respondentUid: respondent.uid,
+          storagePath: malformedPath,
+        }),
+        "failed-precondition",
+      );
+    }
+
+    await db.collection("orgMembers")
+      .doc(`read-respondent-org_${respondentColleague.uid}`)
+      .delete();
+    await expectCallableError(
+      callFunction(respondentColleague, "rfx_prepareResponseDownload", {
+        rfxId,
+        respondentUid: respondent.uid,
+        storagePath,
+      }),
+      "permission-denied",
+    );
+    expect((await db.collection("rfxResponseReadGrantScopes").doc(rfxId)
+      .collection("readGrants").doc(issuerManager.uid).get()).data()).toMatchObject({
+      grantType: "rfx_response_read",
+      rfxId,
+      accessorUid: issuerManager.uid,
+      allowedStoragePaths: [storagePath],
+    });
   });
 
   it("keeps geo backfill dry-run by default and uses a deterministic document cursor", async () => {
@@ -663,19 +1079,30 @@ describe("RFx callable authority and transaction boundaries", () => {
       .toMatchObject({ lat: 25.75, lng: -80.2, source: "territory_centroid_backfill" });
   });
 
-  it("deduplicates response submission/counting and restricts evaluation to the RFx authority", async () => {
+  it("deduplicates response submission/counting across subjects and restricts evaluation to RFx authority", async () => {
     await seedReleasedTerritory();
     const owner = await createActor("rfx-owner", "admin");
     const respondent = await createActor("rfx-respondent", "member");
+    const secondOrgManager = await createActor("rfx-second-org-manager", "member");
     const outsider = await createActor("rfx-outsider", "member");
     await Promise.all([
       db.collection("orgs").doc("respondent-org").set({
         id: "respondent-org",
         status: "active",
       }),
+      db.collection("orgs").doc("unsubmitted-probe-org").set({
+        id: "unsubmitted-probe-org",
+        status: "active",
+      }),
       db.collection("orgMembers").doc(`respondent-org_${respondent.uid}`).set({
         orgId: "respondent-org",
         uid: respondent.uid,
+        role: "owner",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc(`respondent-org_${secondOrgManager.uid}`).set({
+        orgId: "respondent-org",
+        uid: secondOrgManager.uid,
         role: "owner",
         status: "active",
       }),
@@ -720,6 +1147,113 @@ describe("RFx callable authority and transaction boundaries", () => {
       respondentUid: respondent.uid,
       responseId: first.id,
     });
+
+    const markerBeforeCrossSubjectAttempt = (await db.collection("rfxResponseAccess")
+      .doc(published.id)
+      .collection("respondents")
+      .doc(respondent.uid)
+      .get()).data();
+    await expectCallableError(
+      callFunction(respondent, "rfx_submitResponse", {
+        rfxId: published.id,
+        idempotencyKey: "response-submit-cross-subject-0001",
+        proposalText: "A second individual response must not replace the organization marker.",
+        uploadedDocuments: [],
+      }),
+      "already-exists",
+    );
+    expect((await db.collection("rfxResponseAccess")
+      .doc(published.id)
+      .collection("respondents")
+      .doc(respondent.uid)
+      .get()).data()).toEqual(markerBeforeCrossSubjectAttempt);
+
+    const secondManagerPath =
+      `rfxResponses/${published.id}/${secondOrgManager.uid}/second-manager.pdf`;
+    await expectCallableError(
+      callFunction(secondOrgManager, "rfx_prepareResponseUploads", {
+        rfxId: published.id,
+        orgId: "respondent-org",
+        attachments: [{
+          storagePath: secondManagerPath,
+          contentType: "application/pdf",
+          size: 10,
+        }],
+      }),
+      "already-exists",
+    );
+    await expectCallableError(
+      callFunction(secondOrgManager, "rfx_submitResponse", {
+        rfxId: published.id,
+        orgId: "respondent-org",
+        idempotencyKey: "response-submit-second-manager-0001",
+        proposalText: "A second manager cannot collide with the existing organization response.",
+        uploadedDocuments: [],
+      }),
+      "already-exists",
+    );
+    expect((await db.collection("rfxResponseUploadGrantScopes").doc(published.id)
+      .collection("uploadGrants").doc(secondOrgManager.uid).get()).exists).toBe(false);
+
+    const legacyPublished = await callFunction<{ id: string }>(
+      owner,
+      "rfx_publish",
+      publishInput({ idempotencyKey: "legacy-org-response-publish-0001" }),
+    );
+    const legacyResponseId = "legacy-org-response-record";
+    await db.collection("rfxResponses").doc(legacyResponseId).set({
+      id: legacyResponseId,
+      schemaVersion: 1,
+      version: 1,
+      rfxId: legacyPublished.id,
+      respondentUid: respondent.uid,
+      orgId: "respondent-org",
+      idempotencyKey: "legacy-org-response-replay-0001",
+      status: "submitted",
+      submittedAt: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const legacyReplay = await callFunction<{ id: string }>(respondent, "rfx_submitResponse", {
+      rfxId: legacyPublished.id,
+      orgId: "respondent-org",
+      idempotencyKey: "legacy-org-response-replay-0001",
+      proposalText: "Repair the access marker for a canonical legacy organization response.",
+      uploadedDocuments: [],
+    });
+    expect(legacyReplay.id).toBe(legacyResponseId);
+    expect((await db.collection("rfxResponseAccess").doc(legacyPublished.id)
+      .collection("respondents").doc(respondent.uid).get()).data()).toMatchObject({
+      responseId: legacyResponseId,
+      respondentOrgId: "respondent-org",
+    });
+
+    const outsiderProbePath = `rfxResponses/${published.id}/${outsider.uid}/probe.pdf`;
+    const submittedOrgProbe = await expectCallableError(
+      callFunction(outsider, "rfx_prepareResponseUploads", {
+        rfxId: published.id,
+        orgId: "respondent-org",
+        attachments: [{
+          storagePath: outsiderProbePath,
+          contentType: "application/pdf",
+          size: 10,
+        }],
+      }),
+      "failed-precondition",
+    );
+    const unsubmittedOrgProbe = await expectCallableError(
+      callFunction(outsider, "rfx_prepareResponseUploads", {
+        rfxId: published.id,
+        orgId: "unsubmitted-probe-org",
+        attachments: [{
+          storagePath: outsiderProbePath,
+          contentType: "application/pdf",
+          size: 10,
+        }],
+      }),
+      "failed-precondition",
+    );
+    expect(unsubmittedOrgProbe.message).toBe(submittedOrgProbe.message);
 
     await expectCallableError(
       callFunction(respondent, "rfx_submitResponse", {
@@ -1092,6 +1626,16 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
         status: "pending",
         createdAt: 30,
       }),
+      db.collection("referrals").doc("legacy-mixed-referred-uid").set({
+        id: "legacy-mixed-referred-uid",
+        referrerUid: "legacy-referrer",
+        providerUid: recipient.uid,
+        referredUid: "platform-invite-account",
+        clientEmail: "mixed-private-contact@example.test",
+        consentStatus: "confirmed",
+        status: "pending",
+        createdAt: 40,
+      }),
     ]);
 
     const result = await callFunction<{ referrals: Array<Record<string, unknown>> }>(
@@ -1113,6 +1657,293 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
       clientEmail: "consented-person@example.test",
     });
     expect(JSON.stringify(result)).not.toContain("not-for-recipient@example.test");
+    expect(JSON.stringify(result)).not.toContain("mixed-private-contact@example.test");
+  });
+
+  it("rejects malformed organization memberships when listing legacy business introductions", async () => {
+    const recipient = await createActor("legacy-org-recipient");
+    await Promise.all([
+      db.collection("orgs").doc("legacy-recipient-org").set({
+        id: "legacy-recipient-org",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc("malformed-legacy-membership").set({
+        orgId: "legacy-recipient-org",
+        uid: recipient.uid,
+        role: "member",
+        status: "active",
+        // Untrusted document data must never overwrite the trusted snapshot ID.
+        documentId: `legacy-recipient-org_${recipient.uid}`,
+      }),
+      db.collection("referrals").doc("legacy-org-private-intro").set({
+        id: "legacy-org-private-intro",
+        type: "business_intro",
+        referrerUid: "legacy-org-referrer",
+        providerOrgId: "legacy-recipient-org",
+        clientEmail: "org-private-contact@example.test",
+        consentStatus: "confirmed",
+        status: "pending",
+        createdAt: 40,
+      }),
+    ]);
+
+    const denied = await callFunction<{ referrals: Array<Record<string, unknown>> }>(
+      recipient,
+      "legacyBusinessReferral_listReceived",
+      {},
+    );
+    expect(denied.referrals).toEqual([]);
+    expect(JSON.stringify(denied)).not.toContain("org-private-contact@example.test");
+
+    await db.collection("orgMembers").doc(`legacy-recipient-org_${recipient.uid}`).set({
+      orgId: "legacy-recipient-org",
+      uid: recipient.uid,
+      role: "member",
+      status: "active",
+    });
+    const authorized = await callFunction<{ referrals: Array<Record<string, unknown>> }>(
+      recipient,
+      "legacyBusinessReferral_listReceived",
+      {},
+    );
+    expect(authorized.referrals.map((referral) => referral.id)).toEqual([
+      "legacy-org-private-intro",
+    ]);
+  });
+
+  it("uses current organization authority for legacy provider actions and gives admins no implicit lifecycle bypass", async () => {
+    const formerProvider = await createActor("legacy-former-provider");
+    const currentProvider = await createActor("legacy-current-provider");
+    const admin = await createActor("legacy-lifecycle-admin", "admin");
+    await Promise.all([
+      db.collection("orgs").doc("legacy-provider-org").set({
+        id: "legacy-provider-org",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc(`legacy-provider-org_${formerProvider.uid}`).set({
+        orgId: "legacy-provider-org",
+        uid: formerProvider.uid,
+        role: "member",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc(`legacy-provider-org_${currentProvider.uid}`).set({
+        orgId: "legacy-provider-org",
+        uid: currentProvider.uid,
+        role: "member",
+        status: "active",
+      }),
+      db.collection("referrals").doc("legacy-org-action").set({
+        id: "legacy-org-action",
+        type: "business_intro",
+        referrerUid: "legacy-referrer",
+        providerUid: formerProvider.uid,
+        providerOrgId: "legacy-provider-org",
+        status: "pending",
+        createdAt: 1,
+      }),
+      db.collection("referrals").doc("legacy-individual-action").set({
+        id: "legacy-individual-action",
+        type: "business_intro",
+        referrerUid: "legacy-referrer",
+        providerUid: formerProvider.uid,
+        status: "pending",
+        createdAt: 1,
+      }),
+    ]);
+
+    await db.collection("orgMembers").doc(`legacy-provider-org_${formerProvider.uid}`).delete();
+    await expectCallableError(
+      callFunction(formerProvider, "referral_contact", { referralId: "legacy-org-action" }),
+      "permission-denied",
+    );
+    await expectCallableError(
+      callFunction(admin, "referral_contact", { referralId: "legacy-org-action" }),
+      "permission-denied",
+    );
+    await callFunction(currentProvider, "referral_contact", { referralId: "legacy-org-action" });
+    await callFunction(formerProvider, "referral_contact", { referralId: "legacy-individual-action" });
+    expect((await db.collection("referrals").doc("legacy-org-action").get()).data()?.status)
+      .toBe("contacted");
+    expect((await db.collection("referrals").doc("legacy-individual-action").get()).data()?.status)
+      .toBe("contacted");
+  });
+
+  it("materializes consent-aware exact referral evidence grants from current authority", async () => {
+    const referrer = await createActor("evidence-referrer");
+    const recipient = await createActor("evidence-recipient");
+    const recipientColleague = await createActor("evidence-recipient-colleague");
+    const outsider = await createActor("evidence-outsider");
+    const referralId = "evidence-referral";
+    const referrerPath =
+      `businessReferralEvidence/${referralId}/${referrer.uid}/context.pdf`;
+    const recipientPath =
+      `businessReferralDisputeEvidence/${referralId}/${recipient.uid}/dispute.pdf`;
+    await Promise.all([
+      db.collection("orgs").doc("evidence-referrer-org").set({
+        id: "evidence-referrer-org",
+        status: "active",
+      }),
+      db.collection("orgs").doc("evidence-recipient-org").set({
+        id: "evidence-recipient-org",
+        status: "active",
+      }),
+      db.collection("orgMembers")
+        .doc(`evidence-referrer-org_${referrer.uid}`).set({
+          orgId: "evidence-referrer-org",
+          uid: referrer.uid,
+          role: "owner",
+          status: "active",
+        }),
+      db.collection("orgMembers")
+        .doc(`evidence-recipient-org_${recipient.uid}`).set({
+          orgId: "evidence-recipient-org",
+          uid: recipient.uid,
+          role: "member",
+          status: "active",
+        }),
+      db.collection("orgMembers")
+        .doc(`evidence-recipient-org_${recipientColleague.uid}`).set({
+          orgId: "evidence-recipient-org",
+          uid: recipientColleague.uid,
+          role: "member",
+        }),
+      db.collection("businessReferrals").doc(referralId).set({
+        id: referralId,
+        schemaVersion: 1,
+        referrerUid: referrer.uid,
+        referrerOrgId: "evidence-referrer-org",
+        recipientUid: recipient.uid,
+        recipientOrgId: "evidence-recipient-org",
+        assignedStaffUids: [],
+        status: "sent",
+        consentStatus: "pending",
+        compensationPolicy: { type: "none", status: "none" },
+        referralType: "customer_lead",
+        version: 1,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }),
+    ]);
+
+    const uploadGrant = await callFunction<{
+      success: boolean;
+      operation: string;
+      allowedPathCount: number;
+      expiresAt: number;
+    }>(referrer, "businessReferral_prepareEvidenceAccess", {
+      referralId,
+      operation: "upload",
+      storagePaths: [referrerPath],
+    });
+    expect(uploadGrant).toMatchObject({
+      success: true,
+      operation: "upload",
+      allowedPathCount: 1,
+    });
+    const referralEvidence = new TextEncoder().encode("%PDF-1.4\nreferral evidence");
+    await expect(
+      uploadBytes(
+        storageRef(referrer.storage, referrerPath),
+        referralEvidence,
+        { contentType: "application/pdf" },
+      ),
+    ).rejects.toBeDefined();
+    const referralUpload = await privateStorageRequest(
+      referrer,
+      "upload",
+      referrerPath,
+      referralEvidence,
+    );
+    expect(referralUpload.status).toBe(201);
+    const [referralMetadata] = await getAdminStorage(adminApp).bucket()
+      .file(referrerPath).getMetadata();
+    expect(referralMetadata.metadata).not.toHaveProperty("firebaseStorageDownloadTokens");
+    await expectCallableError(
+      callFunction(outsider, "businessReferral_prepareEvidenceAccess", {
+        referralId,
+        operation: "upload",
+        storagePaths: [
+          `businessReferralEvidence/${referralId}/${outsider.uid}/forged.pdf`,
+        ],
+      }),
+      "permission-denied",
+    );
+    await expectCallableError(
+      callFunction(recipient, "businessReferral_prepareEvidenceAccess", {
+        referralId,
+        operation: "read",
+        storagePaths: [referrerPath],
+      }),
+      "permission-denied",
+    );
+
+    const referrerRead = await callFunction<{ success: boolean }>(
+      referrer,
+      "businessReferral_prepareEvidenceAccess",
+      { referralId, operation: "read", storagePaths: [recipientPath] },
+    );
+    expect(referrerRead.success).toBe(true);
+
+    await db.collection("businessReferrals").doc(referralId).update({
+      consentStatus: "confirmed",
+      updatedAt: Date.now(),
+    });
+    for (const actor of [recipient, recipientColleague]) {
+      const readGrant = await callFunction<{ success: boolean; operation: string }>(
+        actor,
+        "businessReferral_prepareEvidenceAccess",
+        { referralId, operation: "read", storagePaths: [referrerPath] },
+      );
+      expect(readGrant).toMatchObject({ success: true, operation: "read" });
+    }
+    const referralDownload = await privateStorageRequest(recipient, "download", referrerPath);
+    expect(referralDownload.status).toBe(200);
+    expect(await referralDownload.text()).toBe("%PDF-1.4\nreferral evidence");
+
+    await Promise.all([
+      db.collection("orgMembers").doc(`evidence-referrer-org_${referrer.uid}`).delete(),
+      db.collection("orgMembers").doc(`evidence-recipient-org_${recipient.uid}`).delete(),
+    ]);
+    await expectCallableError(
+      callFunction(referrer, "businessReferral_prepareEvidenceAccess", {
+        referralId,
+        operation: "read",
+        storagePaths: [recipientPath],
+      }),
+      "permission-denied",
+    );
+    await expectCallableError(
+      callFunction(recipient, "businessReferral_prepareEvidenceAccess", {
+        referralId,
+        operation: "read",
+        storagePaths: [referrerPath],
+      }),
+      "permission-denied",
+    );
+    expect((await callFunction<{ success: boolean }>(
+      recipientColleague,
+      "businessReferral_prepareEvidenceAccess",
+      { referralId, operation: "read", storagePaths: [referrerPath] },
+    )).success).toBe(true);
+
+    await db.collection("orgs").doc("evidence-recipient-org").update({
+      status: "suspended",
+    });
+    await expectCallableError(
+      callFunction(recipientColleague, "businessReferral_prepareEvidenceAccess", {
+        referralId,
+        operation: "read",
+        storagePaths: [referrerPath],
+      }),
+      "permission-denied",
+    );
+    expect((await db.collection("businessReferralStorageGrantScopes").doc(referralId)
+      .collection("storageGrants").doc(recipient.uid).get()).data()).toMatchObject({
+      grantType: "business_referral_storage",
+      referralId,
+      accessorUid: recipient.uid,
+      allowedReadStoragePaths: [referrerPath],
+    });
   });
 
   it("lists typed and safely inferred platform invitations without leaking mixed referrals", async () => {
@@ -1142,6 +1973,16 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
         status: "pending",
         createdAt: 30,
       }),
+      db.collection("referrals").doc("mixed-referred-uid-referral").set({
+        id: "mixed-referred-uid-referral",
+        referrerUid: "inviter",
+        providerUid: "provider",
+        referredUid: invitee.uid,
+        clientEmail: "referred-uid-private@example.test",
+        consentStatus: "confirmed",
+        status: "pending",
+        createdAt: 40,
+      }),
     ]);
 
     const result = await callFunction<{ invitations: Array<Record<string, unknown>> }>(
@@ -1155,6 +1996,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     ]);
     expect(result.invitations.every((invite) => invite.type === "platform_invite")).toBe(true);
     expect(JSON.stringify(result)).not.toContain("customer@example.test");
+    expect(JSON.stringify(result)).not.toContain("referred-uid-private@example.test");
   });
 
   it("locks a verified legacy settlement against later financial-history rewrites", async () => {
@@ -1261,6 +2103,32 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     });
     expect((await db.collection("businessReferrals").doc(created.referralId).get()).data()?.expiresAt)
       .toBeGreaterThan(Date.now());
+    const overdue = await callFunction<{ referralId: string }>(referrer, "businessReferral_create", {
+      idempotencyKey: "business-referral-overdue-0001",
+      recipientUid: recipient.uid,
+      recipientOrgId: "recipient-org",
+      referralType: "business_lead",
+      title: "Overdue introduction",
+      needSummary: "This referral verifies that expiry is enforced in the response transaction.",
+      consentStatus: "not_required",
+    });
+    await callFunction(referrer, "businessReferral_send", {
+      referralId: overdue.referralId,
+      expectedVersion: 0,
+    });
+    await db.collection("businessReferrals").doc(overdue.referralId).update({
+      expiresAt: Date.now() - 1,
+    });
+    await expectCallableError(
+      callFunction(recipient, "businessReferral_respond", {
+        referralId: overdue.referralId,
+        response: "accepted",
+        expectedVersion: 1,
+      }),
+      "failed-precondition",
+    );
+    expect((await db.collection("businessReferrals").doc(overdue.referralId).get()).data()?.status)
+      .toBe("sent");
     await expectCallableError(
       callFunction(referrer, "businessReferral_respond", {
         referralId: created.referralId,
@@ -1474,6 +2342,76 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
       .toMatchObject({ consentStatus: "confirmed", version: 1 });
     expect((await db.collection("businessReferralContacts").doc(created.referralId).get()).data())
       .toMatchObject({ consentStatus: "confirmed", recipientDisclosureAllowed: true });
+  });
+});
+
+describe("short-lived storage grant cleanup concurrency", () => {
+  it("re-reads refreshed grants transactionally before deleting an expired query candidate", async () => {
+    const now = Date.now();
+    const readGrantRef = db.collection("rfxResponseReadGrantScopes").doc("cleanup-rfx")
+      .collection("readGrants").doc("cleanup-reader");
+    const storageGrantRef = db.collection("businessReferralStorageGrantScopes")
+      .doc("cleanup-referral").collection("storageGrants").doc("cleanup-reader");
+    const uploadGrantRef = db.collection("rfxResponseUploadGrantScopes").doc("cleanup-rfx")
+      .collection("uploadGrants").doc("cleanup-uploader");
+    const orphanPath = "rfxResponses/cleanup-rfx/cleanup-uploader/orphan.pdf";
+    await Promise.all([
+      readGrantRef.set({
+        grantType: "rfx_response_read",
+        expiresAt: now - 1,
+      }),
+      storageGrantRef.set({
+        grantType: "business_referral_storage",
+        expiresAt: now - 1,
+      }),
+      uploadGrantRef.set({
+        grantType: "rfx_response_upload",
+        rfxId: "cleanup-rfx",
+        respondentUid: "cleanup-uploader",
+        allowedStoragePaths: [orphanPath],
+        expiresAt: now - 1,
+      }),
+      getAdminStorage(adminApp).bucket().file(orphanPath).save(Buffer.from("orphan"), {
+        metadata: { contentType: "application/pdf" },
+      }),
+    ]);
+
+    // Model the scheduler query observing both expired candidates, followed by
+    // a callable refreshing them before cleanup reaches the delete transaction.
+    const queriedCandidates = await Promise.all([
+      readGrantRef.get(),
+      storageGrantRef.get(),
+      uploadGrantRef.get(),
+    ]);
+    expect(queriedCandidates.every((snapshot) => snapshot.exists)).toBe(true);
+    const refreshedExpiresAt = now + 60_000;
+    await Promise.all([
+      readGrantRef.update({ expiresAt: refreshedExpiresAt }),
+      storageGrantRef.update({ expiresAt: refreshedExpiresAt }),
+      uploadGrantRef.update({ expiresAt: refreshedExpiresAt }),
+    ]);
+
+    expect(await cleanupExpiredResponseReadGrantAt(readGrantRef, now, db)).toBe(false);
+    expect(await cleanupExpiredBusinessReferralStorageGrantAt(storageGrantRef, now, db))
+      .toBe(false);
+    expect(await cleanupExpiredResponseUploadGrantAt(uploadGrantRef, now, db)).toBe(false);
+    expect((await readGrantRef.get()).data()?.expiresAt).toBe(refreshedExpiresAt);
+    expect((await storageGrantRef.get()).data()?.expiresAt).toBe(refreshedExpiresAt);
+    expect((await uploadGrantRef.get()).data()?.expiresAt).toBe(refreshedExpiresAt);
+
+    await Promise.all([
+      readGrantRef.update({ expiresAt: now - 1 }),
+      storageGrantRef.update({ expiresAt: now - 1 }),
+      uploadGrantRef.update({ expiresAt: now - 1 }),
+    ]);
+    expect(await cleanupExpiredResponseReadGrantAt(readGrantRef, now, db)).toBe(true);
+    expect(await cleanupExpiredBusinessReferralStorageGrantAt(storageGrantRef, now, db))
+      .toBe(true);
+    expect(await cleanupExpiredResponseUploadGrantAt(uploadGrantRef, now, db)).toBe(true);
+    expect((await readGrantRef.get()).exists).toBe(false);
+    expect((await storageGrantRef.get()).exists).toBe(false);
+    expect((await uploadGrantRef.get()).exists).toBe(false);
+    expect((await getAdminStorage(adminApp).bucket().file(orphanPath).exists())[0]).toBe(true);
   });
 });
 

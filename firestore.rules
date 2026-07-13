@@ -66,10 +66,12 @@ service cloud.firestore {
 
     function isLegacyReferralParty(referralData) {
       return isSignedIn()
-        && (referralData.referrerUid == request.auth.uid
-            || ("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
+        && ((("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
+              || (!("referrerOrgId" in referralData)
+                  && referralData.referrerUid == request.auth.uid))
             || (isUnambiguousLegacyBusinessReferral(referralData)
                 && legacyBusinessContactMayBeDisclosed(referralData)
+                && !("providerOrgId" in referralData)
                 && "providerUid" in referralData
                 && referralData.providerUid == request.auth.uid)
             || (isUnambiguousLegacyBusinessReferral(referralData)
@@ -87,6 +89,23 @@ service cloud.firestore {
                 && "invitedEmail" in referralData
                 && request.auth.token.email_verified == true
                 && request.auth.token.email == referralData.invitedEmail));
+    }
+
+    function isRfxResponseRespondent(responseData) {
+      return isSignedIn()
+        && (("respondentOrgId" in responseData
+              && responseData.respondentOrgId is string
+              && (!("orgId" in responseData)
+                  || (responseData.orgId is string
+                      && responseData.orgId == responseData.respondentOrgId))
+              && isOrgMember(responseData.respondentOrgId))
+            || (!("respondentOrgId" in responseData)
+                && "orgId" in responseData
+                && responseData.orgId is string
+                && isOrgMember(responseData.orgId))
+            || (!("respondentOrgId" in responseData)
+                && !("orgId" in responseData)
+                && responseData.respondentUid == request.auth.uid));
     }
 
     function isUnambiguousLegacyPlatformInvite(referralData) {
@@ -131,10 +150,8 @@ service cloud.firestore {
 
     function isBusinessReferralParty(referralData) {
       return isSignedIn()
-        && (referralData.referrerUid == request.auth.uid
-            || ("recipientUid" in referralData && referralData.recipientUid == request.auth.uid)
-            || ("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
-            || ("recipientOrgId" in referralData && isOrgMember(referralData.recipientOrgId))
+        && (isBusinessReferralReferrer(referralData)
+            || isBusinessReferralRecipient(referralData)
             || isAssignedReferralStaff(referralData));
     }
 
@@ -147,14 +164,17 @@ service cloud.firestore {
 
     function isBusinessReferralReferrer(referralData) {
       return isSignedIn()
-        && (referralData.referrerUid == request.auth.uid
-            || ("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId)));
+        && (("referrerOrgId" in referralData && isOrgMember(referralData.referrerOrgId))
+            || (!("referrerOrgId" in referralData)
+                && referralData.referrerUid == request.auth.uid));
     }
 
     function isBusinessReferralRecipient(referralData) {
       return isSignedIn()
-        && (("recipientUid" in referralData && referralData.recipientUid == request.auth.uid)
-            || ("recipientOrgId" in referralData && isOrgMember(referralData.recipientOrgId)));
+        && (("recipientOrgId" in referralData && isOrgMember(referralData.recipientOrgId))
+            || (!("recipientOrgId" in referralData)
+                && "recipientUid" in referralData
+                && referralData.recipientUid == request.auth.uid));
     }
 
     function hasMemberUid(memberUids) {
@@ -246,9 +266,7 @@ service cloud.firestore {
     // RFx owner can update status (accept/decline); respondent can update their own.
     match /rfxResponses/{responseId} {
       allow read: if isSignedIn()
-                  && (((!("respondentOrgId" in resource.data)
-                        && resource.data.respondentUid == request.auth.uid)
-                      || ("respondentOrgId" in resource.data && isOrgMember(resource.data.respondentOrgId))
+                  && ((isRfxResponseRespondent(resource.data)
                       || (exists(/databases/$(database)/documents/rfx/$(resource.data.rfxId))
                           && ownsRfx(get(/databases/$(database)/documents/rfx/$(resource.data.rfxId)).data))
                       || isStaff()));

@@ -4,6 +4,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as admin from "firebase-admin";
 import { FieldPath, FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
+import { z } from "zod";
 import { CREDIT_COSTS, MEMBERSHIP_TIERS } from "./config";
 import {
   parseCallableInput,
@@ -37,6 +38,8 @@ const PUBLISH_ACTION = "rfx_publish";
 const SUBMIT_RESPONSE_ACTION = "rfx_submitResponse";
 const MAX_RESPONSES_PER_RFX = 400;
 const RESPONSE_UPLOAD_GRANT_TTL_MS = 2 * 60 * 60 * 1_000;
+const RESPONSE_READ_GRANT_TTL_MS = 60 * 1_000;
+const RESPONSE_FILE_ACCESS_DENIED = "RFx response file access is required";
 const MAX_UPLOAD_GRANT_PATHS = 26;
 const MAX_UPLOAD_GRANT_CLEANUPS = 100;
 const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
@@ -52,6 +55,14 @@ const ALLOWED_ATTACHMENT_CONTENT_TYPES = new Set([
 ]);
 
 type RecordData = Record<string, unknown>;
+
+const rfxPrepareResponseDownloadInputSchema = z
+  .object({
+    rfxId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
+    respondentUid: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
+    storagePath: z.string().trim().min(1).max(1_024),
+  })
+  .strict();
 
 function encodeGeohash(lat: number, lng: number, precision = 9): string {
   let idx = 0;
@@ -126,6 +137,22 @@ function documentVersion(data: RecordData): number {
 
 function rfxOwnerUid(data: RecordData): string | undefined {
   return stringValue(data.ownerUid) ?? stringValue(data.createdBy);
+}
+
+function hasRfxOrganizationScope(data: RecordData): boolean {
+  return Object.prototype.hasOwnProperty.call(data, "orgId");
+}
+
+function requireValidRfxOrganizationId(data: RecordData): string | undefined {
+  if (!hasRfxOrganizationScope(data)) return undefined;
+  const orgId = stringValue(data.orgId);
+  if (!orgId) {
+    throw new HttpsError(
+      "failed-precondition",
+      "RFx organization ownership is malformed and requires administrative review",
+    );
+  }
+  return orgId;
 }
 
 function rfxStatus(data: RecordData): string {
@@ -225,7 +252,7 @@ async function readActiveRfxUsage(
     const status = rfxStatus(rfx);
     const belongsToSubject = orgId
       ? stringValue(rfx.orgId) === orgId
-      : !stringValue(rfx.orgId);
+      : !hasRfxOrganizationScope(rfx);
     return belongsToSubject && (status === "open" || status === "under_review");
   }).length;
   return { ref, activeCount, subjectType, subjectId };
@@ -279,14 +306,31 @@ async function requireRfxManager(
   rfx: RecordData,
   options: { allowStaff?: boolean } = {},
 ): Promise<void> {
+  const orgId = requireValidRfxOrganizationId(rfx);
   if (actor.isAdmin || (options.allowStaff && actor.role === "staff")) return;
-  const orgId = stringValue(rfx.orgId);
   if (orgId) {
     await loadOrgAuthority(transaction, db, orgId, actor.uid, { managementRequired: true });
     return;
   }
   if (rfxOwnerUid(rfx) === actor.uid) return;
   throw new HttpsError("permission-denied", "RFx owner authorization is required");
+}
+
+async function hasActiveOrgAuthority(
+  transaction: FirebaseFirestore.Transaction,
+  db: FirebaseFirestore.Firestore,
+  orgId: string | undefined,
+  uid: string,
+  managementRequired = false,
+): Promise<boolean> {
+  if (!orgId) return false;
+  try {
+    await loadOrgAuthority(transaction, db, orgId, uid, { managementRequired });
+    return true;
+  } catch (error) {
+    if (error instanceof HttpsError && error.code === "permission-denied") return false;
+    throw error;
+  }
 }
 
 function deterministicResponseId(rfxId: string, uid: string, orgId?: string): string {
@@ -302,6 +346,17 @@ function responseUploadGrantRef(
   return db.collection("rfxResponseUploadGrantScopes")
     .doc(rfxId)
     .collection("uploadGrants")
+    .doc(uid);
+}
+
+function responseReadGrantRef(
+  db: FirebaseFirestore.Firestore,
+  rfxId: string,
+  uid: string,
+): FirebaseFirestore.DocumentReference {
+  return db.collection("rfxResponseReadGrantScopes")
+    .doc(rfxId)
+    .collection("readGrants")
     .doc(uid);
 }
 
@@ -344,6 +399,33 @@ function requireCanonicalStoragePath(path: string, rfxId: string, actorUid: stri
       "invalid-argument",
       `Attachment paths must use the private ${prefix} namespace`,
     );
+  }
+}
+
+function requireReferencedResponseStoragePath(
+  path: string,
+  rfxId: string,
+  respondentUid: string,
+): void {
+  const prefixes = [
+    `rfxResponses/${rfxId}/${respondentUid}/`,
+    `rfxProposals/${rfxId}/${respondentUid}/`,
+    `rfxDocuments/${rfxId}/${respondentUid}/`,
+  ];
+  const lowered = path.toLowerCase();
+  const segments = path.split("/");
+  if (
+    !prefixes.some((prefix) => path.startsWith(prefix) && path.length > prefix.length)
+    || path.startsWith("/")
+    || path.includes("\\")
+    || path.includes("\0")
+    || segments.some((segment) => !segment || segment === "." || segment === "..")
+    || /^(?:https?:|gs:)/i.test(path)
+    || lowered.includes("%2f")
+    || lowered.includes("%5c")
+    || lowered.includes("%2e")
+  ) {
+    throw new HttpsError("invalid-argument", "The RFx response file path is not canonical");
   }
 }
 
@@ -520,10 +602,42 @@ function responseSubjectMatches(
   uid: string,
   orgId?: string,
 ): boolean {
-  const responseOrgId = stringValue(response.respondentOrgId) ?? stringValue(response.orgId);
+  const responseOrgId = requireValidResponseOrganizationId(response);
   if (orgId) return responseOrgId === orgId;
-  return !responseOrgId
+  return responseOrgId === undefined
     && (stringValue(response.respondentUid) ?? stringValue(response.createdBy)) === uid;
+}
+
+function responseSubmitterMatches(response: RecordData, uid: string): boolean {
+  return (stringValue(response.respondentUid) ?? stringValue(response.createdBy)) === uid;
+}
+
+function hasResponseOrganizationScope(response: RecordData): boolean {
+  return Object.prototype.hasOwnProperty.call(response, "respondentOrgId")
+    || Object.prototype.hasOwnProperty.call(response, "orgId");
+}
+
+function requireValidResponseOrganizationId(response: RecordData): string | undefined {
+  if (!hasResponseOrganizationScope(response)) return undefined;
+  const hasCanonical = Object.prototype.hasOwnProperty.call(response, "respondentOrgId");
+  const hasLegacy = Object.prototype.hasOwnProperty.call(response, "orgId");
+  const canonicalOrgId = hasCanonical ? stringValue(response.respondentOrgId) : undefined;
+  const legacyOrgId = hasLegacy ? stringValue(response.orgId) : undefined;
+  if (
+    (hasCanonical && !canonicalOrgId)
+    || (hasLegacy && !legacyOrgId)
+    || (canonicalOrgId && legacyOrgId && canonicalOrgId !== legacyOrgId)
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "RFx response organization ownership is malformed and requires administrative review",
+    );
+  }
+  return canonicalOrgId ?? legacyOrgId;
+}
+
+function requireValidResponseAccessOrganizationId(responseAccess: RecordData): string | undefined {
+  return requireValidResponseOrganizationId(responseAccess);
 }
 
 function evaluationCriteriaFromRfx(rfx: RecordData): Array<{ id: string; weight: number }> {
@@ -851,6 +965,7 @@ export const rfx_moderate = onCall(async (request) => {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists) throw new HttpsError("not-found", "RFx not found");
     const rfx = asRecord(snapshot.data());
+    const rfxOrgId = requireValidRfxOrganizationId(rfx);
     const currentVersion = assertExpectedVersion(rfx, input.expectedVersion, "RFx");
     if (rfxStatus(rfx) !== "under_review") {
       throw new HttpsError("failed-precondition", "Only under-review RFx may be moderated");
@@ -875,7 +990,7 @@ export const rfx_moderate = onCall(async (request) => {
     const nextApprovalStatus = approved ? "approved" : "rejected";
     const ownerUid = rfxOwnerUid(rfx);
     const activeUsage = !approved && ownerUid
-      ? await readActiveRfxUsage(transaction, db, ownerUid, stringValue(rfx.orgId))
+      ? await readActiveRfxUsage(transaction, db, ownerUid, rfxOrgId)
       : undefined;
     const update: RecordData = {
       status: nextStatus,
@@ -944,6 +1059,7 @@ export const rfx_cancel = onCall(async (request) => {
     if (!snapshot.exists) throw new HttpsError("not-found", "RFx not found");
     const rfx = asRecord(snapshot.data());
     await requireRfxManager(transaction, db, actor, rfx);
+    const rfxOrgId = requireValidRfxOrganizationId(rfx);
     const currentVersion = assertExpectedVersion(rfx, input.expectedVersion, "RFx");
 
     const currentStatus = rfxStatus(rfx);
@@ -958,7 +1074,7 @@ export const rfx_cancel = onCall(async (request) => {
     const ownerUid = rfxOwnerUid(rfx);
     const wasActive = currentStatus === "under_review" || currentStatus === "open";
     const activeUsage = wasActive && ownerUid
-      ? await readActiveRfxUsage(transaction, db, ownerUid, stringValue(rfx.orgId))
+      ? await readActiveRfxUsage(transaction, db, ownerUid, rfxOrgId)
       : undefined;
 
     const awardedResponsesSnap = awardOverride
@@ -1059,16 +1175,27 @@ export const rfx_prepareResponseUploads = onCall(async (request) => {
   const grantRef = responseUploadGrantRef(db, input.rfxId, actor.uid);
 
   return db.runTransaction(async (transaction) => {
-    const [rfxSnapshot, responseAccessSnapshot, grantSnapshot] = await Promise.all([
+    const [rfxSnapshot, responseAccessSnapshot, grantSnapshot, responseQuerySnapshot] = await Promise.all([
       transaction.get(rfxRef),
       transaction.get(responseAccessRef),
       transaction.get(grantRef),
+      transaction.get(db.collection("rfxResponses").where("rfxId", "==", input.rfxId)),
     ]);
     if (!rfxSnapshot.exists) throw new HttpsError("not-found", "RFx not found");
     if (responseAccessSnapshot.exists) {
       throw new HttpsError("failed-precondition", "This response is already submitted");
     }
     const rfx = asRecord(rfxSnapshot.data());
+    const issuerOrgId = requireValidRfxOrganizationId(rfx);
+    const actorResponseAlreadyExists = responseQuerySnapshot.docs.some((document) => (
+      responseSubmitterMatches(asRecord(document.data()), actor.uid)
+    ));
+    if (actorResponseAlreadyExists) {
+      throw new HttpsError(
+        "already-exists",
+        "This submitter has already submitted for this RFx",
+      );
+    }
     const now = Date.now();
     if (rfxStatus(rfx) !== "open" || rfx.adminApprovalStatus !== "approved") {
       throw new HttpsError("failed-precondition", "RFx is not open and approved for responses");
@@ -1083,7 +1210,6 @@ export const rfx_prepareResponseUploads = onCall(async (request) => {
     if (ownerUid === actor.uid) {
       throw new HttpsError("permission-denied", "RFx owners cannot respond to their own RFx");
     }
-    const issuerOrgId = stringValue(rfx.orgId);
     if (issuerOrgId && issuerOrgId === input.orgId) {
       throw new HttpsError("permission-denied", "The issuing organization cannot respond to its own RFx");
     }
@@ -1099,6 +1225,15 @@ export const rfx_prepareResponseUploads = onCall(async (request) => {
     });
     if (!eligibility.result.allowed) throwEligibilityFailure(eligibility.result);
     if (!actor.isAdmin) requireActiveMembership(eligibility.user, now);
+    const subjectResponseAlreadyExists = responseQuerySnapshot.docs.some((document) => (
+      responseSubjectMatches(asRecord(document.data()), actor.uid, input.orgId)
+    ));
+    if (subjectResponseAlreadyExists) {
+      throw new HttpsError(
+        "already-exists",
+        "This response subject has already submitted for this RFx",
+      );
+    }
 
     if (issuerOrgId) {
       const issuerMembership = await transaction.get(
@@ -1164,7 +1299,97 @@ export const rfx_prepareResponseUploads = onCall(async (request) => {
   });
 });
 
-/** Submit one immutable response per RFx and respondent subject. */
+/**
+ * Issue a one-minute, exact-path read grant. Storage Rules consume only this
+ * materialized decision, keeping their Firestore access budget bounded while
+ * this callable evaluates current user, organization, and RFx authority.
+ */
+export const rfx_prepareResponseDownload = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const input = parseCallableInput(rfxPrepareResponseDownloadInputSchema, request.data);
+  requireReferencedResponseStoragePath(input.storagePath, input.rfxId, input.respondentUid);
+
+  const db = getDb();
+  const rfxRef = db.collection("rfx").doc(input.rfxId);
+  const responseAccessRef = db.collection("rfxResponseAccess")
+    .doc(input.rfxId)
+    .collection("respondents")
+    .doc(input.respondentUid);
+  const grantRef = responseReadGrantRef(db, input.rfxId, actor.uid);
+
+  return db.runTransaction(async (transaction) => {
+    const [rfxSnapshot, responseAccessSnapshot] = await Promise.all([
+      transaction.get(rfxRef),
+      transaction.get(responseAccessRef),
+    ]);
+    if (!rfxSnapshot.exists) throw new HttpsError("not-found", "RFx not found");
+    if (!responseAccessSnapshot.exists) {
+      throw new HttpsError("permission-denied", RESPONSE_FILE_ACCESS_DENIED);
+    }
+
+    const rfx = asRecord(rfxSnapshot.data());
+    requireValidRfxOrganizationId(rfx);
+    const responseAccess = asRecord(responseAccessSnapshot.data());
+    const paths = Array.isArray(responseAccess.attachmentStoragePaths)
+      ? responseAccess.attachmentStoragePaths.filter(
+        (path): path is string => typeof path === "string",
+      )
+      : [];
+    if (
+      responseAccess.rfxId !== input.rfxId
+      || responseAccess.respondentUid !== input.respondentUid
+      || (responseAccess.id !== undefined && responseAccess.id !== input.respondentUid)
+      || !paths.includes(input.storagePath)
+    ) {
+      throw new HttpsError("permission-denied", RESPONSE_FILE_ACCESS_DENIED);
+    }
+
+    let authorized = actor.isAdmin || actor.role === "staff";
+    const respondentOrgId = requireValidResponseAccessOrganizationId(responseAccess);
+    if (!authorized) {
+      authorized = respondentOrgId
+        ? await hasActiveOrgAuthority(transaction, db, respondentOrgId, actor.uid)
+        : input.respondentUid === actor.uid;
+    }
+    if (!authorized) {
+      try {
+        await requireRfxManager(transaction, db, actor, rfx);
+        authorized = true;
+      } catch (error) {
+        if (!(error instanceof HttpsError) || error.code !== "permission-denied") throw error;
+      }
+    }
+    if (!authorized) {
+      throw new HttpsError("permission-denied", RESPONSE_FILE_ACCESS_DENIED);
+    }
+
+    const now = Date.now();
+    const expiresAt = now + RESPONSE_READ_GRANT_TTL_MS;
+    transaction.set(grantRef, {
+      id: actor.uid,
+      grantType: "rfx_response_read",
+      rfxId: input.rfxId,
+      accessorUid: actor.uid,
+      allowedStoragePaths: [input.storagePath],
+      createdAt: now,
+      updatedAt: now,
+      expiresAt,
+    });
+    writeExchangeAudit(transaction, db, {
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      action: "rfx_response_read_grant_prepared",
+      entityType: "rfxResponse",
+      entityId: stringValue(responseAccess.responseId) ?? input.respondentUid,
+      orgId: stringValue(rfx.orgId),
+      metadata: { rfxId: input.rfxId, storagePath: input.storagePath },
+      createdAt: now,
+    });
+    return { success: true, expiresAt, storagePath: input.storagePath };
+  });
+});
+
+/** Submit one immutable response per RFx and authenticated submitter UID. */
 export const rfx_submitResponse = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
   const input = parseCallableInput(rfxSubmitResponseInputSchema, request.data);
@@ -1230,6 +1455,7 @@ export const rfx_submitResponse = onCall(async (request) => {
     const rfxSnap = await transaction.get(rfxRef);
     if (!rfxSnap.exists) throw new HttpsError("not-found", "RFx not found");
     const rfx = asRecord(rfxSnap.data());
+    const issuerOrgId = requireValidRfxOrganizationId(rfx);
     if (rfxStatus(rfx) !== "open" || rfx.adminApprovalStatus !== "approved") {
       throw new HttpsError("failed-precondition", "RFx is not open and approved for responses");
     }
@@ -1246,7 +1472,6 @@ export const rfx_submitResponse = onCall(async (request) => {
     if (ownerUid === actor.uid) {
       throw new HttpsError("permission-denied", "RFx owners cannot respond to their own RFx");
     }
-    const issuerOrgId = stringValue(rfx.orgId);
     if (issuerOrgId && issuerOrgId === input.orgId) {
       throw new HttpsError("permission-denied", "The issuing organization cannot respond to its own RFx");
     }
@@ -1279,19 +1504,41 @@ export const rfx_submitResponse = onCall(async (request) => {
 
     validateResponseAttachments(input, rfx, input.rfxId, actor.uid);
 
-    const [responseQuerySnap, grantSnapshot] = await Promise.all([
+    const [responseQuerySnap, grantSnapshot, responseAccessSnapshot] = await Promise.all([
       transaction.get(db.collection("rfxResponses").where("rfxId", "==", input.rfxId)),
       transaction.get(grantRef),
+      transaction.get(responseAccessRef),
     ]);
-    const existing = responseQuerySnap.docs.find((doc) => responseSubjectMatches(
-      asRecord(doc.data()),
-      actor.uid,
-      input.orgId,
+    const actorResponses = responseQuerySnap.docs.filter((doc) => (
+      responseSubmitterMatches(asRecord(doc.data()), actor.uid)
     ));
+    if (actorResponses.length > 1) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Multiple responses for this submitter require administrative review",
+      );
+    }
+    const existing = actorResponses[0];
     if (existing) {
       const existingData = asRecord(existing.data());
-      if (existingData.idempotencyKey !== input.idempotencyKey) {
-        throw new HttpsError("already-exists", "This respondent has already submitted a response");
+      const existingResponseOrgId = requireValidResponseOrganizationId(existingData);
+      if (
+        !responseSubjectMatches(existingData, actor.uid, input.orgId)
+        || existingData.idempotencyKey !== input.idempotencyKey
+      ) {
+        throw new HttpsError(
+          "already-exists",
+          "This submitter has already submitted a response for this RFx",
+        );
+      }
+      if (
+        responseAccessSnapshot.exists
+        && stringValue(asRecord(responseAccessSnapshot.data()).responseId) !== existing.id
+      ) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The response access marker requires administrative review",
+        );
       }
       const existingResult = {
         id: existing.id,
@@ -1314,13 +1561,28 @@ export const rfx_submitResponse = onCall(async (request) => {
         respondentUid: actor.uid,
         responseId: existing.id,
         attachmentStoragePaths: submittedAttachmentStoragePaths(existingData),
-        ...(stringValue(existingData.respondentOrgId)
-          ? { respondentOrgId: stringValue(existingData.respondentOrgId) }
+        ...(existingResponseOrgId
+          ? { respondentOrgId: existingResponseOrgId }
           : {}),
         submittedAt: existingData.submittedAt ?? transactionStartedAt,
       });
       if (grantSnapshot.exists) transaction.delete(grantRef);
       return existingResult;
+    }
+    const existingSubjectResponse = responseQuerySnap.docs.find((document) => (
+      responseSubjectMatches(asRecord(document.data()), actor.uid, input.orgId)
+    ));
+    if (existingSubjectResponse) {
+      throw new HttpsError(
+        "already-exists",
+        "This response subject has already submitted a response for this RFx",
+      );
+    }
+    if (responseAccessSnapshot.exists) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The response access marker requires administrative review",
+      );
     }
     if (responseQuerySnap.size >= MAX_RESPONSES_PER_RFX) {
       throw new HttpsError(
@@ -1386,7 +1648,7 @@ export const rfx_submitResponse = onCall(async (request) => {
     setDefined(responseDocument, "proposalStoragePath", input.proposalStoragePath);
 
     transaction.create(responseRef, responseDocument);
-    transaction.set(responseAccessRef, {
+    transaction.create(responseAccessRef, {
       id: actor.uid,
       rfxId: input.rfxId,
       respondentUid: actor.uid,
@@ -1442,52 +1704,45 @@ export const rfx_submitResponse = onCall(async (request) => {
   });
 });
 
-async function cleanupExpiredResponseUploadGrant(
+export async function cleanupExpiredResponseUploadGrantAt(
   grantRef: FirebaseFirestore.DocumentReference,
   now: number,
-): Promise<{ removed: boolean; deletedObjects: number }> {
-  const db = getDb();
-  const paths = await db.runTransaction(async (transaction) => {
+  db: FirebaseFirestore.Firestore = getDb(),
+): Promise<boolean> {
+  return db.runTransaction(async (transaction) => {
     const grantSnapshot = await transaction.get(grantRef);
-    if (!grantSnapshot.exists) return null;
+    if (!grantSnapshot.exists) return false;
     const grant = asRecord(grantSnapshot.data());
     if (
       grant.grantType !== "rfx_response_upload"
       || !isFiniteNumber(grant.expiresAt)
       || grant.expiresAt > now
-    ) return null;
-    const rfxId = stringValue(grant.rfxId);
-    const respondentUid = stringValue(grant.respondentUid);
-    if (!rfxId || !respondentUid) {
-      transaction.delete(grantRef);
-      return [];
-    }
-    const responseAccessSnapshot = await transaction.get(
-      db.collection("rfxResponseAccess").doc(rfxId).collection("respondents").doc(respondentUid),
-    );
+    ) return false;
     transaction.delete(grantRef);
-    if (responseAccessSnapshot.exists) return [];
-    const prefix = `rfxResponses/${rfxId}/${respondentUid}/`;
-    return Array.isArray(grant.allowedStoragePaths)
-      ? grant.allowedStoragePaths.filter(
-        (path): path is string => typeof path === "string" && path.startsWith(prefix),
-      )
-      : [];
+    return true;
   });
-  if (paths === null) return { removed: false, deletedObjects: 0 };
-  const deletions = await Promise.all(paths.map(async (path) => {
-    try {
-      await admin.storage().bucket().file(path).delete({ ignoreNotFound: true });
-      return true;
-    } catch (error) {
-      logger.warn("Could not remove expired RFx upload", { path, error });
-      return false;
-    }
-  }));
-  return { removed: true, deletedObjects: deletions.filter(Boolean).length };
 }
 
-/** Removes expired upload grants and their unsubmitted orphan objects. */
+export async function cleanupExpiredResponseReadGrantAt(
+  grantRef: FirebaseFirestore.DocumentReference,
+  now: number,
+  db: FirebaseFirestore.Firestore = getDb(),
+): Promise<boolean> {
+  return db.runTransaction(async (transaction) => {
+    const currentSnapshot = await transaction.get(grantRef);
+    if (!currentSnapshot.exists) return false;
+    const current = asRecord(currentSnapshot.data());
+    if (
+      current.grantType !== "rfx_response_read"
+      || !isFiniteNumber(current.expiresAt)
+      || current.expiresAt > now
+    ) return false;
+    transaction.delete(grantRef);
+    return true;
+  });
+}
+
+/** Removes expired upload/read grants without racing a refreshed or submitted object. */
 export const rfx_cleanupResponseUploadGrants = onSchedule(
   { schedule: "every 60 minutes", timeZone: "UTC", retryCount: 3 },
   async () => {
@@ -1500,12 +1755,23 @@ export const rfx_cleanupResponseUploadGrants = onSchedule(
       .limit(MAX_UPLOAD_GRANT_CLEANUPS)
       .get();
     const outcomes = await Promise.all(
-      snapshot.docs.map((document) => cleanupExpiredResponseUploadGrant(document.ref, now)),
+      snapshot.docs.map((document) => cleanupExpiredResponseUploadGrantAt(document.ref, now, db)),
     );
-    logger.info("RFx response upload grant cleanup completed", {
+    const readGrantSnapshot = await db.collectionGroup("readGrants")
+      .where("expiresAt", "<=", now)
+      .orderBy("expiresAt", "asc")
+      .limit(MAX_UPLOAD_GRANT_CLEANUPS)
+      .get();
+    const readGrantOutcomes = await Promise.all(
+      readGrantSnapshot.docs.map((document) => (
+        cleanupExpiredResponseReadGrantAt(document.ref, now, db)
+      )),
+    );
+    logger.info("RFx response storage grant cleanup completed", {
       scanned: snapshot.size,
-      removed: outcomes.filter((outcome) => outcome.removed).length,
-      deletedObjects: outcomes.reduce((total, outcome) => total + outcome.deletedObjects, 0),
+      removed: outcomes.filter(Boolean).length,
+      readGrantsScanned: readGrantSnapshot.size,
+      readGrantsRemoved: readGrantOutcomes.filter(Boolean).length,
     });
   },
 );
@@ -1530,12 +1796,13 @@ export const rfx_evaluateResponse = onCall(async (request) => {
     const rfx = asRecord(rfxSnap.data());
 
     await requireRfxManager(transaction, db, actor, rfx, { allowStaff: true });
+    const issuerOrgId = requireValidRfxOrganizationId(rfx);
     const respondentUid = stringValue(response.respondentUid) ?? stringValue(response.createdBy);
-    const respondentOrgId = stringValue(response.respondentOrgId) ?? stringValue(response.orgId);
+    const respondentOrgId = requireValidResponseOrganizationId(response);
     if (respondentUid === actor.uid) {
       throw new HttpsError("permission-denied", "Respondents cannot evaluate their own response");
     }
-    if (respondentOrgId && respondentOrgId === stringValue(rfx.orgId)) {
+    if (respondentOrgId && respondentOrgId === issuerOrgId) {
       throw new HttpsError("failed-precondition", "The issuing organization cannot evaluate a self-response");
     }
     if (respondentOrgId) {
@@ -1663,7 +1930,7 @@ export const rfx_evaluateResponse = onCall(async (request) => {
 
     const ownerUid = rfxOwnerUid(rfx);
     const activeUsage = currentRfxStatus === "open" && ownerUid
-      ? await readActiveRfxUsage(transaction, db, ownerUid, stringValue(rfx.orgId))
+      ? await readActiveRfxUsage(transaction, db, ownerUid, issuerOrgId)
       : undefined;
     const responsesSnap = await transaction.get(
       db.collection("rfxResponses").where("rfxId", "==", rfxId),

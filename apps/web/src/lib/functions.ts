@@ -1,5 +1,5 @@
 import { httpsCallable } from "firebase/functions";
-import { functions } from "./firebase";
+import { app, auth, functions } from "./firebase";
 import type {
   EvaluationCriterion,
   ReferralDoc,
@@ -54,10 +54,16 @@ export interface ManagedRfxResult {
   };
   totalCount: number;
   truncated: boolean;
+  dashboardMetrics?: {
+    activeBidCount: number;
+    activeBidCountTruncated: boolean;
+    receivedResponseCount: number;
+    receivedResponseCountTruncated: boolean;
+  };
 }
 
 export const listManagedRfxFn = httpsCallable<
-  { maxResults?: number },
+  { maxResults?: number; includeDashboardMetrics?: boolean },
   ManagedRfxResult
 >(functions, "rfx_listManaged");
 
@@ -115,6 +121,68 @@ export const prepareRfxResponseUploadsFn = httpsCallable<
   },
   { success: true; expiresAt: number; allowedPathCount: number }
 >(functions, "rfx_prepareResponseUploads");
+export const prepareRfxResponseDownloadFn = httpsCallable<
+  { rfxId: string; respondentUid: string; storagePath: string },
+  { success: true; expiresAt: number; storagePath: string }
+>(functions, "rfx_prepareResponseDownload");
+
+function privateStorageEndpointUrl(): string {
+  const projectId = app.options.projectId;
+  if (!projectId) throw new Error("Firebase project configuration is unavailable");
+  if (process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATOR === "true") {
+    return `http://127.0.0.1:5004/${projectId}/us-central1/exchange_privateStorage`;
+  }
+  return `https://us-central1-${projectId}.cloudfunctions.net/exchange_privateStorage`;
+}
+
+async function privateStorageRequest(
+  operation: "upload" | "download",
+  storagePath: string,
+  body?: Blob,
+): Promise<Response> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Authentication is required for private document access");
+  const token = await user.getIdToken();
+  const response = await fetch(privateStorageEndpointUrl(), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Exchange-Storage-Operation": operation,
+      "X-Storage-Path": storagePath,
+      ...(body?.type ? { "Content-Type": body.type } : {}),
+    },
+    body,
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    let message = "Private document processing failed";
+    try {
+      const payload = await response.json() as { error?: unknown };
+      if (typeof payload.error === "string") message = payload.error;
+    } catch {
+      // Keep the safe fallback; private endpoint failures never expose raw bodies.
+    }
+    throw new Error(message);
+  }
+  return response;
+}
+
+export async function uploadPrivateExchangeObject(
+  storagePath: string,
+  file: File,
+): Promise<{ storagePath: string; contentType: string; size: number }> {
+  const response = await privateStorageRequest("upload", storagePath, file);
+  return response.json() as Promise<{
+    storagePath: string;
+    contentType: string;
+    size: number;
+  }>;
+}
+
+export async function downloadPrivateExchangeObject(storagePath: string): Promise<Blob> {
+  const response = await privateStorageRequest("download", storagePath);
+  return response.blob();
+}
 export const submitRfxResponseFn = httpsCallable<
   {
     rfxId: string;
@@ -548,6 +616,20 @@ export const updateBusinessReferralConsentFn = httpsCallable<
   { referralId: string; consentStatus: "confirmed" | "withdrawn"; expectedVersion: number },
   { success: boolean; version: number; status: string }
 >(functions, "businessReferral_updateConsent");
+
+export const prepareBusinessReferralEvidenceAccessFn = httpsCallable<
+  {
+    referralId: string;
+    operation: "upload" | "read";
+    storagePaths: string[];
+  },
+  {
+    success: true;
+    operation: "upload" | "read";
+    expiresAt: number;
+    allowedPathCount: number;
+  }
+>(functions, "businessReferral_prepareEvidenceAccess");
 
 // RFx Suggestions
 export const refreshRfxSuggestionsFn = httpsCallable<
