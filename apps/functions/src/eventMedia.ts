@@ -1,5 +1,6 @@
 import { onObjectFinalized } from "firebase-functions/v2/storage";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 
 function getDb() {
@@ -213,7 +214,7 @@ export const events_onMediaUploaded = onObjectFinalized(
       const collection = parsed.entityType === "events" ? "events" : "eventSeries";
       await db.collection(collection).doc(parsed.entityId).set(
         {
-          gallery: admin.firestore.FieldValue.arrayUnion(mediaRecord),
+          gallery: FieldValue.arrayUnion(mediaRecord),
           updatedAt: now,
         },
         { merge: true }

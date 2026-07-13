@@ -7,6 +7,7 @@
  */
 
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { StripeProvider } from "./stripeProvider";
 import { ensureIdempotent, markWebhookResult } from "./idempotency";
@@ -243,7 +244,7 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
     tx.set(registrationRef, registration);
 
     const updatePayload: Record<string, unknown> = {
-      registrationCount: admin.firestore.FieldValue.increment(quantity),
+      registrationCount: FieldValue.increment(quantity),
       updatedAt: Date.now(),
     };
 

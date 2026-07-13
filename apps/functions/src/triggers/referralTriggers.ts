@@ -146,6 +146,12 @@ async function updateProviderStats(providerUid: string) {
   // "Procurement-Ready" (existing logic usually, but we can re-verify here or leave it)
   // We'll preserve existing badges and toggle specific ones.
   const profileSnap = await providerRef.get();
+  if (!profileSnap.exists) {
+    logger.warn("Skipping legacy referral trust-stat update for missing provider profile", {
+      providerUid,
+    });
+    return;
+  }
   const currentBadges = (profileSnap.data() as ProfileDoc)?.badges || [];
   
   // Reliable Payee Badge

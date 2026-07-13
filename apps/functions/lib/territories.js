@@ -37,7 +37,21 @@ exports.territory_release_scheduled = exports.territory_list_released = exports.
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const admin = __importStar(require("firebase-admin"));
+const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
+function isValidCentroid(value) {
+    if (!value || typeof value !== "object")
+        return false;
+    const candidate = value;
+    return typeof candidate.lat === "number"
+        && Number.isFinite(candidate.lat)
+        && candidate.lat >= -90
+        && candidate.lat <= 90
+        && typeof candidate.lng === "number"
+        && Number.isFinite(candidate.lng)
+        && candidate.lng >= -180
+        && candidate.lng <= 180;
+}
 function getDb() {
     return admin.firestore();
 }
@@ -62,6 +76,9 @@ exports.territory_create = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError("invalid-argument", "fips, name, and state are required");
     }
     validateFips(fips);
+    if (centroid !== undefined && !isValidCentroid(centroid)) {
+        throw new https_1.HttpsError("invalid-argument", "centroid must contain valid latitude and longitude");
+    }
     const finalStatus = status ?? "scheduled";
     const db = getDb();
     const ref = db.collection("territories").doc(fips);
@@ -92,7 +109,7 @@ exports.territory_create = (0, https_1.onCall)(async (request) => {
         releaseDate: typeof releaseDate === "number" ? releaseDate : undefined,
         pausedAt: finalStatus === "paused" ? now : undefined,
         notes: notes?.trim() || "",
-        centroid: centroid && Number.isFinite(centroid.lat) && Number.isFinite(centroid.lng)
+        centroid: centroid && isValidCentroid(centroid)
             ? { lat: centroid.lat, lng: centroid.lng }
             : undefined,
         createdAt: now,
@@ -142,7 +159,7 @@ exports.territory_update = (0, https_1.onCall)(async (request) => {
         updates.releaseDate = releaseDate;
     }
     if (releaseDate === null) {
-        updates.releaseDate = admin.firestore.FieldValue.delete();
+        updates.releaseDate = firestore_1.FieldValue.delete();
     }
     if (typeof notes === "string") {
         updates.notes = notes.trim();
@@ -175,15 +192,16 @@ exports.territory_update = (0, https_1.onCall)(async (request) => {
         updates.fipsStateCode = fipsStateCode.trim();
     }
     if (centroid === null) {
-        updates.centroid = admin.firestore.FieldValue.delete();
+        updates.centroid = firestore_1.FieldValue.delete();
     }
-    else if (centroid &&
-        Number.isFinite(centroid.lat) &&
-        Number.isFinite(centroid.lng)) {
+    else if (centroid !== undefined && !isValidCentroid(centroid)) {
+        throw new https_1.HttpsError("invalid-argument", "centroid must contain valid latitude and longitude");
+    }
+    else if (centroid && isValidCentroid(centroid)) {
         updates.centroid = { lat: centroid.lat, lng: centroid.lng };
     }
     if (statusHistoryEntry) {
-        updates.statusHistory = admin.firestore.FieldValue.arrayUnion(statusHistoryEntry);
+        updates.statusHistory = firestore_1.FieldValue.arrayUnion(statusHistoryEntry);
     }
     await ref.update(updates);
     logger.info("Territory updated", { fips, updates: Object.keys(updates), by: request.auth.uid });

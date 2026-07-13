@@ -42,6 +42,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleStripeWebhook = handleStripeWebhook;
 const admin = __importStar(require("firebase-admin"));
+const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 const stripeProvider_1 = require("./stripeProvider");
 const idempotency_1 = require("./idempotency");
@@ -219,7 +220,7 @@ async function finalizeTicketPurchase(result) {
         };
         tx.set(registrationRef, registration);
         const updatePayload = {
-            registrationCount: admin.firestore.FieldValue.increment(quantity),
+            registrationCount: firestore_1.FieldValue.increment(quantity),
             updatedAt: Date.now(),
         };
         if (ticketTypeId && eventDoc.ticketTypes?.length) {

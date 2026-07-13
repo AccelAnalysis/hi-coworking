@@ -38,6 +38,7 @@ const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const params_1 = require("firebase-functions/params");
 const admin = __importStar(require("firebase-admin"));
+const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 const emailProvider_1 = require("./providers/emailProvider");
 const smsProvider_1 = require("./providers/smsProvider");
@@ -297,13 +298,13 @@ exports.events_processCampaignJobs = (0, scheduler_1.onSchedule)({
                 status: "sent",
                 recipientCount: totalSent,
                 processedAt: Date.now(),
-                error: admin.firestore.FieldValue.delete(),
+                error: firestore_1.FieldValue.delete(),
             }, { merge: true });
             // Update campaign stats
             await campaignSnap.ref.set({
                 status: "active",
                 updatedAt: Date.now(),
-                "stats.impressions": admin.firestore.FieldValue.increment(totalSent),
+                "stats.impressions": firestore_1.FieldValue.increment(totalSent),
             }, { merge: true });
             logger.info("Campaign job processed", {
                 campaignId: claimed.campaignId,
@@ -441,7 +442,7 @@ exports.events_processSocialPosts = (0, scheduler_1.onSchedule)({
                 status: "posted",
                 postedAt: Date.now(),
                 postUrl: result.postUrl,
-                error: admin.firestore.FieldValue.delete(),
+                error: firestore_1.FieldValue.delete(),
             }, { merge: true });
             logger.info("Social post published", { postId: post.id, channel: post.channel, postUrl: result.postUrl });
         }

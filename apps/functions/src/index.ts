@@ -4,6 +4,7 @@ import { beforeUserCreated } from "firebase-functions/v2/identity";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
 
@@ -73,8 +74,40 @@ async function provisionMembership(uid: string, plan: string): Promise<void> {
 }
 
 import { allocateMonthlyCredits } from "./scheduled/monthlyAllocations";
-import { rfx_publish, rfx_backfillGeo } from "./rfx";
-import { referral_create, referral_convert, referral_markPaid, referral_accept, referral_decline, referral_createPayoutCheckout } from "./referrals";
+import {
+  rfx_publish,
+  rfx_update,
+  rfx_moderate,
+  rfx_cancel,
+  rfx_submitResponse,
+  rfx_evaluateResponse,
+  rfx_backfillGeo,
+  rfx_prepareResponseUploads,
+  rfx_cleanupResponseUploadGrants,
+} from "./rfx";
+import {
+  referral_create,
+  referral_contact,
+  referral_convert,
+  referral_markPaid,
+  referral_accept,
+  referral_decline,
+  referral_createPayoutCheckout,
+  platformInvite_listReceived,
+  legacyBusinessReferral_listReceived,
+} from "./referrals";
+import {
+  businessReferral_create,
+  businessReferral_send,
+  businessReferral_respond,
+  businessReferral_progress,
+  businessReferral_updateConsent,
+  businessReferral_confirmConsent,
+  businessReferral_withdrawConsent,
+  businessReferral_createDispute,
+  businessReferral_resolveDispute,
+  businessReferral_expireSent,
+} from "./businessReferrals";
 import { onReferralWritten } from "./triggers/referralTriggers";
 import {
   events_createTicketCheckout,
@@ -101,16 +134,21 @@ import {
 } from "./territories";
 import { enrichment_search, enrichment_link } from "./enrichment";
 import { verification_submit, verification_review, verification_flag } from "./verification";
+import { profile_update } from "./profiles";
 import {
+  team_listMine,
   team_create,
   team_invite,
   team_respond_invite,
+  team_revoke_invite,
   team_manage_member,
+  team_expire_invites,
 } from "./teaming";
 import {
   rfx_refreshSuggestions,
   rfx_refreshSuggestions_scheduled,
 } from "./rfxSuggestions";
+import { rfx_listManaged } from "./rfxQueries";
 import { access_expireGrants, access_noShowRevoke } from "./scheduled/accessCleanup";
 import {
   createAccessGrant,
@@ -127,6 +165,9 @@ import {
 // Scheduled Functions
 export { allocateMonthlyCredits };
 export { rfx_refreshSuggestions_scheduled };
+export { team_expire_invites };
+export { businessReferral_expireSent };
+export { rfx_cleanupResponseUploadGrants };
 export { access_expireGrants, access_noShowRevoke };
 
 // Firestore Triggers
@@ -143,12 +184,40 @@ export {
 };
 
 // RFx Functions
-export { rfx_publish };
+export {
+  rfx_publish,
+  rfx_update,
+  rfx_moderate,
+  rfx_cancel,
+  rfx_submitResponse,
+  rfx_evaluateResponse,
+  rfx_prepareResponseUploads,
+};
 export { rfx_backfillGeo };
 export { rfx_refreshSuggestions };
+export { rfx_listManaged };
 
 // Referral Functions
-export { referral_create, referral_convert, referral_markPaid, referral_accept, referral_decline, referral_createPayoutCheckout };
+export {
+  referral_create,
+  referral_contact,
+  referral_convert,
+  referral_markPaid,
+  referral_accept,
+  referral_decline,
+  referral_createPayoutCheckout,
+  platformInvite_listReceived,
+  legacyBusinessReferral_listReceived,
+  businessReferral_create,
+  businessReferral_send,
+  businessReferral_respond,
+  businessReferral_progress,
+  businessReferral_updateConsent,
+  businessReferral_confirmConsent,
+  businessReferral_withdrawConsent,
+  businessReferral_createDispute,
+  businessReferral_resolveDispute,
+};
 
 // Event Functions
 export {
@@ -181,9 +250,12 @@ export {
   verification_submit,
   verification_review,
   verification_flag,
+  profile_update,
+  team_listMine,
   team_create,
   team_invite,
   team_respond_invite,
+  team_revoke_invite,
   team_manage_member,
 };
 
@@ -366,6 +438,10 @@ export const createBooking = onCall(async (request) => {
 
 export const authBeforeCreate = beforeUserCreated(async (event) => {
   const user = event.data;
+  if (!user) {
+    logger.error("Auth before-create event did not contain a user record");
+    throw new HttpsError("internal", "Account provisioning could not be verified");
+  }
   logger.info(`Creating user doc for ${user.uid} (${user.email})`);
 
   const now = Date.now();
@@ -1462,7 +1538,7 @@ export const referral_onStatusChange = onDocumentCreated(
 
     try {
       await db.collection("users").doc(referrerUid).update({
-        "stats.referralCount": admin.firestore.FieldValue.increment(1),
+        "stats.referralCount": FieldValue.increment(1),
         updatedAt: Date.now(),
       });
 
@@ -1487,60 +1563,6 @@ export const referral_onStatusChange = onDocumentCreated(
     }
   }
 );
-
-/**
- * Callable: Create an RFx team invite.
- * Creates the invite doc and notifies the invitee.
- */
-export const rfx_createTeamInvite = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
-  }
-
-  const { rfxId, inviteeUid, inviteeName, role, note } = request.data as {
-    rfxId: string;
-    inviteeUid: string;
-    inviteeName?: string;
-    role?: string;
-    note?: string;
-  };
-
-  if (!rfxId || !inviteeUid) {
-    throw new HttpsError("invalid-argument", "rfxId and inviteeUid are required");
-  }
-
-  const inviteRef = db.collection("rfxTeamInvites").doc();
-  const invite = {
-    id: inviteRef.id,
-    rfxId,
-    inviterUid: request.auth.uid,
-    inviteeUid,
-    inviteeName: inviteeName || "",
-    role: role || "partner",
-    status: "pending",
-    note: note || "",
-    createdAt: Date.now(),
-  };
-
-  await inviteRef.set(invite);
-
-  await createNotification({
-    uid: inviteeUid,
-    type: "system",
-    title: "Team invitation received",
-    body: `You've been invited to join an RFx team as ${role || "partner"}.`,
-    linkTo: "/referrals?tab=team",
-  });
-
-  logger.info("RFx team invite created", {
-    inviteId: inviteRef.id,
-    rfxId,
-    inviterUid: request.auth.uid,
-    inviteeUid,
-  });
-
-  return { inviteId: inviteRef.id };
-});
 
 // --- Corporate Org (PR-17) ---
 
@@ -1636,7 +1658,7 @@ export const org_purchaseSeats = onCall(async (request) => {
   }
 
   await db.collection("orgs").doc(orgId).update({
-    seatsPurchased: admin.firestore.FieldValue.increment(seats),
+    seatsPurchased: FieldValue.increment(seats),
     updatedAt: Date.now(),
   });
 

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.events_onMediaUploaded = void 0;
 const storage_1 = require("firebase-functions/v2/storage");
 const admin = __importStar(require("firebase-admin"));
+const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 function getDb() {
     return admin.firestore();
@@ -212,7 +213,7 @@ exports.events_onMediaUploaded = (0, storage_1.onObjectFinalized)({
     if (/^gallery[-_]/i.test(parsed.filename)) {
         const collection = parsed.entityType === "events" ? "events" : "eventSeries";
         await db.collection(collection).doc(parsed.entityId).set({
-            gallery: admin.firestore.FieldValue.arrayUnion(mediaRecord),
+            gallery: firestore_1.FieldValue.arrayUnion(mediaRecord),
             updatedAt: now,
         }, { merge: true });
     }

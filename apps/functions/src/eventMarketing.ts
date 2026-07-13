@@ -2,6 +2,7 @@ import { onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { SendGridProvider } from "./providers/emailProvider";
 import { TwilioSmsProvider } from "./providers/smsProvider";
@@ -375,7 +376,7 @@ export const events_processCampaignJobs = onSchedule(
             status: "sent",
             recipientCount: totalSent,
             processedAt: Date.now(),
-            error: admin.firestore.FieldValue.delete(),
+            error: FieldValue.delete(),
           },
           { merge: true }
         );
@@ -385,7 +386,7 @@ export const events_processCampaignJobs = onSchedule(
           {
             status: "active",
             updatedAt: Date.now(),
-            "stats.impressions": admin.firestore.FieldValue.increment(totalSent),
+            "stats.impressions": FieldValue.increment(totalSent),
           },
           { merge: true }
         );
@@ -560,7 +561,7 @@ export const events_processSocialPosts = onSchedule(
             status: "posted",
             postedAt: Date.now(),
             postUrl: result.postUrl,
-            error: admin.firestore.FieldValue.delete(),
+            error: FieldValue.delete(),
           },
           { merge: true }
         );
