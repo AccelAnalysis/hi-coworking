@@ -1,13 +1,14 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "storage": {
     "rules": "storage.rules"
   },
   "functions": {
     "source": "apps/functions",
-    "region": "us-east1"
+    "region": "us-central1"
   },
   "hosting": {
     "public": "apps/web/out",

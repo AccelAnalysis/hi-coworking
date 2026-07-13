@@ -2,8 +2,6 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // --- Helper functions ---
-
     function isSignedIn() {
       return request.auth != null;
     }
@@ -14,56 +12,363 @@ service firebase.storage {
 
     function isAdmin() {
       return isSignedIn()
-             && (request.auth.token.role == "admin" || request.auth.token.role == "master");
+        && (request.auth.token.role == "admin" || request.auth.token.role == "master");
     }
 
-    function isValidFileSize(maxMB) {
-      return request.resource.size < maxMB * 1024 * 1024;
+    function isStaff() {
+      return isAdmin() || (isSignedIn() && request.auth.token.role == "staff");
     }
 
-    // --- capabilityStatements/{uid}/{file} ---
-    // Member uploads their own capability statements; admins can read any.
+    function isOrgMember(orgId) {
+      return isSignedIn()
+        && orgId is string
+        && firestore.exists(/databases/(default)/documents/orgs/$(orgId))
+        && firestore.get(/databases/(default)/documents/orgs/$(orgId)).data.status == "active"
+        && firestore.exists(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid))
+        && firestore.get(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.orgId == orgId
+        && firestore.get(/databases/(default)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.uid == request.auth.uid;
+    }
+
+    function isValidSize(maxBytes) {
+      return request.resource.size > 0 && request.resource.size <= maxBytes;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|gif)');
+    }
+
+    function isVideo() {
+      return request.resource.contentType.matches('video/(mp4|webm|quicktime)');
+    }
+
+    function isPrivateDocument() {
+      return request.resource.contentType.matches(
+        '(application/pdf|application/msword|application/vnd.openxmlformats-officedocument.wordprocessingml.document|text/plain|image/jpeg|image/png|image/webp)'
+      );
+    }
+
+    function rfxExists(rfxId) {
+      return firestore.exists(/databases/(default)/documents/rfx/$(rfxId));
+    }
+
+    function ownsRfx(rfxId) {
+      return isSignedIn()
+        && rfxExists(rfxId)
+        && (("orgId" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data
+              && isOrgMember(firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.orgId))
+            || (!("orgId" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data)
+                && (("ownerUid" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data
+                      && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.ownerUid == request.auth.uid)
+                    || firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.createdBy == request.auth.uid)));
+    }
+
+    function hasSubmittedRfxResponse(rfxId, respondentUid) {
+      return firestore.exists(
+        /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+      );
+    }
+
+    function isSubmittedRfxAttachment(rfxId, respondentUid, storagePath) {
+      return hasSubmittedRfxResponse(rfxId, respondentUid)
+        && "attachmentStoragePaths" in firestore.get(
+          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+        ).data
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+        ).data.attachmentStoragePaths is list
+        && storagePath in firestore.get(
+          /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+        ).data.attachmentStoragePaths;
+    }
+
+    function isCurrentRfxRespondent(rfxId, respondentUid) {
+      return hasSubmittedRfxResponse(rfxId, respondentUid)
+        && (("respondentOrgId" in firestore.get(
+              /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+            ).data
+              && isOrgMember(firestore.get(
+                /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+              ).data.respondentOrgId))
+            || (!("respondentOrgId" in firestore.get(
+                  /databases/(default)/documents/rfxResponseAccess/$(rfxId)/respondents/$(respondentUid)
+                ).data)
+                && isOwner(respondentUid)));
+    }
+
+    function canReadSubmittedRfxFile(rfxId, respondentUid, storagePath) {
+      return isSubmittedRfxAttachment(rfxId, respondentUid, storagePath)
+        && (isCurrentRfxRespondent(rfxId, respondentUid) || isStaff() || ownsRfx(rfxId));
+    }
+
+    function canReadRfxResponseFiles(rfxId, respondentUid, storagePath) {
+      return (!hasSubmittedRfxResponse(rfxId, respondentUid) && isOwner(respondentUid))
+        || canReadSubmittedRfxFile(rfxId, respondentUid, storagePath);
+    }
+
+    function hasValidRfxResponseUploadGrant(rfxId, respondentUid, storagePath) {
+      return firestore.exists(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        )
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.grantType == "rfx_response_upload"
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.rfxId == rfxId
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.respondentUid == respondentUid
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.expiresAt > request.time.toMillis()
+        && firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.allowedStoragePaths is list
+        && storagePath in firestore.get(
+          /databases/(default)/documents/rfxResponseUploadGrantScopes/$(rfxId)/uploadGrants/$(respondentUid)
+        ).data.allowedStoragePaths;
+    }
+
+    function canUploadRfxResponseFiles(rfxId, respondentUid, storagePath) {
+      return isOwner(respondentUid)
+        && rfxExists(rfxId)
+        && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.status == "open"
+        && firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.adminApprovalStatus == "approved"
+        && (!("dueDate" in firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data)
+            || firestore.get(/databases/(default)/documents/rfx/$(rfxId)).data.dueDate > request.time.toMillis())
+        && !hasSubmittedRfxResponse(rfxId, respondentUid)
+        && !ownsRfx(rfxId)
+        && hasValidRfxResponseUploadGrant(rfxId, respondentUid, storagePath);
+    }
+
+    function isTeamMember(teamId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/rfxTeams/$(teamId))
+        && (isStaff()
+            || ("rfxId" in firestore.get(/databases/(default)/documents/rfxTeams/$(teamId)).data
+                && "memberUids" in firestore.get(/databases/(default)/documents/rfxTeams/$(teamId)).data
+                && request.auth.uid in firestore.get(/databases/(default)/documents/rfxTeams/$(teamId)).data.memberUids
+                && firestore.exists(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid))
+                && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.id == request.auth.uid
+                && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.uid == request.auth.uid
+                && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.teamId == teamId
+                && firestore.get(/databases/(default)/documents/rfxTeamMemberships/$(teamId)/members/$(request.auth.uid)).data.rfxId == firestore.get(/databases/(default)/documents/rfxTeams/$(teamId)).data.rfxId));
+    }
+
+    function isBusinessReferralParty(referralId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
+        && (isAdmin()
+            || (request.auth.token.role == "staff"
+                && "assignedStaffUids" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+                && request.auth.uid in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.assignedStaffUids)
+            || firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerUid == request.auth.uid
+            || ("recipientUid" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+                && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.recipientUid == request.auth.uid)
+            || ("referrerOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerOrgId))
+            || ("recipientOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.recipientOrgId)));
+    }
+
+    function isBusinessReferralReferrer(referralId) {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
+        && (firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerUid == request.auth.uid
+            || ("referrerOrgId" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+                && isOrgMember(firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.referrerOrgId)));
+    }
+
+    function isAssignedReferralStaff(referralId) {
+      return isSignedIn()
+        && request.auth.token.role == "staff"
+        && firestore.exists(/databases/(default)/documents/businessReferrals/$(referralId))
+        && "assignedStaffUids" in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data
+        && request.auth.uid in firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.assignedStaffUids;
+    }
+
+    function canReadSensitiveReferralEvidence(referralId) {
+      return isAdmin()
+        || isAssignedReferralStaff(referralId)
+        || isBusinessReferralReferrer(referralId)
+        || (isBusinessReferralParty(referralId)
+            && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.consentStatus in ["confirmed", "not_required"]);
+    }
+
+    function hasPublishedProfile(uid) {
+      return firestore.exists(/databases/(default)/documents/publicProfiles/$(uid))
+        && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.published == true
+        && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.uid == uid;
+    }
+
+    function isSelectedCapabilityStatement(uid, fileName) {
+      return hasPublishedProfile(uid)
+        && "capabilityStatementStoragePath" in firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data
+        && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.capabilityStatementStoragePath
+          == "capabilityStatements/" + uid + "/" + fileName;
+    }
+
+    function isSelectedProfilePhoto(uid, fileName) {
+      return hasPublishedProfile(uid)
+        && (("photoStoragePath" in firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data
+              && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.photoStoragePath
+                == "profilePhotos/" + uid + "/" + fileName)
+            || ("videoIntroPosterStoragePath" in firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data
+              && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.videoIntroPosterStoragePath
+                == "profilePhotos/" + uid + "/" + fileName));
+    }
+
+    function isSelectedProfileVideo(uid, variant, fileName) {
+      return hasPublishedProfile(uid)
+        && (((variant == "processed")
+              && "videoIntroStoragePath" in firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data
+              && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.videoIntroStoragePath
+                == "profileVideos/" + uid + "/" + variant + "/" + fileName)
+            || ((variant == "posters")
+              && "videoIntroPosterStoragePath" in firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data
+              && firestore.get(/databases/(default)/documents/publicProfiles/$(uid)).data.videoIntroPosterStoragePath
+                == "profileVideos/" + uid + "/" + variant + "/" + fileName));
+    }
+
+    // A published profile grants anonymous access to exactly the selected
+    // immutable object. Drafts, siblings, raw history, and nested legacy files
+    // remain owner/staff private.
+    match /capabilityStatements/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isStaff() || isSelectedCapabilityStatement(uid, fileName);
+      allow create: if isOwner(uid) && isValidSize(10 * 1024 * 1024) && isPrivateDocument();
+      allow update: if false;
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
     match /capabilityStatements/{uid}/{allPaths=**} {
-      allow read: if isOwner(uid) || isAdmin();
-      allow write: if isOwner(uid) && isValidFileSize(10); // 10 MB max
+      allow read: if isOwner(uid) || isStaff();
+      allow write: if false;
     }
 
-    // --- proposals/{rfxId}/{responseId}/{file} ---
-    // Respondent uploads; RFx owner and admins can read.
-    match /proposals/{rfxId}/{responseId}/{allPaths=**} {
-      allow read: if isSignedIn(); // Fine-grained access enforced at Firestore level
-      allow write: if isSignedIn() && isValidFileSize(25); // 25 MB max
+    match /profilePhotos/{uid}/{fileName} {
+      allow read: if isOwner(uid) || isStaff() || isSelectedProfilePhoto(uid, fileName);
+      allow create: if isOwner(uid) && isValidSize(5 * 1024 * 1024) && isImage();
+      allow update: if false;
+      allow delete: if isOwner(uid) || isAdmin();
     }
 
-    // --- eventAssets/{eventId}/{file} ---
-    // Admins upload event images/assets; public read for published events.
-    match /eventAssets/{eventId}/{allPaths=**} {
-      allow read: if true; // Public CDN for event images
-      allow write: if isAdmin() && isValidFileSize(5); // 5 MB max
-    }
-
-    // --- event-media/{entityId}/{file} ---
-    // Entity may be eventId or seriesId. Public read for rendering pages/social cards.
-    match /event-media/{entityId}/{allPaths=**} {
-      allow read: if true;
-      allow write: if isAdmin() && isValidFileSize(10); // 10 MB max
-    }
-
-    // --- profilePhotos/{uid}/{file} ---
-    // Member uploads their own photo; public read.
     match /profilePhotos/{uid}/{allPaths=**} {
-      allow read: if true;
-      allow write: if isOwner(uid) && isValidFileSize(5); // 5 MB max
+      allow read: if isOwner(uid) || isStaff();
+      allow write: if false;
     }
 
-    // --- floorplanBackgrounds/{locationId}/{floorId}/{file} ---
-    // Admin uploads shell/layout reference imagery; public read for booking display.
+    match /profileVideos/{uid}/{variant}/{fileName} {
+      allow read: if isOwner(uid) || isStaff() || isSelectedProfileVideo(uid, variant, fileName);
+      allow create: if isOwner(uid) && isValidSize(100 * 1024 * 1024) && isVideo();
+      allow update: if false;
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    match /profileVideos/{uid}/{allPaths=**} {
+      allow read: if isOwner(uid) || isStaff();
+      allow write: if false;
+    }
+
+    // Verification evidence is private and path-bound to the submitting account.
+    match /verificationDocs/{uid}/{docType}/{allPaths=**} {
+      allow read: if isOwner(uid) || isStaff();
+      allow create: if isOwner(uid) && isValidSize(15 * 1024 * 1024) && isPrivateDocument();
+      allow update: if false;
+      allow delete: if isAdmin()
+                    || (isOwner(uid)
+                        && !firestore.exists(/databases/(default)/documents/verificationEvidenceLocks/$(uid + "_" + docType)));
+    }
+
+    // Canonical Run 1 response path. New response documents store this path,
+    // never a permanent download URL, as the authorization source.
+    match /rfxResponses/{rfxId}/{respondentUid}/{allPaths=**} {
+      allow read: if canReadRfxResponseFiles(
+        rfxId,
+        respondentUid,
+        resource.name
+      );
+      allow create: if canUploadRfxResponseFiles(rfxId, respondentUid, request.resource.name)
+                    && isValidSize(25 * 1024 * 1024)
+                    && isPrivateDocument();
+      allow update: if false;
+      allow delete: if isAdmin()
+                    || (isOwner(respondentUid) && !hasSubmittedRfxResponse(rfxId, respondentUid));
+    }
+
+    // Legacy RFx paths remain read-compatible for exact participants only.
+    match /rfxProposals/{rfxId}/{respondentUid}/{allPaths=**} {
+      allow read: if canReadSubmittedRfxFile(rfxId, respondentUid, resource.name);
+      allow write: if false;
+    }
+
+    match /rfxDocuments/{rfxId}/{respondentUid}/{allPaths=**} {
+      allow read: if canReadSubmittedRfxFile(rfxId, respondentUid, resource.name);
+      allow write: if false;
+    }
+
+    match /proposals/{rfxId}/{responseId}/{allPaths=**} {
+      allow read: if isStaff()
+                  || (isSignedIn()
+                      && firestore.exists(/databases/(default)/documents/rfxResponses/$(responseId))
+                      && (firestore.get(/databases/(default)/documents/rfxResponses/$(responseId)).data.respondentUid == request.auth.uid
+                          || ownsRfx(rfxId)));
+      allow write: if false;
+    }
+
+    match /teamDocuments/{teamId}/{uploaderUid}/{allPaths=**} {
+      allow read: if isTeamMember(teamId);
+      allow create: if isOwner(uploaderUid)
+                    && isTeamMember(teamId)
+                    && isValidSize(25 * 1024 * 1024)
+                    && isPrivateDocument();
+      allow update: if false;
+      allow delete: if (isOwner(uploaderUid) && isTeamMember(teamId)) || isAdmin();
+    }
+
+    match /businessReferralEvidence/{referralId}/{uploaderUid}/{allPaths=**} {
+      allow read: if canReadSensitiveReferralEvidence(referralId);
+      allow create: if isOwner(uploaderUid)
+                    && isBusinessReferralParty(referralId)
+                    && isValidSize(15 * 1024 * 1024)
+                    && isPrivateDocument();
+      allow update: if false;
+      allow delete: if isAdmin()
+                    || (isOwner(uploaderUid)
+                        && isBusinessReferralReferrer(referralId)
+                        && firestore.get(/databases/(default)/documents/businessReferrals/$(referralId)).data.status == "draft");
+    }
+
+    // The caller uploads before the server allocates a dispute ID, so the
+    // canonical pre-create path is bound to referral and uploader identity.
+    match /businessReferralDisputeEvidence/{referralId}/{uploaderUid}/{allPaths=**} {
+      allow read: if canReadSensitiveReferralEvidence(referralId);
+      allow create: if isOwner(uploaderUid)
+                    && isBusinessReferralParty(referralId)
+                    && isValidSize(15 * 1024 * 1024)
+                    && isPrivateDocument();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Unrelated public application assets retain their established behavior.
+    match /eventAssets/{eventId}/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidSize(5 * 1024 * 1024) && isImage();
+      allow delete: if isAdmin();
+    }
+
+    match /event-media/{entityType}/{entityId}/{allPaths=**} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidSize(10 * 1024 * 1024) && isImage();
+      allow delete: if isAdmin();
+    }
+
     match /floorplanBackgrounds/{locationId}/{floorId}/{allPaths=**} {
       allow read: if true;
-      allow write: if isAdmin() && isValidFileSize(10); // 10 MB max
+      allow create, update: if isAdmin() && isValidSize(10 * 1024 * 1024) && isImage();
+      allow delete: if isAdmin();
     }
 
-    // --- Deny everything else ---
     match /{allPaths=**} {
       allow read, write: if false;
     }
