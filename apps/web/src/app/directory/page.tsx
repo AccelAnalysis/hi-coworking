@@ -11,7 +11,7 @@ import {
 import type { ProfileDoc } from "@hi/shared";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 import Link from "next/link";
-import Image from "next/image";
+import { ProfileAssetImage } from "@/components/profile/ProfileAssetImage";
 import {
   Search,
   Shield,
@@ -278,9 +278,10 @@ function MemberCard({ profile }: { profile: ProfileDoc }) {
       <div className="flex items-start gap-4">
         {/* Photo */}
         <div className="relative h-14 w-14 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden ring-2 ring-slate-200 shrink-0">
-          {profile.photoUrl ? (
-            <Image
-              src={profile.photoUrl}
+          {profile.photoStoragePath || profile.photoUrl ? (
+            <ProfileAssetImage
+              storagePath={profile.photoStoragePath}
+              legacyUrl={profile.photoUrl}
               alt={profile.businessName || "Member"}
               fill
               className="object-cover"

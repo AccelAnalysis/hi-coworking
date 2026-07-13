@@ -63,6 +63,11 @@ function toModuleContent(ids) {
 }
 
 async function main() {
+  if (process.env.SKIP_BOOKSTORE_SYNC === "true") {
+    console.log("[bookstore:sync] Skipped by SKIP_BOOKSTORE_SYNC.");
+    return;
+  }
+
   const { projectId, apiKey } = await resolveFirebaseEnv();
 
   if (!projectId || !apiKey) {

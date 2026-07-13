@@ -24,7 +24,7 @@ import {
   Laptop,
 } from "lucide-react";
 import Link from "next/link";
-import Image from "next/image";
+import { ProfileAssetImage } from "@/components/profile/ProfileAssetImage";
 import { useAuth } from "@/lib/authContext";
 import {
   getUserBookingsFromFirestore,
@@ -522,8 +522,14 @@ function DashboardContent() {
                     className="group flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 hover:shadow-md hover:-translate-y-0.5 transition-all"
                   >
                     <div className="relative h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden ring-2 ring-slate-200 shrink-0">
-                      {profile.photoUrl ? (
-                        <Image src={profile.photoUrl} alt={profile.businessName || "Member"} fill className="object-cover" />
+                      {profile.photoStoragePath || profile.photoUrl ? (
+                        <ProfileAssetImage
+                          storagePath={profile.photoStoragePath}
+                          legacyUrl={profile.photoUrl}
+                          alt={profile.businessName || "Member"}
+                          fill
+                          className="object-cover"
+                        />
                       ) : (
                         <span className="text-sm font-bold text-slate-400">{profile.businessName?.[0]?.toUpperCase() || "?"}</span>
                       )}

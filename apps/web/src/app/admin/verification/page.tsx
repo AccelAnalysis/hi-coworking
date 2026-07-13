@@ -211,7 +211,7 @@ function AdminVerificationContent() {
       await verificationReviewFn({
         uid: selectedUid,
         documentId: document.id,
-        status,
+        documentStatus: status,
         reviewNote: docNotes[document.id] || "",
       });
       await Promise.all([loadQueue(), loadAudit(selectedUid)]);
@@ -223,7 +223,7 @@ function AdminVerificationContent() {
     }
   };
 
-  const updateFinalStatus = async (status: "pending" | "verified" | "rejected" | "none") => {
+  const updateFinalStatus = async (status: "pending" | "verified" | "rejected") => {
     if (!selectedUid) return;
     setSaving(true);
     setError(null);

@@ -1,12 +1,16 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
-import { getUserActiveRfxCount } from "@/lib/firestore";
-import { listReleasedTerritoriesFn, publishRfx } from "@/lib/functions";
+import {
+  listManagedRfxFn,
+  listReleasedTerritoriesFn,
+  publishRfx,
+  type ManagedRfxOrganization,
+} from "@/lib/functions";
 import { checkMonetizationLimit } from "@/lib/monetization";
 import {
   RFX_TEMPLATES,
@@ -63,13 +67,28 @@ function CreateRfxContent() {
   const { user, userDoc } = useAuth();
   const [step, setStep] = useState(0);
   const [selectedTemplate, setSelectedTemplate] = useState<RfxTemplate | null>(null);
-  const [activeRfxCount, setActiveRfxCount] = useState<number | null>(null);
+  const [publisherActiveCounts, setPublisherActiveCounts] = useState<{
+    individual: number;
+    organizations: Record<string, number>;
+  } | null>(null);
+  const [managerOrganizations, setManagerOrganizations] = useState<ManagedRfxOrganization[]>([]);
+  const [publisherOrgId, setPublisherOrgId] = useState("");
   const [territories, setTerritories] = useState<TerritoryDoc[]>([]);
   const [showCreditConfirm, setShowCreditConfirm] = useState<{ cost: number; remainingLimit?: number } | null>(null);
   
   useEffect(() => {
     if (user) {
-      getUserActiveRfxCount(user.uid).then(setActiveRfxCount).catch(console.error);
+      listManagedRfxFn({ maxResults: 200 })
+        .then(({ data }) => {
+          setPublisherActiveCounts(data.publisherActiveCounts);
+          setManagerOrganizations(data.managerOrganizations);
+        })
+        .catch((loadError) => {
+          // The publish callable remains authoritative for quota and org access.
+          console.error("Failed to load managed RFx authority:", loadError);
+          setPublisherActiveCounts({ individual: 0, organizations: {} });
+          setManagerOrganizations([]);
+        });
     }
   }, [user]);
 
@@ -103,6 +122,12 @@ function CreateRfxContent() {
   const [requestedDocs, setRequestedDocs] = useState<RequestedDocument[]>([]);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const publishRequestKeyRef = useRef<string | null>(null);
+  const activeRfxCount = publisherActiveCounts === null
+    ? null
+    : publisherOrgId
+      ? publisherActiveCounts.organizations[publisherOrgId] ?? 0
+      : publisherActiveCounts.individual;
 
   const updateField = useCallback(
     <K extends keyof FormData>(field: K, value: FormData[K]) => {
@@ -238,7 +263,11 @@ function CreateRfxContent() {
         .filter(Boolean);
 
       // Use Cloud Function for transactional publish + credit deduction
+      const idempotencyKey = publishRequestKeyRef.current ?? crypto.randomUUID();
+      publishRequestKeyRef.current = idempotencyKey;
       const { data } = await publishRfx({
+        idempotencyKey,
+        orgId: publisherOrgId || undefined,
         title: form.title.trim(),
         description: form.description.trim(),
         naicsCodes: naicsCodes.length > 0 ? naicsCodes : undefined,
@@ -249,15 +278,12 @@ function CreateRfxContent() {
         dueDate: form.dueDate ? new Date(form.dueDate).getTime() : undefined,
         budget: form.budget.trim() || undefined,
         memberOnly: form.memberOnly,
-        status: "open",
-        createdBy: user.uid,
-        createdByName: user.displayName || user.email?.split("@")[0] || "Unknown",
         template: selectedTemplate?.id,
         evaluationCriteria: criteria,
         requestedDocuments: requestedDocs.filter((d) => d.label.trim() !== ""),
-        adminApprovalStatus: "approved",
       });
 
+      publishRequestKeyRef.current = null;
       router.push(`/rfx/detail?id=${data.id}`);
     } catch (err: unknown) {
       console.error("Failed to publish RFx:", err);
@@ -397,6 +423,30 @@ function CreateRfxContent() {
             <p className="text-slate-500 mb-8">Edit the details to match your specific requirements.</p>
 
             <div className="space-y-5">
+              {managerOrganizations.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-slate-700 block mb-1.5">Publish for</label>
+                  <select
+                    value={publisherOrgId}
+                    onChange={(event) => {
+                      setPublisherOrgId(event.target.value);
+                      publishRequestKeyRef.current = null;
+                    }}
+                    className="w-full rounded-lg px-4 py-3 border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                  >
+                    <option value="">My individual account</option>
+                    {managerOrganizations.map((organization) => (
+                      <option key={organization.orgId} value={organization.orgId}>
+                        {organization.name || organization.orgId} ({organization.role})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    Organization RFx can be managed by its current active owners and administrators.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium text-slate-700 block mb-1.5">Title *</label>
                 <input
@@ -726,6 +776,12 @@ function CreateRfxContent() {
               {/* Summary card */}
               <div className="p-6 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
                 <h2 className="text-xl font-bold text-slate-900 mb-1">{form.title}</h2>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Publisher: {publisherOrgId
+                    ? managerOrganizations.find((organization) => organization.orgId === publisherOrgId)?.name
+                      || publisherOrgId
+                    : "My individual account"}
+                </p>
                 {selectedTemplate && (
                   <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 uppercase tracking-wide mb-3">
                     {selectedTemplate.name}

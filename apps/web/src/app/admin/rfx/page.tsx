@@ -3,14 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
-import { backfillRfxGeoFn } from "@/lib/functions";
+import { cancelRfxFn, moderateRfxFn } from "@/lib/functions";
 import {
   collection,
   getDocs,
   query,
   orderBy,
-  updateDoc,
-  doc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { RfxDoc } from "@hi/shared";
@@ -32,6 +30,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   closed: { label: "Closed", color: "bg-blue-50 text-blue-600 border-blue-200" },
   awarded: { label: "Awarded", color: "bg-indigo-50 text-indigo-600 border-indigo-200" },
   cancelled: { label: "Cancelled", color: "bg-red-50 text-red-600 border-red-200" },
+  rejected: { label: "Rejected", color: "bg-red-50 text-red-600 border-red-200" },
 };
 
 export default function AdminRfxPage() {
@@ -45,7 +44,6 @@ export default function AdminRfxPage() {
 function AdminRfxContent() {
   const [rfxList, setRfxList] = useState<RfxDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [backfillingGeo, setBackfillingGeo] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [filter, setFilter] = useState<string>("all");
 
@@ -66,24 +64,30 @@ function AdminRfxContent() {
     fetchRfx();
   }, [fetchRfx]);
 
-  const handleStatusChange = async (rfxId: string, status: string) => {
+  const handleModeration = async (rfx: RfxDoc, decision: "approve" | "reject") => {
     try {
-      await updateDoc(doc(db, "rfx", rfxId), { status, updatedAt: Date.now() });
-      fetchRfx();
+      await moderateRfxFn({
+        rfxId: rfx.id,
+        decision,
+        reviewNote: decision === "approve" ? "Approved by Exchange moderator" : "Rejected by Exchange moderator",
+        expectedVersion: rfx.version ?? 1,
+      });
+      await fetchRfx();
     } catch (err) {
-      console.error("Failed to update RFx status:", err);
+      console.error("Failed to moderate RFx:", err);
     }
   };
 
-  const handleBackfillGeo = async () => {
-    setBackfillingGeo(true);
+  const handleCancel = async (rfx: RfxDoc) => {
     try {
-      await backfillRfxGeoFn({ maxDocs: 500 });
+      await cancelRfxFn({
+        rfxId: rfx.id,
+        reason: "Closed by Exchange moderator",
+        expectedVersion: rfx.version ?? 1,
+      });
       await fetchRfx();
     } catch (err) {
-      console.error("Failed to backfill RFx geohash:", err);
-    } finally {
-      setBackfillingGeo(false);
+      console.error("Failed to cancel RFx:", err);
     }
   };
 
@@ -100,23 +104,14 @@ function AdminRfxContent() {
     <AppShell>
       <div className="max-w-5xl mx-auto">
         <div className="mb-8">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-                <ClipboardList className="h-8 w-8 text-slate-400" />
-                RFx Moderation
-              </h1>
-              <p className="text-slate-500 mt-1">
-                {rfxList.length} total · {reviewCount} pending review
-              </p>
-            </div>
-            <button
-              onClick={handleBackfillGeo}
-              disabled={backfillingGeo}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-            >
-              {backfillingGeo ? "Backfilling..." : "Backfill geo/geohash"}
-            </button>
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
+              <ClipboardList className="h-8 w-8 text-slate-400" />
+              RFx Moderation
+            </h1>
+            <p className="text-slate-500 mt-1">
+              {rfxList.length} total · {reviewCount} pending review
+            </p>
           </div>
         </div>
 
@@ -133,7 +128,7 @@ function AdminRfxContent() {
             />
           </div>
           <div className="flex gap-1">
-            {["all", "under_review", "open", "closed", "awarded", "cancelled"].map((s) => (
+            {["all", "under_review", "open", "closed", "awarded", "cancelled", "rejected"].map((s) => (
               <button
                 key={s}
                 onClick={() => setFilter(s)}
@@ -185,14 +180,14 @@ function AdminRfxContent() {
                         {rfx.status === "under_review" && (
                           <>
                             <button
-                              onClick={() => handleStatusChange(rfx.id, "open")}
+                              onClick={() => handleModeration(rfx, "approve")}
                               className="p-2 rounded-lg hover:bg-emerald-50 text-emerald-500 hover:text-emerald-600"
                               title="Approve"
                             >
                               <CheckCircle2 className="h-4 w-4" />
                             </button>
                             <button
-                              onClick={() => handleStatusChange(rfx.id, "cancelled")}
+                              onClick={() => handleModeration(rfx, "reject")}
                               className="p-2 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600"
                               title="Reject"
                             >
@@ -202,7 +197,7 @@ function AdminRfxContent() {
                         )}
                         {rfx.status === "open" && (
                           <button
-                            onClick={() => handleStatusChange(rfx.id, "closed")}
+                            onClick={() => handleCancel(rfx)}
                             className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600"
                             title="Close"
                           >

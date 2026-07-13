@@ -5,12 +5,15 @@ import { useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
-  getProfileFromFirestore,
+  getPublicProfileFromFirestore,
   computeProfileCompleteness,
   isProcurementReady,
 } from "@/lib/firestore";
+import {
+  ProfileAssetImage,
+  useProfileAssetUrl,
+} from "@/components/profile/ProfileAssetImage";
 import type { ProfileDoc } from "@hi/shared";
-import Image from "next/image";
 import Link from "next/link";
 import {
   Loader2,
@@ -40,6 +43,10 @@ function MemberProfileContent() {
   const [profile, setProfile] = useState<ProfileDoc | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const capabilityStatementUrl = useProfileAssetUrl(
+    profile?.capabilityStatementStoragePath,
+    profile?.capabilityStatementUrl,
+  );
 
   useEffect(() => {
     if (!uid) {
@@ -49,7 +56,7 @@ function MemberProfileContent() {
     }
     (async () => {
       try {
-        const p = await getProfileFromFirestore(uid);
+        const p = await getPublicProfileFromFirestore(uid);
         if (!p || !p.published) {
           setNotFound(true);
         } else {
@@ -115,9 +122,10 @@ function MemberProfileContent() {
           <div className="flex flex-col sm:flex-row items-start gap-6">
             {/* Photo */}
             <div className="relative h-24 w-24 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden ring-2 ring-slate-200 shrink-0">
-              {profile.photoUrl ? (
-                <Image
-                  src={profile.photoUrl}
+              {profile.photoStoragePath || profile.photoUrl ? (
+                <ProfileAssetImage
+                  storagePath={profile.photoStoragePath}
+                  legacyUrl={profile.photoUrl}
                   alt={profile.businessName || "Member"}
                   fill
                   className="object-cover"
@@ -252,22 +260,26 @@ function MemberProfileContent() {
           )}
 
           {/* Capability Statement */}
-          {profile.capabilityStatementUrl && (
+          {(profile.capabilityStatementStoragePath || profile.capabilityStatementUrl) && (
             <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 p-6">
               <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-4">
                 <FileText className="h-4 w-4 text-slate-500" />
                 Capability Statement
               </h2>
-              <a
-                href={profile.capabilityStatementUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
-              >
-                <FileText className="h-4 w-4 text-slate-500" />
-                View Capability Statement
-                <ExternalLink className="h-3 w-3 text-slate-400" />
-              </a>
+              {capabilityStatementUrl ? (
+                <a
+                  href={capabilityStatementUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-50 border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <FileText className="h-4 w-4 text-slate-500" />
+                  View Capability Statement
+                  <ExternalLink className="h-3 w-3 text-slate-400" />
+                </a>
+              ) : (
+                <p className="text-sm text-slate-500">Loading secure document…</p>
+              )}
             </div>
           )}
         </div>

@@ -12,11 +12,12 @@ import {
   getOpenRfxListFromFirestore,
   getProfileFromFirestore,
   getRfxSuggestionsForUser,
-  getUserRfxListFromFirestore,
 } from "@/lib/firestore";
 import {
+  listManagedRfxFn,
   listReleasedTerritoriesFn,
   refreshRfxSuggestionsFn,
+  teamListMineFn,
   teamCreateFn,
   teamInviteFn,
   teamManageMemberFn,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/functions";
 import { MarketplaceMap } from "@/components/rfx/MarketplaceMap";
 import { PreviewModeBanner } from "@/components/rfx/PreviewModeBanner";
+import { loadSavedRfxWithLegacyImport, saveRfx, unsaveRfx } from "@/lib/savedExchange";
 import {
   canTransact,
   type ProfileDoc,
@@ -101,7 +103,7 @@ function TeamingPanel({
   setSelectedTeamId: (id: string) => void;
   teamList: RfxTeamDoc[];
   teamInvites: RfxTeamInviteDoc[];
-  teamDirectoryUsers: Array<{ uid: string; displayName?: string; email?: string; role?: string }>;
+  teamDirectoryUsers: Array<{ uid: string; businessName?: string }>;
   createTeamName: string;
   setCreateTeamName: (value: string) => void;
   createTeamNotes: string;
@@ -276,7 +278,7 @@ function TeamingPanel({
                     <option value="">Select user</option>
                     {teamDirectoryUsers.map((u) => (
                       <option key={u.uid} value={u.uid}>
-                        {u.displayName || u.email || u.uid} ({u.role || "member"})
+                        {u.businessName || u.uid}
                       </option>
                     ))}
                   </select>
@@ -321,6 +323,7 @@ function RfxFeedContent() {
   const [openRfxList, setOpenRfxList] = useState<RfxDoc[]>([]);
   const [suggestedOpenRfxList, setSuggestedOpenRfxList] = useState<RfxDoc[]>([]);
   const [myRfxList, setMyRfxList] = useState<RfxDoc[]>([]);
+  const [manageableRfxIds, setManageableRfxIds] = useState<string[]>([]);
   const [savedRfxIds, setSavedRfxIds] = useState<string[]>([]);
   const [releasedTerritories, setReleasedTerritories] = useState<TerritoryDoc[]>([]);
   const [scheduledTerritories, setScheduledTerritories] = useState<TerritoryDoc[]>([]);
@@ -337,7 +340,7 @@ function RfxFeedContent() {
   const [mapViewport, setMapViewport] = useState<ViewportBounds | null>(null);
   const [teamList, setTeamList] = useState<RfxTeamDoc[]>([]);
   const [teamInvites, setTeamInvites] = useState<RfxTeamInviteDoc[]>([]);
-  const [teamDirectoryUsers, setTeamDirectoryUsers] = useState<Array<{ uid: string; displayName?: string; email?: string; role?: string }>>([]);
+  const [teamDirectoryUsers, setTeamDirectoryUsers] = useState<Array<{ uid: string; businessName?: string }>>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>("");
   const [createTeamName, setCreateTeamName] = useState("");
   const [createTeamNotes, setCreateTeamNotes] = useState("");
@@ -355,11 +358,15 @@ function RfxFeedContent() {
       try {
         const uid = user?.uid;
         if (!uid) return;
-        const [mine, userProfile, territoryRes] = await Promise.all([
-          getUserRfxListFromFirestore(uid),
+        const [managedRes, userProfile, territoryRes] = await Promise.all([
+          listManagedRfxFn({ maxResults: 200 }).catch((error) => {
+            console.error("Failed to load manageable RFx:", error);
+            return null;
+          }),
           getProfileFromFirestore(uid),
           listReleasedTerritoriesFn({}),
         ]);
+        const mine = managedRes?.data.rfx ?? [];
 
         const naicsCodes = userProfile?.naicsCodes || [];
         let open = await getRfxSuggestionsForUser(uid, naicsCodes, 60);
@@ -379,13 +386,12 @@ function RfxFeedContent() {
           setSuggestedOpenRfxList(open);
           setOpenRfxList(open);
           setMyRfxList(mine);
+          setManageableRfxIds(managedRes?.data.manageableRfxIds ?? []);
           setProfile(userProfile);
           setReleasedTerritories(territoryRes.data.released || []);
           setScheduledTerritories(territoryRes.data.scheduled || []);
           setSuggestionMode(source);
-          if (!selectedRfxId && open.length > 0) {
-            setSelectedRfxId(open[0].id);
-          }
+          setSelectedRfxId((current) => current || open[0]?.id || mine[0]?.id || "");
         }
       } catch (err) {
         console.error("Failed to fetch RFx list:", err);
@@ -396,7 +402,7 @@ function RfxFeedContent() {
 
     fetchData();
     return () => { cancelled = true; };
-  }, [selectedRfxId, user]);
+  }, [user]);
 
   useEffect(() => {
     if (!mapViewport) return;
@@ -432,33 +438,21 @@ function RfxFeedContent() {
       try {
         const uid = user?.uid;
         if (!uid) return;
-        const [primeTeamSnap, memberTeamSnap, invites, usersSnap] = await Promise.all([
-          getDocs(query(collection(db, "rfxTeams"), where("primeUid", "==", uid), limit(120))),
-          getDocs(query(collection(db, "rfxTeams"), where("memberUids", "array-contains", uid), limit(120))),
+        const [teamResult, invites, usersSnap] = await Promise.all([
+          teamListMineFn({}),
           getTeamInvitesReceived(uid),
-          getDocs(
-            query(
-              collection(db, "users"),
-              where("role", "in", ["member", "externalVendor", "econPartner"]),
-              limit(300)
-            )
-          ),
+          getDocs(query(collection(db, "publicProfiles"), where("published", "==", true), limit(300))),
         ]);
 
         if (cancelled) return;
 
-        const teamsById = new Map<string, RfxTeamDoc>();
-        [...primeTeamSnap.docs, ...memberTeamSnap.docs].forEach((docSnap) => {
-          const team = docSnap.data() as RfxTeamDoc;
-          teamsById.set(team.id, team);
-        });
-        const teams = Array.from(teamsById.values()).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+        const teams = teamResult.data.teams;
 
         setTeamList(teams);
         setTeamInvites(invites);
         setTeamDirectoryUsers(
           usersSnap.docs
-            .map((d) => d.data() as { uid: string; displayName?: string; email?: string; role?: string })
+            .map((d) => d.data() as { uid: string; businessName?: string })
             .filter((u) => u.uid && u.uid !== uid)
         );
 
@@ -478,23 +472,16 @@ function RfxFeedContent() {
 
   useEffect(() => {
     if (!user) return;
-    const key = `saved_rfx_${user.uid}`;
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as string[];
-      if (Array.isArray(parsed)) {
-        setSavedRfxIds(parsed);
-      }
-    } catch {
-      // ignore invalid saved format
-    }
+    let cancelled = false;
+    loadSavedRfxWithLegacyImport(user.uid)
+      .then((ids) => {
+        if (!cancelled) setSavedRfxIds(ids);
+      })
+      .catch((error) => console.error("Failed to load saved RFx items:", error));
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    localStorage.setItem(`saved_rfx_${user.uid}`, JSON.stringify(savedRfxIds));
-  }, [savedRfxIds, user]);
 
   const transactGate = canTransact({
     userRole: role ?? undefined,
@@ -502,10 +489,23 @@ function RfxFeedContent() {
     territoryStatus: releasedTerritories.length > 0 ? "released" : "scheduled",
   });
 
-  const toggleSaved = (rfxId: string) => {
-    setSavedRfxIds((prev) =>
-      prev.includes(rfxId) ? prev.filter((id) => id !== rfxId) : [...prev, rfxId]
+  const toggleSaved = async (rfxId: string) => {
+    if (!user) return;
+    const wasSaved = savedRfxIds.includes(rfxId);
+    setSavedRfxIds((previous) =>
+      wasSaved ? previous.filter((id) => id !== rfxId) : [...previous, rfxId],
     );
+    try {
+      if (wasSaved) await unsaveRfx(user.uid, rfxId);
+      else await saveRfx(user.uid, rfxId);
+    } catch (error) {
+      setSavedRfxIds((previous) =>
+        wasSaved
+          ? previous.includes(rfxId) ? previous : [...previous, rfxId]
+          : previous.filter((id) => id !== rfxId),
+      );
+      console.error("Failed to update saved RFx item:", error);
+    }
   };
 
   const teamByRfxId = useMemo(() => {
@@ -535,6 +535,7 @@ function RfxFeedContent() {
         rfxId,
         name: createTeamName.trim(),
         internalNotes: createTeamNotes.trim() || undefined,
+        idempotencyKey: crypto.randomUUID(),
       });
       setSelectedTeamId(data.teamId);
       setCreateTeamName("");
@@ -556,7 +557,13 @@ function RfxFeedContent() {
     if (!selectedTeam || !inviteeUid) return;
     setTeamingBusy(true);
     try {
-      await teamInviteFn({ teamId: selectedTeam.id, inviteeUid, role: inviteRole, note: inviteNote.trim() || undefined });
+      await teamInviteFn({
+        teamId: selectedTeam.id,
+        rfxId: selectedTeam.rfxId,
+        inviteeUid,
+        role: inviteRole,
+        note: inviteNote.trim() || undefined,
+      });
       setInviteeUid("");
       setInviteNote("");
       setTerritoryMessage("Team invite sent.");
@@ -571,7 +578,10 @@ function RfxFeedContent() {
   const handleRespondInvite = async (inviteId: string, accept: boolean) => {
     setTeamingBusy(true);
     try {
-      const { data } = await teamRespondInviteFn({ inviteId, accept });
+      const { data } = await teamRespondInviteFn({
+        inviteId,
+        response: accept ? "accepted" : "declined",
+      });
       if (accept && data.teamId) {
         setSelectedTeamId(data.teamId);
       }
@@ -657,6 +667,11 @@ function RfxFeedContent() {
   const teamingPlaceholderList = useMemo(
     () => filteredOpen.filter((rfx) => rfx.status === "open").slice(0, 8),
     [filteredOpen]
+  );
+
+  const manageableRfxIdSet = useMemo(
+    () => new Set(manageableRfxIds),
+    [manageableRfxIds]
   );
 
   const activeList =
@@ -862,11 +877,11 @@ function RfxFeedContent() {
                       key={rfx.id}
                       rfx={rfx}
                       teamName={teamByRfxId.get(rfx.id)?.name}
-                      isOwner={rfx.createdBy === user?.uid}
+                      isOwner={manageableRfxIdSet.has(rfx.id)}
                       isSelected={selectedRfx?.id === rfx.id}
                       isSaved={savedRfxIds.includes(rfx.id)}
                       onSelect={() => setSelectedRfxId(rfx.id)}
-                      onToggleSaved={() => toggleSaved(rfx.id)}
+                      onToggleSaved={() => void toggleSaved(rfx.id)}
                     />
                   ))}
                 </div>
@@ -880,7 +895,7 @@ function RfxFeedContent() {
                   <p className="mt-0.5 line-clamp-1">{selectedRfx.title}</p>
                   <div className="mt-2 flex items-center justify-between">
                     <Link
-                      href={selectedRfx.createdBy === user?.uid ? `/rfx/evaluate?id=${selectedRfx.id}` : `/rfx/detail?id=${selectedRfx.id}`}
+                      href={manageableRfxIdSet.has(selectedRfx.id) ? `/rfx/evaluate?id=${selectedRfx.id}` : `/rfx/detail?id=${selectedRfx.id}`}
                       className="font-semibold text-indigo-600 hover:text-indigo-700"
                     >
                       Open details

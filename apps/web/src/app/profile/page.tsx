@@ -6,18 +6,20 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import {
   getProfileFromFirestore,
-  saveProfileToFirestore,
   computeProfileCompleteness,
 } from "@/lib/firestore";
 import {
   enrichmentLinkFn,
   enrichmentSearchFn,
+  profileUpdateFn,
+  type ProfileUpdateInput,
   type EnrichmentCandidate,
   verificationSubmitFn,
 } from "@/lib/functions";
 import { ReadinessMeter } from "@/components/profile/ReadinessMeter";
+import { useProfileAssetUrl } from "@/components/profile/ProfileAssetImage";
 import { storage } from "@/lib/firebase";
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytesResumable } from "firebase/storage";
 import Image from "next/image";
 import { computeReadinessTier, type ProfileDoc } from "@hi/shared";
 import {
@@ -85,10 +87,14 @@ interface VerificationUploadDoc {
   type: VerificationUploadType;
   label: string;
   storagePath: string;
-  downloadUrl: string;
 }
 
 const EXPECTED_ATTESTATION = "I confirm I am authorized to represent this company.";
+
+function uniqueAssetFileName(file: File): string {
+  const extension = file.name.toLowerCase().match(/\.[a-z0-9]{1,10}$/)?.[0] ?? "";
+  return `${Date.now()}_${crypto.randomUUID()}${extension}`;
+}
 
 const VERIFICATION_DOC_LABELS: Record<VerificationUploadType, string> = {
   business_license: "Business license / registration proof",
@@ -130,9 +136,11 @@ function ProfileContent() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [capStatementUrl, setCapStatementUrl] = useState<string | null>(null);
+  const [capStatementStoragePath, setCapStatementStoragePath] = useState<string | null>(null);
   const [capStatementName, setCapStatementName] = useState<string | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoStoragePath, setPhotoStoragePath] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<ProfileDoc["verificationStatus"]>("none");
   const [verificationNote, setVerificationNote] = useState("");
@@ -154,7 +162,9 @@ function ProfileContent() {
   const [uploadingVerificationType, setUploadingVerificationType] = useState<VerificationUploadType | null>(null);
   const [videoUploading, setVideoUploading] = useState(false);
   const [videoIntroUrl, setVideoIntroUrl] = useState<string | null>(null);
+  const [videoIntroStoragePath, setVideoIntroStoragePath] = useState<string | null>(null);
   const [videoIntroPosterUrl, setVideoIntroPosterUrl] = useState<string | null>(null);
+  const [videoIntroPosterStoragePath, setVideoIntroPosterStoragePath] = useState<string | null>(null);
   const [videoIntroStatus, setVideoIntroStatus] = useState<"processing" | "ready" | "failed" | null>(null);
   const capFileRef = useRef<HTMLInputElement>(null);
   const photoFileRef = useRef<HTMLInputElement>(null);
@@ -166,6 +176,20 @@ function ProfileContent() {
     government_id: null,
     other: null,
   });
+  const verificationRequestKeyRef = useRef<string | null>(null);
+  const capStatementDisplayUrl = useProfileAssetUrl(
+    capStatementStoragePath,
+    capStatementUrl,
+  );
+  const photoDisplayUrl = useProfileAssetUrl(photoStoragePath, photoUrl);
+  const videoIntroDisplayUrl = useProfileAssetUrl(
+    videoIntroStoragePath,
+    videoIntroUrl,
+  );
+  const videoIntroPosterDisplayUrl = useProfileAssetUrl(
+    videoIntroPosterStoragePath,
+    videoIntroPosterUrl,
+  );
 
   // Load existing profile
   useEffect(() => {
@@ -187,12 +211,16 @@ function ProfileContent() {
             cageCode: existing.cageCode || "",
           });
           setCapStatementUrl(existing.capabilityStatementUrl || null);
+          setCapStatementStoragePath(existing.capabilityStatementStoragePath || null);
           setPhotoUrl(existing.photoUrl || null);
+          setPhotoStoragePath(existing.photoStoragePath || null);
           setPublished(existing.published ?? false);
           setVerificationStatus(existing.verificationStatus || "none");
           setVerificationNote(existing.verificationRejectionReason || "");
           setVideoIntroUrl(existing.videoIntroUrl || null);
+          setVideoIntroStoragePath(existing.videoIntroStoragePath || null);
           setVideoIntroPosterUrl(existing.videoIntroPosterUrl || null);
+          setVideoIntroPosterStoragePath(existing.videoIntroPosterStoragePath || null);
           setVideoIntroStatus(existing.videoIntroStatus || null);
         }
       } catch (err) {
@@ -222,13 +250,13 @@ function ProfileContent() {
   }, []);
 
   // Build the profile doc for saving / scoring
-  const buildProfileData = useCallback((): Partial<ProfileDoc> => {
+  const buildProfileData = useCallback((): ProfileUpdateInput => {
     const naicsCodes = form.naicsCodes
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const data: Partial<ProfileDoc> = {
+    return {
       businessName: form.businessName || undefined,
       bio: form.bio || undefined,
       website: form.website || undefined,
@@ -239,34 +267,47 @@ function ProfileContent() {
       uei: form.uei || undefined,
       duns: form.duns || undefined,
       cageCode: form.cageCode || undefined,
-      capabilityStatementUrl: capStatementUrl || undefined,
-      photoUrl: photoUrl || undefined,
-      videoIntroUrl: videoIntroUrl || undefined,
-      videoIntroPosterUrl: videoIntroPosterUrl || undefined,
-      videoIntroStatus: videoIntroStatus || undefined,
-      verificationStatus,
+      capabilityStatementUrl: capStatementUrl,
+      capabilityStatementStoragePath: capStatementStoragePath,
+      photoUrl,
+      photoStoragePath,
+      videoIntroUrl,
+      videoIntroStoragePath,
+      videoIntroPosterUrl,
+      videoIntroPosterStoragePath,
       published,
     };
-
-    data.profileCompletenessScore = computeProfileCompleteness(data);
-    data.readinessTier = computeReadinessTier(data);
-    return data;
   }, [
+    capStatementStoragePath,
     capStatementUrl,
     form,
+    photoStoragePath,
     photoUrl,
     published,
-    verificationStatus,
+    videoIntroPosterStoragePath,
     videoIntroPosterUrl,
-    videoIntroStatus,
+    videoIntroStoragePath,
     videoIntroUrl,
   ]);
 
   const computedProfileData = buildProfileData();
-  const completeness = computeProfileCompleteness(computedProfileData);
+  const computedProfileForDisplay: Partial<ProfileDoc> = {
+    ...computedProfileData,
+    capabilityStatementUrl: computedProfileData.capabilityStatementUrl ?? undefined,
+    capabilityStatementStoragePath:
+      computedProfileData.capabilityStatementStoragePath ?? undefined,
+    photoUrl: computedProfileData.photoUrl ?? undefined,
+    photoStoragePath: computedProfileData.photoStoragePath ?? undefined,
+    videoIntroUrl: computedProfileData.videoIntroUrl ?? undefined,
+    videoIntroStoragePath: computedProfileData.videoIntroStoragePath ?? undefined,
+    videoIntroPosterUrl: computedProfileData.videoIntroPosterUrl ?? undefined,
+    videoIntroPosterStoragePath:
+      computedProfileData.videoIntroPosterStoragePath ?? undefined,
+  };
+  const completeness = computeProfileCompleteness(computedProfileForDisplay);
   const readinessTier = computeReadinessTier({
     ...(profile || {}),
-    ...computedProfileData,
+    ...computedProfileForDisplay,
     verificationStatus,
   });
   const procReady = readinessTier === "procurement_ready";
@@ -277,8 +318,24 @@ function ProfileContent() {
     setError(null);
     try {
       const data = buildProfileData();
-      await saveProfileToFirestore(user.uid, data);
-      setProfile(data);
+      const { data: result } = await profileUpdateFn(data);
+      setProfile((previous) => ({
+        ...(previous || {}),
+        ...data,
+        capabilityStatementUrl: data.capabilityStatementUrl ?? undefined,
+        capabilityStatementStoragePath:
+          data.capabilityStatementStoragePath ?? undefined,
+        photoUrl: data.photoUrl ?? undefined,
+        photoStoragePath: data.photoStoragePath ?? undefined,
+        videoIntroUrl: data.videoIntroUrl ?? undefined,
+        videoIntroStoragePath: data.videoIntroStoragePath ?? undefined,
+        videoIntroPosterUrl: data.videoIntroPosterUrl ?? undefined,
+        videoIntroPosterStoragePath:
+          data.videoIntroPosterStoragePath ?? undefined,
+        uid: user.uid,
+        profileCompletenessScore: result.profileCompletenessScore,
+        readinessTier: result.readinessTier as ProfileDoc["readinessTier"],
+      }));
       setSaved(true);
     } catch (err) {
       console.error("Failed to save profile:", err);
@@ -309,10 +366,8 @@ function ProfileContent() {
     setUploadProgress(0);
     setError(null);
 
-    const storageRef = ref(
-      storage,
-      `capabilityStatements/${user.uid}/${file.name}`
-    );
+    const storagePath = `capabilityStatements/${user.uid}/${uniqueAssetFileName(file)}`;
+    const storageRef = ref(storage, storagePath);
     const task = uploadBytesResumable(storageRef, file);
 
     task.on(
@@ -327,9 +382,9 @@ function ProfileContent() {
         setError("Upload failed. Please try again.");
         setUploading(false);
       },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        setCapStatementUrl(url);
+      () => {
+        setCapStatementStoragePath(storagePath);
+        setCapStatementUrl(null);
         setCapStatementName(file.name);
         setUploading(false);
         setSaved(false);
@@ -426,14 +481,12 @@ function ProfileContent() {
         task.on("state_changed", undefined, reject, () => resolve());
       });
 
-      const downloadUrl = await getDownloadURL(task.snapshot.ref);
       setVerificationDocs((prev) => ({
         ...prev,
         [type]: {
           type,
           label: VERIFICATION_DOC_LABELS[type],
           storagePath,
-          downloadUrl,
         },
       }));
       setSaved(false);
@@ -458,7 +511,10 @@ function ProfileContent() {
 
     setSubmittingVerification(true);
     try {
-      await verificationSubmitFn({ documents: docs });
+      const idempotencyKey = verificationRequestKeyRef.current ?? crypto.randomUUID();
+      verificationRequestKeyRef.current = idempotencyKey;
+      await verificationSubmitFn({ idempotencyKey, documents: docs });
+      verificationRequestKeyRef.current = null;
       setVerificationStatus("pending");
       setVerificationNote("");
       setProfile((prev) => ({
@@ -491,8 +547,7 @@ function ProfileContent() {
     setError(null);
 
     try {
-      const safeName = file.name.replace(/\s+/g, "_");
-      const storagePath = `profileVideos/${user.uid}/raw/${Date.now()}_${safeName}`;
+      const storagePath = `profileVideos/${user.uid}/raw/${uniqueAssetFileName(file)}`;
       const storageRef = ref(storage, storagePath);
       const task = uploadBytesResumable(storageRef, file);
 
@@ -500,9 +555,10 @@ function ProfileContent() {
         task.on("state_changed", undefined, reject, () => resolve());
       });
 
-      const url = await getDownloadURL(task.snapshot.ref);
-      setVideoIntroUrl(url);
-      setVideoIntroPosterUrl(photoUrl);
+      setVideoIntroStoragePath(storagePath);
+      setVideoIntroUrl(null);
+      setVideoIntroPosterStoragePath(photoStoragePath);
+      setVideoIntroPosterUrl(photoStoragePath ? null : photoUrl);
       setVideoIntroStatus("ready");
       setSaved(false);
     } catch (err) {
@@ -529,10 +585,8 @@ function ProfileContent() {
     setPhotoUploading(true);
     setError(null);
 
-    const storageRef = ref(
-      storage,
-      `profilePhotos/${user.uid}/${file.name}`
-    );
+    const storagePath = `profilePhotos/${user.uid}/${uniqueAssetFileName(file)}`;
+    const storageRef = ref(storage, storagePath);
     const task = uploadBytesResumable(storageRef, file);
 
     task.on(
@@ -543,9 +597,9 @@ function ProfileContent() {
         setError("Photo upload failed.");
         setPhotoUploading(false);
       },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        setPhotoUrl(url);
+      () => {
+        setPhotoStoragePath(storagePath);
+        setPhotoUrl(null);
         setPhotoUploading(false);
         setSaved(false);
       }
@@ -773,11 +827,11 @@ function ProfileContent() {
             }}
           />
 
-          {videoIntroUrl ? (
+          {videoIntroDisplayUrl ? (
             <div className="mt-3 rounded-lg border border-slate-200 p-2">
               <video
-                src={videoIntroUrl}
-                poster={videoIntroPosterUrl || undefined}
+                src={videoIntroDisplayUrl}
+                poster={videoIntroPosterDisplayUrl || undefined}
                 controls
                 preload="metadata"
                 className="h-auto w-full rounded-md"
@@ -824,7 +878,7 @@ function ProfileContent() {
             <StepBusiness
               form={form}
               updateField={updateField}
-              photoUrl={photoUrl}
+              photoUrl={photoDisplayUrl}
               photoUploading={photoUploading}
               photoFileRef={photoFileRef}
               onPhotoUpload={handlePhotoUpload}
@@ -839,7 +893,10 @@ function ProfileContent() {
           )}
           {step === 2 && (
             <StepDocuments
-              capStatementUrl={capStatementUrl}
+              capStatementUrl={capStatementDisplayUrl}
+              capStatementSelected={Boolean(
+                capStatementStoragePath || capStatementUrl,
+              )}
               capStatementName={capStatementName}
               uploading={uploading}
               uploadProgress={uploadProgress}
@@ -847,6 +904,7 @@ function ProfileContent() {
               onCapUpload={handleCapUpload}
               onRemoveCap={() => {
                 setCapStatementUrl(null);
+                setCapStatementStoragePath(null);
                 setCapStatementName(null);
                 setSaved(false);
               }}
@@ -1184,6 +1242,7 @@ function StepProcurement({
 
 function StepDocuments({
   capStatementUrl,
+  capStatementSelected,
   capStatementName,
   uploading,
   uploadProgress,
@@ -1192,6 +1251,7 @@ function StepDocuments({
   onRemoveCap,
 }: {
   capStatementUrl: string | null;
+  capStatementSelected: boolean;
   capStatementName: string | null;
   uploading: boolean;
   uploadProgress: number;
@@ -1211,21 +1271,25 @@ function StepDocuments({
         </p>
       </div>
 
-      {capStatementUrl ? (
+      {capStatementSelected ? (
         <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
           <FileText className="h-5 w-5 text-emerald-600 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-emerald-900 truncate">
               {capStatementName || "Capability Statement"}
             </p>
-            <a
-              href={capStatementUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-emerald-600 hover:underline"
-            >
-              View document
-            </a>
+            {capStatementUrl ? (
+              <a
+                href={capStatementUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-emerald-600 hover:underline"
+              >
+                View document
+              </a>
+            ) : (
+              <span className="text-xs text-emerald-600">Loading secure preview…</span>
+            )}
           </div>
           <button
             onClick={onRemoveCap}
