@@ -2,7 +2,6 @@ name: Exchange security
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: ["codex/exchange-run-1-secure-foundation"]
 
@@ -30,6 +29,7 @@ jobs:
       - run: npm run build:shared
       - run: npm run build:functions
       - run: npm run lint
+      - run: npm run test:exchange
       - run: npm run test:security
       - run: npm run build
         env:
