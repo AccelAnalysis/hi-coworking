@@ -820,3 +820,110 @@ export const accessAdminGetDoorStatusFn = httpsCallable<
   { doorId: string },
   { doorId: string; online: boolean; batteryLevel?: number; locked?: boolean }
 >(functions, "access_adminGetDoorStatus");
+
+// --- Exchange founding launch and organization wallet ---
+
+export interface ExchangePublicCommercialConfiguration {
+  policyVersion: string;
+  featureFlags: Record<string, boolean>;
+  launchMarket: {
+    enabled: boolean;
+    publicLabel: string;
+    stateCode: string;
+    countyOrLocalityName: string;
+    countryCode: string;
+  };
+  foundingMembership: {
+    enabled: boolean;
+    checkoutReady: boolean;
+    publicLabel: string;
+    amountCents?: number;
+    currency: "usd";
+    billingInterval: "month";
+    includedCreditsPerPeriod: number;
+    foundingCapacity?: number;
+    foundingEnrollmentClosesAt?: number;
+    retainRecognitionAfterCancellation: boolean;
+    pricingVersion: string;
+    entitlementVersion: string;
+  };
+  creditDefinition: {
+    nominalDollarValuePerCredit: 1;
+    expirationCalendarMonths: 12;
+    transferable: false;
+    cashRedeemable: false;
+    generallyRefundable: false;
+    verifiedBusinessRequired: true;
+    spendingOrder: "earliest_expiration_first";
+  };
+  creditPacks: Array<{
+    key: string;
+    enabled: boolean;
+    checkoutReady: boolean;
+    credits: number;
+    amountCents: number;
+    currency: "usd";
+    version: string;
+  }>;
+  actionCosts: Record<string, { enabled: boolean; credits: number; verifiedBusinessRequired: boolean }>;
+  referralFinancialPolicy: {
+    enabled: boolean;
+    platformFeeBps: number;
+    minimumPlatformServiceFeeCents: number;
+    minimumAccumulatedPayoutCents: number;
+    payoutHoldDays: number;
+    automatedPayoutsEnabled: false;
+    policyVersion: string;
+  };
+}
+
+export const getExchangePublicCommercialPolicyFn = httpsCallable<
+  Record<string, never>,
+  { configuration: ExchangePublicCommercialConfiguration }
+>(functions, "exchange_getPublicCommercialPolicy");
+
+export const getExchangeOrganizationWalletFn = httpsCallable<
+  { organizationId: string; limit?: number },
+  {
+    entitlements: {
+      organizationId: string;
+      organizationName: string;
+      verificationStatus: string;
+      permissions: string[];
+      tier: "free" | "founding";
+      membershipStatus: "active" | "past_due" | "cancelled" | "incomplete" | "paused";
+      isFoundingMember: boolean;
+      foundingRecognitionRetained: boolean;
+      paidEntitlementsActive: boolean;
+      currentPeriodStart?: number;
+      currentPeriodEnd?: number;
+    };
+    account: { organizationId: string; usableCredits: number; hasDeficit: boolean; manualReviewRequired?: boolean };
+    expiringSoonCredits: number;
+    grants: Array<Record<string, unknown>>;
+    transactions: Array<Record<string, unknown>>;
+    packs: ExchangePublicCommercialConfiguration["creditPacks"];
+    creditTerms: ExchangePublicCommercialConfiguration["creditDefinition"];
+    truncated: boolean;
+  }
+>(functions, "exchange_getOrganizationWallet");
+
+export const createExchangeMembershipCheckoutFn = httpsCallable<
+  { organizationId: string; key: "exchange_founding"; returnPath: string },
+  { url: string; sessionId: string; paymentId: string }
+>(functions, "stripe_createExchangeMembershipCheckout");
+
+export const createExchangeCreditPackCheckoutFn = httpsCallable<
+  { organizationId: string; key: string; returnPath: string },
+  { url: string; sessionId: string; paymentId: string }
+>(functions, "stripe_createExchangeCreditPackCheckout");
+
+export const createExchangeBillingPortalSessionFn = httpsCallable<
+  { organizationId: string; returnPath: string },
+  { url: string }
+>(functions, "stripe_createExchangeBillingPortalSession");
+
+export const getExchangeAdminLaunchDashboardFn = httpsCallable<
+  Record<string, never>,
+  Record<string, unknown>
+>(functions, "exchange_adminGetLaunchDashboard");

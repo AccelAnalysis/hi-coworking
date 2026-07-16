@@ -4,7 +4,11 @@ export const EXCHANGE_SURFACE_MODES = ["map", "list", "split"] as const;
 export type ExchangeSurfaceMode = (typeof EXCHANGE_SURFACE_MODES)[number];
 
 export const EXCHANGE_VIEWS = [
+  "businesses",
   "opportunities",
+  "referrals",
+  "teaming",
+  "resources",
   "connections",
   "intelligence",
 ] as const;

@@ -1,4 +1,4 @@
-import { ChartNoAxesCombined, Handshake, MapPinned } from "lucide-react";
+import { BookOpenText, BriefcaseBusiness, ChartNoAxesCombined, Handshake, MapPinned, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExchangeView } from "../state/exchangeWorkspaceTypes";
 
@@ -7,8 +7,11 @@ const VIEWS: Array<{
   label: string;
   icon: typeof MapPinned;
 }> = [
+  { view: "businesses", label: "Businesses", icon: BriefcaseBusiness },
   { view: "opportunities", label: "Opportunities", icon: MapPinned },
-  { view: "connections", label: "Connections", icon: Handshake },
+  { view: "referrals", label: "Referrals", icon: Handshake },
+  { view: "teaming", label: "Teaming", icon: Users },
+  { view: "resources", label: "Resources", icon: BookOpenText },
   { view: "intelligence", label: "Intelligence", icon: ChartNoAxesCombined },
 ];
 

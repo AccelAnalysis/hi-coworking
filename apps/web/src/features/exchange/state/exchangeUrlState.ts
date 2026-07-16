@@ -105,7 +105,7 @@ function parseSelection(
   }
   const allowedForView = view === "opportunities"
     ? entityType === "rfx" || entityType === "territory"
-    : view === "connections"
+    : view === "connections" || view === "referrals"
       ? entityType === "referral"
       : entityType === "relationship"
         || entityType === "territory"

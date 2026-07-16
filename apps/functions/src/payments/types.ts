@@ -35,6 +35,7 @@ export interface CheckoutSessionInput {
   metadata?: Record<string, string>;
   mode?: "subscription" | "payment";
   lineItemLabel?: string; // For ad-hoc one-time payments
+  customerId?: string;
 }
 
 export interface CheckoutSessionResult {

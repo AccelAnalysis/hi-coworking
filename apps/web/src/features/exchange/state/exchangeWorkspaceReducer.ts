@@ -282,7 +282,7 @@ export function exchangeWorkspaceReducer(
     case "SET_FILTERS":
       return applyFilterUpdate(state, action.filters);
     case "CLEAR_FILTERS":
-      if (state.view === "connections") {
+      if (state.view === "connections" || state.view === "referrals") {
         return {
           ...state,
           searchQuery: "",

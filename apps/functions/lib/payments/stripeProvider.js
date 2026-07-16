@@ -58,11 +58,9 @@ class StripeProvider {
     async createCheckoutSession(input) {
         const isSubscription = input.mode !== "payment";
         // Construct line item
-        const lineItem = isSubscription
-            ? {
-                price: input.metadata?.stripePriceId,
-                quantity: 1,
-            }
+        const configuredPriceId = input.metadata?.stripePriceId;
+        const lineItem = configuredPriceId
+            ? { price: configuredPriceId, quantity: 1 }
             : {
                 price_data: {
                     currency: input.currency,
@@ -75,7 +73,9 @@ class StripeProvider {
             };
         const sessionConfig = {
             mode: isSubscription ? "subscription" : "payment",
-            customer_email: input.metadata?.email,
+            ...(input.customerId
+                ? { customer: input.customerId }
+                : { customer_email: input.metadata?.email }),
             line_items: [lineItem],
             success_url: input.successUrl,
             cancel_url: input.cancelUrl,
@@ -92,6 +92,9 @@ class StripeProvider {
                 metadata: {
                     uid: input.uid,
                     plan: input.metadata?.plan || "",
+                    organizationId: input.metadata?.organizationId || "",
+                    commercialDomain: input.metadata?.commercialDomain || "",
+                    policyVersion: input.metadata?.policyVersion || "",
                 },
             };
         }
@@ -121,16 +124,23 @@ class StripeProvider {
             throw new Error("Invalid webhook signature");
         }
         switch (event.type) {
-            case "checkout.session.completed": {
+            case "checkout.session.completed":
+            case "checkout.session.async_payment_succeeded":
+            case "checkout.session.async_payment_failed": {
                 const session = event.data.object;
                 const sessionMetadata = session.metadata || {};
+                const failed = event.type === "checkout.session.async_payment_failed";
                 return {
                     eventId: event.id,
-                    action: "payment_succeeded",
+                    action: failed ? "payment_failed" : "payment_succeeded",
                     paymentId: sessionMetadata.paymentId || undefined,
-                    status: "paid",
+                    status: failed ? "failed" : session.payment_status === "paid" ? "paid" : "pending",
                     metadata: {
                         ...sessionMetadata,
+                        eventType: event.type,
+                        sessionId: session.id,
+                        paymentStatus: session.payment_status,
+                        paymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : "",
                         uid: sessionMetadata.uid || "",
                         plan: sessionMetadata.plan || "",
                         subscriptionId: typeof session.subscription === "string"
@@ -142,17 +152,25 @@ class StripeProvider {
                     },
                 };
             }
+            case "invoice.paid":
             case "invoice.payment_succeeded": {
                 const invoice = event.data.object;
+                const invoiceRecord = invoice;
+                const lines = invoice.lines?.data ?? [];
+                const period = lines[0]?.period;
                 return {
                     eventId: event.id,
                     action: "payment_succeeded",
                     status: "paid",
                     metadata: {
-                        subscriptionId: invoice.subscription || "",
+                        eventType: event.type,
+                        invoiceId: invoice.id,
+                        subscriptionId: invoiceRecord.subscription || "",
                         customerId: typeof invoice.customer === "string"
                             ? invoice.customer
                             : "",
+                        currentPeriodStart: period?.start ? String(period.start * 1000) : "",
+                        currentPeriodEnd: period?.end ? String(period.end * 1000) : "",
                     },
                 };
             }
@@ -163,20 +181,56 @@ class StripeProvider {
                     action: "payment_failed",
                     status: "failed",
                     metadata: {
+                        eventType: event.type,
+                        invoiceId: failedInvoice.id,
                         subscriptionId: failedInvoice.subscription || "",
                     },
                 };
             }
+            case "customer.subscription.created":
+            case "customer.subscription.updated":
             case "customer.subscription.deleted": {
                 const deletedSub = event.data.object;
+                const subscriptionRecord = deletedSub;
+                const item = deletedSub.items.data[0];
+                const cancelled = event.type === "customer.subscription.deleted";
                 return {
                     eventId: event.id,
-                    action: "payment_failed",
-                    status: "failed",
+                    action: cancelled ? "payment_failed" : "payment_succeeded",
+                    status: cancelled ? "failed" : deletedSub.status === "active" || deletedSub.status === "trialing" ? "paid" : "pending",
                     metadata: {
+                        ...deletedSub.metadata,
+                        eventType: event.type,
                         subscriptionId: deletedSub.id,
                         uid: deletedSub.metadata?.uid || "",
-                        reason: "subscription_cancelled",
+                        reason: cancelled ? "subscription_cancelled" : "subscription_updated",
+                        subscriptionStatus: deletedSub.status,
+                        subscriptionCreatedAt: String(deletedSub.created * 1000),
+                        currentPeriodStart: item?.current_period_start ? String(item.current_period_start * 1000) : "",
+                        currentPeriodEnd: item?.current_period_end ? String(item.current_period_end * 1000) : "",
+                        customerId: typeof deletedSub.customer === "string" ? deletedSub.customer : "",
+                        stripePriceId: item?.price?.id ?? "",
+                        cancelAtPeriodEnd: String(Boolean(subscriptionRecord.cancel_at_period_end)),
+                    },
+                };
+            }
+            case "charge.refunded":
+            case "refund.created":
+            case "charge.dispute.created":
+            case "charge.dispute.closed": {
+                const object = event.data.object;
+                const metadata = (object.metadata && typeof object.metadata === "object"
+                    ? object.metadata
+                    : {});
+                const paymentIntent = typeof object.payment_intent === "string" ? object.payment_intent : "";
+                return {
+                    eventId: event.id,
+                    action: event.type === "charge.dispute.closed" ? "unknown" : "refund",
+                    status: event.type === "charge.dispute.closed" ? undefined : "refunded",
+                    metadata: {
+                        ...metadata,
+                        eventType: event.type,
+                        paymentIntentId: paymentIntent,
                     },
                 };
             }

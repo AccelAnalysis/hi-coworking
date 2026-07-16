@@ -5,19 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
-  Calendar,
   LogOut,
   User,
-  Users,
   Briefcase,
-  ClipboardList,
   Bell,
   Menu,
   X,
   ChevronDown,
-  Gift,
   Building2,
   Compass,
+  Coins,
 } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import { useEffect, useState, useRef } from "react";
@@ -138,21 +135,16 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
   };
 
   const publicLinks = [
-    { href: "/spaces", label: "Spaces" },
-    { href: "/pricing", label: "Pricing" },
-    { href: "/events", label: "Events" },
-    { href: "/bookstore", label: "Bookstore" },
+    { href: "/exchange", label: "Exchange" },
+    { href: "/exchange/founding", label: "Founding Membership" },
     { href: "/about", label: "About" },
     { href: "/contact", label: "Contact" },
   ];
 
   const memberLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/book", label: "Book Space", icon: Calendar },
     { href: "/exchange", label: "Exchange", icon: Compass },
-    { href: "/rfx", label: "RFx", icon: ClipboardList },
-    { href: "/directory", label: "Directory", icon: Users },
-    { href: "/referrals", label: "Referrals", icon: Gift },
+    { href: "/exchange/wallet", label: "Membership & Credits", icon: Coins },
   ];
 
   const staffLinks = [
@@ -161,6 +153,7 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
 
   const adminLinks = [
     { href: "/admin/dashboard", label: "Admin", icon: LayoutDashboard },
+    { href: "/admin/exchange-launch", label: "Launch", icon: Compass },
   ];
 
   // Claims-based role check (PR-02)
@@ -265,8 +258,8 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
                               </span>
                             )}
                           </Link>
-                          <Link href="/referrals" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
-                            <Gift className="h-4 w-4 text-slate-400" /> Referrals
+                          <Link href="/exchange?view=connections" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
+                            <Compass className="h-4 w-4 text-slate-400" /> Exchange connections
                           </Link>
                           <Link href="/org/dashboard" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
                             <Building2 className="h-4 w-4 text-slate-400" /> Organization

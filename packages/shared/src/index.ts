@@ -2242,3 +2242,4 @@ export * from "./referralCommerce";
 
 // Run 3 referral network intelligence and economic-impact analytics.
 export * from "./referralIntelligence";
+export * from "./exchangeCommercial";

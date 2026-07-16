@@ -14,6 +14,7 @@ import { ensureIdempotent, markWebhookResult } from "./idempotency";
 import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
+import { processExchangeStripeWebhookResult } from "../exchangeStripe";
 
 function getDb() { return admin.firestore(); }
 
@@ -85,6 +86,7 @@ async function processWebhookResult(
   intuitClientId?: string,
   intuitClientSecret?: string
 ): Promise<void> {
+  if (await processExchangeStripeWebhookResult(result)) return;
   switch (result.action) {
     case "payment_succeeded":
       await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret);

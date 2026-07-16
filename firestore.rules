@@ -694,6 +694,77 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
+    // --- Run 4 Exchange commercial foundation ---
+    // The public projection is written by trusted policy Functions and contains
+    // no Stripe identifiers, secrets, customer records, or private fee inputs.
+    match /exchangePublicConfiguration/{configId} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+
+    // Organization participants may inspect their membership and aggregate
+    // wallet balance. All mutation remains server-authoritative.
+    match /exchangeMemberships/{orgId} {
+      allow read: if isOrgMember(orgId) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeCreditAccounts/{orgId} {
+      allow read: if isOrgMember(orgId) || isStaff();
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeCreditGrants/{grantId} {
+      allow read: if isStaff()
+                  || ("organizationId" in resource.data
+                      && isOrgMember(resource.data.organizationId));
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeCreditTransactions/{transactionId} {
+      allow read: if isStaff()
+                  || ("organizationId" in resource.data
+                      && isOrgMember(resource.data.organizationId));
+      allow create, update, delete: if false;
+    }
+
+    // Private configuration, checkout correlation, financial lifecycle,
+    // scheduled-job state, and immutable audit evidence never accept browser
+    // writes. Staff visibility is intentionally narrower than org wallet data.
+    match /exchangeCommercialPolicies/{policyId} {
+      allow read, write: if false;
+    }
+
+    match /exchangeCommercialPolicyVersions/{policyId} {
+      allow read, write: if false;
+    }
+
+    match /exchangeCheckoutIntents/{intentId} {
+      allow read, write: if false;
+    }
+
+    match /exchangeActionUsage/{usageId} {
+      allow read, write: if false;
+    }
+
+    match /referralFinancialAccounts/{accountId} {
+      allow read, write: if false;
+    }
+
+    match /referralFinancialEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /exchangeJobRuns/{runId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /exchangeAuditEvents/{eventId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
     // --- books/{bookId} ---
     // Public read for published books; admin CRUD.
     match /books/{bookId} {

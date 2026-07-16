@@ -35,6 +35,7 @@ jobs:
       - run: npm run test:exchange
       - run: npm run test:security
       - run: npm run test:run3
+      - run: npm run test:run4
       - run: npm run build
         env:
           SKIP_BOOKSTORE_SYNC: "true"

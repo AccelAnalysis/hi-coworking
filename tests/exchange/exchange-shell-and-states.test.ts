@@ -37,13 +37,11 @@ describe("AppShell contract", () => {
     expect(layout.mainClassName).toContain("min-h-0");
   });
 
-  it("uses workspace mode only on the new Exchange route", () => {
+  it("uses workspace mode on the canonical Exchange and redirects legacy product routes into its views", () => {
     expect(source("apps/web/src/app/exchange/page.tsx")).toContain('variant="workspace"');
-    for (const route of ["rfx", "directory", "referrals"]) {
-      const routeSource = source(`apps/web/src/app/${route}/page.tsx`);
-      expect(routeSource).toContain("<AppShell>");
-      expect(routeSource).not.toContain('variant="workspace"');
-    }
+    expect(source("apps/web/src/app/rfx/page.tsx")).toContain('redirect("/exchange?view=opportunities")');
+    expect(source("apps/web/src/app/directory/page.tsx")).toContain('redirect("/exchange?view=businesses")');
+    expect(source("apps/web/src/app/referrals/page.tsx")).toContain('redirect("/exchange?view=referrals")');
   });
 });
 

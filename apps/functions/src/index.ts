@@ -182,6 +182,28 @@ import {
 } from "./exchangeStorage";
 import { access_expireGrants, access_noShowRevoke } from "./scheduled/accessCleanup";
 import {
+  exchange_getPublicCommercialPolicy,
+  exchange_getOrganizationEntitlements,
+  exchange_getOrganizationWallet,
+  exchange_spendCredits,
+  exchange_adminAdjustCredits,
+  exchange_expireCredits,
+  exchange_adminUpdateCommercialPolicy,
+  exchange_adminGetLaunchDashboard,
+} from "./exchangeCommercial";
+import {
+  stripe_createExchangeMembershipCheckout,
+  stripe_createExchangeCreditPackCheckout,
+  stripe_createExchangeBillingPortalSession,
+} from "./exchangeStripe";
+import {
+  referralFinance_quote,
+  referralFinance_getOperatingReserve,
+  referralFinance_initializeLifecycle,
+  referralFinance_getPayoutReadiness,
+  referralFinance_adminApproveManualPayout,
+} from "./referralFinance";
+import {
   createAccessGrant,
   access_getMyGrants,
   access_adminRevoke,
@@ -200,6 +222,7 @@ export { team_expire_invites };
 export { businessReferral_expireSent };
 export { rfx_cleanupResponseUploadGrants };
 export { access_expireGrants, access_noShowRevoke };
+export { exchange_expireCredits };
 
 // Firestore Triggers
 export { onReferralWritten };
@@ -229,6 +252,25 @@ export { rfx_backfillGeo };
 export { rfx_refreshSuggestions };
 export { rfx_listManaged };
 export { exchange_privateStorage, exchange_normalizeSensitiveStorageMetadata };
+
+// Exchange commercial foundation (organization scoped; physical membership remains separate)
+export {
+  exchange_getPublicCommercialPolicy,
+  exchange_getOrganizationEntitlements,
+  exchange_getOrganizationWallet,
+  exchange_spendCredits,
+  exchange_adminAdjustCredits,
+  exchange_adminUpdateCommercialPolicy,
+  exchange_adminGetLaunchDashboard,
+  stripe_createExchangeMembershipCheckout,
+  stripe_createExchangeCreditPackCheckout,
+  stripe_createExchangeBillingPortalSession,
+  referralFinance_quote,
+  referralFinance_getOperatingReserve,
+  referralFinance_initializeLifecycle,
+  referralFinance_getPayoutReadiness,
+  referralFinance_adminApproveManualPayout,
+};
 
 // Referral Functions
 export {

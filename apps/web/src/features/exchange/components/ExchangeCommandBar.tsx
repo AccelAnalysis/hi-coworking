@@ -28,7 +28,11 @@ const MODES: Array<{ mode: ExchangeSurfaceMode; label: string; icon: typeof Map 
 ];
 
 const SEARCH_PLACEHOLDERS: Record<ExchangeView, string> = {
+  businesses: "Search businesses, capabilities, or territory",
   opportunities: "Search RFx, NAICS, or territory",
+  referrals: "Search referrals, partners, industries, or territories",
+  teaming: "Search partners, teams, or capabilities",
+  resources: "Search resources or launch-market support",
   connections: "Search referrals, partners, industries, or territories",
   intelligence: "Search relationships, industries, or territories",
 };

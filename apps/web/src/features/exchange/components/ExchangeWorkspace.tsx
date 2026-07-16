@@ -32,6 +32,7 @@ import {
   parseExchangeUrlState,
 } from "../state/exchangeUrlState";
 import { ExchangeOpportunitiesView } from "../views/ExchangeOpportunitiesView";
+import { ExchangeDomainLayerView } from "../views/ExchangeDomainLayerView";
 import type { ExchangeHistoryMode } from "../views/exchangeViewTypes";
 
 function exchangeUrl(query: string): string {
@@ -149,10 +150,12 @@ export function ExchangeWorkspace() {
       <div className="min-h-0 flex-1">
         {state.view === "opportunities" ? (
           <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
-        ) : state.view === "connections" ? (
+        ) : state.view === "connections" || state.view === "referrals" ? (
           <ConnectionsWorkspace {...shared} gateway={gateway} />
-        ) : (
+        ) : state.view === "intelligence" ? (
           <IntelligenceWorkspace {...shared} gateway={gateway} />
+        ) : (
+          <ExchangeDomainLayerView view={state.view} onViewChange={onViewChange} />
         )}
       </div>
     </div>
