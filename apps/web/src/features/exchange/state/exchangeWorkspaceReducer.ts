@@ -3,9 +3,17 @@ import type {
   ExchangeWorkspaceAction,
 } from "./exchangeWorkspaceActions";
 import {
+  DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+  DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
   DEFAULT_EXCHANGE_LOCAL_FIRST,
+  DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
   createInitialExchangeWorkspaceState,
+  isExchangeCompensationFilter,
+  isExchangeConnectionMode,
+  isExchangeIntelligenceMetric,
   isExchangeRfxStatus,
+  isExchangeReferralStatus,
+  isExchangeRelationshipFilter,
   isExchangeSurfaceMode,
   isExchangeTerritoryStatus,
   isExchangeView,
@@ -49,7 +57,13 @@ function normalizeSelection(value: unknown): ExchangeSelection | undefined {
   if (!value || typeof value !== "object") return undefined;
 
   const candidate = value as { entityType?: unknown; entityId?: unknown };
-  if (candidate.entityType !== "rfx" && candidate.entityType !== "territory") {
+  if (
+    candidate.entityType !== "rfx"
+    && candidate.entityType !== "territory"
+    && candidate.entityType !== "referral"
+    && candidate.entityType !== "relationship"
+    && candidate.entityType !== "industry"
+  ) {
     return undefined;
   }
   if (
@@ -141,6 +155,26 @@ function applyFilterUpdate(
   if (typeof filters.localFirst === "boolean") {
     next.localFirst = filters.localFirst;
   }
+  if (own(filters, "referralStatusFilters")) {
+    next.referralStatusFilters = normalizeStringList(filters.referralStatusFilters)
+      .filter(isExchangeReferralStatus);
+  }
+  if (own(filters, "connectionIndustryFilters")) {
+    next.connectionIndustryFilters = normalizeStringList(
+      filters.connectionIndustryFilters,
+    );
+  }
+  if (own(filters, "connectionTerritoryFilters")) {
+    next.connectionTerritoryFilters = normalizeStringList(
+      filters.connectionTerritoryFilters,
+    );
+  }
+  if (isExchangeCompensationFilter(filters.compensationFilter)) {
+    next.compensationFilter = filters.compensationFilter;
+  }
+  if (isExchangeRelationshipFilter(filters.relationshipFilter)) {
+    next.relationshipFilter = filters.relationshipFilter;
+  }
 
   return next;
 }
@@ -153,6 +187,18 @@ function hydrateWorkspace(
 
   if (own(hydration, "view") && isExchangeView(hydration.view)) {
     next.view = hydration.view;
+  }
+  if (
+    own(hydration, "connectionMode")
+    && isExchangeConnectionMode(hydration.connectionMode)
+  ) {
+    next.connectionMode = hydration.connectionMode;
+  }
+  if (
+    own(hydration, "intelligenceMetric")
+    && isExchangeIntelligenceMetric(hydration.intelligenceMetric)
+  ) {
+    next.intelligenceMetric = hydration.intelligenceMetric;
   }
   if (
     own(hydration, "surfaceMode")
@@ -180,6 +226,21 @@ function hydrateWorkspace(
     ...(own(hydration, "localFirst")
       ? { localFirst: hydration.localFirst }
       : {}),
+    ...(own(hydration, "referralStatusFilters")
+      ? { referralStatusFilters: hydration.referralStatusFilters }
+      : {}),
+    ...(own(hydration, "connectionIndustryFilters")
+      ? { connectionIndustryFilters: hydration.connectionIndustryFilters }
+      : {}),
+    ...(own(hydration, "connectionTerritoryFilters")
+      ? { connectionTerritoryFilters: hydration.connectionTerritoryFilters }
+      : {}),
+    ...(own(hydration, "compensationFilter")
+      ? { compensationFilter: hydration.compensationFilter }
+      : {}),
+    ...(own(hydration, "relationshipFilter")
+      ? { relationshipFilter: hydration.relationshipFilter }
+      : {}),
   });
 
   if (own(hydration, "selection")) {
@@ -205,11 +266,43 @@ export function exchangeWorkspaceReducer(
   action: ExchangeWorkspaceAction,
 ): ExchangeWorkspaceState {
   switch (action.type) {
+    case "SET_VIEW":
+      return isExchangeView(action.view)
+        ? {
+            ...state,
+            view: action.view,
+            selection: null,
+            rightPanelOpen: false,
+            mobileDetailOpen: false,
+            mobileFilterOpen: false,
+          }
+        : state;
     case "SET_SEARCH":
       return { ...state, searchQuery: normalizeSearch(action.query) };
     case "SET_FILTERS":
       return applyFilterUpdate(state, action.filters);
     case "CLEAR_FILTERS":
+      if (state.view === "connections") {
+        return {
+          ...state,
+          searchQuery: "",
+          referralStatusFilters: [],
+          connectionIndustryFilters: [],
+          connectionTerritoryFilters: [],
+          compensationFilter: DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+          relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+        };
+      }
+      if (state.view === "intelligence") {
+        return {
+          ...state,
+          searchQuery: "",
+          connectionIndustryFilters: [],
+          connectionTerritoryFilters: [],
+          relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+          intelligenceMetric: DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
+        };
+      }
       return {
         ...state,
         searchQuery: "",
@@ -222,6 +315,14 @@ export function exchangeWorkspaceReducer(
     case "SET_SURFACE_MODE":
       return isExchangeSurfaceMode(action.mode)
         ? { ...state, surfaceMode: action.mode }
+        : state;
+    case "SET_CONNECTION_MODE":
+      return isExchangeConnectionMode(action.mode)
+        ? { ...state, connectionMode: action.mode }
+        : state;
+    case "SET_INTELLIGENCE_METRIC":
+      return isExchangeIntelligenceMetric(action.metric)
+        ? { ...state, intelligenceMetric: action.metric }
         : state;
     case "SELECT_ENTITY": {
       const selection = normalizeSelection(action.selection);

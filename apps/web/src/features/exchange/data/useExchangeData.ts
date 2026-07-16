@@ -4,12 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 import type { ViewportBounds } from "@/lib/firestore";
 import {
-  loadExchangeSnapshot,
-  loadExchangeViewportRfx,
+  liveExchangeOpportunityRepository,
   mergeExchangeRfxWithPinned,
   normalizeExchangeDataError,
   resolvePinnedExchangeRfx,
   type ExchangeDataError,
+  type ExchangeOpportunityRepository,
 } from "./exchangeRepository";
 
 export interface ExchangeDataState {
@@ -44,7 +44,9 @@ const INITIAL_STATE: ExchangeDataState = {
   lastUpdatedAt: null,
 };
 
-export function useExchangeData() {
+export function useExchangeData(
+  repository: ExchangeOpportunityRepository = liveExchangeOpportunityRepository,
+) {
   const [state, setState] = useState<ExchangeDataState>(INITIAL_STATE);
   const loadVersionRef = useRef(0);
   const viewportVersionRef = useRef(0);
@@ -61,7 +63,7 @@ export function useExchangeData() {
     }));
 
     try {
-      const snapshot = await loadExchangeSnapshot();
+      const snapshot = await repository.loadSnapshot();
       if (version !== loadVersionRef.current) return;
       setState((current) => {
         const baselineRfx = snapshot.rfx;
@@ -95,7 +97,7 @@ export function useExchangeData() {
         error: normalizeExchangeDataError(error),
       }));
     }
-  }, []);
+  }, [repository]);
 
   useEffect(() => {
     void refresh();
@@ -124,7 +126,7 @@ export function useExchangeData() {
     const version = ++viewportVersionRef.current;
     viewportTimerRef.current = setTimeout(async () => {
       try {
-        const viewportRfx = await loadExchangeViewportRfx(bounds);
+        const viewportRfx = await repository.loadViewportRfx(bounds);
         if (version !== viewportVersionRef.current) return;
         setState((current) => {
           const pinnedRfx = resolvePinnedExchangeRfx(
@@ -154,7 +156,7 @@ export function useExchangeData() {
         }));
       }
     }, 450);
-  }, []);
+  }, [repository]);
 
   const pinSelectedRfx = useCallback((selectedRfxId: string | null) => {
     setState((current) => {

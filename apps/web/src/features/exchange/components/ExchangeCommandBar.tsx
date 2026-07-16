@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   Columns3,
+  Download,
   LayoutDashboard,
   List,
   Map,
@@ -14,7 +15,11 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ExchangeSurfaceMode } from "../state/exchangeWorkspaceTypes";
+import type {
+  ExchangeSurfaceMode,
+  ExchangeView,
+} from "../state/exchangeWorkspaceTypes";
+import { ExchangeViewTabs } from "./ExchangeViewTabs";
 
 const MODES: Array<{ mode: ExchangeSurfaceMode; label: string; icon: typeof Map }> = [
   { mode: "map", label: "Map", icon: Map },
@@ -22,7 +27,14 @@ const MODES: Array<{ mode: ExchangeSurfaceMode; label: string; icon: typeof Map 
   { mode: "split", label: "Split", icon: Columns3 },
 ];
 
+const SEARCH_PLACEHOLDERS: Record<ExchangeView, string> = {
+  opportunities: "Search RFx, NAICS, or territory",
+  connections: "Search referrals, partners, industries, or territories",
+  intelligence: "Search relationships, industries, or territories",
+};
+
 export function ExchangeCommandBar({
+  view,
   searchQuery,
   surfaceMode,
   resultCount,
@@ -30,12 +42,16 @@ export function ExchangeCommandBar({
   filtersOpen,
   mapAvailable,
   refreshing,
+  onViewChange,
   onSearchChange,
   onSurfaceModeChange,
   onOpenFilters,
   onClearFilters,
   onRefresh,
+  onCreateReferral,
+  onExportAnalytics,
 }: {
+  view: ExchangeView;
   searchQuery: string;
   surfaceMode: ExchangeSurfaceMode;
   resultCount: number;
@@ -43,33 +59,89 @@ export function ExchangeCommandBar({
   filtersOpen: boolean;
   mapAvailable: boolean;
   refreshing: boolean;
+  onViewChange: (view: ExchangeView) => void;
   onSearchChange: (value: string) => void;
   onSurfaceModeChange: (mode: ExchangeSurfaceMode) => void;
   onOpenFilters: () => void;
   onClearFilters: () => void;
   onRefresh: () => void;
+  onCreateReferral?: () => void;
+  onExportAnalytics?: () => void;
 }) {
   return (
     <header className="relative z-30 shrink-0 border-b border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-lg sm:px-4">
-      <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="mr-1 flex min-w-fit items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl rounded-bl-none bg-gradient-to-br from-emerald-300 to-cyan-400 text-slate-950 shadow-lg shadow-emerald-400/10">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
-          <div>
-            <h1 className="sr-only font-bold sm:not-sr-only sm:text-sm sm:leading-4">Hi Exchange</h1>
-            <p className="hidden text-[10px] leading-4 text-slate-400 sm:block">Regional business and opportunity workspace</p>
+          <div className="hidden sm:block">
+            <h1 className="text-sm font-bold leading-4">Hi Exchange</h1>
+            <p className="text-[10px] leading-4 text-slate-400">Regional business and opportunity workspace</p>
           </div>
         </div>
 
-        <label className="order-3 flex min-w-0 basis-full items-center rounded-xl border border-slate-700 bg-slate-900 px-3 focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-400/20 sm:order-none sm:basis-auto sm:flex-1 xl:max-w-2xl">
+        <ExchangeViewTabs view={view} onChange={onViewChange} />
+
+        <p className="ml-auto whitespace-nowrap text-xs font-semibold text-slate-300" aria-live="polite">
+          {resultCount.toLocaleString("en-US")} result{resultCount === 1 ? "" : "s"}
+        </p>
+
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50 sm:h-10 sm:w-10"
+          aria-label={refreshing ? "Refreshing Exchange data" : "Refresh Exchange data"}
+          title="Refresh Exchange data"
+        >
+          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin motion-reduce:animate-none")} aria-hidden="true" />
+        </button>
+
+        {view === "opportunities" ? (
+          <Link
+            href="/rfx/new"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Create RFx</span>
+            <span className="sm:hidden">Create</span>
+          </Link>
+        ) : view === "connections" ? (
+          <button
+            type="button"
+            onClick={onCreateReferral}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" /> New referral
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onExportAnalytics}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100"
+          >
+            <Download className="h-4 w-4" aria-hidden="true" /> Export CSV
+          </button>
+        )}
+
+        <Link
+          href="/dashboard"
+          className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-400 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 xl:inline-flex"
+          aria-label="Exit Exchange to dashboard"
+          title="Exit to dashboard"
+        >
+          <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
+        </Link>
+
+        <label className="order-3 flex min-w-0 basis-full items-center rounded-xl border border-slate-700 bg-slate-900 px-3 focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-400/20 lg:order-none lg:basis-auto lg:flex-1 xl:max-w-2xl">
           <Search className="mr-2 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
-          <span className="sr-only">Search Exchange records</span>
+          <span className="sr-only">Search current Exchange view</span>
           <input
             type="search"
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search RFx, NAICS, or territory"
+            placeholder={SEARCH_PLACEHOLDERS[view]}
             className="h-10 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
           />
           {searchQuery ? (
@@ -84,35 +156,33 @@ export function ExchangeCommandBar({
           ) : null}
         </label>
 
-        <p className="ml-auto whitespace-nowrap text-xs font-semibold text-slate-300" aria-live="polite">
-          {resultCount.toLocaleString("en-US")} result{resultCount === 1 ? "" : "s"}
-        </p>
-
-        <div className="flex items-center rounded-xl border border-slate-700 bg-slate-900 p-1" role="group" aria-label="Workspace presentation">
-          {MODES.map(({ mode, label, icon: Icon }) => {
-            const disabled = !mapAvailable && mode !== "list";
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => onSurfaceModeChange(mode)}
-                disabled={disabled}
-                aria-pressed={surfaceMode === mode}
-                aria-label={`${label} view`}
-                title={disabled ? "Mapbox token required" : `${label} view`}
-                className={cn(
-                  "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400 sm:min-h-9",
-                  mode === "split" && "hidden lg:inline-flex",
-                  surfaceMode === mode ? "bg-white text-slate-950" : "text-slate-300 hover:bg-slate-800",
-                  disabled && "cursor-not-allowed opacity-40",
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="hidden md:inline">{label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {view === "opportunities" ? (
+          <div className="flex items-center rounded-xl border border-slate-700 bg-slate-900 p-1" role="group" aria-label="Workspace presentation">
+            {MODES.map(({ mode, label, icon: Icon }) => {
+              const disabled = !mapAvailable && mode !== "list";
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onSurfaceModeChange(mode)}
+                  disabled={disabled}
+                  aria-pressed={surfaceMode === mode}
+                  aria-label={`${label} view`}
+                  title={disabled ? "Mapbox token required" : `${label} view`}
+                  className={cn(
+                    "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400 sm:min-h-9",
+                    mode === "split" && "hidden lg:inline-flex",
+                    surfaceMode === mode ? "bg-white text-slate-950" : "text-slate-300 hover:bg-slate-800",
+                    disabled && "cursor-not-allowed opacity-40",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden md:inline">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         <button
           type="button"
@@ -137,35 +207,6 @@ export function ExchangeCommandBar({
             Clear
           </button>
         ) : null}
-
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50 sm:h-10 sm:w-10"
-          aria-label={refreshing ? "Refreshing Exchange data" : "Refresh Exchange data"}
-          title="Refresh Exchange data"
-        >
-          <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin motion-reduce:animate-none")} aria-hidden="true" />
-        </button>
-
-        <Link
-          href="/rfx/new"
-          className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden sm:inline">Create RFx</span>
-          <span className="sm:hidden">Create</span>
-        </Link>
-
-        <Link
-          href="/dashboard"
-          className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-400 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 xl:inline-flex"
-          aria-label="Exit Exchange to dashboard"
-          title="Exit to dashboard"
-        >
-          <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
-        </Link>
       </div>
     </header>
   );

@@ -1,6 +1,6 @@
 # Referral commerce decision record
 
-Status: binding product direction; implementation deferred
+Status: binding product direction; Run 3 foundation implemented, settlement deferred
 Recorded: 2026-07-13
 
 ## Purpose and domain separation
@@ -18,9 +18,9 @@ notifications, reporting, and future commerce. A platform invitation is not a
 business introduction, and a business referral is not evidence of membership
 acquisition.
 
-## Approved future fee rule
+## Approved fee rule
 
-When business-referral commerce is later authorized and implemented:
+The Run 3 business-referral calculation foundation implements this rule:
 
 - the receiving business publishes a structured referral-eligible service offer
   and its compensation formula before accepting referrals;
@@ -30,7 +30,8 @@ When business-referral commerce is later authorized and implemented:
 - the initial platform fee is **100 basis points (1%) of the gross referral
   payout**;
 - the fee is **not** 1% of the underlying customer transaction;
-- the remaining referral payout is payable to the referrer; and
+- the calculated remainder is the net referrer payout for any later approved
+  settlement; Run 3 itself creates no payment entitlement; and
 - each accepted referral stores an immutable snapshot of the applicable fee
   rate and offer terms so later prospective admin changes cannot rewrite an
   accepted agreement.
@@ -45,17 +46,24 @@ Hi Coworking fee: 1% of payout         $10
 Net referrer payout:                   $990
 ```
 
-Future monetary calculations must use integer cents and basis points. No
-rounding rule is invented by this record.
+Monetary calculations use integer cents and basis points. Calculation version 1
+uses BigInt intermediate multiplication and deterministic half-up rounding to
+the nearest cent. This is a technical MVP rule only and still requires finance
+and legal approval before settlement.
 
-## Structured service-offer requirement
+## Structured service-offer decision
 
-A future offer must use an explicit versioned schema rather than free-form copy
-as the financial authority. At minimum it will need the receiving business,
-eligible service, eligibility/qualification conditions, compensation formula,
-effective interval, currency, acceptance terms, fee-rate policy reference, and
-version. Acceptance must bind the referral to an immutable snapshot of the
-offer and platform-fee basis points.
+Run 3 uses an explicit versioned `ReferralServiceOffer` schema rather than
+free-form copy as calculation authority. An offer identifies the receiving
+provider, eligible service/category, NAICS and territory discovery fields,
+compensation type and structured formula, effective time, currency, attribution
+window, and optional payout/refund explanations. `none` is a first-class
+compensation type and `benefit` is non-cash.
+
+Publishing locks an immutable version. A change creates a future draft version;
+deactivation does not rewrite an accepted referral. Recipient acceptance binds
+the exact offer series/version and platform-fee configuration version into an
+immutable accepted-terms snapshot.
 
 ## Anti-gaming concerns
 
@@ -67,15 +75,35 @@ changes, false attestations, repeated claims on one transaction, and attempts to
 manipulate any future trust score. A score or payout must not be inferred from a
 single party's unverified assertion.
 
-## Candidate future settlement states
+## Run 3 commerce states
 
-The final state machine requires legal, finance, and payment-provider approval.
-Candidate states for design review include `awaiting_transaction`,
-`transaction_reported`, `awaiting_confirmation`, `qualified`, `held`,
-`payable`, `paid`, `reversed`, `refunded`, `disputed`, and `cancelled`. These
-names are not an operational schema and create no current payment entitlement.
+The optional business-referral commerce substate is separate from the primary
+referral lifecycle. The Run 3 schema supports `none`, `awaiting_transaction`,
+`transaction_reported`, `awaiting_confirmation`, `transaction_confirmed`,
+`payout_calculated`, `payout_due`, `settlement_unavailable`, `disputed`,
+`cancelled`, `reversed`, and `refunded`.
 
-## Decisions required before financial implementation
+Run 3 transaction confirmation ends an automatic cash calculation at
+`settlement_unavailable`. No Run 3 path creates `paid`, transfers money, or
+establishes payment entitlement. Reserved payout/refund states do not authorize
+settlement or an unimplemented refund workflow.
+
+## Run 3 implemented boundary
+
+Run 3 implements:
+
+- versioned structured offers and prospective platform configuration;
+- a default 100-basis-point fee with `commerceEnabled` distinct from the
+  schema-locked `settlementEnabled: false`;
+- explicit recipient acceptance and immutable terms/fee snapshots;
+- version-1 integer-cent calculations in which the fee applies to gross
+  referral payout only;
+- recipient reporting, referrer confirm/dispute/clarify decisions, protected
+  evidence references, append-only timeline events, and audit;
+- reported-versus-confirmed, currency-specific analytics; and
+- the required settlement-disabled presentation.
+
+## Decisions required before production settlement
 
 - Rounding and allocation policy.
 - Stripe Connect or alternative payout architecture.
@@ -103,3 +131,12 @@ The Exchange shell, reducer, URL framework, and responsive panels are designed
 so a future authorized `connections` view can be added without replacing the
 workspace foundation. That extension remains hidden until it has complete,
 secure data and actions.
+
+## Run 3 boundary
+
+Run 3 activates the secured Connections and Intelligence foundation described
+above, but does not authorize Stripe Connect, transfers, merchant-of-record
+behavior, tax/withholding, production settlement, a paid state, production
+migration, deployment, or secret creation. Its exact formulas and security
+constraints are recorded in `run-3-referral-commerce.md`,
+`run-3-analytics-definitions.md`, and `run-3-security-and-privacy.md`.

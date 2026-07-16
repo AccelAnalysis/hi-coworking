@@ -793,4 +793,49 @@ describe("Run 1 Firestore authorization matrix", () => {
       }),
     );
   });
+
+  test("Run 3 commerce, timeline, relationship, risk, and analytics records are callable-only", async () => {
+    const records: Record<string, DocumentData> = {
+      "referralServiceOffers/offer-one": { id: "offer-one", providerUid: "alice", status: "published" },
+      "referralTransactionReports/report-one": { id: "report-one", referralId: "referral-one" },
+      "businessReferralTimeline/event-one": { id: "event-one", referralId: "referral-one" },
+      "referralRelationshipInsights/pair-one": {
+        id: "pair-one",
+        participantSubjectKeys: ["uid:alice", "uid:bob"],
+      },
+      "referralAnalyticsSnapshots/snapshot-one": {
+        id: "snapshot-one",
+        scopeType: "organization",
+        scopeId: "org-one",
+      },
+      "referralRiskSignals/signal-one": { id: "signal-one", status: "open" },
+      "referralDuplicateFingerprints/fingerprint-one": { id: "fingerprint-one", keyVersion: 1 },
+      "platformConfiguration/referralCommerce": {
+        platformFeeBasisPoints: 100,
+        version: 1,
+        commerceEnabled: true,
+        settlementEnabled: false,
+      },
+    };
+    await seed(records);
+
+    const member = authenticated("alice").firestore();
+    const admin = authenticated("admin", { role: "admin" }).firestore();
+    for (const path of Object.keys(records)) {
+      await assertFails(getDoc(doc(member, path)));
+      await assertFails(getDoc(doc(admin, path)));
+      await assertFails(updateDoc(doc(member, path), { forged: true }));
+      await assertFails(deleteDoc(doc(admin, path)));
+    }
+
+    await assertFails(setDoc(doc(member, "businessReferralTimeline/forged"), {
+      id: "forged",
+      referralId: "referral-one",
+      eventType: "transaction_confirmed",
+    }));
+    await assertFails(setDoc(doc(admin, "platformConfiguration/forged"), {
+      platformFeeBasisPoints: 0,
+      settlementEnabled: true,
+    }));
+  });
 });

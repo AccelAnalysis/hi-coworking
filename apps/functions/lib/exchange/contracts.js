@@ -277,24 +277,79 @@ exports.businessReferralConsentSchema = zod_1.z.enum([
 ]);
 exports.businessReferralCompensationSchema = zod_1.z
     .object({
-    type: zod_1.z.enum(["none", "fixed", "percentage", "custom"]).default("none"),
+    type: zod_1.z.enum(["none", "fixed", "percentage", "custom", "benefit"]).default("none"),
     amountCents: zod_1.z.number().int().positive().max(100000000).optional(),
     percentageBasisPoints: zod_1.z.number().int().min(1).max(10000).optional(),
+    percentageBasis: zod_1.z.enum(["first_collected_invoice", "total_collected_contract"]).optional(),
+    currency: zod_1.z.string().trim().length(3).regex(/^[A-Za-z]{3}$/)
+        .transform((value) => value.toUpperCase()).optional(),
     terms: zod_1.z.string().trim().max(5000).optional(),
+    benefitDescription: zod_1.z.string().trim().min(1).max(5000).optional(),
 })
     .strict()
     .superRefine((value, ctx) => {
-    if (value.type === "none" && (value.amountCents || value.percentageBasisPoints || value.terms)) {
+    if (value.type === "none" && (value.amountCents
+        || value.percentageBasisPoints
+        || value.percentageBasis
+        || value.currency
+        || value.terms
+        || value.benefitDescription)) {
         ctx.addIssue({ code: "custom", message: "No-compensation referrals cannot include payment terms" });
     }
     if (value.type === "fixed" && value.amountCents === undefined) {
         ctx.addIssue({ code: "custom", path: ["amountCents"], message: "Fixed compensation requires an amount" });
     }
-    if (value.type === "percentage" && value.percentageBasisPoints === undefined) {
+    if (value.type === "percentage") {
+        if (value.percentageBasisPoints === undefined) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["percentageBasisPoints"],
+                message: "Percentage compensation requires basis points",
+            });
+        }
+        if (value.percentageBasis === undefined) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["percentageBasis"],
+                message: "Percentage compensation requires an explicit collected-amount basis",
+            });
+        }
+    }
+    if (value.type === "custom" && !value.terms) {
+        ctx.addIssue({ code: "custom", path: ["terms"], message: "Custom compensation requires terms" });
+    }
+    if (value.type === "benefit" && !value.benefitDescription) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["benefitDescription"],
+            message: "Non-cash benefit compensation requires a description",
+        });
+    }
+    if (value.type !== "none" && !value.currency) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["currency"],
+            message: "Compensation terms require an explicit currency context",
+        });
+    }
+    if (value.type !== "fixed" && value.amountCents !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["amountCents"], message: "Only fixed compensation may set an amount" });
+    }
+    if (value.type !== "percentage" && (value.percentageBasisPoints !== undefined || value.percentageBasis !== undefined)) {
         ctx.addIssue({
             code: "custom",
             path: ["percentageBasisPoints"],
-            message: "Percentage compensation requires basis points",
+            message: "Only percentage compensation may set a rate or calculation basis",
+        });
+    }
+    if (value.type !== "custom" && value.terms !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["terms"], message: "Only custom compensation may set custom terms" });
+    }
+    if (value.type !== "benefit" && value.benefitDescription !== undefined) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["benefitDescription"],
+            message: "Only non-cash benefit compensation may set a benefit description",
         });
     }
 });
@@ -322,15 +377,27 @@ exports.businessReferralCreateInputSchema = zod_1.z
     consentStatus: zod_1.z.enum(["not_required", "pending", "confirmed"]),
     referredParty: exports.businessReferralContactInputSchema.optional(),
     compensationPolicy: exports.businessReferralCompensationSchema.optional(),
+    serviceOfferId: trimmedId.optional(),
     relatedRfxId: trimmedId.optional(),
     relatedTeamId: trimmedId.optional(),
+    relatedOpportunityId: trimmedId.optional(),
 })
     .strict()
     .superRefine((value, ctx) => {
     if (!value.recipientUid && !value.recipientOrgId) {
         ctx.addIssue({ code: "custom", message: "A recipient user or organization is required" });
     }
-    const hasContact = Boolean(value.referredParty?.email || value.referredParty?.phone || value.referredParty?.name);
+    if (value.serviceOfferId && value.compensationPolicy) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["compensationPolicy"],
+            message: "A published service offer is the compensation authority when an offer is selected",
+        });
+    }
+    const hasContact = Boolean(value.referredParty?.email
+        || value.referredParty?.phone
+        || value.referredParty?.name
+        || value.referredParty?.companyName);
     if (hasContact && value.consentStatus === "not_required") {
         ctx.addIssue({
             code: "custom",
@@ -343,6 +410,7 @@ exports.businessReferralSendInputSchema = zod_1.z
     .object({
     referralId: trimmedId,
     expectedVersion: zod_1.z.number().int().nonnegative(),
+    idempotencyKey: exports.idempotencyKeySchema.optional(),
 })
     .strict();
 exports.businessReferralRespondInputSchema = zod_1.z
@@ -351,6 +419,15 @@ exports.businessReferralRespondInputSchema = zod_1.z
     response: zod_1.z.enum(["accepted", "declined"]),
     expectedVersion: zod_1.z.number().int().nonnegative(),
     note: zod_1.z.string().trim().max(2000).optional(),
+    idempotencyKey: exports.idempotencyKeySchema.optional(),
+    acceptTerms: zod_1.z
+        .object({
+        acknowledged: zod_1.z.literal(true),
+        serviceOfferId: trimmedId.optional(),
+        serviceOfferVersion: zod_1.z.number().int().positive().optional(),
+    })
+        .strict()
+        .optional(),
 })
     .strict();
 exports.businessReferralProgressInputSchema = zod_1.z
@@ -358,6 +435,7 @@ exports.businessReferralProgressInputSchema = zod_1.z
     referralId: trimmedId,
     status: zod_1.z.enum(["in_progress", "converted", "closed", "withdrawn"]),
     expectedVersion: zod_1.z.number().int().nonnegative(),
+    idempotencyKey: exports.idempotencyKeySchema.optional(),
     outcome: zod_1.z
         .object({
         type: zod_1.z.enum([
@@ -410,6 +488,8 @@ exports.businessReferralConsentInputSchema = zod_1.z
 exports.referralDisputeCreateInputSchema = zod_1.z
     .object({
     referralId: trimmedId,
+    expectedVersion: zod_1.z.number().int().nonnegative().optional(),
+    idempotencyKey: exports.idempotencyKeySchema.optional(),
     reason: zod_1.z.string().trim().min(10).max(5000),
     evidenceStoragePaths: zod_1.z.array(zod_1.z.string().trim().min(1).max(1024)).max(10).default([]),
 })

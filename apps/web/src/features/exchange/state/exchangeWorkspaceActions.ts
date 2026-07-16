@@ -1,8 +1,14 @@
 import type {
+  ExchangeCompensationFilter,
+  ExchangeConnectionMode,
+  ExchangeIntelligenceMetric,
+  ExchangeReferralStatus,
+  ExchangeRelationshipFilter,
   ExchangeRfxStatus,
   ExchangeSelection,
   ExchangeSurfaceMode,
   ExchangeTerritoryStatus,
+  ExchangeView,
   ExchangeViewport,
   ExchangeWorkspaceHydration,
 } from "./exchangeWorkspaceTypes";
@@ -13,13 +19,21 @@ export interface ExchangeFilterUpdate {
   rfxStatusFilters?: ExchangeRfxStatus[];
   territoryStatusFilters?: ExchangeTerritoryStatus[];
   localFirst?: boolean;
+  referralStatusFilters?: ExchangeReferralStatus[];
+  connectionIndustryFilters?: string[];
+  connectionTerritoryFilters?: string[];
+  compensationFilter?: ExchangeCompensationFilter;
+  relationshipFilter?: ExchangeRelationshipFilter;
 }
 
 export type ExchangeWorkspaceAction =
+  | { type: "SET_VIEW"; view: ExchangeView }
   | { type: "SET_SEARCH"; query: string }
   | { type: "SET_FILTERS"; filters: ExchangeFilterUpdate }
   | { type: "CLEAR_FILTERS" }
   | { type: "SET_SURFACE_MODE"; mode: ExchangeSurfaceMode }
+  | { type: "SET_CONNECTION_MODE"; mode: ExchangeConnectionMode }
+  | { type: "SET_INTELLIGENCE_METRIC"; metric: ExchangeIntelligenceMetric }
   | { type: "SELECT_ENTITY"; selection: Exclude<ExchangeSelection, null> }
   | { type: "CLEAR_SELECTION" }
   | { type: "TOGGLE_LEFT_PANEL" }
@@ -34,6 +48,9 @@ export type ExchangeWorkspaceAction =
   | { type: "HYDRATE_FROM_URL"; state: ExchangeWorkspaceHydration };
 
 export const exchangeWorkspaceActions = {
+  setView(view: ExchangeView): ExchangeWorkspaceAction {
+    return { type: "SET_VIEW", view };
+  },
   setSearch(query: string): ExchangeWorkspaceAction {
     return { type: "SET_SEARCH", query };
   },
@@ -45,6 +62,14 @@ export const exchangeWorkspaceActions = {
   },
   setSurfaceMode(mode: ExchangeSurfaceMode): ExchangeWorkspaceAction {
     return { type: "SET_SURFACE_MODE", mode };
+  },
+  setConnectionMode(mode: ExchangeConnectionMode): ExchangeWorkspaceAction {
+    return { type: "SET_CONNECTION_MODE", mode };
+  },
+  setIntelligenceMetric(
+    metric: ExchangeIntelligenceMetric,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_INTELLIGENCE_METRIC", metric };
   },
   selectEntity(
     selection: Exclude<ExchangeSelection, null>,

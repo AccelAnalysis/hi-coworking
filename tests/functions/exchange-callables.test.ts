@@ -2053,16 +2053,9 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
       id: "recipient-org",
       status: "active",
     });
-    await Promise.all([
-      db.collection("orgMembers").doc(`recipient-org_${recipient.uid}`).set({
-        orgId: "recipient-org", uid: recipient.uid, role: "member", status: "active",
-      }),
-      // The referrer is deliberately also a recipient-org member. Separation
-      // of duties still prevents them from accepting their own introduction.
-      db.collection("orgMembers").doc(`recipient-org_${referrer.uid}`).set({
-        orgId: "recipient-org", uid: referrer.uid, role: "member", status: "active",
-      }),
-    ]);
+    await db.collection("orgMembers").doc(`recipient-org_${recipient.uid}`).set({
+      orgId: "recipient-org", uid: recipient.uid, role: "owner", status: "active",
+    });
 
     const created = await callFunction<{ referralId: string; version: number }>(
       referrer,
@@ -2149,6 +2142,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
       referralId: created.referralId,
       response: "accepted",
       expectedVersion: 1,
+      acceptTerms: { acknowledged: true },
     });
 
     await expectCallableError(
@@ -2274,6 +2268,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
       referralId: closeable.referralId,
       response: "accepted",
       expectedVersion: 1,
+      acceptTerms: { acknowledged: true },
     });
     await callFunction(recipient, "businessReferral_progress", {
       referralId: closeable.referralId,

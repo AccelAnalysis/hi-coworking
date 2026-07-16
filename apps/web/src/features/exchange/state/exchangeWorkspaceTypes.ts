@@ -3,8 +3,66 @@ import type { RfxStatus } from "@hi/shared";
 export const EXCHANGE_SURFACE_MODES = ["map", "list", "split"] as const;
 export type ExchangeSurfaceMode = (typeof EXCHANGE_SURFACE_MODES)[number];
 
-export const EXCHANGE_VIEWS = ["opportunities"] as const;
+export const EXCHANGE_VIEWS = [
+  "opportunities",
+  "connections",
+  "intelligence",
+] as const;
 export type ExchangeView = (typeof EXCHANGE_VIEWS)[number];
+
+export const EXCHANGE_CONNECTION_MODES = [
+  "sent",
+  "received",
+  "draft",
+  "active",
+  "converted",
+  "closed",
+  "disputed",
+] as const;
+export type ExchangeConnectionMode =
+  (typeof EXCHANGE_CONNECTION_MODES)[number];
+
+export const EXCHANGE_REFERRAL_STATUSES = [
+  "draft",
+  "sent",
+  "accepted",
+  "declined",
+  "in_progress",
+  "converted",
+  "closed",
+  "withdrawn",
+  "expired",
+] as const;
+export type ExchangeReferralStatus =
+  (typeof EXCHANGE_REFERRAL_STATUSES)[number];
+
+export const EXCHANGE_COMPENSATION_FILTERS = [
+  "all",
+  "configured",
+  "none",
+] as const;
+export type ExchangeCompensationFilter =
+  (typeof EXCHANGE_COMPENSATION_FILTERS)[number];
+
+export const EXCHANGE_RELATIONSHIP_FILTERS = [
+  "all",
+  "new",
+  "active",
+  "established",
+  "trusted",
+  "review_required",
+] as const;
+export type ExchangeRelationshipFilter =
+  (typeof EXCHANGE_RELATIONSHIP_FILTERS)[number];
+
+export const EXCHANGE_INTELLIGENCE_METRICS = [
+  "overview",
+  "relationships",
+  "gaps",
+  "impact",
+] as const;
+export type ExchangeIntelligenceMetric =
+  (typeof EXCHANGE_INTELLIGENCE_METRICS)[number];
 
 export const EXCHANGE_TERRITORY_STATUSES = ["released", "scheduled"] as const;
 export type ExchangeTerritoryStatus =
@@ -18,6 +76,9 @@ export type ExchangeRfxStatus = (typeof EXCHANGE_RFX_STATUSES)[number];
 export type ExchangeSelection =
   | { entityType: "rfx"; entityId: string }
   | { entityType: "territory"; entityId: string }
+  | { entityType: "referral"; entityId: string }
+  | { entityType: "relationship"; entityId: string }
+  | { entityType: "industry"; entityId: string }
   | null;
 
 export interface ExchangeViewport {
@@ -39,6 +100,14 @@ export interface ExchangeWorkspaceState {
   rfxStatusFilters: ExchangeRfxStatus[];
   territoryStatusFilters: ExchangeTerritoryStatus[];
   localFirst: boolean;
+
+  connectionMode: ExchangeConnectionMode;
+  referralStatusFilters: ExchangeReferralStatus[];
+  connectionIndustryFilters: string[];
+  connectionTerritoryFilters: string[];
+  compensationFilter: ExchangeCompensationFilter;
+  relationshipFilter: ExchangeRelationshipFilter;
+  intelligenceMetric: ExchangeIntelligenceMetric;
 
   leftPanelCollapsed: boolean;
   rightPanelOpen: boolean;
@@ -64,6 +133,13 @@ export type ExchangeUrlState = Pick<
   | "rfxStatusFilters"
   | "territoryStatusFilters"
   | "localFirst"
+  | "connectionMode"
+  | "referralStatusFilters"
+  | "connectionIndustryFilters"
+  | "connectionTerritoryFilters"
+  | "compensationFilter"
+  | "relationshipFilter"
+  | "intelligenceMetric"
   | "viewport"
 >;
 
@@ -72,6 +148,10 @@ export type ExchangeWorkspaceHydration = Partial<ExchangeUrlState>;
 export const DEFAULT_EXCHANGE_VIEW: ExchangeView = "opportunities";
 export const DEFAULT_EXCHANGE_SURFACE_MODE: ExchangeSurfaceMode = "split";
 export const DEFAULT_EXCHANGE_LOCAL_FIRST = true;
+export const DEFAULT_EXCHANGE_CONNECTION_MODE: ExchangeConnectionMode = "sent";
+export const DEFAULT_EXCHANGE_COMPENSATION_FILTER: ExchangeCompensationFilter = "all";
+export const DEFAULT_EXCHANGE_RELATIONSHIP_FILTER: ExchangeRelationshipFilter = "all";
+export const DEFAULT_EXCHANGE_INTELLIGENCE_METRIC: ExchangeIntelligenceMetric = "overview";
 
 export function createInitialExchangeWorkspaceState(): ExchangeWorkspaceState {
   return {
@@ -84,6 +164,13 @@ export function createInitialExchangeWorkspaceState(): ExchangeWorkspaceState {
     rfxStatusFilters: [],
     territoryStatusFilters: [],
     localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+    connectionMode: DEFAULT_EXCHANGE_CONNECTION_MODE,
+    referralStatusFilters: [],
+    connectionIndustryFilters: [],
+    connectionTerritoryFilters: [],
+    compensationFilter: DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+    relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+    intelligenceMetric: DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
     leftPanelCollapsed: false,
     rightPanelOpen: false,
     mobileFilterOpen: false,
@@ -105,6 +192,41 @@ export function isExchangeSurfaceMode(
 export function isExchangeView(value: unknown): value is ExchangeView {
   return typeof value === "string"
     && (EXCHANGE_VIEWS as readonly string[]).includes(value);
+}
+
+export function isExchangeConnectionMode(
+  value: unknown,
+): value is ExchangeConnectionMode {
+  return typeof value === "string"
+    && (EXCHANGE_CONNECTION_MODES as readonly string[]).includes(value);
+}
+
+export function isExchangeReferralStatus(
+  value: unknown,
+): value is ExchangeReferralStatus {
+  return typeof value === "string"
+    && (EXCHANGE_REFERRAL_STATUSES as readonly string[]).includes(value);
+}
+
+export function isExchangeCompensationFilter(
+  value: unknown,
+): value is ExchangeCompensationFilter {
+  return typeof value === "string"
+    && (EXCHANGE_COMPENSATION_FILTERS as readonly string[]).includes(value);
+}
+
+export function isExchangeRelationshipFilter(
+  value: unknown,
+): value is ExchangeRelationshipFilter {
+  return typeof value === "string"
+    && (EXCHANGE_RELATIONSHIP_FILTERS as readonly string[]).includes(value);
+}
+
+export function isExchangeIntelligenceMetric(
+  value: unknown,
+): value is ExchangeIntelligenceMetric {
+  return typeof value === "string"
+    && (EXCHANGE_INTELLIGENCE_METRICS as readonly string[]).includes(value);
 }
 
 export function isExchangeRfxStatus(

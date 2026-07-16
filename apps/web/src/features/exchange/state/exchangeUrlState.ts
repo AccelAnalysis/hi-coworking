@@ -1,7 +1,16 @@
 import {
+  DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+  DEFAULT_EXCHANGE_CONNECTION_MODE,
+  DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
   DEFAULT_EXCHANGE_LOCAL_FIRST,
+  DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
   DEFAULT_EXCHANGE_SURFACE_MODE,
   DEFAULT_EXCHANGE_VIEW,
+  isExchangeCompensationFilter,
+  isExchangeConnectionMode,
+  isExchangeIntelligenceMetric,
+  isExchangeReferralStatus,
+  isExchangeRelationshipFilter,
   isExchangeRfxStatus,
   isExchangeSurfaceMode,
   isExchangeTerritoryStatus,
@@ -17,7 +26,8 @@ const MAX_SEARCH_LENGTH = 200;
 const MAX_ENTITY_ID_LENGTH = 160;
 const MAX_FILTER_COUNT = 50;
 const NAICS_PATTERN = /^\d{2,6}$/;
-const TERRITORY_PATTERN = /^[A-Za-z0-9_-]{1,32}$/;
+const TERRITORY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
+const INDUSTRY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
 
 function asSearchParams(input: URLSearchParams | string): URLSearchParams {
   if (input instanceof URLSearchParams) {
@@ -77,18 +87,34 @@ function parseViewport(params: URLSearchParams): ExchangeViewport | undefined {
   });
 }
 
-function parseSelection(params: URLSearchParams): ExchangeSelection {
+function parseSelection(
+  params: URLSearchParams,
+  view: ExchangeUrlState["view"],
+): ExchangeSelection {
   const entityType = params.get("entity");
   const entityId = params.get("selected") ?? "";
   if (
-    (entityType !== "rfx" && entityType !== "territory")
+    !["rfx", "territory", "referral", "relationship", "industry"].includes(
+      entityType ?? "",
+    )
     || entityId.length === 0
     || entityId.length > MAX_ENTITY_ID_LENGTH
     || /[\u0000-\u001f\u007f]/.test(entityId)
   ) {
     return null;
   }
-  return { entityType, entityId };
+  const allowedForView = view === "opportunities"
+    ? entityType === "rfx" || entityType === "territory"
+    : view === "connections"
+      ? entityType === "referral"
+      : entityType === "relationship"
+        || entityType === "territory"
+        || entityType === "industry";
+  if (!allowedForView) return null;
+  return {
+    entityType: entityType as Exclude<ExchangeSelection, null>["entityType"],
+    entityId,
+  };
 }
 
 export function createDefaultExchangeUrlState(): ExchangeUrlState {
@@ -102,6 +128,13 @@ export function createDefaultExchangeUrlState(): ExchangeUrlState {
     rfxStatusFilters: [],
     territoryStatusFilters: [],
     localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+    connectionMode: DEFAULT_EXCHANGE_CONNECTION_MODE,
+    referralStatusFilters: [],
+    connectionIndustryFilters: [],
+    connectionTerritoryFilters: [],
+    compensationFilter: DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+    relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+    intelligenceMetric: DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
     viewport: undefined,
   };
 }
@@ -145,7 +178,36 @@ export function parseExchangeUrlState(
   if (local === "0") state.localFirst = false;
   if (local === "1") state.localFirst = true;
 
-  state.selection = parseSelection(params);
+  const connectionMode = params.get("connectionMode");
+  if (isExchangeConnectionMode(connectionMode)) {
+    state.connectionMode = connectionMode;
+  }
+  state.referralStatusFilters = parseCsv(
+    params.get("referralStatus"),
+    isExchangeReferralStatus,
+  ).filter(isExchangeReferralStatus);
+  state.connectionIndustryFilters = parseCsv(
+    params.get("industry"),
+    (candidate) => INDUSTRY_PATTERN.test(candidate),
+  );
+  state.connectionTerritoryFilters = parseCsv(
+    params.get("connectionTerritory"),
+    (candidate) => TERRITORY_PATTERN.test(candidate),
+  );
+  const compensation = params.get("compensation");
+  if (isExchangeCompensationFilter(compensation)) {
+    state.compensationFilter = compensation;
+  }
+  const relationship = params.get("relationship");
+  if (isExchangeRelationshipFilter(relationship)) {
+    state.relationshipFilter = relationship;
+  }
+  const metric = params.get("metric");
+  if (isExchangeIntelligenceMetric(metric)) {
+    state.intelligenceMetric = metric;
+  }
+
+  state.selection = parseSelection(params, state.view);
   state.viewport = parseViewport(params);
   return state;
 }
@@ -183,6 +245,25 @@ export function serializeExchangeUrlState(
   serializeCsv(params, "territoryStatus", state.territoryStatusFilters);
   if (state.localFirst !== DEFAULT_EXCHANGE_LOCAL_FIRST) {
     params.set("local", state.localFirst ? "1" : "0");
+  }
+  if (state.connectionMode !== DEFAULT_EXCHANGE_CONNECTION_MODE) {
+    params.set("connectionMode", state.connectionMode);
+  }
+  serializeCsv(params, "referralStatus", state.referralStatusFilters);
+  serializeCsv(params, "industry", state.connectionIndustryFilters);
+  serializeCsv(
+    params,
+    "connectionTerritory",
+    state.connectionTerritoryFilters,
+  );
+  if (state.compensationFilter !== DEFAULT_EXCHANGE_COMPENSATION_FILTER) {
+    params.set("compensation", state.compensationFilter);
+  }
+  if (state.relationshipFilter !== DEFAULT_EXCHANGE_RELATIONSHIP_FILTER) {
+    params.set("relationship", state.relationshipFilter);
+  }
+  if (state.intelligenceMetric !== DEFAULT_EXCHANGE_INTELLIGENCE_METRIC) {
+    params.set("metric", state.intelligenceMetric);
   }
 
   if (state.selection) {

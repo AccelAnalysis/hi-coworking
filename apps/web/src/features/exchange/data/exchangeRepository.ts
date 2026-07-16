@@ -23,6 +23,11 @@ export interface ExchangeRepositorySnapshot {
   manageableRfxIds: string[];
 }
 
+export interface ExchangeOpportunityRepository {
+  loadSnapshot(): Promise<ExchangeRepositorySnapshot>;
+  loadViewportRfx(bounds: ViewportBounds): Promise<RfxDoc[]>;
+}
+
 export type ExchangeDataErrorKind = "permission" | "offline" | "unknown";
 
 export interface ExchangeDataError {
@@ -83,6 +88,11 @@ export async function loadExchangeViewportRfx(
   const records = await getOpenRfxByViewportGeohash(bounds, MAX_VIEWPORT_RFX);
   return uniqueDiscoverableExchangeRfx(records, MAX_VIEWPORT_RFX);
 }
+
+export const liveExchangeOpportunityRepository: ExchangeOpportunityRepository = {
+  loadSnapshot: loadExchangeSnapshot,
+  loadViewportRfx: loadExchangeViewportRfx,
+};
 
 export function mergeExchangeRfx(
   current: RfxDoc[],

@@ -47,6 +47,9 @@ const MAX_REFERRAL_EVIDENCE_FILE_SIZE = 15 * 1024 * 1024;
 const BUSINESS_REFERRAL_SENT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const BUSINESS_REFERRAL_STORAGE_GRANT_TTL_MS = 60 * 1000;
 const MAX_REFERRAL_EXPIRATIONS_PER_RUN = 200;
+const DEFAULT_PLATFORM_FEE_BASIS_POINTS = 100;
+const DEFAULT_PLATFORM_FEE_CONFIG_VERSION = 1;
+const REFERRAL_CALCULATION_VERSION = 1;
 const ALLOWED_REFERRAL_EVIDENCE_CONTENT_TYPES = new Set([
     "application/pdf",
     "application/msword",
@@ -56,6 +59,25 @@ const ALLOWED_REFERRAL_EVIDENCE_CONTENT_TYPES = new Set([
     "image/png",
     "image/webp",
 ]);
+function writeReferralTimeline(transaction, db, params) {
+    const eventId = `${params.referralId}_${params.referralVersion}_${params.eventType}`;
+    const event = {
+        id: eventId,
+        referralId: params.referralId,
+        eventType: params.eventType,
+        actorUid: params.actor.uid,
+        actorRole: params.actor.role,
+        referralVersion: params.referralVersion,
+        occurredAt: params.occurredAt,
+    };
+    if (params.actorOrgId)
+        event.actorOrgId = params.actorOrgId;
+    if (params.transactionReportId)
+        event.transactionReportId = params.transactionReportId;
+    if (params.metadata && Object.keys(params.metadata).length > 0)
+        event.metadata = params.metadata;
+    transaction.create(db.collection("businessReferralTimeline").doc(eventId), event);
+}
 function assertCanonicalDisputeEvidencePaths(referralId, actorUid, paths) {
     const expectedPrefix = `businessReferralDisputeEvidence/${referralId}/${actorUid}/`;
     if (new Set(paths).size !== paths.length) {
@@ -147,8 +169,10 @@ async function hasOrgAuthority(transaction, orgId, actor, managementRequired = f
         await (0, security_1.loadOrgAuthority)(transaction, (0, security_1.getDb)(), orgId, actor.uid, { managementRequired });
         return true;
     }
-    catch {
-        return false;
+    catch (error) {
+        if (error instanceof https_1.HttpsError && error.code === "permission-denied")
+            return false;
+        throw error;
     }
 }
 function hasOrganizationScope(referral, field) {
@@ -175,7 +199,7 @@ async function requireReferrerAuthority(transaction, referral, actor) {
     }
     throw new https_1.HttpsError("permission-denied", "Referrer authority is required");
 }
-async function requireRecipientAuthority(transaction, referral, actor) {
+async function requireRecipientAuthority(transaction, referral, actor, managementRequired = false) {
     const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
         ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor)
         : isIndividualReferrer(referral, actor.uid);
@@ -183,7 +207,7 @@ async function requireRecipientAuthority(transaction, referral, actor) {
         throw new https_1.HttpsError("permission-denied", "Referrer authority cannot act for the recipient");
     }
     const recipientAuthorized = hasOrganizationScope(referral, "recipientOrgId")
-        ? await hasOrgAuthority(transaction, referral.recipientOrgId, actor)
+        ? await hasOrgAuthority(transaction, referral.recipientOrgId, actor, managementRequired)
         : isIndividualRecipient(referral, actor.uid);
     if (recipientAuthorized)
         return;
@@ -254,15 +278,130 @@ function requireReferralSnapshot(snapshot) {
     if (!snapshot.exists)
         throw new https_1.HttpsError("not-found", "Business referral not found");
     const referral = snapshot.data();
-    if (referral.schemaVersion !== 1) {
+    if (referral.schemaVersion !== 1 && referral.schemaVersion !== 2) {
         throw new https_1.HttpsError("failed-precondition", "Unsupported business-referral version");
     }
     return referral;
+}
+function referralCommerceConfig(snapshot) {
+    if (!snapshot.exists) {
+        return {
+            platformFeeBasisPoints: DEFAULT_PLATFORM_FEE_BASIS_POINTS,
+            version: DEFAULT_PLATFORM_FEE_CONFIG_VERSION,
+            commerceEnabled: true,
+        };
+    }
+    const config = snapshot.data() ?? {};
+    if (!Number.isInteger(config.platformFeeBasisPoints)
+        || config.platformFeeBasisPoints < 0
+        || config.platformFeeBasisPoints > 10000
+        || !Number.isInteger(config.version)
+        || config.version < 1
+        || typeof config.commerceEnabled !== "boolean") {
+        throw new https_1.HttpsError("failed-precondition", "Referral commerce configuration is invalid");
+    }
+    return {
+        platformFeeBasisPoints: config.platformFeeBasisPoints,
+        version: config.version,
+        commerceEnabled: config.commerceEnabled,
+    };
 }
 function compensationForCreate(policy) {
     if (!policy || policy.type === "none")
         return { type: "none", status: "none" };
     return { ...policy, status: "proposed" };
+}
+function compensationForOffer(offer) {
+    if (offer.compensationType === "none")
+        return { type: "none", status: "none" };
+    const policy = {
+        type: offer.compensationType,
+        status: "proposed",
+        currency: offer.currency,
+    };
+    if (offer.fixedCompensationCents !== undefined)
+        policy.amountCents = offer.fixedCompensationCents;
+    if (offer.compensationRateBasisPoints !== undefined) {
+        policy.percentageBasisPoints = offer.compensationRateBasisPoints;
+    }
+    if (offer.percentageBasis)
+        policy.percentageBasis = offer.percentageBasis;
+    if (offer.benefitDescription)
+        policy.benefitDescription = offer.benefitDescription;
+    if (offer.customTerms)
+        policy.terms = offer.customTerms;
+    return policy;
+}
+function requirePublishedOffer(snapshot, expectedId) {
+    if (!snapshot?.exists)
+        throw new https_1.HttpsError("not-found", "Referral service offer not found");
+    const offer = snapshot.data();
+    if (offer.id !== expectedId
+        || !Number.isInteger(offer.version)
+        || offer.version < 1
+        || offer.status !== "published"
+        || offer.acceptingReferrals !== true) {
+        throw new https_1.HttpsError("failed-precondition", "The referral service offer is not currently available");
+    }
+    return offer;
+}
+function offerMatchesRecipient(offer, recipientUid, recipientOrgId) {
+    if (offer.providerOrgId)
+        return offer.providerOrgId === recipientOrgId;
+    return Boolean(offer.providerUid && offer.providerUid === recipientUid && !recipientOrgId);
+}
+function acceptedTermsSnapshot(params) {
+    const compensationType = params.offer?.compensationType ?? params.referral.compensationPolicy.type;
+    const snapshot = {
+        schemaVersion: 1,
+        compensationType,
+        currency: params.offer?.currency ?? params.referral.compensationPolicy.currency ?? "USD",
+        attributionWindowDays: params.offer?.attributionWindowDays ?? 30,
+        platformFeeBasisPoints: params.platformFeeBasisPoints,
+        platformFeeConfigVersion: params.platformFeeConfigVersion,
+        acceptedByUid: params.acceptedByUid,
+        acceptedAt: params.acceptedAt,
+        calculationVersion: REFERRAL_CALCULATION_VERSION,
+    };
+    if (params.offer) {
+        snapshot.serviceOfferId = params.offer.offerId ?? params.offer.id;
+        snapshot.serviceOfferVersionId = params.offer.id;
+        snapshot.serviceOfferVersion = params.offer.version;
+    }
+    if (params.acceptedByOrgId)
+        snapshot.acceptedByOrgId = params.acceptedByOrgId;
+    const fixedCents = params.offer?.fixedCompensationCents ?? params.referral.compensationPolicy.amountCents;
+    const rate = params.offer?.compensationRateBasisPoints
+        ?? params.referral.compensationPolicy.percentageBasisPoints;
+    if (fixedCents !== undefined)
+        snapshot.fixedCompensationCents = fixedCents;
+    if (rate !== undefined)
+        snapshot.compensationRateBasisPoints = rate;
+    const percentageBasis = params.offer?.percentageBasis ?? params.referral.compensationPolicy.percentageBasis;
+    if (percentageBasis)
+        snapshot.percentageBasis = percentageBasis;
+    if (params.offer?.payoutTrigger)
+        snapshot.payoutTrigger = params.offer.payoutTrigger;
+    if (params.offer?.paymentDeadlineDays !== undefined) {
+        snapshot.paymentDeadlineDays = params.offer.paymentDeadlineDays;
+    }
+    if (params.offer?.refundTreatment)
+        snapshot.refundTreatment = params.offer.refundTreatment;
+    if (params.offer?.includedCharges)
+        snapshot.includedCharges = params.offer.includedCharges;
+    if (params.offer?.excludedCharges)
+        snapshot.excludedCharges = params.offer.excludedCharges;
+    const benefitDescription = params.offer?.benefitDescription
+        ?? params.referral.compensationPolicy.benefitDescription;
+    const customTerms = params.offer?.customTerms
+        ?? (params.referral.compensationPolicy.type === "custom"
+            ? params.referral.compensationPolicy.terms
+            : undefined);
+    if (benefitDescription)
+        snapshot.benefitDescription = benefitDescription;
+    if (customTerms)
+        snapshot.customTerms = customTerms;
+    return snapshot;
 }
 function contactPayload(params) {
     const payload = {
@@ -320,14 +459,42 @@ exports.businessReferral_create = (0, https_1.onCall)(async (request) => {
         const recipientMemberRef = input.recipientUid && input.recipientOrgId
             ? db.collection("orgMembers").doc(`${input.recipientOrgId}_${input.recipientUid}`)
             : undefined;
+        const recipientInReferrerOrgRef = input.referrerOrgId && input.recipientUid
+            ? db.collection("orgMembers").doc(`${input.referrerOrgId}_${input.recipientUid}`)
+            : undefined;
+        const referrerInRecipientOrgRef = input.recipientOrgId
+            ? db.collection("orgMembers").doc(`${input.recipientOrgId}_${actor.uid}`)
+            : undefined;
         const relatedRfxRef = input.relatedRfxId ? db.collection("rfx").doc(input.relatedRfxId) : undefined;
         const relatedTeamRef = input.relatedTeamId ? db.collection("rfxTeams").doc(input.relatedTeamId) : undefined;
-        const [recipientUserSnapshot, recipientOrgSnapshot, recipientMemberSnapshot, rfxSnapshot, teamSnapshot] = await Promise.all([
+        const relatedTeamActorGuardRef = input.relatedTeamId
+            ? db.collection("rfxTeamMemberships").doc(input.relatedTeamId).collection("members").doc(actor.uid)
+            : undefined;
+        const relatedTeamRecipientGuardRef = input.relatedTeamId && input.recipientUid
+            ? db.collection("rfxTeamMemberships").doc(input.relatedTeamId).collection("members").doc(input.recipientUid)
+            : undefined;
+        const serviceOfferRef = input.serviceOfferId
+            ? db.collection("referralServiceOffers").doc(input.serviceOfferId)
+            : undefined;
+        const [recipientUserSnapshot, recipientOrgSnapshot, recipientMemberSnapshot, recipientInReferrerOrgSnapshot, referrerInRecipientOrgSnapshot, rfxSnapshot, teamSnapshot, teamActorGuardSnapshot, teamRecipientGuardSnapshot, serviceOfferSnapshot,] = await Promise.all([
             recipientUserRef ? transaction.get(recipientUserRef) : Promise.resolve(undefined),
             recipientOrgRef ? transaction.get(recipientOrgRef) : Promise.resolve(undefined),
             recipientMemberRef ? transaction.get(recipientMemberRef) : Promise.resolve(undefined),
+            recipientInReferrerOrgRef
+                ? transaction.get(recipientInReferrerOrgRef)
+                : Promise.resolve(undefined),
+            referrerInRecipientOrgRef
+                ? transaction.get(referrerInRecipientOrgRef)
+                : Promise.resolve(undefined),
             relatedRfxRef ? transaction.get(relatedRfxRef) : Promise.resolve(undefined),
             relatedTeamRef ? transaction.get(relatedTeamRef) : Promise.resolve(undefined),
+            relatedTeamActorGuardRef
+                ? transaction.get(relatedTeamActorGuardRef)
+                : Promise.resolve(undefined),
+            relatedTeamRecipientGuardRef
+                ? transaction.get(relatedTeamRecipientGuardRef)
+                : Promise.resolve(undefined),
+            serviceOfferRef ? transaction.get(serviceOfferRef) : Promise.resolve(undefined),
         ]);
         if (recipientUserRef && !recipientUserSnapshot?.exists) {
             throw new https_1.HttpsError("not-found", "Recipient account not found");
@@ -341,26 +508,61 @@ exports.businessReferral_create = (0, https_1.onCall)(async (request) => {
                 throw new https_1.HttpsError("invalid-argument", "Recipient user is not a member of the recipient organization");
             }
         }
-        if (relatedRfxRef && !rfxSnapshot?.exists)
-            throw new https_1.HttpsError("not-found", "Related RFx not found");
+        if (recipientInReferrerOrgSnapshot?.exists || referrerInRecipientOrgSnapshot?.exists) {
+            throw new https_1.HttpsError("invalid-argument", "A business referral cannot be made within the same organization");
+        }
+        if (input.relatedOpportunityId && input.relatedOpportunityId !== input.relatedRfxId) {
+            throw new https_1.HttpsError("invalid-argument", "Only an authorized RFx may currently be used as a related opportunity");
+        }
+        if (relatedRfxRef) {
+            if (!rfxSnapshot?.exists)
+                throw new https_1.HttpsError("not-found", "Related RFx not found");
+            const rfx = rfxSnapshot.data() ?? {};
+            const discoverable = rfx.status === "open" && rfx.adminApprovalStatus === "approved";
+            let manageable = !Object.prototype.hasOwnProperty.call(rfx, "orgId")
+                && (rfx.ownerUid === actor.uid || rfx.createdBy === actor.uid);
+            if (!discoverable && typeof rfx.orgId === "string" && rfx.orgId) {
+                manageable = await hasOrgAuthority(transaction, rfx.orgId, actor, true);
+            }
+            if (!discoverable && !manageable) {
+                throw new https_1.HttpsError("permission-denied", "The related RFx is not visible to this referrer");
+            }
+        }
         if (relatedTeamRef) {
             if (!teamSnapshot?.exists)
                 throw new https_1.HttpsError("not-found", "Related team not found");
             const team = teamSnapshot.data();
-            const isParticipant = team?.primeUid === actor.uid
-                || (Array.isArray(team?.memberUids) && team.memberUids.includes(actor.uid));
-            if (!isParticipant) {
+            const actorGuard = teamActorGuardSnapshot?.data();
+            if (!teamActorGuardSnapshot?.exists
+                || actorGuard?.teamId !== input.relatedTeamId
+                || actorGuard?.uid !== actor.uid) {
                 throw new https_1.HttpsError("permission-denied", "Related-team membership is required");
+            }
+            if (input.recipientUid) {
+                const recipientGuard = teamRecipientGuardSnapshot?.data();
+                if (!teamRecipientGuardSnapshot?.exists
+                    || recipientGuard?.teamId !== input.relatedTeamId
+                    || recipientGuard?.uid !== input.recipientUid) {
+                    throw new https_1.HttpsError("failed-precondition", "The individual referral recipient is not a current member of the related team");
+                }
             }
             if (input.relatedRfxId && team?.rfxId !== input.relatedRfxId) {
                 throw new https_1.HttpsError("invalid-argument", "The related team does not belong to the related RFx");
             }
         }
+        const serviceOffer = input.serviceOfferId
+            ? requirePublishedOffer(serviceOfferSnapshot, input.serviceOfferId)
+            : undefined;
+        if (serviceOffer && !offerMatchesRecipient(serviceOffer, input.recipientUid, input.recipientOrgId)) {
+            throw new https_1.HttpsError("invalid-argument", "The service offer does not belong to the selected referral recipient");
+        }
         const now = Date.now();
-        const compensationPolicy = compensationForCreate(input.compensationPolicy);
+        const compensationPolicy = serviceOffer
+            ? compensationForOffer(serviceOffer)
+            : compensationForCreate(input.compensationPolicy);
         const referral = {
             id: referralRef.id,
-            schemaVersion: 1,
+            schemaVersion: 2,
             referrerUid: actor.uid,
             assignedStaffUids: [],
             referralType: input.referralType,
@@ -389,6 +591,12 @@ exports.businessReferral_create = (0, https_1.onCall)(async (request) => {
             referral.relatedRfxId = input.relatedRfxId;
         if (input.relatedTeamId)
             referral.relatedTeamId = input.relatedTeamId;
+        if (input.relatedOpportunityId)
+            referral.relatedOpportunityId = input.relatedOpportunityId;
+        if (serviceOffer) {
+            referral.serviceOfferId = serviceOffer.id;
+            referral.serviceOfferVersion = serviceOffer.version;
+        }
         if (input.referredParty) {
             // Explicit referred-party identity stays in the separately authorized contact document.
             referral.referredPartySummary = { type: input.referredParty.type };
@@ -434,6 +642,19 @@ exports.businessReferral_create = (0, https_1.onCall)(async (request) => {
             },
             createdAt: now,
         });
+        writeReferralTimeline(transaction, db, {
+            referralId: referralRef.id,
+            eventType: "draft_created",
+            actor,
+            actorOrgId: input.referrerOrgId,
+            referralVersion: 0,
+            occurredAt: now,
+            metadata: {
+                referralType: input.referralType,
+                compensationType: compensationPolicy.type,
+                hasServiceOffer: Boolean(serviceOffer),
+            },
+        });
         return { referralId: referralRef.id, version: 0 };
     });
 });
@@ -475,6 +696,14 @@ exports.businessReferral_send = (0, https_1.onCall)(async (request) => {
             newStatus: "sent",
             createdAt: now,
         });
+        writeReferralTimeline(transaction, db, {
+            referralId: input.referralId,
+            eventType: "referral_sent",
+            actor,
+            actorOrgId: referral.referrerOrgId,
+            referralVersion: version,
+            occurredAt: now,
+        });
         return { success: true, version };
     });
 });
@@ -483,10 +712,13 @@ exports.businessReferral_respond = (0, https_1.onCall)(async (request) => {
     const input = (0, contracts_1.parseCallableInput)(contracts_1.businessReferralRespondInputSchema, request.data);
     const db = (0, security_1.getDb)();
     const referralRef = db.collection("businessReferrals").doc(input.referralId);
+    const commerceConfigRef = db.collection("platformConfiguration").doc("referralCommerce");
     return db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(referralRef);
         const referral = requireReferralSnapshot(snapshot);
-        await requireRecipientAuthority(transaction, referral, actor);
+        const financialAcceptance = input.response === "accepted"
+            && (referral.compensationPolicy.type !== "none" || Boolean(referral.serviceOfferId));
+        await requireRecipientAuthority(transaction, referral, actor, financialAcceptance);
         if (referral.status === input.response) {
             return { success: true, idempotent: true, version: getVersion(referral) };
         }
@@ -511,7 +743,47 @@ exports.businessReferral_respond = (0, https_1.onCall)(async (request) => {
         if (input.note)
             updates.recipientResponseNote = input.note;
         if (input.response === "accepted") {
+            if (referral.schemaVersion >= 2 && input.acceptTerms?.acknowledged !== true) {
+                throw new https_1.HttpsError("failed-precondition", "The recipient must explicitly accept the locked referral terms");
+            }
+            if (referral.acceptedTermsSnapshot) {
+                throw new https_1.HttpsError("failed-precondition", "Accepted referral terms are already locked");
+            }
+            const [configSnapshot, offerSnapshot] = await Promise.all([
+                transaction.get(commerceConfigRef),
+                referral.serviceOfferId
+                    ? transaction.get(db.collection("referralServiceOffers").doc(referral.serviceOfferId))
+                    : Promise.resolve(undefined),
+            ]);
+            const config = referralCommerceConfig(configSnapshot);
+            const offer = referral.serviceOfferId
+                ? requirePublishedOffer(offerSnapshot, referral.serviceOfferId)
+                : undefined;
+            if (offer) {
+                if (offer.version !== referral.serviceOfferVersion
+                    || input.acceptTerms?.serviceOfferId !== offer.id
+                    || input.acceptTerms.serviceOfferVersion !== offer.version
+                    || !offerMatchesRecipient(offer, referral.recipientUid, referral.recipientOrgId)) {
+                    throw new https_1.HttpsError("failed-precondition", "The accepted service-offer version does not match this referral");
+                }
+            }
+            else if (input.acceptTerms?.serviceOfferId || input.acceptTerms?.serviceOfferVersion) {
+                throw new https_1.HttpsError("invalid-argument", "This referral does not use a service offer");
+            }
+            if (!config.commerceEnabled && referral.compensationPolicy.type !== "none") {
+                throw new https_1.HttpsError("failed-precondition", "Referral commerce is not currently enabled");
+            }
             updates.acceptedAt = now;
+            updates.acceptedTermsSnapshot = acceptedTermsSnapshot({
+                referral,
+                offer,
+                platformFeeBasisPoints: config.platformFeeBasisPoints,
+                platformFeeConfigVersion: config.version,
+                acceptedByUid: actor.uid,
+                acceptedByOrgId: referral.recipientOrgId,
+                acceptedAt: now,
+            });
+            updates.commerceStatus = "none";
             updates.compensationPolicy = {
                 ...referral.compensationPolicy,
                 status: referral.compensationPolicy.type === "none" ? "none" : "agreed",
@@ -533,6 +805,28 @@ exports.businessReferral_respond = (0, https_1.onCall)(async (request) => {
             newStatus: input.response,
             createdAt: now,
         });
+        writeReferralTimeline(transaction, db, {
+            referralId: input.referralId,
+            eventType: input.response === "accepted" ? "recipient_accepted" : "recipient_declined",
+            actor,
+            actorOrgId: referral.recipientOrgId,
+            referralVersion: version,
+            occurredAt: now,
+        });
+        if (input.response === "accepted") {
+            writeReferralTimeline(transaction, db, {
+                referralId: input.referralId,
+                eventType: "terms_snapshot_locked",
+                actor,
+                actorOrgId: referral.recipientOrgId,
+                referralVersion: version,
+                occurredAt: now,
+                metadata: {
+                    compensationType: referral.compensationPolicy.type,
+                    platformFeeBasisPoints: updates.acceptedTermsSnapshot.platformFeeBasisPoints,
+                },
+            });
+        }
         return { success: true, version };
     });
 });
@@ -574,6 +868,8 @@ exports.businessReferral_progress = (0, https_1.onCall)(async (request) => {
             updates.inProgressAt = now;
         if (input.status === "converted" || input.status === "closed") {
             updates.closedAt = now;
+            if (input.status === "converted")
+                updates.convertedAt = now;
             updates.outcome = {
                 ...input.outcome,
                 recordedAt: now,
@@ -586,10 +882,13 @@ exports.businessReferral_progress = (0, https_1.onCall)(async (request) => {
         }
         if (referral.compensationPolicy.type !== "none") {
             if (input.status === "converted" && referral.compensationPolicy.status === "agreed") {
-                updates.compensationPolicy = { ...referral.compensationPolicy, status: "due" };
+                updates.commerceStatus = referral.compensationPolicy.type === "benefit"
+                    ? "none"
+                    : "awaiting_transaction";
             }
             else if (input.status === "closed" || input.status === "withdrawn") {
                 updates.compensationPolicy = { ...referral.compensationPolicy, status: "cancelled" };
+                updates.commerceStatus = "cancelled";
             }
         }
         transaction.update(referralRef, updates);
@@ -603,6 +902,21 @@ exports.businessReferral_progress = (0, https_1.onCall)(async (request) => {
             previousStatus: referral.status,
             newStatus: input.status,
             createdAt: now,
+        });
+        writeReferralTimeline(transaction, db, {
+            referralId: input.referralId,
+            eventType: input.status === "converted"
+                ? "referral_converted"
+                : input.status === "closed"
+                    ? "referral_closed"
+                    : input.status === "withdrawn"
+                        ? "referral_withdrawn"
+                        : "progress_changed",
+            actor,
+            actorOrgId: input.status === "withdrawn" ? referral.referrerOrgId : referral.recipientOrgId,
+            referralVersion: version,
+            occurredAt: now,
+            metadata: { status: input.status },
         });
         return { success: true, version };
     });
@@ -685,6 +999,15 @@ async function updateConsent(request, forcedStatus) {
             metadata: { previousConsent: referral.consentStatus, newConsent: input.consentStatus },
             createdAt: now,
         });
+        writeReferralTimeline(transaction, db, {
+            referralId: input.referralId,
+            eventType: input.consentStatus === "confirmed" ? "consent_confirmed" : "consent_withdrawn",
+            actor,
+            actorOrgId: referral.referrerOrgId,
+            referralVersion: version,
+            occurredAt: now,
+            metadata: { disclosureAllowed: input.consentStatus === "confirmed" },
+        });
         return { success: true, version, status: nextStatus };
     });
 }
@@ -764,6 +1087,9 @@ exports.businessReferral_createDispute = (0, https_1.onCall)(async (request) => 
         const snapshot = await transaction.get(referralRef);
         const referral = requireReferralSnapshot(snapshot);
         await requirePartyAuthority(transaction, referral, actor);
+        if (input.expectedVersion !== undefined) {
+            requireExpectedVersion(referral, input.expectedVersion);
+        }
         if (!["accepted", "in_progress", "converted", "closed"].includes(referral.status)) {
             throw new https_1.HttpsError("failed-precondition", "The referral is not in a disputable state");
         }
@@ -773,6 +1099,7 @@ exports.businessReferral_createDispute = (0, https_1.onCall)(async (request) => 
             });
         }
         const now = Date.now();
+        const version = getVersion(referral) + 1;
         transaction.create(disputeRef, {
             id: disputeRef.id,
             referralId: input.referralId,
@@ -790,9 +1117,13 @@ exports.businessReferral_createDispute = (0, https_1.onCall)(async (request) => 
         });
         const referralUpdates = {
             activeDisputeId: disputeRef.id,
-            version: getVersion(referral) + 1,
+            version,
             updatedAt: now,
         };
+        if (typeof referral.commerceStatus === "string") {
+            referralUpdates.commerceStatusBeforeDispute = referral.commerceStatus;
+            referralUpdates.commerceStatus = "disputed";
+        }
         if (referral.compensationPolicy.type !== "none") {
             referralUpdates.compensationStatusBeforeDispute = referral.compensationPolicy.status;
             referralUpdates.compensationPolicy = { ...referral.compensationPolicy, status: "disputed" };
@@ -806,6 +1137,17 @@ exports.businessReferral_createDispute = (0, https_1.onCall)(async (request) => 
             entityId: input.referralId,
             metadata: { disputeId: disputeRef.id, evidenceCount: input.evidenceStoragePaths.length },
             createdAt: now,
+        });
+        writeReferralTimeline(transaction, db, {
+            referralId: input.referralId,
+            eventType: "dispute_opened",
+            actor,
+            actorOrgId: isIndividualReferrer(referral, actor.uid)
+                ? referral.referrerOrgId
+                : referral.recipientOrgId,
+            referralVersion: version,
+            occurredAt: now,
+            metadata: { evidenceCount: input.evidenceStoragePaths.length },
         });
         return { success: true, disputeId: disputeRef.id };
     });
@@ -852,19 +1194,27 @@ exports.businessReferral_resolveDispute = (0, https_1.onCall)(async (request) =>
         const restoredCompensationStatus = typeof storedCompensationStatus === "string"
             && RESTORABLE_COMPENSATION_STATUSES.has(storedCompensationStatus)
             ? storedCompensationStatus
-            : referral.status === "converted"
-                ? "due"
-                : "agreed";
+            : "agreed";
         const compensationStatus = ["closed", "declined", "withdrawn", "expired"].includes(referral.status)
             || input.resolution === "upheld"
             ? "cancelled"
             : restoredCompensationStatus;
+        const version = getVersion(referral) + 1;
         const updates = {
             activeDisputeId: firestore_1.FieldValue.delete(),
             compensationStatusBeforeDispute: firestore_1.FieldValue.delete(),
-            version: getVersion(referral) + 1,
+            commerceStatusBeforeDispute: firestore_1.FieldValue.delete(),
+            version,
             updatedAt: now,
         };
+        const priorCommerceStatus = typeof referral.commerceStatusBeforeDispute === "string"
+            ? referral.commerceStatusBeforeDispute
+            : undefined;
+        if (typeof referral.commerceStatus === "string") {
+            updates.commerceStatus = input.resolution === "upheld"
+                ? "cancelled"
+                : priorCommerceStatus ?? "settlement_unavailable";
+        }
         if (referral.compensationPolicy.type !== "none") {
             updates.compensationPolicy = {
                 ...referral.compensationPolicy,
@@ -881,6 +1231,14 @@ exports.businessReferral_resolveDispute = (0, https_1.onCall)(async (request) =>
             metadata: { disputeId: input.disputeId, resolution: input.resolution },
             createdAt: now,
         });
+        writeReferralTimeline(transaction, db, {
+            referralId: dispute.referralId,
+            eventType: "dispute_resolved",
+            actor,
+            referralVersion: version,
+            occurredAt: now,
+            metadata: { resolution: input.resolution },
+        });
         return { success: true, status: resolutionStatus };
     });
 });
@@ -894,11 +1252,12 @@ async function expireSentReferral(referralRef, now) {
         const expiresAt = typeof referral.expiresAt === "number" ? referral.expiresAt : null;
         if (referral.status !== "sent" || expiresAt === null || expiresAt > now)
             return false;
+        const version = getVersion(referral) + 1;
         const updates = {
             status: "expired",
             expiredAt: now,
             updatedAt: now,
-            version: getVersion(referral) + 1,
+            version,
         };
         if (referral.compensationPolicy.type !== "none") {
             updates.compensationPolicy = { ...referral.compensationPolicy, status: "cancelled" };
@@ -913,6 +1272,13 @@ async function expireSentReferral(referralRef, now) {
             previousStatus: "sent",
             newStatus: "expired",
             createdAt: now,
+        });
+        writeReferralTimeline(transaction, db, {
+            referralId: referralRef.id,
+            eventType: "referral_expired",
+            actor: { uid: "system", role: "system" },
+            referralVersion: version,
+            occurredAt: now,
         });
         return true;
     });

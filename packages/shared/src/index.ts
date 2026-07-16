@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { referralTermsSnapshotSchema } from "./referralCommerce";
 
 /** Browser-navigable URL. Explicitly excludes executable and local protocols. */
 export const httpUrlSchema = z
@@ -1098,9 +1099,12 @@ export type BusinessReferralCompensationStatus = z.infer<
 >;
 
 export const businessReferralCompensationPolicySchema = z.object({
-  type: z.enum(["none", "fixed", "percentage", "custom"]).default("none"),
+  type: z.enum(["none", "fixed", "percentage", "custom", "benefit"]).default("none"),
   amountCents: z.number().int().positive().optional(),
   percentageBasisPoints: z.number().int().min(1).max(10_000).optional(),
+  percentageBasis: z.enum(["first_collected_invoice", "total_collected_contract"]).optional(),
+  currency: z.string().trim().regex(/^[A-Z]{3}$/).optional(),
+  benefitDescription: z.string().optional(),
   terms: z.string().optional(),
   status: businessReferralCompensationStatusSchema.default("none"),
   lockedAt: z.number().optional(),
@@ -1124,13 +1128,31 @@ export const businessReferralOutcomeSchema = z.object({
 });
 export type BusinessReferralOutcome = z.infer<typeof businessReferralOutcomeSchema>;
 
+export const businessReferralCommerceStatusSchema = z.enum([
+  "none",
+  "awaiting_transaction",
+  "transaction_reported",
+  "awaiting_confirmation",
+  "transaction_confirmed",
+  "payout_calculated",
+  "payout_due",
+  "settlement_unavailable",
+  "disputed",
+  "cancelled",
+  "reversed",
+  "refunded",
+]);
+export type BusinessReferralCommerceStatus = z.infer<
+  typeof businessReferralCommerceStatusSchema
+>;
+
 /**
  * Third-party contact data is stored separately in businessReferralContacts.
  * The primary document deliberately contains only a minimized party summary.
  */
 export const businessReferralDocSchema = z.object({
   id: z.string(),
-  schemaVersion: z.literal(1).default(1),
+  schemaVersion: z.union([z.literal(1), z.literal(2)]).default(1),
   referrerUid: z.string(),
   referrerOrgId: z.string().optional(),
   recipientUid: z.string().optional(),
@@ -1156,9 +1178,15 @@ export const businessReferralDocSchema = z.object({
   status: businessReferralStatusSchema,
   outcome: businessReferralOutcomeSchema.optional(),
   compensationPolicy: businessReferralCompensationPolicySchema.default({ type: "none", status: "none" }),
+  serviceOfferId: z.string().optional(),
+  serviceOfferVersion: z.number().int().positive().optional(),
+  acceptedTermsSnapshot: referralTermsSnapshotSchema.optional(),
+  commerceStatus: businessReferralCommerceStatusSchema.optional(),
+  latestTransactionReportId: z.string().optional(),
   relatedRfxId: z.string().optional(),
   relatedTeamId: z.string().optional(),
   relatedOpportunityId: z.string().optional(),
+  relatedResourceProgramId: z.string().optional(),
   version: z.number().int().nonnegative().default(0),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -1166,6 +1194,7 @@ export const businessReferralDocSchema = z.object({
   expiresAt: z.number().optional(),
   expiredAt: z.number().optional(),
   acceptedAt: z.number().optional(),
+  convertedAt: z.number().optional(),
   respondedAt: z.number().optional(),
   respondedByUid: z.string().optional(),
   recipientResponseNote: z.string().optional(),
@@ -1175,6 +1204,7 @@ export const businessReferralDocSchema = z.object({
   withdrawnByUid: z.string().optional(),
   activeDisputeId: z.string().optional(),
   compensationStatusBeforeDispute: businessReferralCompensationStatusSchema.optional(),
+  commerceStatusBeforeDispute: businessReferralCommerceStatusSchema.optional(),
   legacyCompensationReviewRequired: z.boolean().optional(),
   legacyReferralId: z.string().optional(),
 });
@@ -2206,3 +2236,9 @@ export const accessEventDocSchema = z.object({
   createdAt: z.number(),
 });
 export type AccessEventDoc = z.infer<typeof accessEventDocSchema>;
+
+// Run 3 referral commerce contracts and pure calculation utilities.
+export * from "./referralCommerce";
+
+// Run 3 referral network intelligence and economic-impact analytics.
+export * from "./referralIntelligence";

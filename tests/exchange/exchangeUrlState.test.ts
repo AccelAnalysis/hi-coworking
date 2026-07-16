@@ -76,7 +76,7 @@ describe("Exchange URL state", () => {
       "mode=globe&view=connections&naics=abc,541511&territory=%3Cscript%3E,51093&rfxStatus=secret,open&territoryStatus=paused,scheduled&local=yes&entity=rfx&selected=&lng=-76&lat=36",
     );
     expect(state).toMatchObject({
-      view: "opportunities",
+      view: "connections",
       surfaceMode: "split",
       naicsFilters: ["541511"],
       territoryFilters: ["51093"],
@@ -86,6 +86,42 @@ describe("Exchange URL state", () => {
       selection: null,
       viewport: undefined,
     });
+  });
+
+  it("round-trips Connections filters and referral selection", () => {
+    const state = parseExchangeUrlState(
+      "view=connections&connectionMode=received&q=controls&referralStatus=sent,accepted&industry=Engineering%20services&connectionTerritory=51093&compensation=configured&relationship=trusted&entity=referral&selected=ref-42",
+    );
+    expect(state).toMatchObject({
+      view: "connections",
+      connectionMode: "received",
+      searchQuery: "controls",
+      referralStatusFilters: ["sent", "accepted"],
+      connectionIndustryFilters: ["Engineering services"],
+      connectionTerritoryFilters: ["51093"],
+      compensationFilter: "configured",
+      relationshipFilter: "trusted",
+      selection: { entityType: "referral", entityId: "ref-42" },
+    });
+    expect(exchangeUrlStateToString(state)).toContain("view=connections");
+    expect(exchangeUrlStateToString(state)).toContain("entity=referral");
+  });
+
+  it("validates Intelligence metrics and rejects cross-view selections", () => {
+    expect(parseExchangeUrlState(
+      "view=intelligence&metric=impact&relationship=established&entity=relationship&selected=relationship-1",
+    )).toMatchObject({
+      view: "intelligence",
+      intelligenceMetric: "impact",
+      relationshipFilter: "established",
+      selection: { entityType: "relationship", entityId: "relationship-1" },
+    });
+    expect(parseExchangeUrlState(
+      "view=connections&entity=relationship&selected=relationship-1",
+    ).selection).toBeNull();
+    expect(parseExchangeUrlState(
+      "view=opportunities&entity=referral&selected=ref-1",
+    ).selection).toBeNull();
   });
 
   it("accepts full URLs and leading question marks", () => {

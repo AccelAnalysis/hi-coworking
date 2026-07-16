@@ -82,6 +82,56 @@ describe("exchangeWorkspaceReducer", () => {
     }
   });
 
+  it("switches Exchange views and clears incompatible detail state", () => {
+    const selected = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.selectEntity({ entityType: "rfx", entityId: "rfx-1" }),
+      actions.openMobileFilter(),
+      actions.setView("connections"),
+    );
+    expect(selected).toMatchObject({
+      view: "connections",
+      selection: null,
+      rightPanelOpen: false,
+      mobileDetailOpen: false,
+      mobileFilterOpen: false,
+    });
+  });
+
+  it("owns Connections and Intelligence filter state", () => {
+    const connections = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.setView("connections"),
+      actions.setConnectionMode("received"),
+      actions.setFilters({
+        referralStatusFilters: ["accepted", "converted"],
+        connectionIndustryFilters: ["Engineering services"],
+        connectionTerritoryFilters: ["51093"],
+        compensationFilter: "configured",
+        relationshipFilter: "trusted",
+      }),
+    );
+    expect(connections).toMatchObject({
+      connectionMode: "received",
+      referralStatusFilters: ["accepted", "converted"],
+      compensationFilter: "configured",
+      relationshipFilter: "trusted",
+    });
+    const intelligence = reduce(
+      connections,
+      actions.setView("intelligence"),
+      actions.setIntelligenceMetric("gaps"),
+      actions.clearFilters(),
+    );
+    expect(intelligence).toMatchObject({
+      view: "intelligence",
+      intelligenceMetric: "overview",
+      connectionIndustryFilters: [],
+      connectionTerritoryFilters: [],
+      relationshipFilter: "all",
+    });
+  });
+
   it("selects an RFx and opens responsive detail surfaces", () => {
     const state = exchangeWorkspaceReducer(
       createInitialExchangeWorkspaceState(),

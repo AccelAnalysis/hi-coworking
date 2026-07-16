@@ -573,11 +573,15 @@ export const createBusinessReferralFn = httpsCallable<
       phone?: string;
     };
     compensationPolicy?: {
-      type: "none" | "fixed" | "percentage" | "custom";
+      type: "none" | "fixed" | "percentage" | "custom" | "benefit";
       amountCents?: number;
       percentageBasisPoints?: number;
+      percentageBasis?: "first_collected_invoice" | "total_collected_contract";
+      currency?: string;
       terms?: string;
+      benefitDescription?: string;
     };
+    serviceOfferId?: string;
     relatedRfxId?: string;
     relatedTeamId?: string;
   },
@@ -585,7 +589,7 @@ export const createBusinessReferralFn = httpsCallable<
 >(functions, "businessReferral_create");
 
 export const sendBusinessReferralFn = httpsCallable<
-  { referralId: string; expectedVersion: number },
+  { referralId: string; expectedVersion: number; idempotencyKey?: string },
   { success: boolean; version: number; idempotent?: boolean }
 >(functions, "businessReferral_send");
 
@@ -595,6 +599,12 @@ export const respondBusinessReferralFn = httpsCallable<
     response: "accepted" | "declined";
     expectedVersion: number;
     note?: string;
+    idempotencyKey?: string;
+    acceptTerms?: {
+      acknowledged: true;
+      serviceOfferId?: string;
+      serviceOfferVersion?: number;
+    };
   },
   { success: boolean; version: number; idempotent?: boolean }
 >(functions, "businessReferral_respond");
@@ -604,6 +614,7 @@ export const progressBusinessReferralFn = httpsCallable<
     referralId: string;
     status: "in_progress" | "converted" | "closed" | "withdrawn";
     expectedVersion: number;
+    idempotencyKey?: string;
     outcome?: {
       type: "converted" | "not_a_fit" | "unable_to_contact" | "declined_by_customer" | "duplicate" | "other";
       summary?: string;
@@ -630,6 +641,140 @@ export const prepareBusinessReferralEvidenceAccessFn = httpsCallable<
     allowedPathCount: number;
   }
 >(functions, "businessReferral_prepareEvidenceAccess");
+
+// Run 3 business-referral workspace queries and commerce foundation.
+export interface BusinessReferralListMineInput {
+  direction: "all" | "sent" | "received";
+  scope: "all" | "individual" | "organization";
+  orgId?: string;
+  statuses: string[];
+  industry?: string;
+  territoryFips?: string;
+  compensationPresent?: boolean;
+  search?: string;
+  limit: number;
+  cursor?: { createdAt: number; id: string };
+}
+
+export const listBusinessReferralsFn = httpsCallable<
+  BusinessReferralListMineInput,
+  {
+    referrals: unknown[];
+    scope: { organizations: Array<{ id: string; role: string; name?: string }> };
+    truncated: boolean;
+    nextCursor?: { createdAt: number; id: string };
+  }
+>(functions, "businessReferral_listMine");
+
+export const getBusinessReferralDetailFn = httpsCallable<
+  { referralId: string },
+  {
+    referral: unknown;
+    contact: unknown | null;
+    contactRedacted: boolean;
+    transactionReports: unknown[];
+  }
+>(functions, "businessReferral_getDetail");
+
+export const listBusinessReferralTimelineFn = httpsCallable<
+  { referralId: string; limit: number; before?: number },
+  { events: unknown[]; truncated: boolean; nextBefore?: number }
+>(functions, "businessReferral_listTimeline");
+
+export interface BusinessReferralSuggestionInput {
+  referralId?: string;
+  referrerOrgId?: string;
+  serviceCategory?: string;
+  naicsCodes: string[];
+  territoryFips?: string;
+  limit: number;
+}
+
+export const suggestBusinessReferralRecipientsFn = httpsCallable<
+  BusinessReferralSuggestionInput,
+  { suggestions: unknown[]; truncated: boolean; algorithmVersion: number; notice: string }
+>(functions, "businessReferral_suggestRecipients");
+
+export const listDiscoverableReferralServiceOffersFn = httpsCallable<
+  {
+    limit: number;
+    cursor?: string;
+    serviceCategory?: string;
+    naicsCode?: string;
+    territoryFips?: string;
+  },
+  { offers: unknown[]; nextCursor?: string | null; truncated: boolean }
+>(functions, "referralServiceOffer_listDiscoverable");
+
+export interface BusinessReferralReportTransactionInput {
+  referralId: string;
+  idempotencyKey: string;
+  expectedReferralVersion: number;
+  serviceOfferId?: string;
+  contractReference?: string;
+  qualifyingTransactionCents: number;
+  collectedTransactionCents: number;
+  collectedAt: number;
+  currency: string;
+  evidenceStoragePaths: string[];
+}
+
+export const reportBusinessReferralTransactionFn = httpsCallable<
+  BusinessReferralReportTransactionInput,
+  { reportId: string; referralVersion: number; reportVersion: number; idempotent?: boolean }
+>(functions, "businessReferral_reportTransaction");
+
+export interface BusinessReferralReviewTransactionInput {
+  reportId: string;
+  action: "confirm" | "dispute" | "clarify";
+  idempotencyKey: string;
+  expectedVersion: number;
+  note?: string;
+}
+
+export const reviewBusinessReferralTransactionFn = httpsCallable<
+  BusinessReferralReviewTransactionInput,
+  {
+    reportId: string;
+    status: string;
+    reportVersion: number;
+    referralVersion: number;
+    settlementEnabled: false;
+    calculation?: unknown;
+    idempotent?: boolean;
+  }
+>(functions, "businessReferral_reviewTransaction");
+
+export interface ReferralIntelligenceInput {
+  scope: "individual" | "organization" | "platform";
+  orgId?: string;
+  windowDays: 30 | 90 | 365;
+}
+
+export const getReferralOverviewFn = httpsCallable<
+  ReferralIntelligenceInput,
+  Record<string, unknown>
+>(functions, "referralIntelligence_getOverview");
+
+export const listReferralRelationshipsFn = httpsCallable<
+  ReferralIntelligenceInput & { limit: number },
+  { relationships: unknown[]; truncated: boolean }
+>(functions, "referralIntelligence_listRelationships");
+
+export const getReferralGapAnalysisFn = httpsCallable<
+  ReferralIntelligenceInput,
+  { cells: unknown[]; truncated: boolean; privacyThreshold: unknown }
+>(functions, "referralIntelligence_getGapAnalysis");
+
+export const getReferralEconomicImpactFn = httpsCallable<
+  ReferralIntelligenceInput,
+  Record<string, unknown>
+>(functions, "referralIntelligence_getEconomicImpact");
+
+export const getReferralReciprocalPatternsFn = httpsCallable<
+  ReferralIntelligenceInput & { limit: number },
+  { patterns: unknown[]; truncated: boolean; notice: string }
+>(functions, "referralIntelligence_getReciprocalPatterns");
 
 // RFx Suggestions
 export const refreshRfxSuggestionsFn = httpsCallable<

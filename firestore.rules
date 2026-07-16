@@ -355,6 +355,42 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Run 3 referral-commerce and intelligence records are exposed only through
+    // bounded callables that re-read current party and organization authority.
+    // The Admin SDK bypasses these rules, so every callable also returns an
+    // explicit allowlisted projection.
+    match /referralServiceOffers/{offerVersionId} {
+      allow read, write: if false;
+    }
+
+    match /referralTransactionReports/{reportId} {
+      allow read, write: if false;
+    }
+
+    match /businessReferralTimeline/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /referralRelationshipInsights/{relationshipId} {
+      allow read, write: if false;
+    }
+
+    match /referralAnalyticsSnapshots/{snapshotId} {
+      allow read, write: if false;
+    }
+
+    match /referralRiskSignals/{signalId} {
+      allow read, write: if false;
+    }
+
+    match /referralDuplicateFingerprints/{fingerprintId} {
+      allow read, write: if false;
+    }
+
+    match /platformConfiguration/{configurationId} {
+      allow read, write: if false;
+    }
+
     // Compatibility boundary for any pre-Run-1 dispute records.
     match /referralDisputes/{disputeId} {
       allow read: if isAdmin()

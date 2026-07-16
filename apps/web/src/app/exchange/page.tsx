@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ExchangeWorkspace } from "@/features/exchange/components/ExchangeWorkspace";
+import { isExchangeDemoMode } from "@/features/exchange/demo/exchangeDemoMode";
 
 function ExchangeRouteFallback() {
   return (
@@ -21,13 +22,12 @@ function ExchangeRouteFallback() {
 }
 
 export default function ExchangePage() {
-  return (
-    <RequireAuth>
-      <AppShell variant="workspace">
-        <Suspense fallback={<ExchangeRouteFallback />}>
-          <ExchangeWorkspace />
-        </Suspense>
-      </AppShell>
-    </RequireAuth>
+  const workspace = (
+    <AppShell variant="workspace">
+      <Suspense fallback={<ExchangeRouteFallback />}>
+        <ExchangeWorkspace />
+      </Suspense>
+    </AppShell>
   );
+  return isExchangeDemoMode() ? workspace : <RequireAuth>{workspace}</RequireAuth>;
 }

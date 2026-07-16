@@ -3,7 +3,9 @@ name: Exchange security
 on:
   pull_request:
   push:
-    branches: ["codex/exchange-run-1-secure-foundation"]
+    branches:
+      - "codex/exchange-run-1-secure-foundation"
+      - "codex/exchange-run-3-economic-intelligence"
 
 permissions:
   contents: read
@@ -26,11 +28,13 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=low
       - run: npm run build:shared
       - run: npm run build:functions
       - run: npm run lint
       - run: npm run test:exchange
       - run: npm run test:security
+      - run: npm run test:run3
       - run: npm run build
         env:
           SKIP_BOOKSTORE_SYNC: "true"
@@ -40,4 +44,5 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+          NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
       - run: git diff --check
