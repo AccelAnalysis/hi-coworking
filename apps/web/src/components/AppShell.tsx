@@ -17,18 +17,28 @@ import {
   User,
   Users,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/authContext";
 import { subscribeToUnreadCount } from "@/lib/firestore";
 import { cn } from "@/lib/utils";
 
+export type AppShellVariant = "site" | "workspace";
+
 interface AppShellProps {
   children: React.ReactNode;
   fullWidth?: boolean;
+  variant?: AppShellVariant;
 }
 
-export function AppShell({ children, fullWidth = false }: AppShellProps) {
+interface NavItem {
+  href: string;
+  label: string;
+  icon?: LucideIcon;
+}
+
+export function AppShell({ children, fullWidth = false, variant = "site" }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, role, signOut } = useAuth();
@@ -36,11 +46,12 @@ export function AppShell({ children, fullWidth = false }: AppShellProps) {
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
-  const isExchangeWorkspace = pathname === "/exchange";
+  const isExchangeWorkspace = variant === "workspace" || pathname === "/exchange";
 
   useEffect(() => {
     if (!user) return;
-    return subscribeToUnreadCount(user.uid, setUnreadCount);
+    const unsubscribe = subscribeToUnreadCount(user.uid, setUnreadCount);
+    return () => unsubscribe();
   }, [user]);
 
   useEffect(() => {
@@ -59,7 +70,7 @@ export function AppShell({ children, fullWidth = false }: AppShellProps) {
   const isAdmin = role === "admin" || role === "master";
   const isStaff = role === "staff" || isAdmin;
 
-  const publicLinks = [
+  const publicLinks: NavItem[] = [
     { href: "/exchange", label: "Exchange" },
     { href: "/exchange/founding", label: "Founding Membership" },
     { href: "/spaces", label: "Spaces" },
@@ -68,7 +79,7 @@ export function AppShell({ children, fullWidth = false }: AppShellProps) {
     { href: "/about", label: "About" },
   ];
 
-  const memberLinks = [
+  const memberLinks: NavItem[] = [
     { href: "/exchange", label: "Exchange", icon: Compass },
     { href: "/exchange/onboarding", label: "Connect Organization", icon: Building2 },
     { href: "/directory", label: "Directory", icon: Users },
@@ -156,7 +167,7 @@ export function AppShell({ children, fullWidth = false }: AppShellProps) {
             {user && <Link href="/exchange" className="mb-5 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white"><Compass className="h-5 w-5" /> Open Exchange map</Link>}
             <div className="space-y-1">
               {(user ? memberLinks : publicLinks).map((item) => {
-                const Icon = "icon" in item ? item.icon : BookOpen;
+                const Icon = item.icon ?? BookOpen;
                 return <Link key={item.href} href={item.href} className={cn("flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-semibold", isActive(item.href) ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50")}><Icon className="h-4 w-4 text-slate-400" />{item.label}</Link>;
               })}
               {user && <button onClick={handleSignOut} className="mt-4 flex w-full items-center gap-3 border-t border-slate-200 px-3 py-4 text-sm font-semibold text-red-600"><LogOut className="h-4 w-4" /> Sign out</button>}
