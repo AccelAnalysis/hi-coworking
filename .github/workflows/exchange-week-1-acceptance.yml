@@ -27,6 +27,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm audit --omit=dev --audit-level=critical
       - run: npx playwright install --with-deps chromium
       - run: npm run build:shared
       - run: npm run build:functions
