@@ -33,3 +33,4 @@ The canonical `/exchange` route exposes the existing RFx marketplace map, includ
 4. Submit a seeded-organization claim and continue browsing while it remains pending.
 5. Create a new organization and return to the map.
 6. Open membership separately for an owned or approved organization.
+7. Run the full Exchange security and Week 1 acceptance workflows before staging deployment.
