@@ -2,6 +2,8 @@
 
 No staging Firebase project ID or Stripe credentials are stored in this repository. Do not substitute the production project.
 
+As of the 2026-07-17 pre-deployment check, `.firebaserc` maps both `default` and `prod` to `hi-coworking-plat`. The authenticated account can see a separate project named `hi-coworking-plat-dev`, but that name alone is not authorization to treat it as staging. Secret Manager is not enabled there and no Functions deployment could be listed. The project owner must explicitly designate the staging project before any alias, service enablement, secret write, import, or deployment.
+
 ## Configure a separate Firebase alias
 
 ```bash
@@ -12,6 +14,8 @@ firebase projects:list
 ```
 
 Confirm the active project is non-production before every command. Configure the project-scoped Functions environment with `STRIPE_FOUNDING_PRICE_ID`, `STRIPE_FOUNDING_PRODUCT_ID`, `STRIPE_EXPECTED_MODE=test`, and the staging `APP_URL`. Set test secrets with `firebase functions:secrets:set` while the staging alias is active.
+
+The repository currently deploys and calls Functions in `us-central1`. If `us-east1` is required, resolve that as a reviewed migration before deployment; do not change the shared region implicitly during staging setup.
 
 ## Deploy to staging only
 

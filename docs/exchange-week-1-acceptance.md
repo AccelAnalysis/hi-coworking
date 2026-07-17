@@ -1,33 +1,35 @@
 # Exchange Week 1 acceptance record
 
-| Requirement | Implementation location | Automated test | Manual test | Result | Evidence | Remaining issue |
+Status: **Code complete — manual acceptance pending.** No staging deployment or real Stripe test-mode transaction has been performed.
+
+| Requirement | Implementation location | Automated test evidence | Staging test evidence | Stripe evidence | Result | Remaining issue |
 |---|---|---|---|---|---|---|
-| Clean reconciliation from current main | `docs/pr4-preservation-and-deferral.md` | Diff scope and full inherited suite | PR review | Code complete | PR #4 commit preserved; Category B/C absent | CI review pending |
-| Search/create organization | `exchange/organizations.ts`, onboarding route | Emulator search/create + browser Path A | Staging source search | Code complete | Local emulator/browser pass | Remote USAspending/staging smoke pending |
-| Claim authority | Claim callables and `/admin/exchange-claims` | Emulator approve/reject/competing/rules + browser Path B | Staging review UI | Code complete | Atomic owner assignment and audit pass | Staging operator sign-off pending |
-| Strict Stripe test configuration | `exchange/membership.ts`, Stripe adapter | Unit catalog rejection matrix + mock checkout | Real Stripe retrieval/Checkout | Code complete | Validation precedes reservation locally | Real Stripe test credentials unavailable |
-| Founder cap/lifecycle | Membership transactions | Unit 1/249/250/251 + concurrent emulator attempts | Inspect staging allocation | Code complete | Unique/idempotent allocation tests | Remote webhook lifecycle pending |
-| Credits | `exchange/credits.ts` | Unit FIFO/reversal/expiry + emulator invoice replay/isolation | Inspect staging invoice lot | Code complete | One 25-credit lot per invoice locally | Real Stripe invoice pending |
-| Firestore security | `firestore.rules`, indexes | 71 inherited security tests + Exchange denials | Rules deploy smoke | Code complete | Direct claim/credit/founder/source access denied | Staging rules deployment pending |
-| Seed privacy/determinism | preparation/import/verifier scripts | Unit dry-run/idempotency + attached-source double regeneration | Staging dry-run/import | Deploy-ready | Identical hashes, zero privacy violations | Staging import not performed |
-| Browser journeys | Playwright suite | Path A and Path B against emulators | Repeat on staging | Code complete | 2/2 local browser tests pass | Staging and real hosted Checkout pending |
-| CI | GitHub Actions workflow | Runs all builds/tests/browser/seed checks | Observe branch run | Configured | Workflow committed | Result unavailable until pushed/run |
-| Staging deployment | Staging checklist | N/A | Deploy and smoke | Not performed | No staging alias/project in repo | Project ID/authorization required |
-| Real Stripe lifecycle | Stripe setup/checklist | Mocked only in CI | Real test Checkout + signed webhooks/replay | Not performed | No secrets used or exposed | Required for Week 1 acceptance |
-| Production | Explicitly out of scope | N/A | N/A | Not performed | No production command run | Merge/deploy requires later authorization |
+| Clean reconciliation from current main | `docs/pr4-preservation-and-deferral.md` | Full inherited and Exchange suites; clean generated diff | Not applicable | Not applicable | Pass | Human PR review |
+| Search/create organization | `exchange/organizations.ts`, onboarding route | Emulator search/create; Playwright Path A | Not performed | Not applicable | Code complete | Authorized staging project and URL |
+| Claim authority | Claim callables and `/admin/exchange-claims` | Emulator approve/reject/competing/rules; Playwright Path B | Not performed | Not applicable | Code complete | Staging operator sign-off |
+| Strict Stripe test configuration | `exchange/membership.ts`, Stripe adapter | Catalog rejection matrix and injected mock Checkout | Not performed | No real Product/Price retrieval | Code complete | Test IDs and Firebase secrets unavailable |
+| Founder cap/lifecycle | Membership transactions | Founder 1/249/250/251, concurrency, expiration and replay | Not performed | No real subscription | Code complete | Signed staging webhook lifecycle |
+| Credits | `exchange/credits.ts` | FIFO/expiry/reversal plus invoice replay and organization isolation | Not performed | No real paid invoice | Code complete | Real test invoice and replay |
+| Firestore security | `firestore.rules`, indexes | 71/71 combined tests; standalone rules 14/14, Functions 35/35, migrations 22/22 | Not deployed | Not applicable | Code complete | Deploy to designated staging only |
+| Seed privacy/determinism | Preparation/import/verifier scripts | Two identical generations; local-emulator dry run/import/rerun | Not imported | Not applicable | Deploy-ready | Staging authorization |
+| Browser journeys | Playwright suite | Path A and Path B pass against Auth/Firestore/Functions emulators | Not performed | Mock boundary only | Code complete | Hosted staging and real Checkout |
+| Dependency runtime security | Root dependency override | `npm audit --omit=dev`: 0 vulnerabilities | Not applicable | Not applicable | Pass | Three moderate Firebase CLI-only advisories remain |
+| CI | GitHub Actions | Final reviewed head had three green checks | Not applicable | Mocked only | Pass | New evidence commit must also remain green |
+| Staging deployment | Staging checklist | Configuration inspection only | Not performed | Not configured | Blocked | Project owner must designate a project and enable required services |
+| Real Stripe lifecycle | Stripe setup/checklist | Signed-webhook adapter and replay tests | Not performed | No test Checkout/webhook | Blocked | Test secrets, Product/Price IDs, endpoint and staging URL |
+| Production safety | Explicit scope boundary | Secret scan and target inspection | No production command run | No live operation | Pass | Production remains out of scope |
 
-## Automated evidence
+## Pre-deployment revalidation — 2026-07-17
 
-- Functions/shared/web TypeScript builds pass.
-- Thirteen Node unit/import tests pass for normalization, capabilities, Stripe state, founder 1/249/250/251 behavior, credit expiry/FIFO, strict price/product/mode validation, webhook signatures, and seed dry-run/idempotency/privacy.
-- Four Firebase emulator tests pass for search/create, server-only claim rules and competing approval, checkout authority/reservation/cap, and invoice-credit idempotency/expiry.
-- Two Playwright journeys pass against Auth/Firestore/Functions emulators for the required Path A and Path B.
-- Attached source regeneration produced 5,128 Isle of Wight organizations, 1,591 home-based classifications, and 3,564 restricted candidates twice with identical SHA-256 output. The public output exactly matches the committed JSONL, has no duplicate IDs, and has no protected home-location/contact fields.
-
-## Environment truth
-
-The emulator uses a mock Stripe client only when `EXCHANGE_STRIPE_MOCK_MODE=1` and the project ID starts with `demo-`. Production/staging code uses the real adapter. No real Stripe test checkout, remote webhook, or staging deployment was performed because no dedicated staging Firebase alias/project or Stripe test credentials were available in repository configuration.
+- Branch and remote head matched `8e5fe94467555e9db8cbc448a090e1a30055bfb5` before this evidence/security update. PR #5 was mergeable, draft, and had no reviews, comments, or unresolved review threads.
+- Node `20.20.2`: clean `npm ci`; shared and Functions builds; web TypeScript and production export of 57/57 routes; 13/13 unit/import tests; 71/71 combined security/functions/migration tests; standalone rules 14/14, Functions 35/35, and migrations 22/22; Exchange emulator 7/7; Playwright 2/2; lint 0 errors with five pre-existing warnings.
+- `websocket-driver` was pinned to the fixed `0.7.5` release after the clean install exposed a critical transitive runtime advisory. Runtime audit now reports zero vulnerabilities. Three moderate advisories remain only in the Firebase CLI dependency graph.
+- Seed preparation produced 5,128 organizations, 1,591 home-based classifications, and 3,564 restricted candidates twice with identical SHA-256 hashes. Public output matched the committed JSONL; duplicate and home-privacy violations were zero.
+- Full local-emulator dry run: 5,128 organizations and 3,564 restricted candidates would be created; zero updated, skipped, duplicated, or invalid. Local-emulator import created those counts, and the immediate rerun skipped all 5,128/3,564 records with zero writes.
+- No staging import was run. No staging project is configured in `.firebaserc`; it contains only `default` and `prod`, both mapped to `hi-coworking-plat`. The authenticated account can see `hi-coworking-plat-dev`, but the repository and project owner have not designated it as staging, and Secret Manager is not enabled there.
+- Actual repository Functions region is `us-central1` (`firebase.json`, web client, tests, and existing deployment documentation). A request to use `us-east1` must be resolved explicitly before deployment; changing the shared region would affect existing functions and URLs.
+- No Stripe CLI or Stripe environment credential names were available. No secret was read, printed, written, or requested in chat.
 
 ## Acceptance boundary
 
-Automated code acceptance is complete. Final operational acceptance requires the manual staging evidence in `docs/exchange-staging-checklist.md`, including real Stripe test mode and signed remote webhook verification. Production merge/deploy remains explicitly out of scope.
+Operational acceptance still requires an explicitly designated staging Firebase project, secure Stripe test configuration, controlled deployment, the two hosted journeys, a real signed webhook activation/invoice/replay, and sanitized evidence. Production merge/deploy and Stripe live mode remain out of scope.

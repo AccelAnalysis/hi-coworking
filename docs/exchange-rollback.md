@@ -9,4 +9,19 @@ The data model is additive. Rollback application behavior without deleting audit
 5. If an import batch is incorrect, identify documents by `importBatchId`; review claimed/edited organizations before any compensating mutation. Never bulk-delete claimed records.
 6. Reconcile founder counts, reservations, Stripe subscriptions, and invoice credit lots before retrying deployment.
 
+For a staging rollback, check out or build the recorded last-known-good commit and target the explicit project ID on every command:
+
+```bash
+git switch --detach <last-known-good-commit>
+npm ci
+npm run build:shared
+npm run build:functions
+npm run build
+firebase deploy --project <staging-project-id> --only firestore:rules,firestore:indexes
+firebase deploy --project <staging-project-id> --only functions
+firebase deploy --project <staging-project-id> --only hosting
+```
+
+Disable the Stripe **test-mode** webhook endpoint before rolling back Functions when its event contract is incompatible. Do not delete audit, membership, founder, payment, claim, or credit records as part of rollback.
+
 Production rollback is out of scope because this acceptance run does not authorize or perform a production deployment.
