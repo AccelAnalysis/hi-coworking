@@ -8,13 +8,16 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test test/*.test.cjs",
     "watch": "tsc -w",
     "lint": "eslint .",
     "serve": "firebase emulators:start --only functions",
     "shell": "firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "seed:prepare": "python3 scripts/prepare-organization-seeds.py",
+    "seed:import": "node scripts/import-organizations.cjs"
   },
   "dependencies": {
     "@hi/shared": "^0.0.0",

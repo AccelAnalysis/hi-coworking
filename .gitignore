@@ -5,6 +5,8 @@ node_modules/
 
 # Testing
 coverage/
+test-results/
+playwright-report/
 
 # Next.js
 .next/
@@ -45,3 +47,10 @@ Thumbs.db
 # Misc
 *.tsbuildinfo
 .turbo/
+
+# Local Codex/workspace scratch and private runtime material
+.codex-tmp/
+apps/functions/src/.secret.local
+
+# Restricted seed output is generated locally and must never be committed.
+data/seed/prepared/exchange-targeting-restricted.jsonl

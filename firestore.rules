@@ -253,6 +253,40 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Exchange onboarding, claims, membership, counters, and credits are
+    // server-authoritative. Clients use callable functions for every write and
+    // for privacy-filtered reads.
+    match /organizationClaims/{claimId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationSourceCandidates/{candidateId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationMemberships/{organizationId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationCreditLots/{lotId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationCreditLedger/{entryId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationSubscriptionEvents/{eventId} {
+      allow read, create, update, delete: if false;
+    }
+    match /stripeSubscriptions/{subscriptionId} {
+      allow read, create, update, delete: if false;
+    }
+    match /founderAllocation/{docId} {
+      allow read, create, update, delete: if false;
+    }
+    match /founderReservations/{organizationId} {
+      allow read, create, update, delete: if false;
+    }
+    match /organizationSearchRateLimits/{limitId} {
+      allow read, create, update, delete: if false;
+    }
+
     // --- rfx/{rfxId} ---
     // Public read if not member-only; member-only requires auth.
     // Authenticated users can create; owner or admin can update/delete.
