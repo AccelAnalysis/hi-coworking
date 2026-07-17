@@ -1,7 +1,7 @@
 /**
  * Payment Abstraction Layer — Types (PR-09)
  *
- * These types mirror the schemas in @hi/shared (PaymentDoc, WebhookEventDoc)
+ * These types mirror the shared workspace schemas (PaymentDoc, WebhookEventDoc)
  * but are kept inline to avoid cross-package module issues in Cloud Functions.
  */
 
@@ -26,6 +26,7 @@ export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
 
 export interface CheckoutSessionInput {
   uid: string;
+  customerId?: string;
   amount: number;
   currency: string;
   purpose: PaymentPurpose;
@@ -45,7 +46,7 @@ export interface CheckoutSessionResult {
 
 export interface WebhookResult {
   eventId: string;
-  action: "payment_succeeded" | "payment_failed" | "refund" | "unknown";
+  action: "payment_succeeded" | "payment_failed" | "checkout_expired" | "subscription_updated" | "refund" | "unknown";
   paymentId?: string;
   status?: PaymentStatus;
   metadata?: Record<string, string>;
@@ -79,7 +80,7 @@ export interface PaymentProvider {
   reconcileStatus(providerRefs: Record<string, string>): Promise<PaymentStatus>;
 }
 
-// --- PaymentDoc shape (mirrors @hi/shared) ---
+// --- PaymentDoc shape (mirrors shared workspace schema) ---
 
 export interface PaymentDocData {
   id: string;
@@ -97,7 +98,7 @@ export interface PaymentDocData {
   updatedAt?: number;
 }
 
-// --- WebhookEventDoc shape (mirrors @hi/shared) ---
+// --- WebhookEventDoc shape (mirrors shared workspace schema) ---
 
 export interface WebhookEventDocData {
   eventId: string;

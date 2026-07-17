@@ -236,11 +236,36 @@ export const bookingSchema = z.object({
   end: z.number(),   // Timestamp
   status: bookingStatusSchema,
   totalPrice: z.number(),
+  durationMinutes: z.number().int().nonnegative().optional(),
+  includedSeatMinutesApplied: z.number().int().nonnegative().optional(),
+  overageSeatMinutes: z.number().int().nonnegative().optional(),
+  seatRateCents: z.number().int().nonnegative().optional(),
+  roomOrModeRateCents: z.number().int().nonnegative().optional(),
+  totalPriceCents: z.number().int().nonnegative().optional(),
+  membershipPeriodId: z.string().nullable().optional(),
+  paymentStatus: z.enum(["paid", "pending", "failed", "refunded"]).optional(),
   paymentMethod: z.enum(["STRIPE", "CREDITS"]),
   createdAt: z.number()
 });
 
 export type Booking = z.infer<typeof bookingSchema>;
+
+export const membershipPeriodSchema = z.object({
+  id: z.string(),
+  uid: z.string(),
+  plan: z.string(),
+  stripeSubscriptionId: z.string().optional(),
+  periodStart: z.number(),
+  periodEnd: z.number(),
+  includedSeatMinutes: z.number().int().nonnegative(),
+  usedSeatMinutes: z.number().int().nonnegative(),
+  reservedSeatMinutes: z.number().int().nonnegative(),
+  overageSeatMinutes: z.number().int().nonnegative(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+export type MembershipPeriod = z.infer<typeof membershipPeriodSchema>;
 
 // --- User Roles & Entitlements (PR-02) ---
 
@@ -287,7 +312,9 @@ export const userDocSchema = z.object({
   membershipStatus: membershipStatusSchema,
   plan: z.string().optional(),           // e.g. "dayPass", "dedicated", "team"
   expiresAt: z.number().optional(),      // Timestamp
-  features: z.record(z.string(), z.boolean()).optional(), // Feature flags
+  billingPeriodStart: z.number().optional(),
+  billingPeriodEnd: z.number().optional(),
+  features: z.record(z.string(), z.union([z.boolean(), z.string(), z.number()])).optional(),
 
   // Membership track (PR-08: personalization)
   membershipTrack: membershipTrackSchema.optional(),
@@ -331,6 +358,134 @@ export const orgMemberDocSchema = z.object({
 });
 
 export type OrgMemberDoc = z.infer<typeof orgMemberDocSchema>;
+
+// --- Exchange organizations, membership & entitlements (Week 1 launch) ---
+
+export const exchangeOrganizationSourceSchema = z.enum([
+  "manual",
+  "exchange_targeting",
+  "iow_companies",
+  "iow_home_businesses",
+  "usaspending",
+]);
+export type ExchangeOrganizationSource = z.infer<typeof exchangeOrganizationSourceSchema>;
+
+export const exchangeClaimStatusSchema = z.enum(["unclaimed", "claim_pending", "claimed"]);
+export type ExchangeClaimStatus = z.infer<typeof exchangeClaimStatusSchema>;
+
+export const exchangeVerificationStatusSchema = z.enum([
+  "unverified",
+  "pending",
+  "verified",
+  "rejected",
+]);
+export type ExchangeVerificationStatus = z.infer<typeof exchangeVerificationStatusSchema>;
+
+export const exchangeMembershipStatusSchema = z.enum([
+  "free",
+  "checkout_pending",
+  "active",
+  "trialing",
+  "past_due",
+  "canceled",
+  "incomplete",
+  "suspended",
+]);
+export type ExchangeMembershipStatus = z.infer<typeof exchangeMembershipStatusSchema>;
+
+export const exchangeMembershipPlanSchema = z.enum(["free", "founding"]);
+export type ExchangeMembershipPlan = z.infer<typeof exchangeMembershipPlanSchema>;
+
+export const exchangeCapabilitySchema = z.enum([
+  "exchange.profile.manage",
+  "exchange.directory.browse",
+  "exchange.map.browse",
+  "exchange.opportunity.respond",
+  "exchange.opportunity.create",
+  "exchange.rfx.respond",
+  "exchange.rfx.create",
+  "exchange.referral.receive",
+  "exchange.referral.initiate",
+  "exchange.teaming.respond",
+  "exchange.teaming.initiate",
+  "exchange.resources.browse",
+  "exchange.analytics.basic",
+  "exchange.analytics.founder",
+  "exchange.founder.badge",
+  "exchange.credits.use",
+]);
+export type ExchangeCapability = z.infer<typeof exchangeCapabilitySchema>;
+
+export const exchangeOrgDocSchema = orgDocSchema.extend({
+  normalizedName: z.string(),
+  websiteDomain: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  postalCode: z.string().optional(),
+  county: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  publicPhone: z.string().optional(),
+  description: z.string().optional(),
+  organizationType: z.string().optional(),
+  naicsCodes: z.array(z.string()).default([]),
+  sourceIds: z.record(z.string(), z.string()).default({}),
+  sources: z.array(exchangeOrganizationSourceSchema).default(["manual"]),
+  sourceRetrievedAt: z.number().optional(),
+  importBatchId: z.string().optional(),
+  claimStatus: exchangeClaimStatusSchema.default("unclaimed"),
+  verificationStatus: exchangeVerificationStatusSchema.default("unverified"),
+  homeBased: z.boolean().default(false),
+  searchTokens: z.array(z.string()).default([]),
+});
+export type ExchangeOrgDoc = z.infer<typeof exchangeOrgDocSchema>;
+
+export const organizationMembershipDocSchema = z.object({
+  organizationId: z.string(),
+  plan: exchangeMembershipPlanSchema,
+  status: exchangeMembershipStatusSchema,
+  stripeCustomerId: z.string().optional(),
+  stripeSubscriptionId: z.string().optional(),
+  stripePriceId: z.string().optional(),
+  currentPeriodStart: z.number().optional(),
+  currentPeriodEnd: z.number().optional(),
+  cancelAtPeriodEnd: z.boolean().default(false),
+  founderNumber: z.number().int().min(1).max(250).optional(),
+  foundingActivatedAt: z.number().optional(),
+  protectedRateEligible: z.boolean().default(false),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  audit: z.record(z.string(), z.unknown()).optional(),
+});
+export type OrganizationMembershipDoc = z.infer<typeof organizationMembershipDocSchema>;
+
+export const organizationCreditEntryTypeSchema = z.enum([
+  "grant",
+  "spend",
+  "refund",
+  "administrative_adjustment",
+  "expiration",
+  "reversal",
+]);
+export type OrganizationCreditEntryType = z.infer<typeof organizationCreditEntryTypeSchema>;
+
+export const organizationCreditLedgerEntrySchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  amount: z.number().int(),
+  entryType: organizationCreditEntryTypeSchema,
+  effectiveAt: z.number(),
+  expiresAt: z.number().optional(),
+  sourceType: z.string(),
+  sourceId: z.string(),
+  stripeInvoiceId: z.string().optional(),
+  stripeEventId: z.string().optional(),
+  description: z.string(),
+  actor: z.string(),
+  reversalOf: z.string().optional(),
+  createdAt: z.number(),
+});
+export type OrganizationCreditLedgerEntry = z.infer<typeof organizationCreditLedgerEntrySchema>;
 
 // --- Profiles (PR-03) ---
 
@@ -1486,7 +1641,7 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
     amountCents: 4900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_virtual_monthly",
+    stripePriceId: "price_1TpWsiAhUpL6HYCQziHOJrur",
     includedHoursPerMonth: 2,
     extraHourlyRateCents: 1200,
     bookingWindowDays: 14,
@@ -1515,7 +1670,7 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
     amountCents: 12900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_monthly",
+    stripePriceId: "price_1TpWsiAhUpL6HYCQFIrh8x1K",
     includedHoursPerMonth: 15,
     extraHourlyRateCents: 1050,
     bookingWindowDays: 90,
@@ -1543,7 +1698,7 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
     amountCents: 19900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_plus_monthly",
+    stripePriceId: "price_1TpWsiAhUpL6HYCQtNdAt702",
     includedHoursPerMonth: 30,
     extraHourlyRateCents: 900,
     bookingWindowDays: 90,

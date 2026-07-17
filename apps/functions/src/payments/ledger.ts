@@ -43,16 +43,25 @@ export async function createPayment(
   const doc: PaymentDocData = {
     id: ref.id,
     uid: input.uid,
-    orgId: input.orgId,
     provider: input.provider,
     amount: input.amount,
     currency: input.currency || "USD",
     purpose: input.purpose,
-    purposeRefId: input.purposeRefId,
     status: input.status || "pending",
-    providerRefs: input.providerRefs,
     createdAt: now,
   };
+
+  if (input.orgId !== undefined) {
+    doc.orgId = input.orgId;
+  }
+
+  if (input.purposeRefId !== undefined) {
+    doc.purposeRefId = input.purposeRefId;
+  }
+
+  if (input.providerRefs !== undefined) {
+    doc.providerRefs = input.providerRefs;
+  }
 
   await ref.set(doc);
   logger.info("Payment created", { id: doc.id, provider: doc.provider, amount: doc.amount });

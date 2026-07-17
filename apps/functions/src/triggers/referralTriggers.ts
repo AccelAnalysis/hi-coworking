@@ -2,7 +2,7 @@ import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 
-// MIRROR of @hi/shared types — kept inline because @hi/shared is ESM-only.
+// MIRROR of shared workspace types, kept inline so functions deploy standalone.
 interface ReferralDoc {
   providerUid?: string;
   status: "pending" | "contacted" | "accepted" | "declined" | "converted" | "expired" | "disputed" | "paid";

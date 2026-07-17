@@ -47,6 +47,9 @@ const stripeProvider_1 = require("./stripeProvider");
 const idempotency_1 = require("./idempotency");
 const ledger_1 = require("./ledger");
 const qboAccountingSync_1 = require("./qboAccountingSync");
+const seatHours_1 = require("../memberships/seatHours");
+const access_1 = require("../access");
+const membership_1 = require("../exchange/membership");
 function getDb() { return admin.firestore(); }
 /**
  * Process a raw Stripe webhook request.
@@ -68,7 +71,7 @@ async function handleStripeWebhook(rawBody, headers, stripeSecretKey, stripeWebh
         return { status: 200, body: { received: true, skipped: true } };
     }
     try {
-        await processWebhookResult(result, intuitClientId, intuitClientSecret);
+        await processWebhookResult(result, provider, intuitClientId, intuitClientSecret);
         await (0, idempotency_1.markWebhookResult)(result.eventId, "success");
     }
     catch (err) {
@@ -81,13 +84,20 @@ async function handleStripeWebhook(rawBody, headers, stripeSecretKey, stripeWebh
 /**
  * Route the webhook result to the appropriate handler.
  */
-async function processWebhookResult(result, intuitClientId, intuitClientSecret) {
+async function processWebhookResult(result, provider, intuitClientId, intuitClientSecret) {
+    if (await (0, membership_1.processExchangeMembershipWebhook)(result))
+        return;
     switch (result.action) {
         case "payment_succeeded":
-            await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret);
+            await handlePaymentSucceeded(result, provider, intuitClientId, intuitClientSecret);
             break;
         case "payment_failed":
             await handlePaymentFailed(result);
+            break;
+        case "checkout_expired":
+            await handleBookingPaymentFailed(result, "EXPIRED");
+            break;
+        case "subscription_updated":
             break;
         case "refund":
             if (result.paymentId) {
@@ -105,10 +115,14 @@ async function processWebhookResult(result, intuitClientId, intuitClientSecret) 
  * 2. Provision membership entitlements on users/{uid}
  * 3. Sync to QBO accounting if connected (PR-14)
  */
-async function handlePaymentSucceeded(result, intuitClientId, intuitClientSecret) {
+async function handlePaymentSucceeded(result, provider, intuitClientId, intuitClientSecret) {
     const uid = result.metadata?.uid;
     const subscriptionId = result.metadata?.subscriptionId;
     const plan = result.metadata?.plan;
+    if (isBookingPayment(result)) {
+        await finalizeBookingPayment(result);
+        return;
+    }
     // Update existing payment doc if we have a paymentId
     if (result.paymentId) {
         await (0, ledger_1.updatePaymentStatus)(result.paymentId, "paid", {
@@ -120,7 +134,7 @@ async function handlePaymentSucceeded(result, intuitClientId, intuitClientSecret
     }
     // Provision membership entitlements
     if (uid && plan) {
-        await provisionMembership(uid, plan, subscriptionId);
+        await provisionMembership(uid, plan, provider, subscriptionId, result.metadata);
     }
     // Handle Referral Payouts (PR-16)
     if (result.metadata?.purpose === "referral" && result.metadata.purposeRefId) {
@@ -288,12 +302,116 @@ async function finalizeVendorTablePurchase(result) {
         status: "active",
     });
 }
+function isBookingPayment(result) {
+    return result.metadata?.purpose === "booking" || Boolean(result.metadata?.bookingId);
+}
+function parseMetadataNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+async function finalizeBookingPayment(result) {
+    const bookingId = result.metadata?.bookingId || result.metadata?.purposeRefId;
+    const paymentId = result.paymentId || result.metadata?.paymentId;
+    if (!bookingId)
+        return;
+    const db = getDb();
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    let bookingForAccess = null;
+    await db.runTransaction(async (tx) => {
+        const bookingSnap = await tx.get(bookingRef);
+        if (!bookingSnap.exists)
+            return;
+        const booking = bookingSnap.data() || {};
+        if (booking.status === "CONFIRMED")
+            return;
+        const userId = typeof booking.userId === "string" ? booking.userId : result.metadata?.uid || "";
+        const membershipPeriodId = typeof booking.membershipPeriodId === "string"
+            ? booking.membershipPeriodId
+            : result.metadata?.membershipPeriodId || undefined;
+        const includedSeatMinutesApplied = typeof booking.includedSeatMinutesApplied === "number"
+            ? booking.includedSeatMinutesApplied
+            : parseMetadataNumber(result.metadata?.includedSeatMinutesApplied);
+        (0, seatHours_1.consumeReservedSeatMinutesForBooking)(tx, userId, membershipPeriodId || undefined, includedSeatMinutesApplied);
+        const now = Date.now();
+        tx.update(bookingRef, {
+            status: "CONFIRMED",
+            paymentStatus: "paid",
+            paidAt: now,
+            updatedAt: now,
+            checkoutSessionId: result.metadata?.checkoutSessionId || booking.checkoutSessionId || null,
+            paymentId: paymentId || booking.paymentId || null,
+        });
+        if (paymentId) {
+            tx.update(db.collection("payments").doc(paymentId), {
+                status: "paid",
+                updatedAt: now,
+                "providerRefs.bookingId": bookingId,
+                "providerRefs.checkoutSessionId": result.metadata?.checkoutSessionId || "",
+            });
+        }
+        bookingForAccess = {
+            resourceId: String(booking.resourceId || result.metadata?.resourceId || ""),
+            userId,
+            start: typeof booking.start === "number" ? booking.start : parseMetadataNumber(result.metadata?.start),
+            end: typeof booking.end === "number" ? booking.end : parseMetadataNumber(result.metadata?.end),
+        };
+    });
+    const accessContext = bookingForAccess;
+    if (accessContext?.resourceId && accessContext.userId && accessContext.start && accessContext.end) {
+        await (0, access_1.createAccessGrant)(bookingId, accessContext.resourceId, accessContext.userId, accessContext.start, accessContext.end);
+    }
+    logger.info("Booking payment finalized", { bookingId, paymentId });
+}
+async function handleBookingPaymentFailed(result, bookingStatus) {
+    const bookingId = result.metadata?.bookingId || result.metadata?.purposeRefId;
+    const paymentId = result.paymentId || result.metadata?.paymentId;
+    if (!bookingId)
+        return;
+    const db = getDb();
+    const bookingRef = db.collection("bookings").doc(bookingId);
+    await db.runTransaction(async (tx) => {
+        const bookingSnap = await tx.get(bookingRef);
+        if (!bookingSnap.exists)
+            return;
+        const booking = bookingSnap.data() || {};
+        if (booking.status !== "PENDING_PAYMENT")
+            return;
+        const userId = typeof booking.userId === "string" ? booking.userId : result.metadata?.uid || "";
+        const membershipPeriodId = typeof booking.membershipPeriodId === "string"
+            ? booking.membershipPeriodId
+            : result.metadata?.membershipPeriodId || undefined;
+        const includedSeatMinutesApplied = typeof booking.includedSeatMinutesApplied === "number"
+            ? booking.includedSeatMinutesApplied
+            : parseMetadataNumber(result.metadata?.includedSeatMinutesApplied);
+        (0, seatHours_1.releaseReservedSeatMinutesForBooking)(tx, userId, membershipPeriodId || undefined, includedSeatMinutesApplied);
+        const now = Date.now();
+        tx.update(bookingRef, {
+            status: bookingStatus,
+            paymentStatus: "failed",
+            updatedAt: now,
+            checkoutSessionId: result.metadata?.checkoutSessionId || booking.checkoutSessionId || null,
+        });
+        if (paymentId) {
+            tx.update(db.collection("payments").doc(paymentId), {
+                status: "failed",
+                updatedAt: now,
+                "providerRefs.bookingId": bookingId,
+                "providerRefs.checkoutSessionId": result.metadata?.checkoutSessionId || "",
+            });
+        }
+    });
+    logger.info("Booking payment failed", { bookingId, paymentId, bookingStatus });
+}
 /**
  * On failed payment:
  * 1. Update payment doc
  * 2. Downgrade membership status to pastDue or cancelled
  */
 async function handlePaymentFailed(result) {
+    if (isBookingPayment(result)) {
+        await handleBookingPaymentFailed(result, "FAILED_PAYMENT");
+        return;
+    }
     if (result.paymentId) {
         await (0, ledger_1.updatePaymentStatus)(result.paymentId, "failed");
     }
@@ -316,19 +434,69 @@ async function handlePaymentFailed(result) {
 /**
  * Set membership entitlements on the user doc after a successful subscription.
  */
-async function provisionMembership(uid, plan, subscriptionId) {
+async function provisionMembership(uid, plan, provider, subscriptionId, metadata) {
     const now = Date.now();
-    // Default expiration: 35 days from now (gives buffer for monthly billing)
-    const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
+    let resolvedPlan = plan;
+    let resolvedSubscriptionId = subscriptionId;
+    let periodStart = metadata?.billingPeriodStart
+        ? Number(metadata.billingPeriodStart)
+        : metadata?.periodStart
+            ? Number(metadata.periodStart)
+            : NaN;
+    let periodEnd = metadata?.billingPeriodEnd
+        ? Number(metadata.billingPeriodEnd)
+        : metadata?.periodEnd
+            ? Number(metadata.periodEnd)
+            : NaN;
+    if (resolvedSubscriptionId &&
+        (!Number.isFinite(periodStart) || !Number.isFinite(periodEnd) || !resolvedPlan)) {
+        const subscriptionContext = await provider.getSubscriptionMembershipContext(resolvedSubscriptionId);
+        if (subscriptionContext) {
+            resolvedPlan = resolvedPlan || subscriptionContext.plan || plan;
+            periodStart = Number.isFinite(periodStart)
+                ? periodStart
+                : subscriptionContext.periodStart || NaN;
+            periodEnd = Number.isFinite(periodEnd)
+                ? periodEnd
+                : subscriptionContext.periodEnd || NaN;
+            resolvedSubscriptionId = resolvedSubscriptionId || subscriptionContext.subscriptionId;
+        }
+    }
+    if (!Number.isFinite(periodStart) || !Number.isFinite(periodEnd)) {
+        logger.warn("Stripe billing period missing; using MVP fallback membership period", {
+            uid,
+            plan: resolvedPlan,
+            subscriptionId: resolvedSubscriptionId,
+            periodStart,
+            periodEnd,
+        });
+        periodStart = now;
+        periodEnd = now + 31 * 24 * 60 * 60 * 1000;
+    }
     const updates = {
         membershipStatus: "active",
-        plan,
-        expiresAt,
+        plan: resolvedPlan,
+        expiresAt: periodEnd,
+        billingPeriodStart: periodStart,
+        billingPeriodEnd: periodEnd,
         updatedAt: now,
     };
-    if (subscriptionId) {
-        updates["features.stripeSubscriptionId"] = subscriptionId;
+    if (resolvedSubscriptionId) {
+        updates["features.stripeSubscriptionId"] = resolvedSubscriptionId;
     }
-    await getDb().collection("users").doc(uid).update(updates);
-    logger.info("Membership provisioned", { uid, plan, expiresAt });
+    await getDb().collection("users").doc(uid).set(updates, { merge: true });
+    await (0, seatHours_1.upsertMembershipPeriod)({
+        uid,
+        plan: resolvedPlan,
+        stripeSubscriptionId: resolvedSubscriptionId,
+        periodStart,
+        periodEnd,
+    });
+    logger.info("Membership provisioned", {
+        uid,
+        plan: resolvedPlan,
+        expiresAt: periodEnd,
+        periodStart,
+        periodEnd,
+    });
 }

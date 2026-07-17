@@ -58,11 +58,26 @@ async function ensureIdempotent(eventId, provider) {
         const result = await db.runTransaction(async (tx) => {
             const snap = await tx.get(ref);
             if (snap.exists) {
-                logger.info(`Webhook event ${eventId} already processed, skipping`, {
+                const existing = snap.data();
+                if (existing?.result === "success") {
+                    logger.info(`Webhook event ${eventId} already processed, skipping`, {
+                        provider,
+                        processedAt: existing.processedAt,
+                    });
+                    return false;
+                }
+                logger.warn(`Webhook event ${eventId} did not complete successfully; retrying`, {
                     provider,
-                    processedAt: snap.data()?.processedAt,
+                    processedAt: existing?.processedAt,
+                    result: existing?.result,
                 });
-                return false;
+                tx.set(ref, {
+                    eventId,
+                    provider,
+                    processedAt: Date.now(),
+                    result: "retrying",
+                }, { merge: true });
+                return true;
             }
             const doc = {
                 eventId,

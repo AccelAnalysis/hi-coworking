@@ -15,8 +15,8 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 
 const callCreateBooking = httpsCallable<
-  { resourceId: string; start: number; end: number },
-  { success: boolean; bookingId: string }
+  { resourceId: string; start: number; end: number; successUrl?: string; cancelUrl?: string },
+  { success: boolean; bookingId: string; paymentId?: string; url?: string; requiresPayment: boolean }
 >(functions, "createBooking");
 
 type BookingStep = 1 | 2 | 3;
@@ -40,6 +40,7 @@ export default function BookPage() {
   
   const [isLoadingFloorplans, setIsLoadingFloorplans] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("Checking availability...");
   const [bookingSuccess, setBookingSuccess] = useState(false);
 
   const loadFloorContext = async (locationId: string) => {
@@ -168,12 +169,20 @@ export default function BookPage() {
     }
 
     setIsSubmitting(true);
+    setSubmitMessage("Checking availability...");
     try {
-      await callCreateBooking({
+      const result = await callCreateBooking({
         resourceId: selectedResource.id,
         start: startEnd.start.getTime(),
         end: startEnd.end.getTime(),
+        successUrl: `${window.location.origin}/dashboard?booking=success`,
+        cancelUrl: `${window.location.origin}/book?booking=cancelled`,
       });
+      if (result.data.requiresPayment && result.data.url) {
+        setSubmitMessage("Redirecting to payment...");
+        window.location.href = result.data.url;
+        return;
+      }
       setBookingSuccess(true);
     } catch (err: unknown) {
       console.error("Booking failed", err);
@@ -416,7 +425,7 @@ export default function BookPage() {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Confirming...
+                        {submitMessage}
                       </>
                     ) : (
                       <>

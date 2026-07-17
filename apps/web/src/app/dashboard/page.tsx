@@ -40,7 +40,7 @@ import {
   getUserDoc,
   updateUserMembershipTrack,
 } from "@/lib/firestore";
-import type { Booking, RfxDoc, ProfileDoc, MembershipTrack } from "@hi/shared";
+import { MEMBERSHIP_TIERS, type Booking, type RfxDoc, type ProfileDoc, type MembershipTrack } from "@hi/shared";
 
 // --- Membership Track Metadata (PR-08) ---
 
@@ -94,6 +94,29 @@ const ALL_TRACKS: MembershipTrack[] = [
   "consultant",
   "service_provider",
 ];
+
+function getMembershipPlanLabel(plan: string | null | undefined, fallback: string) {
+  if (!plan) return fallback;
+
+  const normalized = plan.toLowerCase();
+  const aliases: Record<string, string> = {
+    virtual_member: "virtual",
+    coworking_member: "coworking",
+    coworking_plus_member: "coworking_plus",
+    coworking_plus_membership: "coworking_plus",
+  };
+  const tierId = aliases[normalized] || normalized;
+  const tier = MEMBERSHIP_TIERS.find((item) => item.id === tierId);
+
+  if (tier?.id === "coworking_plus") return "Coworking Plus Membership";
+  if (tier) return tier.name;
+
+  return plan
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
 
 export default function DashboardPage() {
   return (
@@ -245,6 +268,8 @@ function DashboardContent() {
 
   const membershipStatus = userDoc?.membershipStatus ?? "none";
   const memberPlan = userDoc?.plan ?? null;
+  const displayName = userDoc?.displayName || user.displayName || user.email?.split("@")[0] || "Member";
+  const membershipPlanLabel = getMembershipPlanLabel(memberPlan, membershipStatus);
   const memberExpiresAt = userDoc?.expiresAt ? new Date(userDoc.expiresAt) : null;
 
   const upcomingBookings = bookings.filter(
@@ -260,7 +285,7 @@ function DashboardContent() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-              Welcome back, {user.displayName || user.email?.split("@")[0] || "Member"}
+              Welcome back, {displayName}
             </h1>
             <p className="text-slate-500 mt-1">
               Your workspace and community at a glance.
@@ -310,7 +335,7 @@ function DashboardContent() {
               <h3 className="text-slate-400 font-medium text-[10px] uppercase tracking-widest mb-1">Membership</h3>
               {membershipStatus === "active" || membershipStatus === "trial" ? (
                 <>
-                  <div className="text-xl font-bold capitalize">{memberPlan || membershipStatus}</div>
+                  <div className="text-xl font-bold">{membershipPlanLabel}</div>
                   {memberExpiresAt && (
                     <p className="text-[10px] text-slate-500 mt-3">
                       Renews {memberExpiresAt.toLocaleDateString()}

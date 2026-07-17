@@ -5,7 +5,7 @@ import { defineSecret } from "firebase-functions/params";
 import { createPayment } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 
-// MIRROR of @hi/shared types — kept inline because @hi/shared is ESM-only.
+// MIRROR of shared workspace types, kept inline so functions deploy standalone.
 interface BookDoc {
   id: string;
   title: string;

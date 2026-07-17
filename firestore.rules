@@ -28,6 +28,12 @@ service cloud.firestore {
       return isSignedIn(); // All authenticated users are at least members
     }
 
+    function isOrgAdmin(orgId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/orgMembers/$(orgId + '_' + request.auth.uid))
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + '_' + request.auth.uid)).data.role in ['owner', 'admin'];
+    }
+
     function hasMemberUid(memberUids) {
       return memberUids is list && request.auth.uid in memberUids;
     }
@@ -76,8 +82,50 @@ service cloud.firestore {
     // Composite key doc: org admin or platform admin can manage; member can read own.
     match /orgMembers/{docId} {
       allow read: if isSignedIn()
-                  && (resource.data.uid == request.auth.uid || isAdmin());
+                  && (resource.data.uid == request.auth.uid
+                      || isOrgAdmin(resource.data.orgId)
+                      || isAdmin());
       allow create, update, delete: if isAdmin();
+    }
+
+    // Exchange membership, founder reservations, and credits are server-authoritative.
+    match /organizationMemberships/{orgId} {
+      allow read: if isOrgAdmin(orgId) || isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /organizationClaims/{claimId} {
+      allow read: if isSignedIn()
+                  && (resource.data.requestedBy == request.auth.uid || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    match /organizationCreditLedger/{entryId} {
+      allow read, write: if false;
+    }
+
+    match /organizationCreditLots/{lotId} {
+      allow read, write: if false;
+    }
+
+    match /founderAllocation/{docId} {
+      allow read, write: if false;
+    }
+
+    match /founderReservations/{orgId} {
+      allow read, write: if false;
+    }
+
+    match /stripeSubscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    match /organizationSubscriptionEvents/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /organizationSearchRateLimits/{docId} {
+      allow read, write: if false;
     }
 
     // --- rfx/{rfxId} ---
@@ -206,7 +254,9 @@ service cloud.firestore {
     // Owner + admin read; only Cloud Functions write.
     match /payments/{paymentId} {
       allow read: if isSignedIn()
-                  && (resource.data.uid == request.auth.uid || isAdmin());
+                  && (resource.data.uid == request.auth.uid
+                      || (resource.data.orgId is string && isOrgAdmin(resource.data.orgId))
+                      || isAdmin());
       allow create, update, delete: if false; // Cloud Functions only
     }
 

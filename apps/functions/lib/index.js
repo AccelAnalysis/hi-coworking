@@ -33,8 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = exports.team_respond_invite = exports.team_invite = exports.team_create = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_processSocialPosts = exports.events_generateShareKits = exports.events_processCampaignJobs = exports.events_enqueueCampaignJobs = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_create = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_publish = exports.onReferralWritten = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
-exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = exports.rfx_createTeamInvite = exports.referral_onStatusChange = exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = void 0;
+exports.team_respond_invite = exports.team_invite = exports.team_create = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.exchange_adminAdjustCredits = exports.exchange_getOrganizationMembership = exports.exchange_getFounderAvailability = exports.exchange_createFoundingCheckout = exports.exchange_organizationRequestClaim = exports.exchange_organizationCreate = exports.exchange_organizationSearch = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_create = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_publish = exports.access_seamWebhook = exports.access_adminGetDoorStatus = exports.access_adminResendPin = exports.access_adminUnlock = exports.access_adminRevoke = exports.access_getMyGrants = exports.onReferralWritten = exports.access_noShowRevoke = exports.access_expireGrants = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
+exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = exports.rfx_createTeamInvite = exports.referral_onStatusChange = exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const identity_1 = require("firebase-functions/v2/identity");
@@ -49,13 +49,13 @@ const stripeSecretKey = (0, params_1.defineSecret)("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = (0, params_1.defineSecret)("STRIPE_WEBHOOK_SECRET");
 const intuitClientId = (0, params_1.defineSecret)("INTUIT_CLIENT_ID");
 const intuitClientSecret = (0, params_1.defineSecret)("INTUIT_CLIENT_SECRET");
-// MIRROR of @hi/shared userRoleSchema — kept inline because @hi/shared is ESM-only.
+// MIRROR of shared workspace userRoleSchema, kept inline so functions deploy standalone.
 // Keep in sync with: packages/shared/src/index.ts → userRoleSchema
 const VALID_ROLES = ["master", "admin", "staff", "member", "externalVendor", "econPartner"];
 admin.initializeApp();
 const db = admin.firestore();
 // --- Types & Constants ---
-// MIRROR of @hi/shared RESOURCE_CATALOG — kept inline because @hi/shared is ESM-only.
+// MIRROR of shared workspace RESOURCE_CATALOG, kept inline so functions deploy standalone.
 // Keep in sync with: packages/shared/src/index.ts → RESOURCE_CATALOG
 const RESOURCE_CONFIG = {
     "seat-1": { name: "Seat 1", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
@@ -110,11 +110,10 @@ const eventSeries_1 = require("./eventSeries");
 Object.defineProperty(exports, "events_upsertSeries", { enumerable: true, get: function () { return eventSeries_1.events_upsertSeries; } });
 Object.defineProperty(exports, "events_extendHorizon", { enumerable: true, get: function () { return eventSeries_1.events_extendHorizon; } });
 Object.defineProperty(exports, "events_setSeriesOccurrenceOverride", { enumerable: true, get: function () { return eventSeries_1.events_setSeriesOccurrenceOverride; } });
-const eventMarketing_1 = require("./eventMarketing");
-Object.defineProperty(exports, "events_enqueueCampaignJobs", { enumerable: true, get: function () { return eventMarketing_1.events_enqueueCampaignJobs; } });
-Object.defineProperty(exports, "events_processCampaignJobs", { enumerable: true, get: function () { return eventMarketing_1.events_processCampaignJobs; } });
-Object.defineProperty(exports, "events_generateShareKits", { enumerable: true, get: function () { return eventMarketing_1.events_generateShareKits; } });
-Object.defineProperty(exports, "events_processSocialPosts", { enumerable: true, get: function () { return eventMarketing_1.events_processSocialPosts; } });
+// Event marketing is temporarily disabled during billing setup. It currently
+// depends on SendGrid, Twilio, and social-provider secrets. Hi Coworking intends
+// to evaluate Microsoft 365/Microsoft Graph for email instead of SendGrid. This
+// is not a billing dependency.
 const eventMedia_1 = require("./eventMedia");
 Object.defineProperty(exports, "events_onMediaUploaded", { enumerable: true, get: function () { return eventMedia_1.events_onMediaUploaded; } });
 const bookstore_1 = require("./bookstore");
@@ -141,6 +140,27 @@ Object.defineProperty(exports, "team_manage_member", { enumerable: true, get: fu
 const rfxSuggestions_1 = require("./rfxSuggestions");
 Object.defineProperty(exports, "rfx_refreshSuggestions", { enumerable: true, get: function () { return rfxSuggestions_1.rfx_refreshSuggestions; } });
 Object.defineProperty(exports, "rfx_refreshSuggestions_scheduled", { enumerable: true, get: function () { return rfxSuggestions_1.rfx_refreshSuggestions_scheduled; } });
+const accessCleanup_1 = require("./scheduled/accessCleanup");
+Object.defineProperty(exports, "access_expireGrants", { enumerable: true, get: function () { return accessCleanup_1.access_expireGrants; } });
+Object.defineProperty(exports, "access_noShowRevoke", { enumerable: true, get: function () { return accessCleanup_1.access_noShowRevoke; } });
+const access_1 = require("./access");
+Object.defineProperty(exports, "access_getMyGrants", { enumerable: true, get: function () { return access_1.access_getMyGrants; } });
+Object.defineProperty(exports, "access_adminRevoke", { enumerable: true, get: function () { return access_1.access_adminRevoke; } });
+Object.defineProperty(exports, "access_adminUnlock", { enumerable: true, get: function () { return access_1.access_adminUnlock; } });
+Object.defineProperty(exports, "access_adminResendPin", { enumerable: true, get: function () { return access_1.access_adminResendPin; } });
+Object.defineProperty(exports, "access_adminGetDoorStatus", { enumerable: true, get: function () { return access_1.access_adminGetDoorStatus; } });
+Object.defineProperty(exports, "access_seamWebhook", { enumerable: true, get: function () { return access_1.access_seamWebhook; } });
+const seatHours_1 = require("./memberships/seatHours");
+const organizations_1 = require("./exchange/organizations");
+Object.defineProperty(exports, "exchange_organizationSearch", { enumerable: true, get: function () { return organizations_1.exchange_organizationSearch; } });
+Object.defineProperty(exports, "exchange_organizationCreate", { enumerable: true, get: function () { return organizations_1.exchange_organizationCreate; } });
+Object.defineProperty(exports, "exchange_organizationRequestClaim", { enumerable: true, get: function () { return organizations_1.exchange_organizationRequestClaim; } });
+const membership_1 = require("./exchange/membership");
+Object.defineProperty(exports, "exchange_createFoundingCheckout", { enumerable: true, get: function () { return membership_1.exchange_createFoundingCheckout; } });
+Object.defineProperty(exports, "exchange_getFounderAvailability", { enumerable: true, get: function () { return membership_1.exchange_getFounderAvailability; } });
+Object.defineProperty(exports, "exchange_getOrganizationMembership", { enumerable: true, get: function () { return membership_1.exchange_getOrganizationMembership; } });
+const credits_1 = require("./exchange/credits");
+Object.defineProperty(exports, "exchange_adminAdjustCredits", { enumerable: true, get: function () { return credits_1.exchange_adminAdjustCredits; } });
 exports.health = (0, https_1.onCall)(async () => {
     return { ok: true, timestamp: Date.now() };
 });
@@ -154,40 +174,48 @@ exports.createBookingQuote = (0, https_1.onCall)(async (request) => {
     if (!resource) {
         throw new https_1.HttpsError("not-found", "Resource not found");
     }
-    // Determine rate based on user type and tier
     let userType = "guest";
-    let rate = resource.guestRateHourly;
-    if (uid && resource.type === "SEAT") {
+    let plan;
+    if (uid) {
         const userSnap = await db.collection("users").doc(uid).get();
         const userData = userSnap.data();
-        if (userData?.membershipStatus === "active" && userData?.plan) {
-            const tier = (0, payments_1.getTierById)(userData.plan);
-            if (tier) {
-                userType = "member";
-                rate = tier.extraHourlyRateCents / 100;
-            }
+        if (userData?.membershipStatus === "active" && typeof userData.plan === "string") {
+            userType = "member";
+            plan = userData.plan;
         }
     }
-    const durationHours = (end - start) / (1000 * 60 * 60);
-    const total = Math.round(durationHours * rate * 100) / 100;
+    const durationMinutes = Math.ceil((end - start) / (1000 * 60));
+    const charge = await (0, seatHours_1.calculateSeatBookingCharge)({
+        uid: uid || "",
+        plan,
+        durationMinutes,
+        resourceType: resource.type,
+        resourceRateHourlyCents: Math.round(resource.guestRateHourly * 100),
+        atMillis: start,
+    });
+    const durationHours = durationMinutes / 60;
+    const total = charge.totalPriceCents / 100;
     return {
         resourceId,
         resourceName: resource.name,
         start,
         end,
         userType,
-        hourlyRate: rate,
+        hourlyRate: resource.type === "MODE"
+            ? charge.roomOrModeRateCents / 100
+            : charge.seatRateCents / 100,
         durationHours,
         total,
-        currency: "USD"
+        currency: "USD",
+        ...charge,
     };
 });
-exports.createBooking = (0, https_1.onCall)(async (request) => {
+exports.createBooking = (0, https_1.onCall)({ secrets: [stripeSecretKey, stripeWebhookSecret, access_1.seamApiKey] }, async (request) => {
     // 1. Auth & Input Validation
     if (!request.auth) {
         throw new https_1.HttpsError("unauthenticated", "User must be logged in to book");
     }
-    const { resourceId, start, end } = request.data;
+    const { resourceId, start, end, successUrl, cancelUrl } = request.data;
     if (!resourceId || !start || !end) {
         throw new https_1.HttpsError("invalid-argument", "Missing required fields");
     }
@@ -200,14 +228,19 @@ exports.createBooking = (0, https_1.onCall)(async (request) => {
     }
     const userId = request.auth.uid;
     const userName = request.auth.token.name || request.auth.token.email || "Member";
+    const email = request.auth.token.email || "";
+    const now = Date.now();
+    const pendingPaymentCutoff = now - 15 * 60 * 1000;
+    const bookingsRef = db.collection("bookings");
+    const bookingRef = bookingsRef.doc();
+    const paymentRef = db.collection("payments").doc();
     // 2. Transaction for Slot Locking
-    return await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
         // A. Query potential conflicts
         // We need to check ANY booking that overlaps with our time window.
         // Firestore query limitations mean we usually query for bookings that start before our end time
         // and end after our start time.
         // Simpler query: get bookings ending AFTER our start time, then filter in memory.
-        const bookingsRef = db.collection("bookings");
         const q = bookingsRef.where("end", ">", start);
         const snapshot = await transaction.get(q);
         const conflicts = [];
@@ -216,7 +249,10 @@ exports.createBooking = (0, https_1.onCall)(async (request) => {
             // Filter out bookings that don't actually overlap (since query is only on 'end')
             if (!isOverlapping(start, end, b.start, b.end))
                 return;
-            if (b.status === "CANCELLED")
+            const status = b.status;
+            const blocksSlot = status === "CONFIRMED" ||
+                (status === "PENDING_PAYMENT" && typeof b.createdAt === "number" && b.createdAt >= pendingPaymentCutoff);
+            if (!blocksSlot)
                 return;
             const conflictResId = b.resourceId;
             const conflictResConfig = RESOURCE_CONFIG[conflictResId];
@@ -247,36 +283,155 @@ exports.createBooking = (0, https_1.onCall)(async (request) => {
             throw new https_1.HttpsError("failed-precondition", "Slot is not available.", { conflicts });
         }
         // B. Calculate Price (Recalculate to be safe)
-        let rate = targetResource.guestRateHourly;
-        if (targetResource.type === "SEAT") {
-            const userSnap = await transaction.get(db.collection("users").doc(userId));
-            const userData = userSnap.data();
-            if (userData?.membershipStatus === "active" && userData?.plan) {
-                const tier = (0, payments_1.getTierById)(userData.plan);
-                if (tier)
-                    rate = tier.extraHourlyRateCents / 100;
-            }
-        }
-        const durationHours = (end - start) / (1000 * 60 * 60);
-        const totalPrice = Math.round(durationHours * rate * 100) / 100;
+        const userSnap = await transaction.get(db.collection("users").doc(userId));
+        const userData = userSnap.data();
+        const plan = userData?.membershipStatus === "active" && typeof userData.plan === "string"
+            ? userData.plan
+            : undefined;
+        const durationMinutes = Math.ceil((end - start) / (1000 * 60));
+        const charge = await (0, seatHours_1.calculateSeatBookingChargeInTransaction)(transaction, {
+            uid: userId,
+            plan,
+            durationMinutes,
+            resourceType: targetResource.type,
+            resourceRateHourlyCents: Math.round(targetResource.guestRateHourly * 100),
+            atMillis: start,
+        });
+        const totalPrice = charge.totalPriceCents / 100;
+        const requiresPayment = charge.totalPriceCents > 0;
+        const paymentId = requiresPayment ? paymentRef.id : null;
+        const status = requiresPayment ? "PENDING_PAYMENT" : "CONFIRMED";
+        const paymentStatus = requiresPayment ? "pending" : "not_required";
         // C. Write Booking
-        const newBookingRef = bookingsRef.doc();
         const newBooking = {
-            id: newBookingRef.id,
+            id: bookingRef.id,
             resourceId,
             resourceName: targetResource.name,
             userId,
             userName,
             start,
             end,
-            status: "CONFIRMED",
+            status,
             totalPrice,
-            paymentMethod: "STRIPE", // Default
-            createdAt: Date.now()
+            durationMinutes: charge.durationMinutes,
+            includedSeatMinutesApplied: charge.includedSeatMinutesApplied,
+            overageSeatMinutes: charge.overageSeatMinutes,
+            seatRateCents: charge.seatRateCents,
+            roomOrModeRateCents: charge.roomOrModeRateCents,
+            totalPriceCents: charge.totalPriceCents,
+            membershipPeriodId: charge.membershipPeriodId || null,
+            paymentStatus,
+            paymentId,
+            checkoutSessionId: null,
+            createdAt: now,
+            updatedAt: now,
         };
-        transaction.set(newBookingRef, newBooking);
-        return { success: true, bookingId: newBookingRef.id, booking: newBooking };
+        if (!requiresPayment && targetResource.type === "SEAT") {
+            (0, seatHours_1.consumeSeatMinutesForConfirmedBooking)(transaction, userId, charge);
+        }
+        if (requiresPayment && targetResource.type === "SEAT") {
+            (0, seatHours_1.reserveSeatMinutesForBooking)(transaction, userId, charge.membershipPeriodId, charge.includedSeatMinutesApplied);
+        }
+        transaction.set(bookingRef, newBooking);
+        if (requiresPayment) {
+            transaction.set(paymentRef, {
+                id: paymentRef.id,
+                uid: userId,
+                provider: "stripe",
+                purpose: "booking",
+                purposeRefId: bookingRef.id,
+                amount: charge.totalPriceCents,
+                currency: "usd",
+                status: "pending",
+                providerRefs: { bookingId: bookingRef.id },
+                createdAt: now,
+            });
+        }
+        return {
+            success: true,
+            bookingId: bookingRef.id,
+            paymentId,
+            requiresPayment,
+            amountDueCents: charge.totalPriceCents,
+            resourceName: targetResource.name,
+            charge,
+            booking: newBooking,
+        };
     });
+    if (!result.requiresPayment) {
+        (0, access_1.createAccessGrant)(result.bookingId, resourceId, userId, start, end).catch((err) => {
+            logger.error("createAccessGrant failed after booking", {
+                bookingId: result.bookingId,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        });
+        return { success: true, bookingId: result.bookingId, requiresPayment: false };
+    }
+    const provider = new payments_1.StripeProvider(stripeSecretKey.value(), stripeWebhookSecret.value());
+    try {
+        const session = await provider.createCheckoutSession({
+            uid: userId,
+            amount: result.amountDueCents,
+            currency: "usd",
+            purpose: "booking",
+            purposeRefId: result.bookingId,
+            successUrl: successUrl || "https://hi-coworking.com/dashboard?booking=success",
+            cancelUrl: cancelUrl || "https://hi-coworking.com/book?booking=cancelled",
+            mode: "payment",
+            lineItemLabel: `Booking: ${result.resourceName}`,
+            metadata: {
+                email,
+                paymentId: result.paymentId || "",
+                bookingId: result.bookingId,
+                resourceId,
+                start: String(start),
+                end: String(end),
+                membershipPeriodId: result.charge.membershipPeriodId || "",
+                includedSeatMinutesApplied: String(result.charge.includedSeatMinutesApplied),
+                overageSeatMinutes: String(result.charge.overageSeatMinutes),
+            },
+        });
+        await Promise.all([
+            bookingRef.update({
+                checkoutSessionId: session.sessionId,
+                updatedAt: Date.now(),
+            }),
+            paymentRef.update({
+                providerRefs: {
+                    bookingId: result.bookingId,
+                    checkoutSessionId: session.sessionId,
+                },
+                updatedAt: Date.now(),
+            }),
+        ]);
+        return {
+            success: true,
+            bookingId: result.bookingId,
+            paymentId: result.paymentId,
+            url: session.url,
+            requiresPayment: true,
+        };
+    }
+    catch (err) {
+        logger.error("Failed to create Stripe Checkout for booking", {
+            bookingId: result.bookingId,
+            paymentId: result.paymentId,
+            err,
+        });
+        await db.runTransaction(async (tx) => {
+            (0, seatHours_1.releaseReservedSeatMinutesForBooking)(tx, userId, result.charge.membershipPeriodId, result.charge.includedSeatMinutesApplied);
+            tx.update(bookingRef, {
+                status: "FAILED_PAYMENT",
+                paymentStatus: "failed",
+                updatedAt: Date.now(),
+            });
+            tx.update(paymentRef, {
+                status: "failed",
+                updatedAt: Date.now(),
+            });
+        });
+        throw new https_1.HttpsError("internal", "Unable to create payment checkout. Please try again.");
+    }
 });
 // --- Auth Triggers (PR-02) ---
 exports.authBeforeCreate = (0, identity_1.beforeUserCreated)(async (event) => {
@@ -535,13 +690,18 @@ exports.stripe_createCheckoutSession = (0, https_1.onCall)({ secrets: [stripeSec
  * HTTP endpoint: Stripe webhook receiver.
  * Must be configured as the webhook endpoint in the Stripe Dashboard.
  * URL: https://<region>-<project>.cloudfunctions.net/stripe_webhook
+ *
+ * QBO sync is intentionally not bound during the membership-first Stripe
+ * deployment. QBO accounting sync can be re-enabled later after Intuit secrets
+ * and the accounting workflow are intentionally configured. Membership
+ * activation does not require QBO secrets.
  */
-exports.stripe_webhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret, intuitClientId, intuitClientSecret], cors: false }, async (req, res) => {
+exports.stripe_webhook = (0, https_1.onRequest)({ secrets: [stripeSecretKey, stripeWebhookSecret, access_1.seamApiKey], cors: false }, async (req, res) => {
     if (req.method !== "POST") {
         res.status(405).json({ error: "Method not allowed" });
         return;
     }
-    const result = await (0, payments_1.handleStripeWebhook)(req.rawBody, req.headers, stripeSecretKey.value(), stripeWebhookSecret.value(), intuitClientId.value(), intuitClientSecret.value());
+    const result = await (0, payments_1.handleStripeWebhook)(req.rawBody, req.headers, stripeSecretKey.value(), stripeWebhookSecret.value());
     res.status(result.status).json(result.body);
 });
 /**

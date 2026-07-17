@@ -45,3 +45,13 @@ Thumbs.db
 # Misc
 *.tsbuildinfo
 .turbo/
+
+# Firebase local secrets
+.secret.local
+.secret.*.local
+apps/functions/.secret.local
+apps/functions/.secret.*.local
+
+# Generated restricted source data and local inspection files
+.codex-tmp/
+data/seed/prepared/exchange-targeting-restricted.jsonl

@@ -1,0 +1,2 @@
+source_id,legal_business_name,dba_name,organization_type,industry,street_address,city,state,zip_code,county,latitude,longitude,website,public_phone,description,data_source,source_retrieval_date,home_based
+duns:000000001,Example Organization LLC,,Private,Professional Services,100 Example St,Smithfield,VA,23430,Isle of Wight,36.98,-76.63,https://example.org,757-555-0100,Example fixture only,iow_companies,2026-07-17,false

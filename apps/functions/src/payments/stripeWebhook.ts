@@ -12,7 +12,14 @@ import { StripeProvider } from "./stripeProvider";
 import { ensureIdempotent, markWebhookResult } from "./idempotency";
 import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
+import {
+  consumeReservedSeatMinutesForBooking,
+  releaseReservedSeatMinutesForBooking,
+  upsertMembershipPeriod,
+} from "../memberships/seatHours";
+import { createAccessGrant } from "../access";
 import type { WebhookResult } from "./types";
+import { processExchangeMembershipWebhook } from "../exchange/membership";
 
 function getDb() { return admin.firestore(); }
 
@@ -34,6 +41,13 @@ interface EventDocLite {
     slots: number;
     soldCount: number;
   }>;
+}
+
+interface BookingAccessContext {
+  resourceId: string;
+  userId: string;
+  start: number;
+  end: number;
 }
 
 /**
@@ -65,7 +79,7 @@ export async function handleStripeWebhook(
   }
 
   try {
-    await processWebhookResult(result, intuitClientId, intuitClientSecret);
+    await processWebhookResult(result, provider, intuitClientId, intuitClientSecret);
     await markWebhookResult(result.eventId, "success");
   } catch (err) {
     logger.error("Stripe webhook processing error", { eventId: result.eventId, err });
@@ -81,15 +95,23 @@ export async function handleStripeWebhook(
  */
 async function processWebhookResult(
   result: WebhookResult,
+  provider: StripeProvider,
   intuitClientId?: string,
   intuitClientSecret?: string
 ): Promise<void> {
+  if (await processExchangeMembershipWebhook(result)) return;
+
   switch (result.action) {
     case "payment_succeeded":
-      await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret);
+      await handlePaymentSucceeded(result, provider, intuitClientId, intuitClientSecret);
       break;
     case "payment_failed":
       await handlePaymentFailed(result);
+      break;
+    case "checkout_expired":
+      await handleBookingPaymentFailed(result, "EXPIRED");
+      break;
+    case "subscription_updated":
       break;
     case "refund":
       if (result.paymentId) {
@@ -110,12 +132,18 @@ async function processWebhookResult(
  */
 async function handlePaymentSucceeded(
   result: WebhookResult,
+  provider: StripeProvider,
   intuitClientId?: string,
   intuitClientSecret?: string
 ): Promise<void> {
   const uid = result.metadata?.uid;
   const subscriptionId = result.metadata?.subscriptionId;
   const plan = result.metadata?.plan;
+
+  if (isBookingPayment(result)) {
+    await finalizeBookingPayment(result);
+    return;
+  }
 
   // Update existing payment doc if we have a paymentId
   if (result.paymentId) {
@@ -129,7 +157,7 @@ async function handlePaymentSucceeded(
 
   // Provision membership entitlements
   if (uid && plan) {
-    await provisionMembership(uid, plan, subscriptionId);
+    await provisionMembership(uid, plan, provider, subscriptionId, result.metadata);
   }
 
   // Handle Referral Payouts (PR-16)
@@ -324,12 +352,156 @@ async function finalizeVendorTablePurchase(result: WebhookResult): Promise<void>
   });
 }
 
+function isBookingPayment(result: WebhookResult): boolean {
+  return result.metadata?.purpose === "booking" || Boolean(result.metadata?.bookingId);
+}
+
+function parseMetadataNumber(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function finalizeBookingPayment(result: WebhookResult): Promise<void> {
+  const bookingId = result.metadata?.bookingId || result.metadata?.purposeRefId;
+  const paymentId = result.paymentId || result.metadata?.paymentId;
+  if (!bookingId) return;
+
+  const db = getDb();
+  const bookingRef = db.collection("bookings").doc(bookingId);
+  let bookingForAccess: BookingAccessContext | null = null;
+
+  await db.runTransaction(async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists) return;
+
+    const booking = bookingSnap.data() || {};
+    if (booking.status === "CONFIRMED") return;
+
+    const userId = typeof booking.userId === "string" ? booking.userId : result.metadata?.uid || "";
+    const membershipPeriodId =
+      typeof booking.membershipPeriodId === "string"
+        ? booking.membershipPeriodId
+        : result.metadata?.membershipPeriodId || undefined;
+    const includedSeatMinutesApplied =
+      typeof booking.includedSeatMinutesApplied === "number"
+        ? booking.includedSeatMinutesApplied
+        : parseMetadataNumber(result.metadata?.includedSeatMinutesApplied);
+
+    consumeReservedSeatMinutesForBooking(
+      tx,
+      userId,
+      membershipPeriodId || undefined,
+      includedSeatMinutesApplied
+    );
+
+    const now = Date.now();
+    tx.update(bookingRef, {
+      status: "CONFIRMED",
+      paymentStatus: "paid",
+      paidAt: now,
+      updatedAt: now,
+      checkoutSessionId: result.metadata?.checkoutSessionId || booking.checkoutSessionId || null,
+      paymentId: paymentId || booking.paymentId || null,
+    });
+
+    if (paymentId) {
+      tx.update(db.collection("payments").doc(paymentId), {
+        status: "paid",
+        updatedAt: now,
+        "providerRefs.bookingId": bookingId,
+        "providerRefs.checkoutSessionId": result.metadata?.checkoutSessionId || "",
+      });
+    }
+
+    bookingForAccess = {
+      resourceId: String(booking.resourceId || result.metadata?.resourceId || ""),
+      userId,
+      start: typeof booking.start === "number" ? booking.start : parseMetadataNumber(result.metadata?.start),
+      end: typeof booking.end === "number" ? booking.end : parseMetadataNumber(result.metadata?.end),
+    };
+  });
+
+  const accessContext = bookingForAccess as BookingAccessContext | null;
+  if (accessContext?.resourceId && accessContext.userId && accessContext.start && accessContext.end) {
+    await createAccessGrant(
+      bookingId,
+      accessContext.resourceId,
+      accessContext.userId,
+      accessContext.start,
+      accessContext.end
+    );
+  }
+
+  logger.info("Booking payment finalized", { bookingId, paymentId });
+}
+
+async function handleBookingPaymentFailed(
+  result: WebhookResult,
+  bookingStatus: "EXPIRED" | "FAILED_PAYMENT"
+): Promise<void> {
+  const bookingId = result.metadata?.bookingId || result.metadata?.purposeRefId;
+  const paymentId = result.paymentId || result.metadata?.paymentId;
+  if (!bookingId) return;
+
+  const db = getDb();
+  const bookingRef = db.collection("bookings").doc(bookingId);
+
+  await db.runTransaction(async (tx) => {
+    const bookingSnap = await tx.get(bookingRef);
+    if (!bookingSnap.exists) return;
+
+    const booking = bookingSnap.data() || {};
+    if (booking.status !== "PENDING_PAYMENT") return;
+
+    const userId = typeof booking.userId === "string" ? booking.userId : result.metadata?.uid || "";
+    const membershipPeriodId =
+      typeof booking.membershipPeriodId === "string"
+        ? booking.membershipPeriodId
+        : result.metadata?.membershipPeriodId || undefined;
+    const includedSeatMinutesApplied =
+      typeof booking.includedSeatMinutesApplied === "number"
+        ? booking.includedSeatMinutesApplied
+        : parseMetadataNumber(result.metadata?.includedSeatMinutesApplied);
+
+    releaseReservedSeatMinutesForBooking(
+      tx,
+      userId,
+      membershipPeriodId || undefined,
+      includedSeatMinutesApplied
+    );
+
+    const now = Date.now();
+    tx.update(bookingRef, {
+      status: bookingStatus,
+      paymentStatus: "failed",
+      updatedAt: now,
+      checkoutSessionId: result.metadata?.checkoutSessionId || booking.checkoutSessionId || null,
+    });
+
+    if (paymentId) {
+      tx.update(db.collection("payments").doc(paymentId), {
+        status: "failed",
+        updatedAt: now,
+        "providerRefs.bookingId": bookingId,
+        "providerRefs.checkoutSessionId": result.metadata?.checkoutSessionId || "",
+      });
+    }
+  });
+
+  logger.info("Booking payment failed", { bookingId, paymentId, bookingStatus });
+}
+
 /**
  * On failed payment:
  * 1. Update payment doc
  * 2. Downgrade membership status to pastDue or cancelled
  */
 async function handlePaymentFailed(result: WebhookResult): Promise<void> {
+  if (isBookingPayment(result)) {
+    await handleBookingPaymentFailed(result, "FAILED_PAYMENT");
+    return;
+  }
+
   if (result.paymentId) {
     await updatePaymentStatus(result.paymentId, "failed");
   }
@@ -359,23 +531,79 @@ async function handlePaymentFailed(result: WebhookResult): Promise<void> {
 async function provisionMembership(
   uid: string,
   plan: string,
-  subscriptionId?: string
+  provider: StripeProvider,
+  subscriptionId?: string,
+  metadata?: Record<string, string>
 ): Promise<void> {
   const now = Date.now();
-  // Default expiration: 35 days from now (gives buffer for monthly billing)
-  const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
+  let resolvedPlan = plan;
+  let resolvedSubscriptionId = subscriptionId;
+  let periodStart = metadata?.billingPeriodStart
+    ? Number(metadata.billingPeriodStart)
+    : metadata?.periodStart
+      ? Number(metadata.periodStart)
+      : NaN;
+  let periodEnd = metadata?.billingPeriodEnd
+    ? Number(metadata.billingPeriodEnd)
+    : metadata?.periodEnd
+      ? Number(metadata.periodEnd)
+      : NaN;
+
+  if (
+    resolvedSubscriptionId &&
+    (!Number.isFinite(periodStart) || !Number.isFinite(periodEnd) || !resolvedPlan)
+  ) {
+    const subscriptionContext = await provider.getSubscriptionMembershipContext(resolvedSubscriptionId);
+    if (subscriptionContext) {
+      resolvedPlan = resolvedPlan || subscriptionContext.plan || plan;
+      periodStart = Number.isFinite(periodStart)
+        ? periodStart
+        : subscriptionContext.periodStart || NaN;
+      periodEnd = Number.isFinite(periodEnd)
+        ? periodEnd
+        : subscriptionContext.periodEnd || NaN;
+      resolvedSubscriptionId = resolvedSubscriptionId || subscriptionContext.subscriptionId;
+    }
+  }
+
+  if (!Number.isFinite(periodStart) || !Number.isFinite(periodEnd)) {
+    logger.warn("Stripe billing period missing; using MVP fallback membership period", {
+      uid,
+      plan: resolvedPlan,
+      subscriptionId: resolvedSubscriptionId,
+      periodStart,
+      periodEnd,
+    });
+    periodStart = now;
+    periodEnd = now + 31 * 24 * 60 * 60 * 1000;
+  }
 
   const updates: Record<string, unknown> = {
     membershipStatus: "active",
-    plan,
-    expiresAt,
+    plan: resolvedPlan,
+    expiresAt: periodEnd,
+    billingPeriodStart: periodStart,
+    billingPeriodEnd: periodEnd,
     updatedAt: now,
   };
 
-  if (subscriptionId) {
-    updates["features.stripeSubscriptionId"] = subscriptionId;
+  if (resolvedSubscriptionId) {
+    updates["features.stripeSubscriptionId"] = resolvedSubscriptionId;
   }
 
-  await getDb().collection("users").doc(uid).update(updates);
-  logger.info("Membership provisioned", { uid, plan, expiresAt });
+  await getDb().collection("users").doc(uid).set(updates, { merge: true });
+  await upsertMembershipPeriod({
+    uid,
+    plan: resolvedPlan,
+    stripeSubscriptionId: resolvedSubscriptionId,
+    periodStart,
+    periodEnd,
+  });
+  logger.info("Membership provisioned", {
+    uid,
+    plan: resolvedPlan,
+    expiresAt: periodEnd,
+    periodStart,
+    periodEnd,
+  });
 }

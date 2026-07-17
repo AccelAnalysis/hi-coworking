@@ -63,6 +63,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
   };
 
   const publicLinks = [
+    { href: "/exchange/founding", label: "Exchange" },
     { href: "/spaces", label: "Spaces" },
     { href: "/pricing", label: "Pricing" },
     { href: "/events", label: "Events" },

@@ -1,17 +1,95 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import {
-  canTransact,
-  type RfxTeamDoc,
-  type RfxTeamInviteDoc,
-  type RfxTeamMember,
-  type RfxTeamRole,
-  type UserDoc,
-  type ProfileDoc,
-  type TerritoryDoc,
-} from "@hi/shared";
 
 const db = admin.firestore();
+
+// Function-local mirrors of shared workspace types/helpers. Firebase deploys
+// apps/functions as a standalone package, so this file must not import the local
+// workspace package at runtime.
+type UserRole = "master" | "admin" | "staff" | "member" | "externalVendor" | "econPartner";
+type VerificationStatus = "none" | "pending" | "verified" | "rejected";
+type TerritoryStatus = "scheduled" | "released" | "paused" | "archived";
+type RfxTeamRole = "prime" | "sub" | "estimator" | "compliance" | "proposal_writer";
+
+interface UserDoc {
+  displayName?: string;
+  role?: UserRole;
+}
+
+interface ProfileDoc {
+  businessName?: string;
+  verificationStatus?: VerificationStatus;
+}
+
+interface TerritoryDoc {
+  status: TerritoryStatus;
+}
+
+interface RfxTeamMember {
+  uid: string;
+  displayName?: string;
+  businessName?: string;
+  role: RfxTeamRole;
+  joinedAt: number;
+  scopeDescription?: string;
+}
+
+interface RfxTeamDoc {
+  id: string;
+  rfxId: string;
+  name: string;
+  primeUid: string;
+  members: RfxTeamMember[];
+  memberUids: string[];
+  status: "forming" | "active" | "submitted" | "dissolved";
+  internalNotes?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+interface RfxTeamInviteDoc {
+  id: string;
+  rfxId: string;
+  inviterUid: string;
+  inviteeUid: string;
+  inviteeName?: string;
+  role?: string;
+  status: "pending" | "accepted" | "declined";
+  note?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
+function canTransact(input: {
+  userRole?: UserRole;
+  verificationStatus?: VerificationStatus;
+  territoryStatus?: TerritoryStatus;
+  allowAdminBypass?: boolean;
+  permittedRoles?: UserRole[];
+}): { allowed: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  const allowAdminBypass = input.allowAdminBypass ?? true;
+  const role = input.userRole;
+
+  if (allowAdminBypass && (role === "admin" || role === "master")) {
+    return { allowed: true, reasons: [] };
+  }
+
+  if (input.territoryStatus !== "released") {
+    reasons.push("territory_not_released");
+  }
+
+  if (input.verificationStatus !== "verified") {
+    reasons.push("company_not_verified");
+  }
+
+  const permittedRoles = input.permittedRoles ?? ["member", "externalVendor", "econPartner"];
+  if (!role || !permittedRoles.includes(role)) {
+    reasons.push("role_not_permitted");
+  }
+
+  return { allowed: reasons.length === 0, reasons };
+}
 
 /**
  * Create a new RFx Team.

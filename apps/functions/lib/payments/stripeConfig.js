@@ -2,7 +2,7 @@
 /**
  * Stripe Product & Price Configuration
  *
- * MIRROR of @hi/shared pricing — kept inline because @hi/shared is ESM-only.
+ * MIRROR of shared workspace pricing, kept inline so functions deploy standalone.
  * Keep in sync with: packages/shared/src/index.ts → MEMBERSHIP_TIERS / GUEST_PRICING
  *
  * Setup instructions:
@@ -21,7 +21,7 @@ exports.MEMBERSHIP_TIERS = [
     {
         id: "virtual",
         name: "Virtual Member",
-        stripePriceId: "price_virtual_monthly",
+        stripePriceId: "price_1TpWsiAhUpL6HYCQziHOJrur",
         interval: "month",
         amountCents: 4900,
         currency: "usd",
@@ -40,7 +40,7 @@ exports.MEMBERSHIP_TIERS = [
     {
         id: "coworking",
         name: "Coworking Member",
-        stripePriceId: "price_coworking_monthly",
+        stripePriceId: "price_1TpWsiAhUpL6HYCQFIrh8x1K",
         interval: "month",
         amountCents: 12900,
         currency: "usd",
@@ -57,7 +57,7 @@ exports.MEMBERSHIP_TIERS = [
     {
         id: "coworking_plus",
         name: "Coworking Plus",
-        stripePriceId: "price_coworking_plus_monthly",
+        stripePriceId: "price_1TpWsiAhUpL6HYCQtNdAt702",
         interval: "month",
         amountCents: 19900,
         currency: "usd",

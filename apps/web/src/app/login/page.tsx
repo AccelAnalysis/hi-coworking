@@ -25,7 +25,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push("/dashboard");
+      router.push("/exchange/onboarding");
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -50,7 +50,7 @@ export default function LoginPage() {
         <div className="p-8">
           <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Welcome back</h1>
           <p className="text-center text-slate-500 text-sm mb-8">
-            Sign in to your member account to book spaces and manage credits.
+            Sign in to manage your organization and Exchange membership.
           </p>
 
           <form onSubmit={handleLogin} className="space-y-4">

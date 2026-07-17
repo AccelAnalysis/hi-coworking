@@ -1465,7 +1465,7 @@ export async function removeOrgMember(
 export async function getOrgPayments(orgId: string): Promise<PaymentDoc[]> {
   const q = query(
     collection(db, "payments"),
-    where("metadata.orgId", "==", orgId),
+    where("orgId", "==", orgId),
     orderBy("createdAt", "desc")
   );
   const snap = await getDocs(q);

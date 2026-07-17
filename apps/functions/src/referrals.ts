@@ -9,7 +9,7 @@ import { StripeProvider } from "./payments/stripeProvider";
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 
-// MIRROR of @hi/shared types — kept inline because @hi/shared is ESM-only.
+// MIRROR of shared workspace types, kept inline so functions deploy standalone.
 export type ReferralType = "platform_invite" | "business_intro";
 
 export interface ReferralDoc {

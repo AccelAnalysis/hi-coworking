@@ -36,8 +36,26 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.team_manage_member = exports.team_respond_invite = exports.team_invite = exports.team_create = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
-const shared_1 = require("@hi/shared");
 const db = admin.firestore();
+function canTransact(input) {
+    const reasons = [];
+    const allowAdminBypass = input.allowAdminBypass ?? true;
+    const role = input.userRole;
+    if (allowAdminBypass && (role === "admin" || role === "master")) {
+        return { allowed: true, reasons: [] };
+    }
+    if (input.territoryStatus !== "released") {
+        reasons.push("territory_not_released");
+    }
+    if (input.verificationStatus !== "verified") {
+        reasons.push("company_not_verified");
+    }
+    const permittedRoles = input.permittedRoles ?? ["member", "externalVendor", "econPartner"];
+    if (!role || !permittedRoles.includes(role)) {
+        reasons.push("role_not_permitted");
+    }
+    return { allowed: reasons.length === 0, reasons };
+}
 /**
  * Create a new RFx Team.
  * The creator automatically becomes the Prime.
@@ -116,7 +134,7 @@ exports.team_create = functions.https.onCall(async (data, context) => {
             terrStatus = terr.status;
         }
     }
-    const transactCheck = (0, shared_1.canTransact)({
+    const transactCheck = canTransact({
         userRole: user.role,
         verificationStatus: profile.verificationStatus,
         territoryStatus: terrStatus,

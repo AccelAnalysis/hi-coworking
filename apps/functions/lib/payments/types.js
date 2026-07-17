@@ -2,7 +2,7 @@
 /**
  * Payment Abstraction Layer — Types (PR-09)
  *
- * These types mirror the schemas in @hi/shared (PaymentDoc, WebhookEventDoc)
+ * These types mirror the shared workspace schemas (PaymentDoc, WebhookEventDoc)
  * but are kept inline to avoid cross-package module issues in Cloud Functions.
  */
 Object.defineProperty(exports, "__esModule", { value: true });

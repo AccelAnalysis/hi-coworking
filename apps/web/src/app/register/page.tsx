@@ -24,7 +24,7 @@ export default function RegisterPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       // Update display name immediately
       await updateProfile(userCredential.user, { displayName: name });
-      router.push("/dashboard");
+      router.push("/exchange/onboarding");
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -51,7 +51,7 @@ export default function RegisterPage() {
         <div className="p-8">
           <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Create an account</h1>
           <p className="text-center text-slate-500 text-sm mb-8">
-            Join Hi Coworking to start booking spaces instantly.
+            Join the Hi-Coworking Exchange and connect your organization.
           </p>
 
           <form onSubmit={handleRegister} className="space-y-4">

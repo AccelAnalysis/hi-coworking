@@ -318,3 +318,63 @@ export const accessAdminGetDoorStatusFn = httpsCallable<
   { doorId: string },
   { doorId: string; online: boolean; batteryLevel?: number; locked?: boolean }
 >(functions, "access_adminGetDoorStatus");
+
+// --- Exchange organization onboarding + Founding Membership ---
+
+export interface ExchangeOrganizationCandidate {
+  id: string;
+  name: string;
+  city?: string;
+  state?: string;
+  website?: string;
+  claimStatus: "unclaimed" | "claim_pending" | "claimed";
+  verificationStatus: string;
+  sources: string[];
+  confidenceScore: number;
+  matchReason: string;
+  canRequestClaim: boolean;
+  external: boolean;
+}
+
+export const exchangeOrganizationSearchFn = httpsCallable<
+  { name: string; city?: string; state?: string },
+  { candidates: ExchangeOrganizationCandidate[] }
+>(functions, "exchange_organizationSearch");
+
+export const exchangeOrganizationCreateFn = httpsCallable<
+  { name: string; city?: string; state?: string; website?: string; forceCreate?: boolean },
+  { created: boolean; organizationId?: string; possibleMatches?: ExchangeOrganizationCandidate[] }
+>(functions, "exchange_organizationCreate");
+
+export const exchangeOrganizationRequestClaimFn = httpsCallable<
+  { organizationId: string; reason?: string },
+  { success: boolean; claimId: string; organizationId: string }
+>(functions, "exchange_organizationRequestClaim");
+
+export const exchangeCreateFoundingCheckoutFn = httpsCallable<
+  { organizationId: string },
+  { url: string }
+>(functions, "exchange_createFoundingCheckout");
+
+export const exchangeGetFounderAvailabilityFn = httpsCallable<
+  Record<string, never>,
+  { claimed: number; remaining: number; limit: number }
+>(functions, "exchange_getFounderAvailability");
+
+export interface ExchangeOrganizationMembershipResult {
+  membership: {
+    organizationId: string;
+    plan: "free" | "founding";
+    status: string;
+    founderNumber?: number;
+    currentPeriodEnd?: number;
+    cancelAtPeriodEnd?: boolean;
+  };
+  capabilities: string[];
+  creditBalance: number;
+}
+
+export const exchangeGetOrganizationMembershipFn = httpsCallable<
+  { organizationId: string },
+  ExchangeOrganizationMembershipResult
+>(functions, "exchange_getOrganizationMembership");
