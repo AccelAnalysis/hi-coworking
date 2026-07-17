@@ -1,0 +1,23 @@
+name: Exchange map smoke
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [codex/exchange-week-1-acceptance]
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci --silent
+      - run: npx tsc --noEmit -p apps/web/tsconfig.json --pretty false
