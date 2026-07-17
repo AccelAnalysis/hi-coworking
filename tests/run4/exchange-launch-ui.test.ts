@@ -9,6 +9,22 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(parseExchangeUrlState(`?view=${view}`).view).toBe(view);
   });
 
+  it("keeps the prototype-based workspace as the canonical Exchange entry", () => {
+    const exchangeRoute = read("apps/web/src/app/exchange/page.tsx");
+    expect(exchangeRoute).toContain("ExchangeWorkspace");
+    expect(exchangeRoute).toContain('variant="workspace"');
+    expect(exchangeRoute).not.toContain("RfxFeedPage");
+    expect(exchangeRoute).not.toContain('../rfx/page');
+  });
+
+  it("sends registration and sign-in into the Exchange without organization gating", () => {
+    const login = read("apps/web/src/app/login/page.tsx");
+    const register = read("apps/web/src/app/register/page.tsx");
+    expect(login).toContain('router.push("/exchange")');
+    expect(register).toContain('router.push("/exchange")');
+    expect(register).toMatch(/Connecting an organization remains optional/i);
+  });
+
   it("keeps legacy primary routes as Exchange compatibility redirects", () => {
     expect(read("apps/web/src/app/directory/page.tsx")).toContain("/exchange?view=businesses");
     expect(read("apps/web/src/app/rfx/page.tsx")).toContain("/exchange?view=opportunities");
