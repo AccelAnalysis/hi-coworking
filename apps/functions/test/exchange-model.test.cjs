@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   allocateFounderNumber,
+  calculateCreditExpiration,
   calculateUsableCreditBalance,
   createSearchTokens,
   mapStripeSubscriptionStatus,
@@ -58,6 +59,17 @@ test("usable balance excludes expired and reversed lots", () => {
     { amount: 25, remainingAmount: 25, expiresAt: now - 1 },
     { amount: 10, remainingAmount: 10, expiresAt: now + 1000, reversed: true },
   ], now), 20);
+});
+
+test("credit expiration is the 12-month anniversary, including leap-day clamping", () => {
+  assert.equal(
+    calculateCreditExpiration(Date.UTC(2024, 1, 29, 12, 30)),
+    Date.UTC(2025, 1, 28, 12, 30),
+  );
+  assert.equal(
+    calculateCreditExpiration(Date.UTC(2026, 6, 17, 9, 15)),
+    Date.UTC(2027, 6, 17, 9, 15),
+  );
 });
 
 test("credit spends consume the oldest eligible lots first", () => {

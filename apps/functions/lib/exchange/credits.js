@@ -48,7 +48,7 @@ async function grantFoundingInvoiceCredits(input) {
         const existing = await tx.get(grantRef);
         if (existing.exists)
             return false;
-        const expiresAt = now + model_1.CREDIT_EXPIRY_MS;
+        const expiresAt = (0, model_1.calculateCreditExpiration)(now);
         tx.create(grantRef, {
             id: grantRef.id,
             organizationId: input.organizationId,
@@ -153,8 +153,9 @@ exports.exchange_adminAdjustCredits = (0, https_1.onCall)(async (request) => {
         const lotRef = getDb().collection("organizationCreditLots").doc();
         const ledgerRef = getDb().collection("organizationCreditLedger").doc(lotRef.id);
         await getDb().runTransaction(async (tx) => {
-            tx.create(lotRef, { id: lotRef.id, organizationId, amount, remainingAmount: amount, effectiveAt: now, expiresAt: now + model_1.CREDIT_EXPIRY_MS, sourceType: "administrative_adjustment", sourceId: lotRef.id, reversed: false, createdAt: now });
-            tx.create(ledgerRef, { id: ledgerRef.id, organizationId, amount, entryType: "administrative_adjustment", effectiveAt: now, expiresAt: now + model_1.CREDIT_EXPIRY_MS, sourceType: "administrative_adjustment", sourceId: lotRef.id, description, actor: actorUid, createdAt: now });
+            const expiresAt = (0, model_1.calculateCreditExpiration)(now);
+            tx.create(lotRef, { id: lotRef.id, organizationId, amount, remainingAmount: amount, effectiveAt: now, expiresAt, sourceType: "administrative_adjustment", sourceId: lotRef.id, reversed: false, createdAt: now });
+            tx.create(ledgerRef, { id: ledgerRef.id, organizationId, amount, entryType: "administrative_adjustment", effectiveAt: now, expiresAt, sourceType: "administrative_adjustment", sourceId: lotRef.id, description, actor: actorUid, createdAt: now });
         });
     }
     return { success: true, balance: await getUsableOrganizationCreditBalance(organizationId) };

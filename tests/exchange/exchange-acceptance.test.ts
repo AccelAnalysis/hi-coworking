@@ -195,7 +195,11 @@ describe("Exchange Week 1 callable acceptance", () => {
     const before = await call<{ creditBalance: number }>(owner, "exchange_getOrganizationMembership", { organizationId: created.organizationId });
     expect(before.creditBalance).toBe(25);
     const lot = (await db.collection("organizationCreditLots").doc("stripe_invoice_in_1").get()).data();
-    expect(Number(lot?.expiresAt) - Number(lot?.effectiveAt)).toBe(365 * 24 * 60 * 60 * 1000);
+    const effectiveAt = new Date(Number(lot?.effectiveAt));
+    const expiresAt = new Date(Number(lot?.expiresAt));
+    expect(expiresAt.getUTCFullYear()).toBe(effectiveAt.getUTCFullYear() + 1);
+    expect(expiresAt.getUTCMonth()).toBe(effectiveAt.getUTCMonth());
+    expect(expiresAt.getUTCDate()).toBe(effectiveAt.getUTCDate());
     const isolated = await call<{ organizationId: string }>(owner, "exchange_organizationCreate", { name: "Isolated Credit Org", city: "Smithfield", state: "VA" });
     expect((await call<{ creditBalance: number }>(owner, "exchange_getOrganizationMembership", { organizationId: isolated.organizationId })).creditBalance).toBe(0);
     await db.collection("organizationCreditLots").doc("stripe_invoice_in_1").update({ expiresAt: Date.now() - 1 });

@@ -9,7 +9,7 @@ Status: **Code complete — manual acceptance pending.** No staging deployment o
 | Claim authority | Claim callables and `/admin/exchange-claims` | Emulator approve/reject/competing/rules; Playwright Path B | Not performed | Not applicable | Code complete | Staging operator sign-off |
 | Strict Stripe test configuration | `exchange/membership.ts`, Stripe adapter | Catalog rejection matrix and injected mock Checkout | Not performed | No real Product/Price retrieval | Code complete | Test IDs and Firebase secrets unavailable |
 | Founder cap/lifecycle | Membership transactions | Founder 1/249/250/251, concurrency, expiration and replay | Not performed | No real subscription | Code complete | Signed staging webhook lifecycle |
-| Credits | `exchange/credits.ts` | FIFO/expiry/reversal plus invoice replay and organization isolation | Not performed | No real paid invoice | Code complete | Real test invoice and replay |
+| Credits | `exchange/credits.ts` | FIFO/reversal, calendar-anniversary expiry, invoice replay and organization isolation | Not performed | No real paid invoice | Code complete | Real test invoice and replay |
 | Firestore security | `firestore.rules`, indexes | 71/71 combined tests; standalone rules 14/14, Functions 35/35, migrations 22/22 | Not deployed | Not applicable | Code complete | Deploy to designated staging only |
 | Seed privacy/determinism | Preparation/import/verifier scripts | Two identical generations; local-emulator dry run/import/rerun | Not imported | Not applicable | Deploy-ready | Staging authorization |
 | Browser journeys | Playwright suite | Path A and Path B pass against Auth/Firestore/Functions emulators | Not performed | Mock boundary only | Code complete | Hosted staging and real Checkout |
@@ -22,7 +22,8 @@ Status: **Code complete — manual acceptance pending.** No staging deployment o
 ## Pre-deployment revalidation — 2026-07-17
 
 - Branch and remote head matched `8e5fe94467555e9db8cbc448a090e1a30055bfb5` before this evidence/security update. PR #5 was mergeable, draft, and had no reviews, comments, or unresolved review threads.
-- Node `20.20.2`: clean `npm ci`; shared and Functions builds; web TypeScript and production export of 57/57 routes; 13/13 unit/import tests; 71/71 combined security/functions/migration tests; standalone rules 14/14, Functions 35/35, and migrations 22/22; Exchange emulator 7/7; Playwright 2/2; lint 0 errors with five pre-existing warnings.
+- Node `20.20.2`: clean `npm ci`; shared and Functions builds; web TypeScript and production export of 57/57 routes; 14/14 unit/import tests; 71/71 combined security/functions/migration tests; standalone rules 14/14, Functions 35/35, and migrations 22/22; Exchange emulator 7/7; Playwright 2/2; lint 0 errors with five pre-existing warnings.
+- Credit expiry now uses the exact 12-month UTC calendar anniversary and clamps leap-day grants to February 28 in the following non-leap year; fixed-duration 365-day arithmetic is not used.
 - `websocket-driver` was pinned to the fixed `0.7.5` release after the clean install exposed a critical transitive runtime advisory. Runtime audit now reports zero vulnerabilities. Three moderate advisories remain only in the Firebase CLI dependency graph.
 - Seed preparation produced 5,128 organizations, 1,591 home-based classifications, and 3,564 restricted candidates twice with identical SHA-256 hashes. Public output matched the committed JSONL; duplicate and home-privacy violations were zero.
 - Full local-emulator dry run: 5,128 organizations and 3,564 restricted candidates would be created; zero updated, skipped, duplicated, or invalid. Local-emulator import created those counts, and the immediate rerun skipped all 5,128/3,564 records with zero writes.

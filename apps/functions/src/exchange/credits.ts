@@ -2,7 +2,7 @@ import * as admin from "firebase-admin";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
   calculateUsableCreditBalance,
-  CREDIT_EXPIRY_MS,
+  calculateCreditExpiration,
   FOUNDING_MONTHLY_CREDITS,
   planFifoCreditSpend,
 } from "./model";
@@ -21,7 +21,7 @@ export async function grantFoundingInvoiceCredits(input: {
   return getDb().runTransaction(async (tx) => {
     const existing = await tx.get(grantRef);
     if (existing.exists) return false;
-    const expiresAt = now + CREDIT_EXPIRY_MS;
+    const expiresAt = calculateCreditExpiration(now);
     tx.create(grantRef, {
       id: grantRef.id,
       organizationId: input.organizationId,
@@ -133,8 +133,9 @@ export const exchange_adminAdjustCredits = onCall(async (request) => {
     const lotRef = getDb().collection("organizationCreditLots").doc();
     const ledgerRef = getDb().collection("organizationCreditLedger").doc(lotRef.id);
     await getDb().runTransaction(async (tx) => {
-      tx.create(lotRef, { id: lotRef.id, organizationId, amount, remainingAmount: amount, effectiveAt: now, expiresAt: now + CREDIT_EXPIRY_MS, sourceType: "administrative_adjustment", sourceId: lotRef.id, reversed: false, createdAt: now });
-      tx.create(ledgerRef, { id: ledgerRef.id, organizationId, amount, entryType: "administrative_adjustment", effectiveAt: now, expiresAt: now + CREDIT_EXPIRY_MS, sourceType: "administrative_adjustment", sourceId: lotRef.id, description, actor: actorUid, createdAt: now });
+      const expiresAt = calculateCreditExpiration(now);
+      tx.create(lotRef, { id: lotRef.id, organizationId, amount, remainingAmount: amount, effectiveAt: now, expiresAt, sourceType: "administrative_adjustment", sourceId: lotRef.id, reversed: false, createdAt: now });
+      tx.create(ledgerRef, { id: ledgerRef.id, organizationId, amount, entryType: "administrative_adjustment", effectiveAt: now, expiresAt, sourceType: "administrative_adjustment", sourceId: lotRef.id, description, actor: actorUid, createdAt: now });
     });
   }
   return { success: true, balance: await getUsableOrganizationCreditBalance(organizationId) };

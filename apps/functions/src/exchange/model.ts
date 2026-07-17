@@ -1,8 +1,24 @@
 export const FOUNDING_MEMBER_LIMIT = 250;
 export const FOUNDING_MONTHLY_CREDITS = 25;
 export const FOUNDING_PRICE_CENTS = 4900;
-export const CREDIT_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000;
 export const CHECKOUT_RESERVATION_MS = 30 * 60 * 1000;
+
+export function calculateCreditExpiration(effectiveAt: number): number {
+  const source = new Date(effectiveAt);
+  if (!Number.isFinite(source.getTime())) throw new Error("Invalid credit effective timestamp");
+  const targetYear = source.getUTCFullYear() + 1;
+  const targetMonth = source.getUTCMonth();
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  return Date.UTC(
+    targetYear,
+    targetMonth,
+    Math.min(source.getUTCDate(), lastDayOfTargetMonth),
+    source.getUTCHours(),
+    source.getUTCMinutes(),
+    source.getUTCSeconds(),
+    source.getUTCMilliseconds(),
+  );
+}
 
 export type ExchangePlan = "free" | "founding";
 export type ExchangeMembershipStatus =

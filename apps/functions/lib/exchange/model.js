@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FOUNDING_CAPABILITIES = exports.FREE_CAPABILITIES = exports.CHECKOUT_RESERVATION_MS = exports.CREDIT_EXPIRY_MS = exports.FOUNDING_PRICE_CENTS = exports.FOUNDING_MONTHLY_CREDITS = exports.FOUNDING_MEMBER_LIMIT = void 0;
+exports.FOUNDING_CAPABILITIES = exports.FREE_CAPABILITIES = exports.CHECKOUT_RESERVATION_MS = exports.FOUNDING_PRICE_CENTS = exports.FOUNDING_MONTHLY_CREDITS = exports.FOUNDING_MEMBER_LIMIT = void 0;
+exports.calculateCreditExpiration = calculateCreditExpiration;
 exports.normalizeOrganizationName = normalizeOrganizationName;
 exports.normalizeWebsiteDomain = normalizeWebsiteDomain;
 exports.createSearchTokens = createSearchTokens;
@@ -13,8 +14,16 @@ exports.planFifoCreditSpend = planFifoCreditSpend;
 exports.FOUNDING_MEMBER_LIMIT = 250;
 exports.FOUNDING_MONTHLY_CREDITS = 25;
 exports.FOUNDING_PRICE_CENTS = 4900;
-exports.CREDIT_EXPIRY_MS = 365 * 24 * 60 * 60 * 1000;
 exports.CHECKOUT_RESERVATION_MS = 30 * 60 * 1000;
+function calculateCreditExpiration(effectiveAt) {
+    const source = new Date(effectiveAt);
+    if (!Number.isFinite(source.getTime()))
+        throw new Error("Invalid credit effective timestamp");
+    const targetYear = source.getUTCFullYear() + 1;
+    const targetMonth = source.getUTCMonth();
+    const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    return Date.UTC(targetYear, targetMonth, Math.min(source.getUTCDate(), lastDayOfTargetMonth), source.getUTCHours(), source.getUTCMinutes(), source.getUTCSeconds(), source.getUTCMilliseconds());
+}
 exports.FREE_CAPABILITIES = [
     "exchange.profile.manage",
     "exchange.directory.browse",
