@@ -24,9 +24,8 @@ export default function RegisterPage() {
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      // Update display name immediately
       await updateProfile(userCredential.user, { displayName: name });
-      router.push("/exchange/onboarding");
+      router.push("/exchange");
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -53,7 +52,7 @@ export default function RegisterPage() {
         <div className="p-8">
           <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Create an account</h1>
           <p className="text-center text-slate-500 text-sm mb-8">
-            Join the Hi-Coworking Exchange and connect your organization.
+            Join the Hi-Coworking Exchange and start exploring the map. You can connect an organization when you are ready.
           </p>
 
           <form onSubmit={handleRegister} className="space-y-4">
@@ -64,64 +63,27 @@ export default function RegisterPage() {
             )}
 
             <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="name">
-                Full Name
-              </label>
-              <input
-                id="name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
-                placeholder="Jane Doe"
-              />
+              <label className="text-sm font-semibold text-slate-700" htmlFor="name">Full Name</label>
+              <input id="name" type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all" placeholder="Jane Doe" />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="email">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
-                placeholder="you@company.com"
-              />
+              <label className="text-sm font-semibold text-slate-700" htmlFor="email">Email</label>
+              <input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all" placeholder="you@company.com" />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="password">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 transition-all"
-                placeholder="••••••••"
-              />
+              <label className="text-sm font-semibold text-slate-700" htmlFor="password">Password</label>
+              <input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 transition-all" placeholder="••••••••" />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading || !hydrated}
-              className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
+            <button type="submit" disabled={loading || !hydrated} className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account and explore"}
             </button>
           </form>
         </div>
         <div className="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-600">
-          Already have an account?{" "}
-          <Link href="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">
-            Sign in
-          </Link>
+          Already have an account?{" "}<Link href="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">Sign in</Link>
         </div>
       </div>
     </div>
