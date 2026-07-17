@@ -19,6 +19,7 @@ The Exchange workspace is the product. Organization connection and Founding Memb
 - Creating an organization returns the user to `/exchange` rather than forcing an immediate upgrade.
 - Organization ownership remains required for profile management, organization actions, and organization-level billing.
 - The Coming Soon gate does not hide Exchange routes.
+- The global Exchange navigation item opens the workspace rather than the Founding campaign.
 
 ## Current map implementation
 
