@@ -165,8 +165,37 @@ import {
   access_adminGetDoorStatus,
   access_seamWebhook,
 } from "./access";
+import {
+  exchange_organizationSearch,
+  exchange_organizationCreate,
+  exchange_organizationRequestClaim,
+  exchange_organizationListMyClaims,
+  exchange_adminListOrganizationClaims,
+  exchange_adminGetOrganizationClaim,
+  exchange_adminReviewOrganizationClaim,
+} from "./exchange/organizations";
+import {
+  exchange_createFoundingCheckout,
+  exchange_getFounderAvailability,
+  exchange_getOrganizationMembership,
+} from "./exchange/membership";
+import { exchange_adminAdjustCredits } from "./exchange/credits";
 
 // --- Exports ---
+
+export {
+  exchange_organizationSearch,
+  exchange_organizationCreate,
+  exchange_organizationRequestClaim,
+  exchange_organizationListMyClaims,
+  exchange_adminListOrganizationClaims,
+  exchange_adminGetOrganizationClaim,
+  exchange_adminReviewOrganizationClaim,
+  exchange_createFoundingCheckout,
+  exchange_getFounderAvailability,
+  exchange_getOrganizationMembership,
+  exchange_adminAdjustCredits,
+};
 
 // Scheduled Functions
 export { allocateMonthlyCredits };

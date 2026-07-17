@@ -48,6 +48,7 @@ const stripeProvider_1 = require("./stripeProvider");
 const idempotency_1 = require("./idempotency");
 const ledger_1 = require("./ledger");
 const qboAccountingSync_1 = require("./qboAccountingSync");
+const membership_1 = require("../exchange/membership");
 function getDb() { return admin.firestore(); }
 /**
  * Process a raw Stripe webhook request.
@@ -83,6 +84,8 @@ async function handleStripeWebhook(rawBody, headers, stripeSecretKey, stripeWebh
  * Route the webhook result to the appropriate handler.
  */
 async function processWebhookResult(result, intuitClientId, intuitClientSecret) {
+    if (await (0, membership_1.processExchangeMembershipWebhook)(result))
+        return;
     switch (result.action) {
         case "payment_succeeded":
             await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret);

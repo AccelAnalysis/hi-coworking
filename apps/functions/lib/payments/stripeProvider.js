@@ -55,6 +55,34 @@ class StripeProvider {
         this.stripe = new stripe_1.default(secretKey, { apiVersion: "2026-01-28.clover" });
         this.webhookSecret = webhookSecret;
     }
+    async createCustomer(input) {
+        const customer = await this.stripe.customers.create({
+            email: input.email || undefined,
+            name: input.name || undefined,
+            metadata: input.metadata,
+        });
+        return customer.id;
+    }
+    async getPriceConfiguration(priceId) {
+        const price = await this.stripe.prices.retrieve(priceId, { expand: ["product"] });
+        const product = price.product;
+        if (typeof product === "string" || product.deleted) {
+            throw new Error("Configured Stripe product is unavailable");
+        }
+        return {
+            id: price.id,
+            active: price.active,
+            livemode: price.livemode,
+            currency: price.currency,
+            unitAmount: price.unit_amount,
+            type: price.type,
+            recurringInterval: price.recurring?.interval || null,
+            recurringIntervalCount: price.recurring?.interval_count || null,
+            productId: product.id,
+            productActive: product.active,
+            productName: product.name,
+        };
+    }
     async createCheckoutSession(input) {
         const isSubscription = input.mode !== "payment";
         // Construct line item
@@ -75,7 +103,9 @@ class StripeProvider {
             };
         const sessionConfig = {
             mode: isSubscription ? "subscription" : "payment",
-            customer_email: input.metadata?.email,
+            ...(input.customerId
+                ? { customer: input.customerId }
+                : { customer_email: input.metadata?.email }),
             line_items: [lineItem],
             success_url: input.successUrl,
             cancel_url: input.cancelUrl,
@@ -90,6 +120,7 @@ class StripeProvider {
         if (isSubscription) {
             sessionConfig.subscription_data = {
                 metadata: {
+                    ...(input.metadata || {}),
                     uid: input.uid,
                     plan: input.metadata?.plan || "",
                 },
@@ -142,14 +173,19 @@ class StripeProvider {
                     },
                 };
             }
+            case "invoice.paid":
             case "invoice.payment_succeeded": {
                 const invoice = event.data.object;
+                const invoiceRecord = invoice;
+                const subscriptionMetadata = invoiceRecord.parent?.subscription_details?.metadata || {};
                 return {
                     eventId: event.id,
                     action: "payment_succeeded",
                     status: "paid",
                     metadata: {
-                        subscriptionId: invoice.subscription || "",
+                        ...subscriptionMetadata,
+                        invoiceId: invoice.id,
+                        subscriptionId: invoiceRecord.subscription || invoiceRecord.parent?.subscription_details?.subscription || "",
                         customerId: typeof invoice.customer === "string"
                             ? invoice.customer
                             : "",
@@ -158,12 +194,15 @@ class StripeProvider {
             }
             case "invoice.payment_failed": {
                 const failedInvoice = event.data.object;
+                const failedRecord = failedInvoice;
                 return {
                     eventId: event.id,
                     action: "payment_failed",
                     status: "failed",
                     metadata: {
-                        subscriptionId: failedInvoice.subscription || "",
+                        ...(failedRecord.parent?.subscription_details?.metadata || {}),
+                        invoiceId: failedInvoice.id,
+                        subscriptionId: failedRecord.subscription || failedRecord.parent?.subscription_details?.subscription || "",
                     },
                 };
             }
@@ -174,10 +213,41 @@ class StripeProvider {
                     action: "payment_failed",
                     status: "failed",
                     metadata: {
+                        ...(deletedSub.metadata || {}),
                         subscriptionId: deletedSub.id,
+                        customerId: typeof deletedSub.customer === "string" ? deletedSub.customer : "",
+                        subscriptionStatus: deletedSub.status,
+                        cancelAtPeriodEnd: String(deletedSub.cancel_at_period_end),
                         uid: deletedSub.metadata?.uid || "",
                         reason: "subscription_cancelled",
                     },
+                };
+            }
+            case "customer.subscription.created":
+            case "customer.subscription.updated": {
+                const subscription = event.data.object;
+                const item = subscription.items.data[0];
+                return {
+                    eventId: event.id,
+                    action: "subscription_updated",
+                    status: subscription.status === "active" || subscription.status === "trialing" ? "paid" : "pending",
+                    metadata: {
+                        ...(subscription.metadata || {}),
+                        subscriptionId: subscription.id,
+                        customerId: typeof subscription.customer === "string" ? subscription.customer : "",
+                        subscriptionStatus: subscription.status,
+                        billingPeriodStart: String(item?.current_period_start ? item.current_period_start * 1000 : ""),
+                        billingPeriodEnd: String(item?.current_period_end ? item.current_period_end * 1000 : ""),
+                        cancelAtPeriodEnd: String(subscription.cancel_at_period_end),
+                    },
+                };
+            }
+            case "checkout.session.expired": {
+                const session = event.data.object;
+                return {
+                    eventId: event.id,
+                    action: "checkout_expired",
+                    metadata: { ...(session.metadata || {}) },
                 };
             }
             default:

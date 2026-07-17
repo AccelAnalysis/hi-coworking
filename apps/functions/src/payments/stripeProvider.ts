@@ -29,6 +29,52 @@ export class StripeProvider implements PaymentProvider {
     this.webhookSecret = webhookSecret;
   }
 
+  async createCustomer(input: {
+    email?: string;
+    name?: string;
+    metadata?: Record<string, string>;
+  }): Promise<string> {
+    const customer = await this.stripe.customers.create({
+      email: input.email || undefined,
+      name: input.name || undefined,
+      metadata: input.metadata,
+    });
+    return customer.id;
+  }
+
+  async getPriceConfiguration(priceId: string): Promise<{
+    id: string;
+    active: boolean;
+    livemode: boolean;
+    currency: string;
+    unitAmount: number | null;
+    type: string;
+    recurringInterval: string | null;
+    recurringIntervalCount: number | null;
+    productId: string;
+    productActive: boolean;
+    productName: string;
+  }> {
+    const price = await this.stripe.prices.retrieve(priceId, { expand: ["product"] });
+    const product = price.product;
+    if (typeof product === "string" || product.deleted) {
+      throw new Error("Configured Stripe product is unavailable");
+    }
+    return {
+      id: price.id,
+      active: price.active,
+      livemode: price.livemode,
+      currency: price.currency,
+      unitAmount: price.unit_amount,
+      type: price.type,
+      recurringInterval: price.recurring?.interval || null,
+      recurringIntervalCount: price.recurring?.interval_count || null,
+      productId: product.id,
+      productActive: product.active,
+      productName: product.name,
+    };
+  }
+
   async createCheckoutSession(
     input: CheckoutSessionInput
   ): Promise<CheckoutSessionResult> {
@@ -53,7 +99,9 @@ export class StripeProvider implements PaymentProvider {
 
     const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       mode: isSubscription ? "subscription" : "payment",
-      customer_email: input.metadata?.email,
+      ...(input.customerId
+        ? { customer: input.customerId }
+        : { customer_email: input.metadata?.email }),
       line_items: [lineItem],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
@@ -69,6 +117,7 @@ export class StripeProvider implements PaymentProvider {
     if (isSubscription) {
       sessionConfig.subscription_data = {
         metadata: {
+          ...(input.metadata || {}),
           uid: input.uid,
           plan: input.metadata?.plan || "",
         },
@@ -136,14 +185,22 @@ export class StripeProvider implements PaymentProvider {
         };
       }
 
+      case "invoice.paid":
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
+        const invoiceRecord = invoice as unknown as {
+          parent?: { subscription_details?: { metadata?: Record<string, string>; subscription?: string } };
+          subscription?: string;
+        };
+        const subscriptionMetadata = invoiceRecord.parent?.subscription_details?.metadata || {};
         return {
           eventId: event.id,
           action: "payment_succeeded",
           status: "paid",
           metadata: {
-            subscriptionId: (invoice as unknown as Record<string, unknown>).subscription as string || "",
+            ...subscriptionMetadata,
+            invoiceId: invoice.id,
+            subscriptionId: invoiceRecord.subscription || invoiceRecord.parent?.subscription_details?.subscription || "",
             customerId:
               typeof invoice.customer === "string"
                 ? invoice.customer
@@ -154,12 +211,18 @@ export class StripeProvider implements PaymentProvider {
 
       case "invoice.payment_failed": {
         const failedInvoice = event.data.object as Stripe.Invoice;
+        const failedRecord = failedInvoice as unknown as {
+          parent?: { subscription_details?: { metadata?: Record<string, string>; subscription?: string } };
+          subscription?: string;
+        };
         return {
           eventId: event.id,
           action: "payment_failed",
           status: "failed",
           metadata: {
-            subscriptionId: (failedInvoice as unknown as Record<string, unknown>).subscription as string || "",
+            ...(failedRecord.parent?.subscription_details?.metadata || {}),
+            invoiceId: failedInvoice.id,
+            subscriptionId: failedRecord.subscription || failedRecord.parent?.subscription_details?.subscription || "",
           },
         };
       }
@@ -171,10 +234,43 @@ export class StripeProvider implements PaymentProvider {
           action: "payment_failed",
           status: "failed",
           metadata: {
+            ...(deletedSub.metadata || {}),
             subscriptionId: deletedSub.id,
+            customerId: typeof deletedSub.customer === "string" ? deletedSub.customer : "",
+            subscriptionStatus: deletedSub.status,
+            cancelAtPeriodEnd: String(deletedSub.cancel_at_period_end),
             uid: deletedSub.metadata?.uid || "",
             reason: "subscription_cancelled",
           },
+        };
+      }
+
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const subscription = event.data.object as Stripe.Subscription;
+        const item = subscription.items.data[0];
+        return {
+          eventId: event.id,
+          action: "subscription_updated",
+          status: subscription.status === "active" || subscription.status === "trialing" ? "paid" : "pending",
+          metadata: {
+            ...(subscription.metadata || {}),
+            subscriptionId: subscription.id,
+            customerId: typeof subscription.customer === "string" ? subscription.customer : "",
+            subscriptionStatus: subscription.status,
+            billingPeriodStart: String(item?.current_period_start ? item.current_period_start * 1000 : ""),
+            billingPeriodEnd: String(item?.current_period_end ? item.current_period_end * 1000 : ""),
+            cancelAtPeriodEnd: String(subscription.cancel_at_period_end),
+          },
+        };
+      }
+
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        return {
+          eventId: event.id,
+          action: "checkout_expired",
+          metadata: { ...(session.metadata || {}) },
         };
       }
 

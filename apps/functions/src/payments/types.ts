@@ -26,6 +26,7 @@ export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
 
 export interface CheckoutSessionInput {
   uid: string;
+  customerId?: string;
   amount: number;
   currency: string;
   purpose: PaymentPurpose;
@@ -45,7 +46,7 @@ export interface CheckoutSessionResult {
 
 export interface WebhookResult {
   eventId: string;
-  action: "payment_succeeded" | "payment_failed" | "refund" | "unknown";
+  action: "payment_succeeded" | "payment_failed" | "checkout_expired" | "subscription_updated" | "refund" | "unknown";
   paymentId?: string;
   status?: PaymentStatus;
   metadata?: Record<string, string>;

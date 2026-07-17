@@ -56,14 +56,14 @@ async function createPayment(input) {
     const doc = {
         id: ref.id,
         uid: input.uid,
-        orgId: input.orgId,
+        ...(input.orgId ? { orgId: input.orgId } : {}),
         provider: input.provider,
         amount: input.amount,
         currency: input.currency || "USD",
         purpose: input.purpose,
-        purposeRefId: input.purposeRefId,
+        ...(input.purposeRefId ? { purposeRefId: input.purposeRefId } : {}),
         status: input.status || "pending",
-        providerRefs: input.providerRefs,
+        ...(input.providerRefs ? { providerRefs: input.providerRefs } : {}),
         createdAt: now,
     };
     await ref.set(doc);
