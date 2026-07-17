@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -17,6 +17,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetSending, setResetSending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +27,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push("/dashboard");
+      router.push("/exchange/onboarding");
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -50,7 +52,7 @@ export default function LoginPage() {
         <div className="p-8">
           <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Welcome back</h1>
           <p className="text-center text-slate-500 text-sm mb-8">
-            Sign in to your member account to book spaces and manage credits.
+            Sign in to manage your organization and Exchange membership.
           </p>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -116,7 +118,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !hydrated}
               className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}

@@ -33,7 +33,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
   }, []);
 
   // Allow /platform route to bypass Coming Soon mode
-  const isAllowedRoute = pathname === "/platform";
+  const isAllowedRoute = pathname === "/platform" || pathname === "/exchange/founding";
   const bypassComingSoon = role === "staff" || role === "admin" || role === "master" || isAllowedRoute;
   const showComingSoon = settings.comingSoonEnabled && !bypassComingSoon;
 
