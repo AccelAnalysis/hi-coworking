@@ -33,19 +33,22 @@ import {
   parseExchangeUrlState,
 } from "../state/exchangeUrlState";
 import { ExchangeOpportunitiesView } from "../views/ExchangeOpportunitiesView";
-import { ExchangeDomainLayerView } from "../views/ExchangeDomainLayerView";
+import { ExchangeResourcesView } from "../views/ExchangeResourcesView";
 import type { ExchangeHistoryMode } from "../views/exchangeViewTypes";
+import { ExchangeContextMap } from "./ExchangeContextMap";
 import { ExchangeMobileNavigation } from "./ExchangeMobileNavigation";
-import { ExchangeMobileOpportunityTray } from "./ExchangeMobileOpportunityTray";
+import { ExchangeMobileWorkspaceTray } from "./ExchangeMobileWorkspaceTray";
+
+type CanonicalExchangeView = "intelligence" | "referrals" | "opportunities" | "resources";
 
 function exchangeUrl(query: string): string {
   return query ? `/exchange?${query}` : "/exchange";
 }
 
-function canonicalExchangeView(view: ExchangeView): ExchangeView {
+function canonicalExchangeView(view: ExchangeView): CanonicalExchangeView {
   if (view === "connections") return "referrals";
   if (view === "businesses" || view === "teaming") return "opportunities";
-  return view;
+  return view as CanonicalExchangeView;
 }
 
 export function ExchangeWorkspace() {
@@ -155,17 +158,21 @@ export function ExchangeWorkspace() {
   }, [applyAction]);
   const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
+  const sharedState: ExchangeWorkspaceState = activeView === state.view
+    ? state
+    : { ...state, view: activeView };
   const shared = {
-    state: activeView === state.view ? state : { ...state, view: activeView },
+    state: sharedState,
     applyAction,
     scheduleUrlReplace,
     onViewChange,
   };
+  const mobileMapVisible = activeView !== "opportunities" && state.surfaceMode !== "list";
 
   return (
     <div className="fixed inset-0 z-[60] flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-100 lg:relative lg:inset-auto lg:z-auto lg:h-full">
       {demoMode ? <ExchangeDemoBanner /> : null}
-      <div className="min-h-0 flex-1 pb-[4.75rem] lg:pb-0">
+      <div className="relative min-h-0 flex-1 pb-[4.75rem] lg:pb-0">
         {activeView === "opportunities" ? (
           <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
         ) : activeView === "referrals" ? (
@@ -173,11 +180,19 @@ export function ExchangeWorkspace() {
         ) : activeView === "intelligence" ? (
           <IntelligenceWorkspace {...shared} gateway={gateway} />
         ) : (
-          <ExchangeDomainLayerView view="resources" onViewChange={onViewChange} />
+          <ExchangeResourcesView {...shared} demoMode={demoMode} />
         )}
+
+        {mobileMapVisible ? (
+          <div className="absolute inset-x-0 bottom-0 top-[4.25rem] z-20 lg:hidden">
+            <ExchangeContextMap view={activeView} demoMode={demoMode} />
+          </div>
+        ) : null}
       </div>
-      {activeView === "opportunities" && !mobileMenuOpen ? (
-        <ExchangeMobileOpportunityTray
+
+      {!mobileMenuOpen ? (
+        <ExchangeMobileWorkspaceTray
+          view={activeView}
           surfaceMode={state.surfaceMode}
           onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
         />
