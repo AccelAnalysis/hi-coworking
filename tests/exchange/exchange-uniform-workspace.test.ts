@@ -4,11 +4,16 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(path, "utf8");
 
 describe("uniform Exchange workspace contract", () => {
-  it("uses Mapbox Standard and documents the browser token location", () => {
+  it("uses a compatible Mapbox basemap and documents the browser token location", () => {
     const config = read("apps/web/src/features/exchange/map/mapConfig.ts");
+    const layers = read("apps/web/src/features/exchange/map/mapLayers.ts");
+    const map = read("apps/web/src/features/exchange/map/ExchangeMap.tsx");
     const example = read("apps/web/.env.example");
-    expect(config).toContain("mapbox://styles/mapbox/standard");
+    expect(config).toContain("mapbox://styles/mapbox/streets-v12");
     expect(config).toContain('EXCHANGE_MAP_DIMENSIONS = ["2d", "3d"]');
+    expect(config).toContain('buildings3d: "exchange-buildings-3d"');
+    expect(layers).toContain('type: "fill-extrusion"');
+    expect(map).toContain("setLayoutProperty");
     expect(example).toContain("NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.");
   });
 
