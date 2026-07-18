@@ -1,3 +1,4 @@
+import type { OpportunityLocationFilter } from "@hi/shared/opportunity-discovery";
 import type {
   ExchangeFilterUpdate,
   ExchangeWorkspaceAction,
@@ -6,11 +7,14 @@ import {
   DEFAULT_EXCHANGE_COMPENSATION_FILTER,
   DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
   DEFAULT_EXCHANGE_LOCAL_FIRST,
+  DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
   DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
   createInitialExchangeWorkspaceState,
   isExchangeCompensationFilter,
   isExchangeConnectionMode,
   isExchangeIntelligenceMetric,
+  isExchangeOpportunitySort,
+  isExchangePersonalizedFilter,
   isExchangeRfxStatus,
   isExchangeReferralStatus,
   isExchangeRelationshipFilter,
@@ -23,9 +27,9 @@ import {
   type ExchangeWorkspaceState,
 } from "./exchangeWorkspaceTypes";
 
-const MAX_SEARCH_LENGTH = 200;
-const MAX_FILTER_COUNT = 50;
-const MAX_FILTER_LENGTH = 64;
+const MAX_SEARCH_LENGTH = 240;
+const MAX_FILTER_COUNT = 60;
+const MAX_FILTER_LENGTH = 160;
 const MAX_ENTITY_ID_LENGTH = 160;
 
 function own(value: object, key: PropertyKey): boolean {
@@ -36,20 +40,31 @@ function normalizeSearch(value: unknown): string {
   return typeof value === "string" ? value.slice(0, MAX_SEARCH_LENGTH) : "";
 }
 
-function normalizeStringList(value: unknown): string[] {
+function normalizeStringList(
+  value: unknown,
+  maxLength = MAX_FILTER_LENGTH,
+): string[] {
   if (!Array.isArray(value)) return [];
 
   const seen = new Set<string>();
   const normalized: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
-    const candidate = item.trim().slice(0, MAX_FILTER_LENGTH);
+    const candidate = item.trim().slice(0, maxLength);
     if (!candidate || seen.has(candidate)) continue;
     seen.add(candidate);
     normalized.push(candidate);
     if (normalized.length >= MAX_FILTER_COUNT) break;
   }
   return normalized;
+}
+
+function normalizeOptionalMoney(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 10_000_000_000
+    ? parsed
+    : undefined;
 }
 
 function normalizeSelection(value: unknown): ExchangeSelection | undefined {
@@ -131,17 +146,82 @@ export function normalizeExchangeViewport(
   };
 }
 
+export function normalizeOpportunityLocation(
+  value: unknown,
+): OpportunityLocationFilter | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const latitude = candidate.latitude;
+  const longitude = candidate.longitude;
+  const radiusMiles = candidate.radiusMiles;
+  if ((latitude === undefined) !== (longitude === undefined)) return undefined;
+  if (
+    latitude !== undefined
+    && (typeof latitude !== "number" || !Number.isFinite(latitude) || latitude < -85.051129 || latitude > 85.051129)
+  ) return undefined;
+  if (
+    longitude !== undefined
+    && (typeof longitude !== "number" || !Number.isFinite(longitude) || longitude < -180 || longitude > 180)
+  ) return undefined;
+  if (
+    radiusMiles !== undefined
+    && (typeof radiusMiles !== "number" || !Number.isFinite(radiusMiles) || radiusMiles < 1 || radiusMiles > 500)
+  ) return undefined;
+
+  let bounds: OpportunityLocationFilter["bounds"];
+  if (candidate.bounds && typeof candidate.bounds === "object" && !Array.isArray(candidate.bounds)) {
+    const raw = candidate.bounds as Record<string, unknown>;
+    if ([raw.west, raw.south, raw.east, raw.north].every((item) => typeof item === "number" && Number.isFinite(item))) {
+      bounds = {
+        west: raw.west as number,
+        south: raw.south as number,
+        east: raw.east as number,
+        north: raw.north as number,
+      };
+    }
+  }
+
+  const label = typeof candidate.label === "string"
+    ? candidate.label.trim().slice(0, 240)
+    : undefined;
+  const includeRemote = candidate.includeRemote !== false;
+  if (!label && latitude === undefined && !bounds) return undefined;
+  return {
+    ...(label ? { label } : {}),
+    ...(typeof latitude === "number" ? { latitude } : {}),
+    ...(typeof longitude === "number" ? { longitude } : {}),
+    ...(typeof radiusMiles === "number" ? { radiusMiles } : {}),
+    ...(bounds ? { bounds } : {}),
+    includeRemote,
+  };
+}
+
 function applyFilterUpdate(
   state: ExchangeWorkspaceState,
   filters: ExchangeFilterUpdate,
 ): ExchangeWorkspaceState {
   const next = { ...state };
-
-  if (own(filters, "naicsFilters")) {
-    next.naicsFilters = normalizeStringList(filters.naicsFilters);
-  }
-  if (own(filters, "territoryFilters")) {
-    next.territoryFilters = normalizeStringList(filters.territoryFilters);
+  const stringListFields = [
+    "naicsFilters",
+    "industryFilters",
+    "capabilityFilters",
+    "territoryFilters",
+    "opportunityTypeFilters",
+    "rfxTypeFilters",
+    "buyerTypeFilters",
+    "workArrangementFilters",
+    "visibilityFilters",
+    "certificationFilters",
+    "setAsideFilters",
+    "primeClassificationFilters",
+    "awardClassificationFilters",
+    "connectionIndustryFilters",
+    "connectionTerritoryFilters",
+  ] as const;
+  for (const field of stringListFields) {
+    if (own(filters, field)) {
+      next[field] = normalizeStringList(filters[field]);
+    }
   }
   if (own(filters, "rfxStatusFilters")) {
     next.rfxStatusFilters = normalizeStringList(filters.rfxStatusFilters)
@@ -152,22 +232,26 @@ function applyFilterUpdate(
       filters.territoryStatusFilters,
     ).filter(isExchangeTerritoryStatus);
   }
-  if (typeof filters.localFirst === "boolean") {
-    next.localFirst = filters.localFirst;
+  if (own(filters, "personalizedFilters")) {
+    next.personalizedFilters = normalizeStringList(filters.personalizedFilters)
+      .filter(isExchangePersonalizedFilter);
+  }
+  if (typeof filters.localFirst === "boolean") next.localFirst = filters.localFirst;
+  if (typeof filters.closingSoon === "boolean") next.closingSoon = filters.closingSoon;
+  if (typeof filters.teamingSuitable === "boolean") next.teamingSuitable = filters.teamingSuitable;
+  if (own(filters, "budgetMin")) next.budgetMin = normalizeOptionalMoney(filters.budgetMin);
+  if (own(filters, "budgetMax")) next.budgetMax = normalizeOptionalMoney(filters.budgetMax);
+  if (isExchangeOpportunitySort(filters.opportunitySort)) {
+    next.opportunitySort = filters.opportunitySort;
+  }
+  if (filters.clearOpportunityLocation) {
+    next.opportunityLocation = undefined;
+  } else if (own(filters, "opportunityLocation")) {
+    next.opportunityLocation = normalizeOpportunityLocation(filters.opportunityLocation);
   }
   if (own(filters, "referralStatusFilters")) {
     next.referralStatusFilters = normalizeStringList(filters.referralStatusFilters)
       .filter(isExchangeReferralStatus);
-  }
-  if (own(filters, "connectionIndustryFilters")) {
-    next.connectionIndustryFilters = normalizeStringList(
-      filters.connectionIndustryFilters,
-    );
-  }
-  if (own(filters, "connectionTerritoryFilters")) {
-    next.connectionTerritoryFilters = normalizeStringList(
-      filters.connectionTerritoryFilters,
-    );
   }
   if (isExchangeCompensationFilter(filters.compensationFilter)) {
     next.compensationFilter = filters.compensationFilter;
@@ -179,69 +263,70 @@ function applyFilterUpdate(
   return next;
 }
 
+function hydrationFilterUpdate(
+  hydration: ExchangeWorkspaceHydration,
+): ExchangeFilterUpdate {
+  const keys: Array<keyof ExchangeFilterUpdate> = [
+    "naicsFilters",
+    "industryFilters",
+    "capabilityFilters",
+    "territoryFilters",
+    "rfxStatusFilters",
+    "territoryStatusFilters",
+    "opportunityTypeFilters",
+    "rfxTypeFilters",
+    "buyerTypeFilters",
+    "workArrangementFilters",
+    "visibilityFilters",
+    "certificationFilters",
+    "setAsideFilters",
+    "primeClassificationFilters",
+    "awardClassificationFilters",
+    "personalizedFilters",
+    "localFirst",
+    "closingSoon",
+    "teamingSuitable",
+    "budgetMin",
+    "budgetMax",
+    "opportunitySort",
+    "opportunityLocation",
+    "referralStatusFilters",
+    "connectionIndustryFilters",
+    "connectionTerritoryFilters",
+    "compensationFilter",
+    "relationshipFilter",
+  ];
+  const result: ExchangeFilterUpdate = {};
+  for (const key of keys) {
+    if (own(hydration, key)) {
+      (result as Record<string, unknown>)[key] = hydration[key as keyof ExchangeWorkspaceHydration];
+    }
+  }
+  if (own(hydration, "opportunityLocation") && hydration.opportunityLocation === undefined) {
+    result.clearOpportunityLocation = true;
+  }
+  return result;
+}
+
 function hydrateWorkspace(
   state: ExchangeWorkspaceState,
   hydration: ExchangeWorkspaceHydration,
 ): ExchangeWorkspaceState {
   let next = { ...state };
 
-  if (own(hydration, "view") && isExchangeView(hydration.view)) {
-    next.view = hydration.view;
-  }
-  if (
-    own(hydration, "connectionMode")
-    && isExchangeConnectionMode(hydration.connectionMode)
-  ) {
+  if (own(hydration, "view") && isExchangeView(hydration.view)) next.view = hydration.view;
+  if (own(hydration, "connectionMode") && isExchangeConnectionMode(hydration.connectionMode)) {
     next.connectionMode = hydration.connectionMode;
   }
-  if (
-    own(hydration, "intelligenceMetric")
-    && isExchangeIntelligenceMetric(hydration.intelligenceMetric)
-  ) {
+  if (own(hydration, "intelligenceMetric") && isExchangeIntelligenceMetric(hydration.intelligenceMetric)) {
     next.intelligenceMetric = hydration.intelligenceMetric;
   }
-  if (
-    own(hydration, "surfaceMode")
-    && isExchangeSurfaceMode(hydration.surfaceMode)
-  ) {
+  if (own(hydration, "surfaceMode") && isExchangeSurfaceMode(hydration.surfaceMode)) {
     next.surfaceMode = hydration.surfaceMode;
   }
-  if (own(hydration, "searchQuery")) {
-    next.searchQuery = normalizeSearch(hydration.searchQuery);
-  }
+  if (own(hydration, "searchQuery")) next.searchQuery = normalizeSearch(hydration.searchQuery);
 
-  next = applyFilterUpdate(next, {
-    ...(own(hydration, "naicsFilters")
-      ? { naicsFilters: hydration.naicsFilters }
-      : {}),
-    ...(own(hydration, "territoryFilters")
-      ? { territoryFilters: hydration.territoryFilters }
-      : {}),
-    ...(own(hydration, "rfxStatusFilters")
-      ? { rfxStatusFilters: hydration.rfxStatusFilters }
-      : {}),
-    ...(own(hydration, "territoryStatusFilters")
-      ? { territoryStatusFilters: hydration.territoryStatusFilters }
-      : {}),
-    ...(own(hydration, "localFirst")
-      ? { localFirst: hydration.localFirst }
-      : {}),
-    ...(own(hydration, "referralStatusFilters")
-      ? { referralStatusFilters: hydration.referralStatusFilters }
-      : {}),
-    ...(own(hydration, "connectionIndustryFilters")
-      ? { connectionIndustryFilters: hydration.connectionIndustryFilters }
-      : {}),
-    ...(own(hydration, "connectionTerritoryFilters")
-      ? { connectionTerritoryFilters: hydration.connectionTerritoryFilters }
-      : {}),
-    ...(own(hydration, "compensationFilter")
-      ? { compensationFilter: hydration.compensationFilter }
-      : {}),
-    ...(own(hydration, "relationshipFilter")
-      ? { relationshipFilter: hydration.relationshipFilter }
-      : {}),
-  });
+  next = applyFilterUpdate(next, hydrationFilterUpdate(hydration));
 
   if (own(hydration, "selection")) {
     const selection = normalizeSelection(hydration.selection);
@@ -307,10 +392,39 @@ export function exchangeWorkspaceReducer(
         ...state,
         searchQuery: "",
         naicsFilters: [],
+        industryFilters: [],
+        capabilityFilters: [],
         territoryFilters: [],
         rfxStatusFilters: [],
         territoryStatusFilters: [],
+        opportunityTypeFilters: [],
+        rfxTypeFilters: [],
+        buyerTypeFilters: [],
+        workArrangementFilters: [],
+        visibilityFilters: [],
+        certificationFilters: [],
+        setAsideFilters: [],
+        primeClassificationFilters: [],
+        awardClassificationFilters: [],
+        personalizedFilters: [],
         localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+        closingSoon: false,
+        teamingSuitable: false,
+        budgetMin: undefined,
+        budgetMax: undefined,
+        opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
+        opportunityLocation: undefined,
+      };
+    case "SET_OPPORTUNITY_SORT":
+      return isExchangeOpportunitySort(action.sort)
+        ? { ...state, opportunitySort: action.sort }
+        : state;
+    case "SET_OPPORTUNITY_LOCATION":
+      return {
+        ...state,
+        opportunityLocation: action.location === undefined
+          ? undefined
+          : normalizeOpportunityLocation(action.location),
       };
     case "SET_SURFACE_MODE":
       return isExchangeSurfaceMode(action.mode)
@@ -360,9 +474,7 @@ export function exchangeWorkspaceReducer(
     case "CLOSE_MOBILE_DETAIL":
       return { ...state, mobileDetailOpen: false };
     case "SET_VIEWPORT": {
-      if (action.viewport === undefined) {
-        return { ...state, viewport: undefined };
-      }
+      if (action.viewport === undefined) return { ...state, viewport: undefined };
       const viewport = normalizeExchangeViewport(action.viewport);
       return viewport ? { ...state, viewport } : state;
     }
