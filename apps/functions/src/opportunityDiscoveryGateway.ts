@@ -17,6 +17,10 @@ import {
   handleOpportunityGovernanceOperation,
   OPPORTUNITY_GOVERNANCE_OPERATIONS,
 } from "./opportunityGovernance";
+import {
+  listRecentOpportunitySearches,
+  recordRecentOpportunitySearch,
+} from "./opportunityRecentSearches";
 
 type RecordData = Record<string, unknown>;
 type RunnableCallable = {
@@ -30,6 +34,7 @@ const OPERATIONS = new Set([
   "savedSearchUpsert",
   "savedSearchDelete",
   "savedSearchList",
+  "recentSearchList",
   ...OPPORTUNITY_GOVERNANCE_OPERATIONS,
 ]);
 
@@ -125,6 +130,7 @@ export async function handleOpportunityDiscoveryGateway(
         payload,
         page,
       );
+      await recordRecentOpportunitySearch(request, payload);
       return trimPersonalizedPage(payload, personalized);
     }
     case "setSaved":
@@ -139,6 +145,8 @@ export async function handleOpportunityDiscoveryGateway(
       return runnable(rfx_savedSearch_delete).run(delegatedRequest);
     case "savedSearchList":
       return runnable(rfx_savedSearch_list).run(delegatedRequest);
+    case "recentSearchList":
+      return listRecentOpportunitySearches(request, payload);
     default:
       if (OPPORTUNITY_GOVERNANCE_OPERATIONS.has(String(operation))) {
         return handleOpportunityGovernanceOperation(request, operation, payload);
