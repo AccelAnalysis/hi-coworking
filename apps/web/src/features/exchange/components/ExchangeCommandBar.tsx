@@ -27,15 +27,20 @@ const MODES: Array<{ mode: ExchangeSurfaceMode; label: string; icon: typeof Map 
   { mode: "split", label: "Split", icon: Columns3 },
 ];
 
-const SEARCH_PLACEHOLDERS: Record<ExchangeView, string> = {
-  businesses: "Search businesses, capabilities, or territory",
-  opportunities: "Search RFx, NAICS, or territory",
+const SEARCH_PLACEHOLDERS = {
+  intelligence: "Search industries, territories, relationships, or metrics",
   referrals: "Search referrals, partners, industries, or territories",
-  teaming: "Search partners, teams, or capabilities",
-  resources: "Search resources or launch-market support",
-  connections: "Search referrals, partners, industries, or territories",
-  intelligence: "Search relationships, industries, or territories",
-};
+  opportunities: "Business name, opportunity, industry, or location",
+  resources: "Search resources, providers, programs, or support",
+} as const;
+
+type CanonicalExchangeView = keyof typeof SEARCH_PLACEHOLDERS;
+
+function canonicalView(view: ExchangeView): CanonicalExchangeView {
+  if (view === "connections") return "referrals";
+  if (view === "businesses" || view === "teaming") return "opportunities";
+  return view as CanonicalExchangeView;
+}
 
 export function ExchangeCommandBar({
   view,
@@ -72,22 +77,29 @@ export function ExchangeCommandBar({
   onCreateReferral?: () => void;
   onExportAnalytics?: () => void;
 }) {
+  const currentView = canonicalView(view);
+  const opportunityOverlay = currentView === "opportunities";
+
   return (
-    <header className="relative z-30 shrink-0 border-b border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-lg sm:px-4">
+    <header className={cn(
+      "relative z-30 shrink-0 border-b border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-lg sm:px-4",
+      opportunityOverlay && "max-lg:absolute max-lg:inset-x-0 max-lg:top-0 max-lg:border-0 max-lg:bg-transparent max-lg:py-3 max-lg:shadow-none",
+      !opportunityOverlay && "max-lg:border-slate-200 max-lg:bg-white max-lg:text-slate-950",
+    )}>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="mr-1 flex min-w-fit items-center gap-2">
+        <div className="mr-1 hidden min-w-fit items-center gap-2 lg:flex">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl rounded-bl-none bg-gradient-to-br from-emerald-300 to-cyan-400 text-slate-950 shadow-lg shadow-emerald-400/10">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
-          <div className="hidden sm:block">
+          <div>
             <h1 className="text-sm font-bold leading-4">Hi Exchange</h1>
             <p className="text-[10px] leading-4 text-slate-400">Regional business and opportunity workspace</p>
           </div>
         </div>
 
-        <ExchangeViewTabs view={view} onChange={onViewChange} />
+        <ExchangeViewTabs view={currentView} onChange={onViewChange} />
 
-        <p className="ml-auto whitespace-nowrap text-xs font-semibold text-slate-300" aria-live="polite">
+        <p className="ml-auto hidden whitespace-nowrap text-xs font-semibold text-slate-300 lg:block" aria-live="polite">
           {resultCount.toLocaleString("en-US")} result{resultCount === 1 ? "" : "s"}
         </p>
 
@@ -95,39 +107,37 @@ export function ExchangeCommandBar({
           type="button"
           onClick={onRefresh}
           disabled={refreshing}
-          className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50 sm:h-10 sm:w-10"
+          className="hidden h-10 w-10 items-center justify-center rounded-xl border border-slate-700 bg-slate-900 text-slate-300 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50 lg:inline-flex"
           aria-label={refreshing ? "Refreshing Exchange data" : "Refresh Exchange data"}
           title="Refresh Exchange data"
         >
           <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin motion-reduce:animate-none")} aria-hidden="true" />
         </button>
 
-        {view === "opportunities" ? (
+        {currentView === "opportunities" ? (
           <Link
             href="/rfx/new"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            className="hidden min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 lg:inline-flex"
           >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">Create RFx</span>
-            <span className="sm:hidden">Create</span>
+            <Plus className="h-4 w-4" aria-hidden="true" /> Create opportunity
           </Link>
-        ) : view === "connections" ? (
+        ) : currentView === "referrals" ? (
           <button
             type="button"
             onClick={onCreateReferral}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100"
+            className="hidden min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 lg:inline-flex"
           >
             <Plus className="h-4 w-4" aria-hidden="true" /> New referral
           </button>
-        ) : (
+        ) : currentView === "intelligence" ? (
           <button
             type="button"
             onClick={onExportAnalytics}
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100"
+            className="hidden min-h-10 items-center gap-1.5 rounded-xl bg-emerald-300 px-3 text-xs font-bold text-slate-950 outline-none hover:bg-emerald-200 focus-visible:ring-2 focus-visible:ring-emerald-100 lg:inline-flex"
           >
             <Download className="h-4 w-4" aria-hidden="true" /> Export CSV
           </button>
-        )}
+        ) : null}
 
         <Link
           href="/dashboard"
@@ -138,21 +148,25 @@ export function ExchangeCommandBar({
           <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
         </Link>
 
-        <label className="order-3 flex min-w-0 basis-full items-center rounded-xl border border-slate-700 bg-slate-900 px-3 focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-400/20 lg:order-none lg:basis-auto lg:flex-1 xl:max-w-2xl">
+        <label className={cn(
+          "order-first flex min-w-0 basis-full items-center rounded-xl border px-3 focus-within:ring-2 lg:order-none lg:basis-auto lg:flex-1 xl:max-w-2xl",
+          "border-slate-200 bg-white shadow-lg focus-within:border-blue-500 focus-within:ring-blue-500/20",
+          "lg:border-slate-700 lg:bg-slate-900 lg:shadow-none lg:focus-within:border-cyan-400 lg:focus-within:ring-cyan-400/20",
+        )}>
           <Search className="mr-2 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
           <span className="sr-only">Search current Exchange view</span>
           <input
             type="search"
             value={searchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={SEARCH_PLACEHOLDERS[view]}
-            className="h-10 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+            placeholder={SEARCH_PLACEHOLDERS[currentView]}
+            className="h-11 min-w-0 flex-1 bg-transparent text-sm text-slate-950 outline-none placeholder:text-slate-400 lg:h-10 lg:text-white lg:placeholder:text-slate-500"
           />
           {searchQuery ? (
             <button
               type="button"
               onClick={() => onSearchChange("")}
-              className="rounded-lg p-2 text-slate-400 outline-none hover:bg-slate-800 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400"
+              className="rounded-lg p-2 text-slate-400 outline-none hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500 lg:hover:bg-slate-800 lg:hover:text-white lg:focus-visible:ring-cyan-400"
               aria-label="Clear search"
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -160,8 +174,8 @@ export function ExchangeCommandBar({
           ) : null}
         </label>
 
-        {view === "opportunities" ? (
-          <div className="flex items-center rounded-xl border border-slate-700 bg-slate-900 p-1" role="group" aria-label="Workspace presentation">
+        {currentView === "opportunities" ? (
+          <div className="hidden items-center rounded-xl border border-slate-700 bg-slate-900 p-1 lg:flex" role="group" aria-label="Workspace presentation">
             {MODES.map(({ mode, label, icon: Icon }) => {
               const disabled = !mapAvailable && mode !== "list";
               return (
@@ -174,14 +188,14 @@ export function ExchangeCommandBar({
                   aria-label={`${label} view`}
                   title={disabled ? "Mapbox token required" : `${label} view`}
                   className={cn(
-                    "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400 sm:min-h-9",
-                    mode === "split" && "hidden lg:inline-flex",
+                    "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400",
+                    mode === "split" && "hidden xl:inline-flex",
                     surfaceMode === mode ? "bg-white text-slate-950" : "text-slate-300 hover:bg-slate-800",
                     disabled && "cursor-not-allowed opacity-40",
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="hidden md:inline">{label}</span>
+                  <span className="hidden xl:inline">{label}</span>
                 </button>
               );
             })}
@@ -191,14 +205,17 @@ export function ExchangeCommandBar({
         <button
           type="button"
           onClick={onOpenFilters}
-          className="relative inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 text-xs font-semibold text-slate-200 outline-none hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-cyan-400 lg:hidden"
+          className={cn(
+            "relative min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-lg outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden",
+            opportunityOverlay ? "hidden" : "inline-flex",
+          )}
           aria-label={activeFilterCount ? `Open filters, ${activeFilterCount} active` : "Open filters"}
           aria-expanded={filtersOpen}
           aria-controls="exchange-filter-drawer"
         >
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" /> Filters
           {activeFilterCount ? (
-            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-300 px-1 text-[10px] font-bold text-slate-950">{activeFilterCount}</span>
+            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-700 px-1 text-[10px] font-bold text-white">{activeFilterCount}</span>
           ) : null}
         </button>
 
