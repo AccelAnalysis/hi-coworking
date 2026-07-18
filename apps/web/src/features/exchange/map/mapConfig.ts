@@ -26,8 +26,10 @@ export const EXCHANGE_MAP_LAYER_IDS = Object.freeze({
 export const SOURCE_IDS = EXCHANGE_MAP_SOURCE_IDS;
 export const LAYER_IDS = EXCHANGE_MAP_LAYER_IDS;
 
-export const EXCHANGE_MAP_STYLE = "mapbox://styles/mapbox/light-v11";
+export const EXCHANGE_MAP_STYLE = "mapbox://styles/mapbox/standard";
 export const EXCHANGE_MAP_CENTER: [number, number] = [-76.7075, 36.9];
+export const EXCHANGE_MAP_DIMENSIONS = ["2d", "3d"] as const;
+export type ExchangeMapDimension = (typeof EXCHANGE_MAP_DIMENSIONS)[number];
 
 export interface ExchangeMapViewport {
   longitude: number;
@@ -53,8 +55,13 @@ export const DEFAULT_EXCHANGE_MAP_VIEWPORT: Readonly<ExchangeMapViewport> = Obje
   longitude: EXCHANGE_MAP_CENTER[0],
   latitude: EXCHANGE_MAP_CENTER[1],
   zoom: 9.7,
-  bearing: -10,
-  pitch: 35,
+  bearing: 0,
+  pitch: 0,
+});
+
+export const EXCHANGE_3D_VIEWPORT = Object.freeze({
+  bearing: -14,
+  pitch: 58,
 });
 
 export const EXCHANGE_RFX_CLUSTER_OPTIONS = Object.freeze({
