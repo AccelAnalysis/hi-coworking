@@ -9,6 +9,75 @@ import type {
   TerritoryDoc,
 } from "@hi/shared";
 
+export interface ExchangeOrganizationCandidate {
+  id: string;
+  name: string;
+  city?: string;
+  state?: string;
+  website?: string;
+  claimStatus: "unclaimed" | "claim_pending" | "claimed";
+  verificationStatus: string;
+  sources: string[];
+  confidenceScore: number;
+  matchReason: string;
+  canRequestClaim: boolean;
+  external: boolean;
+}
+
+export interface ExchangeOrganizationClaim {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  organizationCity: string;
+  organizationState: string;
+  organizationWebsite: string;
+  organizationSources: string[];
+  requestedBy: string;
+  requesterEmail: string;
+  status: "pending" | "approved" | "rejected";
+  reason: string;
+  reviewNote: string;
+  reviewedBy: string;
+  createdAt: number;
+  updatedAt: number;
+  reviewedAt: number | null;
+}
+
+export const exchangeOrganizationSearchFn = httpsCallable<
+  { name: string; city?: string; state?: string; website?: string },
+  { candidates: ExchangeOrganizationCandidate[] }
+>(functions, "exchange_organizationSearch");
+
+export const exchangeOrganizationCreateFn = httpsCallable<
+  { name: string; city?: string; state?: string; website?: string; forceCreate?: boolean; idempotencyKey?: string },
+  { created: boolean; organizationId?: string; possibleMatches?: ExchangeOrganizationCandidate[]; idempotent?: boolean }
+>(functions, "exchange_organizationCreate");
+
+export const exchangeOrganizationRequestClaimFn = httpsCallable<
+  { organizationId: string; reason: string },
+  { success: boolean; claimId: string; organizationId: string }
+>(functions, "exchange_organizationRequestClaim");
+
+export const exchangeOrganizationListMyClaimsFn = httpsCallable<
+  Record<string, never>,
+  { claims: ExchangeOrganizationClaim[] }
+>(functions, "exchange_organizationListMyClaims");
+
+export const exchangeAdminListOrganizationClaimsFn = httpsCallable<
+  { status?: "pending" | "approved" | "rejected" | "all" },
+  { claims: ExchangeOrganizationClaim[] }
+>(functions, "exchange_adminListOrganizationClaims");
+
+export const exchangeAdminGetOrganizationClaimFn = httpsCallable<
+  { claimId: string },
+  { claim: ExchangeOrganizationClaim; organization: Record<string, unknown> }
+>(functions, "exchange_adminGetOrganizationClaim");
+
+export const exchangeAdminReviewOrganizationClaimFn = httpsCallable<
+  { claimId: string; decision: "approve" | "reject"; reviewNote: string },
+  { success: boolean; idempotent: boolean; status?: string; organizationId?: string }
+>(functions, "exchange_adminReviewOrganizationClaim");
+
 interface PublishRfxInput {
   idempotencyKey: string;
   orgId?: string;
@@ -463,6 +532,7 @@ export const profileUpdateFn = httpsCallable<
     profileCompletenessScore: number;
     readinessTier: string;
     published: boolean;
+    profileSchemaVersion?: number;
   }
 >(functions, "profile_update");
 
