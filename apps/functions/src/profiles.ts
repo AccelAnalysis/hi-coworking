@@ -1,5 +1,4 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import * as logger from "firebase-functions/logger";
 import { getAuthorizedActor, getDb, writeExchangeAudit } from "./exchange/security";
 import { parseCallableInput } from "./exchange/contracts";
 import {
