@@ -9,6 +9,8 @@ import "./exchangeMapLayering.css";
 import { cn } from "@/lib/utils";
 import {
   EXCHANGE_3D_VIEWPORT,
+  EXCHANGE_MAP_LAYER_IDS,
+  EXCHANGE_MAP_STYLE,
   type ExchangeMapDimension,
   type ExchangeMapViewport,
 } from "./mapConfig";
@@ -191,7 +193,14 @@ function ExchangeMapboxCanvas({
     try {
       map.setConfigProperty("basemap", "show3dObjects", threeDimensional);
     } catch {
-      // Custom Mapbox styles may not expose Standard basemap configuration.
+      // Streets and custom styles do not expose Standard basemap configuration.
+    }
+    if (map.getLayer(EXCHANGE_MAP_LAYER_IDS.buildings3d)) {
+      map.setLayoutProperty(
+        EXCHANGE_MAP_LAYER_IDS.buildings3d,
+        "visibility",
+        threeDimensional ? "visible" : "none",
+      );
     }
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     map.easeTo({
@@ -233,6 +242,7 @@ function ExchangeMapboxCanvas({
       data-map-provider="mapbox"
       data-map-token-state="configured"
       data-map-dimension={dimension}
+      data-map-style={EXCHANGE_MAP_STYLE}
     >
       <div ref={containerRef} className="absolute inset-0 z-0" />
       <div className="absolute right-3 top-3 z-30 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">

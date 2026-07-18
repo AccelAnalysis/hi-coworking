@@ -8,6 +8,7 @@ export const EXCHANGE_MAP_SOURCE_IDS = Object.freeze({
 } as const);
 
 export const EXCHANGE_MAP_LAYER_IDS = Object.freeze({
+  buildings3d: "exchange-buildings-3d",
   scheduledTerritoryFill: "exchange-territory-scheduled-fill",
   releasedTerritoryFill: "exchange-territory-released-fill",
   scheduledTerritoryOutline: "exchange-territory-scheduled-outline",
@@ -26,7 +27,10 @@ export const EXCHANGE_MAP_LAYER_IDS = Object.freeze({
 export const SOURCE_IDS = EXCHANGE_MAP_SOURCE_IDS;
 export const LAYER_IDS = EXCHANGE_MAP_LAYER_IDS;
 
-export const EXCHANGE_MAP_STYLE = "mapbox://styles/mapbox/standard";
+// Streets v12 is the most broadly compatible first-party Mapbox style for the
+// Exchange's current local/browser matrix. The 3D control uses the style's
+// composite building source rather than depending on Standard-style config.
+export const EXCHANGE_MAP_STYLE = "mapbox://styles/mapbox/streets-v12";
 export const EXCHANGE_MAP_CENTER: [number, number] = [-76.7075, 36.9];
 export const EXCHANGE_MAP_DIMENSIONS = ["2d", "3d"] as const;
 export type ExchangeMapDimension = (typeof EXCHANGE_MAP_DIMENSIONS)[number];

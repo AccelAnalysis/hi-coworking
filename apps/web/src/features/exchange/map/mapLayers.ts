@@ -11,6 +11,23 @@ const selected = ["boolean", ["feature-state", "selected"], false] as const;
 export function createExchangeMapLayerSpecifications(): LayerSpecification[] {
   return [
     {
+      id: EXCHANGE_MAP_LAYER_IDS.buildings3d,
+      source: "composite",
+      "source-layer": "building",
+      type: "fill-extrusion",
+      minzoom: 14,
+      filter: ["==", ["get", "extrude"], "true"],
+      layout: {
+        visibility: "none",
+      },
+      paint: {
+        "fill-extrusion-color": "#cbd5e1",
+        "fill-extrusion-height": ["coalesce", ["get", "height"], 0],
+        "fill-extrusion-base": ["coalesce", ["get", "min_height"], 0],
+        "fill-extrusion-opacity": 0.62,
+      },
+    },
+    {
       id: EXCHANGE_MAP_LAYER_IDS.scheduledTerritoryFill,
       type: "fill",
       source: EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryBoundaries,
