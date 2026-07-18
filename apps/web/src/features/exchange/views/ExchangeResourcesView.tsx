@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ExchangeCommandBar } from "../components/ExchangeCommandBar";
 import { ExchangeContextMap } from "../components/ExchangeContextMap";
 import { ExchangeMobileDrawer } from "../components/ExchangeMobileDrawer";
+import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { exchangeWorkspaceActions } from "../state/exchangeWorkspaceActions";
 import type { ExchangeViewProps } from "./exchangeViewTypes";
 
@@ -75,6 +76,38 @@ export function ExchangeResourcesView({
     window.setTimeout(() => setRefreshing(false), 350);
   };
 
+  const resourceTiles = (compact = false) => (
+    <div className={cn("grid gap-2 p-3", !compact && state.surfaceMode === "list" && "sm:grid-cols-2")}>
+      {filtered.length ? filtered.map((record) => {
+        const Icon = record.icon;
+        const active = selectedCategory === record.id;
+        return (
+          <button
+            key={record.id}
+            type="button"
+            onClick={() => setSelectedCategory(active ? "all" : record.id)}
+            className={cn(
+              "rounded-2xl border p-4 text-left shadow-sm backdrop-blur-xl outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
+              active
+                ? "border-blue-500/70 bg-blue-50/82"
+                : "border-white/75 bg-white/48 hover:bg-white/78",
+            )}
+          >
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/65 text-blue-700 shadow-sm">
+              <Icon className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <span className="mt-3 block text-sm font-black text-slate-950">{record.title}</span>
+            <span className="mt-1 block text-xs leading-5 text-slate-600">{record.description}</span>
+          </button>
+        );
+      }) : (
+        <div className="rounded-2xl border border-dashed border-white/80 bg-white/45 p-5 text-sm text-slate-600">
+          No resource categories match this search.
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
       <ExchangeCommandBar
@@ -113,35 +146,7 @@ export function ExchangeResourcesView({
               Browse support by need while verified provider and program records are connected to the launch-market map.
             </p>
           </div>
-          <div className={cn("grid gap-2 p-3", state.surfaceMode === "list" && "sm:grid-cols-2")}>
-            {filtered.length ? filtered.map((record) => {
-              const Icon = record.icon;
-              const active = selectedCategory === record.id;
-              return (
-                <button
-                  key={record.id}
-                  type="button"
-                  onClick={() => setSelectedCategory(active ? "all" : record.id)}
-                  className={cn(
-                    "rounded-2xl border p-4 text-left shadow-sm backdrop-blur-xl outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
-                    active
-                      ? "border-blue-500/70 bg-blue-50/82"
-                      : "border-white/75 bg-white/48 hover:bg-white/78",
-                  )}
-                >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/65 text-blue-700 shadow-sm">
-                    <Icon className="h-5 w-5" aria-hidden="true" />
-                  </span>
-                  <span className="mt-3 block text-sm font-black text-slate-950">{record.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-slate-600">{record.description}</span>
-                </button>
-              );
-            }) : (
-              <div className="rounded-2xl border border-dashed border-white/80 bg-white/45 p-5 text-sm text-slate-600">
-                No resource categories match this search.
-              </div>
-            )}
-          </div>
+          {resourceTiles()}
         </aside>
 
         <aside className="absolute bottom-3 right-3 top-3 z-30 hidden w-[20rem] min-h-0 overflow-y-auto rounded-2xl border border-white/60 bg-white/72 p-5 shadow-[0_20px_55px_rgba(15,23,42,0.24)] backdrop-blur-2xl xl:block" aria-label="Resource detail">
@@ -159,6 +164,15 @@ export function ExchangeResourcesView({
           </div>
         </aside>
       </div>
+
+      <ExchangeMobileWorkspaceTray
+        view="resources"
+        surfaceMode={state.surfaceMode}
+        resultCount={filtered.length}
+        onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
+      >
+        <div className="h-full overflow-y-auto overscroll-contain">{resourceTiles(true)}</div>
+      </ExchangeMobileWorkspaceTray>
 
       <ExchangeMobileDrawer
         open={state.mobileFilterOpen}
