@@ -28,10 +28,16 @@ describe("Run 4 Exchange launch navigation", () => {
   it("uses the approved five-item mobile order and removes Businesses and Teaming from primary navigation", () => {
     const mobile = read("apps/web/src/features/exchange/components/ExchangeMobileNavigation.tsx");
     const desktop = read("apps/web/src/features/exchange/components/ExchangeViewTabs.tsx");
-    const labels = ["Intelligence", "Referrals", "Opportunities", "Resources", "Menu"];
+    const tokens = [
+      'label: "Intelligence"',
+      'label: "Referrals"',
+      'label: "Opportunities"',
+      'label: "Resources"',
+      '<span>Menu</span>',
+    ];
     let prior = -1;
-    for (const label of labels) {
-      const position = mobile.indexOf(label);
+    for (const token of tokens) {
+      const position = mobile.indexOf(token);
       expect(position).toBeGreaterThan(prior);
       prior = position;
     }
