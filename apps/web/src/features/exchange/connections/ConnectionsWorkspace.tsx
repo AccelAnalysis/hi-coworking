@@ -12,6 +12,7 @@ import {
 import { ExchangeCommandBar } from "../components/ExchangeCommandBar";
 import { ExchangeDetailSheet } from "../components/ExchangeDetailSheet";
 import { ExchangeMobileDrawer } from "../components/ExchangeMobileDrawer";
+import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { ExchangeStateView } from "../components/ExchangeStateView";
 import type {
   ExchangeRun3Gateway,
@@ -158,7 +159,7 @@ export function ConnectionsWorkspace({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-100">
+    <div className="relative flex h-full min-h-0 flex-col bg-transparent">
       <ExchangeCommandBar
         view="connections"
         searchQuery={state.searchQuery}
@@ -166,14 +167,14 @@ export function ConnectionsWorkspace({
         resultCount={snapshot?.records.length ?? 0}
         activeFilterCount={activeFilterCount}
         filtersOpen={state.mobileFilterOpen}
-        mapAvailable={false}
+        mapAvailable
         refreshing={refreshing}
         onViewChange={onViewChange}
         onSearchChange={(value) => {
           applyAction(exchangeWorkspaceActions.setSearch(value));
           scheduleUrlReplace();
         }}
-        onSurfaceModeChange={() => undefined}
+        onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
         onOpenFilters={() => applyAction(exchangeWorkspaceActions.openMobileFilter())}
         onClearFilters={clearFilters}
         onRefresh={() => void refresh()}
@@ -181,25 +182,23 @@ export function ConnectionsWorkspace({
       />
 
       {error ? (
-        <div className="shrink-0 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-950" role="alert">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
-            <span>{error}</span>
-            <button type="button" onClick={() => void refresh()} className="min-h-9 shrink-0 rounded-lg border border-red-300 bg-white px-3 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-red-500">Retry</button>
-          </div>
+        <div className="absolute left-1/2 top-20 z-50 flex -translate-x-1/2 items-center justify-between gap-3 rounded-full border border-red-200/80 bg-red-50/88 px-4 py-2 text-sm text-red-950 shadow-lg backdrop-blur-xl" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => void refresh()} className="min-h-9 shrink-0 rounded-lg border border-red-300 bg-white/80 px-3 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-red-500">Retry</button>
         </div>
       ) : null}
 
-      <div className="shrink-0 border-b border-slate-200 bg-white lg:hidden">
+      <div className="shrink-0 border-b border-white/60 bg-white/62 backdrop-blur-xl lg:hidden">
         <ConnectionModeTabs mode={state.connectionMode} counts={snapshot?.counts ?? EMPTY_COUNTS} onChange={setMode} />
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-[350px] shrink-0 flex-col border-r border-slate-200 bg-slate-50 lg:flex" aria-label="Referral list and filters">
-          <div className="shrink-0 border-b border-slate-200 bg-white">
+      <div className="relative flex min-h-0 flex-1">
+        <aside className="absolute bottom-3 left-3 top-3 z-30 hidden w-[350px] shrink-0 flex-col overflow-hidden rounded-2xl border border-white/60 bg-white/68 shadow-2xl backdrop-blur-2xl lg:flex" aria-label="Referral list and filters">
+          <div className="shrink-0 border-b border-white/70 bg-white/45">
             <ConnectionModeTabs mode={state.connectionMode} counts={snapshot?.counts ?? EMPTY_COUNTS} onChange={setMode} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <details className="border-b border-slate-200 bg-slate-50" open={activeFilterCount > 0}>
+            <details className="border-b border-white/60 bg-white/32" open={activeFilterCount > 0}>
               <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs font-bold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">Filters {activeFilterCount ? `· ${activeFilterCount} active` : ""}</summary>
               <ConnectionsFilters state={state} industries={industries} territories={territories} onChange={(filters) => applyAction(exchangeWorkspaceActions.setFilters(filters), "push")} onClear={clearFilters} />
             </details>
@@ -207,14 +206,11 @@ export function ConnectionsWorkspace({
           </div>
         </aside>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain" aria-label="Referral workspace">
-          <div className="lg:hidden">
-            <ReferralList records={snapshot?.records ?? []} selectedId={selectedReferralId} loading={loading} onSelect={selectReferral} />
-          </div>
-          <div className="hidden lg:block">{detailSurface}</div>
+        <main className="relative z-20 hidden min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-transparent px-[23rem] py-3 lg:block" aria-label="Referral workspace">
+          <div className="mx-auto max-w-4xl overflow-hidden rounded-3xl border border-white/60 bg-white/68 shadow-2xl backdrop-blur-2xl">{detailSurface}</div>
         </main>
 
-        <aside className="hidden w-[310px] shrink-0 overflow-y-auto border-l border-slate-200 bg-white p-4 xl:block" aria-label="Connection context">
+        <aside className="absolute bottom-3 right-3 top-3 z-30 hidden w-[310px] shrink-0 overflow-y-auto rounded-2xl border border-white/60 bg-white/68 p-4 shadow-2xl backdrop-blur-2xl xl:block" aria-label="Connection context">
           {detail && (detail.serviceOfferId || detail.termsSnapshot?.serviceOfferId) ? (() => {
             const offerId = detail.serviceOfferId ?? detail.termsSnapshot?.serviceOfferId;
             const offer = snapshot?.serviceOffers.find((candidate) => candidate.id === offerId);
@@ -223,9 +219,21 @@ export function ConnectionsWorkspace({
           <div className="mt-4">
             <RecipientSuggestions suggestions={snapshot?.suggestions ?? []} compact />
           </div>
-          <p className="mt-4 flex items-start gap-2 rounded-xl bg-slate-100 p-3 text-xs leading-5 text-slate-600"><Info className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" aria-hidden="true" />Suggestions use published discovery fields and verified history. Protected contact data is excluded.</p>
+          <p className="mt-4 flex items-start gap-2 rounded-xl border border-white/70 bg-white/48 p-3 text-xs leading-5 text-slate-600"><Info className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600" aria-hidden="true" />Suggestions use published discovery fields and verified history. Protected contact data is excluded.</p>
         </aside>
       </div>
+
+      <ExchangeMobileWorkspaceTray
+        view="referrals"
+        surfaceMode={state.surfaceMode}
+        resultCount={snapshot?.records.length ?? 0}
+        loading={loading}
+        onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
+      >
+        <div className="h-full overflow-y-auto overscroll-contain">
+          <ReferralList records={snapshot?.records ?? []} selectedId={selectedReferralId} loading={loading} onSelect={selectReferral} />
+        </div>
+      </ExchangeMobileWorkspaceTray>
 
       <ExchangeMobileDrawer
         open={state.mobileFilterOpen}
@@ -276,7 +284,7 @@ function ConnectionsWelcome({
   const compensated = records.filter((record) => record.compensation.configured).length;
   return (
     <div className="mx-auto max-w-4xl p-5 sm:p-8">
-      <section className="overflow-hidden rounded-3xl bg-slate-950 p-6 text-white shadow-xl sm:p-8">
+      <section className="overflow-hidden rounded-3xl border border-white/20 bg-slate-950/88 p-6 text-white shadow-xl backdrop-blur-2xl sm:p-8">
         <div className="max-w-2xl">
           <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.14em] text-emerald-300"><Sparkles className="h-4 w-4" aria-hidden="true" /> Business referral exchange</p>
           <h2 className="mt-3 text-2xl font-bold sm:text-3xl">Connect a real business need with the right regional capability.</h2>
@@ -285,9 +293,9 @@ function ConnectionsWelcome({
         </div>
       </section>
       <dl className="mt-5 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><BriefcaseBusiness className="h-4 w-4 text-indigo-600" aria-hidden="true" /> In this view</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{records.length}</dd><p className="text-xs text-slate-500">Authorized referrals</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><ArrowRight className="h-4 w-4 text-emerald-600" aria-hidden="true" /> Converted</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{converted}</dd><p className="text-xs text-slate-500">Lifecycle state, not payment</p></div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><CircleDollarSign className="h-4 w-4 text-amber-600" aria-hidden="true" /> Terms configured</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{compensated}</dd><p className="text-xs text-slate-500">Optional policies</p></div>
+        <div className="rounded-2xl border border-white/70 bg-white/62 p-4 shadow-sm backdrop-blur-xl"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><BriefcaseBusiness className="h-4 w-4 text-indigo-600" aria-hidden="true" /> In this view</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{records.length}</dd><p className="text-xs text-slate-500">Authorized referrals</p></div>
+        <div className="rounded-2xl border border-white/70 bg-white/62 p-4 shadow-sm backdrop-blur-xl"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><ArrowRight className="h-4 w-4 text-emerald-600" aria-hidden="true" /> Converted</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{converted}</dd><p className="text-xs text-slate-500">Lifecycle state, not payment</p></div>
+        <div className="rounded-2xl border border-white/70 bg-white/62 p-4 shadow-sm backdrop-blur-xl"><dt className="flex items-center gap-2 text-xs font-bold text-slate-500"><CircleDollarSign className="h-4 w-4 text-amber-600" aria-hidden="true" /> Terms configured</dt><dd className="mt-2 text-2xl font-bold text-slate-950">{compensated}</dd><p className="text-xs text-slate-500">Optional policies</p></div>
       </dl>
       {suggestions.length ? <div className="mt-6 xl:hidden"><RecipientSuggestions suggestions={suggestions} /></div> : null}
     </div>
