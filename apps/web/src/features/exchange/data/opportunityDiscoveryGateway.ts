@@ -13,6 +13,15 @@ export type ExchangeDiscoveryRfx = RfxDoc & {
   discovery?: OpportunityDiscoveryRecord;
 };
 
+export interface RecentOpportunitySearch {
+  id: string;
+  ownerUid: string;
+  label: string;
+  query: Omit<OpportunityDiscoveryQuery, "cursor">;
+  normalizedVersion: number;
+  lastUsedAt: number;
+}
+
 export interface OpportunityAddendum {
   id: string;
   rfxId: string;
@@ -60,6 +69,7 @@ interface GatewayInput {
     | "savedSearchUpsert"
     | "savedSearchDelete"
     | "savedSearchList"
+    | "recentSearchList"
     | "governanceList"
     | "addendumCreate"
     | "addendumAcknowledge"
@@ -170,6 +180,14 @@ export async function listSavedOpportunitySearches(): Promise<SavedOpportunitySe
     payload: { maxResults: 50 },
   });
   return (response.data as { searches?: SavedOpportunitySearch[] }).searches ?? [];
+}
+
+export async function listRecentOpportunitySearches(): Promise<RecentOpportunitySearch[]> {
+  const response = await gateway({
+    operation: "recentSearchList",
+    payload: { maxResults: 10 },
+  });
+  return (response.data as { searches?: RecentOpportunitySearch[] }).searches ?? [];
 }
 
 export async function upsertSavedOpportunitySearch(input: {
