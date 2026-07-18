@@ -25,12 +25,26 @@ describe("uniform Exchange workspace contract", () => {
     expect(hook).toContain('NavigationControl({ showCompass: false }), "bottom-right"');
   });
 
-  it("falls back instead of leaving a permanently gray Mapbox loading surface", () => {
+  it("validates the compiled Mapbox token, browser origin, style access, and WebGL", () => {
+    const map = read("apps/web/src/features/exchange/map/ExchangeMap.tsx");
+    const diagnostics = read("apps/web/src/features/exchange/map/mapboxDiagnostics.ts");
+    const checker = read("scripts/check-mapbox-env.mjs");
+    expect(map).toContain("validateMapboxRuntime");
+    expect(map).toContain("data-map-token-fingerprint");
+    expect(map).toContain("Mapbox configuration check failed");
+    expect(diagnostics).toContain("mapboxgl.supported()");
+    expect(diagnostics).toContain("styles/v1/mapbox/streets-v12");
+    expect(diagnostics).toContain('referrerPolicy: "strict-origin-when-cross-origin"');
+    expect(checker).toContain("--origin=");
+    expect(checker).toContain("Mapbox style check passed");
+  });
+
+  it("does not silently replace required Mapbox with another provider", () => {
     const map = read("apps/web/src/features/exchange/map/ExchangeMap.tsx");
     expect(map).toContain("MAPBOX_LOAD_TIMEOUT_MS");
-    expect(map).toContain('tokenState="provider-error"');
-    expect(map).toContain("Retry Mapbox");
-    expect(map).toContain("token URL restrictions");
+    expect(map).toContain("Mapbox passed access checks but did not render");
+    expect(map).toContain("Retry Mapbox check");
+    expect(map).not.toContain("ExchangeLeafletFallback");
   });
 
   it("keeps Firestore opportunity discovery usable when optional Functions are absent", () => {
