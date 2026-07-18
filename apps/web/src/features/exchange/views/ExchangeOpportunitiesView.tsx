@@ -17,6 +17,7 @@ import { ExchangeMobileDrawer } from "../components/ExchangeMobileDrawer";
 import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { ExchangeResultsList } from "../components/ExchangeResultsList";
 import { ExchangeRightPanel } from "../components/ExchangeRightPanel";
+import { SavedOpportunitySearchManager } from "../components/SavedOpportunitySearchManager";
 import { ExchangeStateView, type ExchangeStateKind } from "../components/ExchangeStateView";
 import { resolveExchangeBlockingState } from "../data/exchangePresentationState";
 import { selectExchangeResults } from "../data/exchangeSelectors";
@@ -24,6 +25,7 @@ import { liveExchangeOpportunityRepository } from "../data/exchangeRepository";
 import { useExchangeData } from "../data/useExchangeData";
 import { useOpportunityDiscovery } from "../data/useOpportunityDiscovery";
 import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
+import { opportunityQueryToWorkspaceHydration } from "../data/opportunityDiscoveryState";
 import { exchangeDemoOpportunityRepository } from "../demo/exchangeDemoGateway";
 import { isValidLatitude, isValidLongitude } from "../map/geojson";
 import {
@@ -285,13 +287,30 @@ export function ExchangeOpportunitiesView({
     isValidLatitude(record.geo?.lat) && isValidLongitude(record.geo?.lng));
 
   const filterContent = () => (
-    <ExchangeFilters
-      state={state}
-      territories={allTerritories}
-      activeFilterCount={activeFilterCount}
-      onChange={setFilters}
-      onClear={clearFilters}
-    />
+    <div>
+      <ExchangeFilters
+        state={state}
+        territories={allTerritories}
+        activeFilterCount={activeFilterCount}
+        onChange={setFilters}
+        onClear={clearFilters}
+      />
+      {!demoMode ? (
+        <div className="px-4 pb-4">
+          <SavedOpportunitySearchManager
+            state={state}
+            onRun={(query) => {
+              applyAction(
+                exchangeWorkspaceActions.hydrateFromUrl(
+                  opportunityQueryToWorkspaceHydration(query),
+                ),
+                "push",
+              );
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 
   const resultsContent = (compact = false) => (
