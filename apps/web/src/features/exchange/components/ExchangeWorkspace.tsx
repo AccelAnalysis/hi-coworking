@@ -36,6 +36,7 @@ import { ExchangeOpportunitiesView } from "../views/ExchangeOpportunitiesView";
 import { ExchangeDomainLayerView } from "../views/ExchangeDomainLayerView";
 import type { ExchangeHistoryMode } from "../views/exchangeViewTypes";
 import { ExchangeMobileNavigation } from "./ExchangeMobileNavigation";
+import { ExchangeMobileOpportunityTray } from "./ExchangeMobileOpportunityTray";
 
 function exchangeUrl(query: string): string {
   return query ? `/exchange?${query}` : "/exchange";
@@ -175,6 +176,12 @@ export function ExchangeWorkspace() {
           <ExchangeDomainLayerView view="resources" onViewChange={onViewChange} />
         )}
       </div>
+      {activeView === "opportunities" && !mobileMenuOpen ? (
+        <ExchangeMobileOpportunityTray
+          surfaceMode={state.surfaceMode}
+          onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
+        />
+      ) : null}
       <ExchangeMobileNavigation
         view={activeView}
         menuOpen={mobileMenuOpen}
