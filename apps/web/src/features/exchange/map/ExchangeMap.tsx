@@ -1,11 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-import type { ExchangeMapViewport } from "./mapConfig";
+import { cn } from "@/lib/utils";
+import {
+  EXCHANGE_3D_VIEWPORT,
+  type ExchangeMapDimension,
+  type ExchangeMapViewport,
+} from "./mapConfig";
 import type { ExchangeMapCallbacks } from "./mapEvents";
 import type { ExchangeMapSelection } from "./selection";
 import { useExchangeMap, type ExchangeMapStatus } from "./useExchangeMap";
@@ -65,7 +70,8 @@ function ExchangeMapboxCanvas({
   ...callbacks
 }: ExchangeMapProps & { accessToken: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const { status, error } = useExchangeMap({
+  const [dimension, setDimension] = useState<ExchangeMapDimension>("2d");
+  const { mapRef, status, error } = useExchangeMap({
     containerRef,
     accessToken,
     rfxList,
@@ -80,38 +86,75 @@ function ExchangeMapboxCanvas({
     ...callbacks,
   });
 
+  useEffect(() => {
+    if (status !== "ready") return;
+    const map = mapRef.current;
+    if (!map) return;
+    const threeDimensional = dimension === "3d";
+    try {
+      map.setConfigProperty("basemap", "show3dObjects", threeDimensional);
+    } catch {
+      // Custom Mapbox styles may not expose Standard basemap configuration.
+    }
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    map.easeTo({
+      pitch: threeDimensional ? EXCHANGE_3D_VIEWPORT.pitch : 0,
+      bearing: threeDimensional ? EXCHANGE_3D_VIEWPORT.bearing : 0,
+      duration: reduceMotion ? 0 : 500,
+    });
+  }, [dimension, mapRef, status]);
+
   return (
     <div
-      className={`${className} relative overflow-hidden border border-slate-200 bg-slate-100`}
+      className={`${className} relative overflow-hidden border border-white/40 bg-slate-100`}
       role="region"
       aria-label={ariaLabel}
       aria-busy={status === "initializing"}
       data-map-status={status}
       data-map-provider="mapbox"
+      data-map-dimension={dimension}
     >
       <div ref={containerRef} className="absolute inset-0" />
+      <div className="absolute right-3 top-3 z-20 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">
+        {(["2d", "3d"] as const).map((candidate) => (
+          <button
+            key={candidate}
+            type="button"
+            onClick={() => setDimension(candidate)}
+            aria-pressed={dimension === candidate}
+            className={cn(
+              "min-h-9 rounded-lg px-3 text-xs font-black uppercase tracking-[0.08em] outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
+              dimension === candidate
+                ? "bg-slate-950 text-white shadow-sm"
+                : "text-slate-600 hover:bg-white/80 hover:text-slate-950",
+            )}
+          >
+            {candidate.toUpperCase()}
+          </button>
+        ))}
+      </div>
       {status === "initializing" ? (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-100/80 text-sm text-slate-600"
+          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-100/55 text-sm font-semibold text-slate-700 backdrop-blur-sm"
           role="status"
         >
-          Loading map…
+          Loading Mapbox…
         </div>
       ) : null}
       {status === "error" ? (
         <div
-          className="absolute inset-0 flex items-center justify-center bg-slate-50/95 p-6 text-center"
+          className="absolute inset-0 flex items-center justify-center bg-slate-50/75 p-6 text-center backdrop-blur-md"
           role="alert"
         >
-          <div className="max-w-md">
-            <p className="font-medium text-slate-800">The map could not be loaded.</p>
+          <div className="max-w-md rounded-3xl border border-white/70 bg-white/80 p-6 shadow-2xl backdrop-blur-2xl">
+            <p className="font-bold text-slate-900">The Mapbox map could not be loaded.</p>
             <p className="mt-1 text-sm text-slate-600">
-              The list remains available while the configured map service is unavailable.
+              Verify the public token and its allowed URLs. The result list remains available.
             </p>
             {onRetry ? (
               <button
                 type="button"
-                className="mt-4 min-h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-700"
+                className="mt-4 min-h-11 rounded-xl border border-slate-300 bg-white/90 px-4 text-sm font-bold text-slate-800 hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-700"
                 onClick={onRetry}
               >
                 Retry map
