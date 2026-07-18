@@ -16,6 +16,8 @@ import type { ExchangeMapCallbacks } from "./mapEvents";
 import type { ExchangeMapSelection } from "./selection";
 import { useExchangeMap, type ExchangeMapStatus } from "./useExchangeMap";
 
+const MAPBOX_LOAD_TIMEOUT_MS = 12_000;
+
 const ExchangeLeafletMap = dynamic(
   () => import("./ExchangeLeafletMap").then((module) => module.ExchangeLeafletMap),
   {
@@ -91,9 +93,10 @@ function ExchangeLeafletFallback({
   ariaLabel,
   tokenState,
   message,
+  onRetry,
   ...props
 }: Omit<ExchangeMapProps, "accessToken"> & {
-  tokenState: "missing" | "invalid";
+  tokenState: "missing" | "invalid" | "provider-error";
   message: string;
 }) {
   return (
@@ -111,14 +114,23 @@ function ExchangeLeafletFallback({
       />
       <div
         className={cn(
-          "pointer-events-none absolute left-3 top-3 z-30 max-w-[calc(100%-5.5rem)] rounded-full border px-3 py-1.5 text-[10px] font-black shadow-lg backdrop-blur-xl",
+          "absolute left-3 top-3 z-30 flex max-w-[calc(100%-5.5rem)] items-center gap-2 rounded-2xl border px-3 py-1.5 text-[10px] font-black shadow-lg backdrop-blur-xl",
           tokenState === "missing"
             ? "border-amber-200/80 bg-amber-50/88 text-amber-900"
             : "border-red-200/80 bg-red-50/88 text-red-900",
         )}
         role="status"
       >
-        OpenStreetMap fallback · {message}
+        <span>OpenStreetMap fallback · {message}</span>
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="pointer-events-auto rounded-lg border border-current/25 bg-white/65 px-2 py-1 font-black uppercase tracking-[0.06em] outline-none hover:bg-white focus-visible:ring-2 focus-visible:ring-current"
+          >
+            Retry Mapbox
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -142,6 +154,7 @@ function ExchangeMapboxCanvas({
 }: ExchangeMapProps & { accessToken: string }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [dimension, setDimension] = useState<ExchangeMapDimension>("2d");
+  const [loadTimeoutError, setLoadTimeoutError] = useState<Error | null>(null);
   const { mapRef, status, error } = useExchangeMap({
     containerRef,
     accessToken,
@@ -156,6 +169,19 @@ function ExchangeMapboxCanvas({
     onStatusChange,
     ...callbacks,
   });
+
+  useEffect(() => {
+    if (status !== "initializing") {
+      setLoadTimeoutError(null);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setLoadTimeoutError(new Error(
+        "Mapbox did not finish loading. Check token URL restrictions, restart the Next.js server after env changes, and verify WebGL support.",
+      ));
+    }, MAPBOX_LOAD_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [status]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -174,6 +200,28 @@ function ExchangeMapboxCanvas({
       duration: reduceMotion ? 0 : 500,
     });
   }, [dimension, mapRef, status]);
+
+  const providerError = error ?? loadTimeoutError;
+  if (status === "error" || providerError) {
+    return (
+      <ExchangeLeafletFallback
+        {...callbacks}
+        rfxList={rfxList}
+        releasedTerritories={releasedTerritories}
+        scheduledTerritories={scheduledTerritories}
+        selection={selection}
+        initialViewport={initialViewport}
+        viewport={viewport}
+        fitRequest={fitRequest}
+        resizeSignal={resizeSignal}
+        className={className}
+        ariaLabel={ariaLabel}
+        tokenState="provider-error"
+        message={providerError?.message || "Mapbox could not load its style or tiles"}
+        onRetry={onRetry}
+      />
+    );
+  }
 
   return (
     <div
@@ -211,29 +259,6 @@ function ExchangeMapboxCanvas({
           role="status"
         >
           Loading Mapbox…
-        </div>
-      ) : null}
-      {status === "error" ? (
-        <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-slate-50/75 p-6 text-center backdrop-blur-md"
-          role="alert"
-        >
-          <div className="max-w-md rounded-3xl border border-white/70 bg-white/80 p-6 shadow-2xl backdrop-blur-2xl">
-            <p className="font-bold text-slate-900">The Mapbox map could not be loaded.</p>
-            <p className="mt-1 text-sm text-slate-600">
-              Verify the public token and its allowed URLs. The result list remains available.
-            </p>
-            {error?.message ? <p className="mt-2 text-xs text-slate-500">{error.message}</p> : null}
-            {onRetry ? (
-              <button
-                type="button"
-                className="mt-4 min-h-11 rounded-xl border border-slate-300 bg-white/90 px-4 text-sm font-bold text-slate-800 hover:bg-white focus:outline-none focus:ring-2 focus:ring-slate-700"
-                onClick={onRetry}
-              >
-                Retry map
-              </button>
-            ) : null}
-          </div>
         </div>
       ) : null}
     </div>
