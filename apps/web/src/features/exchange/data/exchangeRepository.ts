@@ -49,10 +49,22 @@ export function normalizeExchangeDataError(error: unknown): ExchangeDataError {
     };
   }
   if (
+    code.includes("not-found")
+    || message.includes("404")
+    || message.includes("cloudfunctions.net")
+  ) {
+    return {
+      kind: "unknown",
+      message: "The Exchange backend functions are not available in this Firebase environment. Deploy the matching Functions build, run the emulator stack, or use the local Exchange demo mode.",
+    };
+  }
+  if (
     code.includes("unavailable")
     || code.includes("network")
     || message.includes("offline")
     || message.includes("network")
+    || message.includes("failed to fetch")
+    || message.includes("load failed")
   ) {
     return {
       kind: "offline",
@@ -68,15 +80,18 @@ export function normalizeExchangeDataError(error: unknown): ExchangeDataError {
 export async function loadExchangeSnapshot(): Promise<ExchangeRepositorySnapshot> {
   const [rfx, territoryResult, managedResult] = await Promise.all([
     getOpenRfxListFromFirestore(MAX_DISCOVERY_RFX),
-    listReleasedTerritoriesFn({}),
+    // Territory and management callables are enhancements to the public
+    // discovery snapshot. A branch whose Functions have not been deployed
+    // must not erase otherwise usable Firestore RFx records or the basemap.
+    listReleasedTerritoriesFn({}).catch(() => null),
     listManagedRfxFn({ maxResults: MAX_DISCOVERY_RFX }).catch(() => null),
   ]);
 
   return {
     rfx: uniqueDiscoverableExchangeRfx(rfx, MAX_DISCOVERY_RFX),
-    releasedTerritories: territoryResult.data.released
+    releasedTerritories: (territoryResult?.data.released ?? [])
       .filter((territory) => territory.status === "released"),
-    scheduledTerritories: territoryResult.data.scheduled
+    scheduledTerritories: (territoryResult?.data.scheduled ?? [])
       .filter((territory) => territory.status === "scheduled"),
     manageableRfxIds: managedResult?.data.manageableRfxIds ?? [],
   };
