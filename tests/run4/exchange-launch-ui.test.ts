@@ -5,7 +5,7 @@ import { parseExchangeUrlState } from "../../apps/web/src/features/exchange/stat
 const read = (path: string) => readFileSync(path, "utf8");
 
 describe("Run 4 Exchange launch navigation", () => {
-  it.each(["businesses", "opportunities", "referrals", "teaming", "resources", "intelligence"])("accepts the %s unified Exchange view", (view) => {
+  it.each(["intelligence", "referrals", "opportunities", "resources"])("accepts the %s primary Exchange view", (view) => {
     expect(parseExchangeUrlState(`?view=${view}`).view).toBe(view);
   });
 
@@ -25,8 +25,41 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(register).toMatch(/Connecting an organization remains optional/i);
   });
 
+  it("uses the approved five-item mobile order and removes Businesses and Teaming from primary navigation", () => {
+    const mobile = read("apps/web/src/features/exchange/components/ExchangeMobileNavigation.tsx");
+    const desktop = read("apps/web/src/features/exchange/components/ExchangeViewTabs.tsx");
+    const labels = ["Intelligence", "Referrals", "Opportunities", "Resources", "Menu"];
+    let prior = -1;
+    for (const label of labels) {
+      const position = mobile.indexOf(label);
+      expect(position).toBeGreaterThan(prior);
+      prior = position;
+    }
+    expect(desktop).not.toContain('label: "Businesses"');
+    expect(desktop).not.toContain('label: "Teaming"');
+    expect(desktop).toContain('label: "Intelligence"');
+    expect(desktop).toContain('label: "Referrals"');
+    expect(desktop).toContain('label: "Opportunities"');
+    expect(desktop).toContain('label: "Resources"');
+  });
+
+  it("normalizes legacy business, teaming, and connections states into the current product model", () => {
+    const workspace = read("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");
+    expect(workspace).toContain('view === "connections"');
+    expect(workspace).toContain('return "referrals"');
+    expect(workspace).toContain('view === "businesses" || view === "teaming"');
+    expect(workspace).toContain('return "opportunities"');
+  });
+
+  it("keeps teaming inside an opportunity detail modal", () => {
+    const detail = read("apps/web/src/features/exchange/components/ExchangeEntityDetail.tsx");
+    expect(detail).toContain("Team up");
+    expect(detail).toContain("Opportunity teaming");
+    expect(detail).toContain("Request a partner introduction");
+  });
+
   it("keeps legacy primary routes as Exchange compatibility redirects", () => {
-    expect(read("apps/web/src/app/directory/page.tsx")).toContain("/exchange?view=businesses");
+    expect(read("apps/web/src/app/directory/page.tsx")).toContain("/exchange?view=opportunities");
     expect(read("apps/web/src/app/rfx/page.tsx")).toContain("/exchange?view=opportunities");
     expect(read("apps/web/src/app/referrals/page.tsx")).toContain("/exchange?view=referrals");
     const shell = read("apps/web/src/components/AppShell.tsx");
