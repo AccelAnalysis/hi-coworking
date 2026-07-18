@@ -31,29 +31,48 @@ Legacy `view=teaming` states normalize to Opportunities.
 
 The product-facing name is Referrals. Existing internal Connections components and legacy `view=connections` states normalize to Referrals until their implementation names are safely refactored.
 
-## Mobile visual contract
+## Shared mobile workspace contract
 
-At phone breakpoints the Exchange behaves as a full-screen application layer and covers the general site navigation. The approved mobile reference is the original mockup supplied by the product owner. Required characteristics include:
+At phone breakpoints, every primary view uses the same application anatomy:
 
-- universal search at the top of the active workspace;
-- map-first Opportunities canvas;
-- compact map-layer/filter and fit controls along the map edge;
-- a lower opportunity control tray with a drag handle, sort label, map/list toggle, and quick actions;
+- one stable command and universal-search row;
+- one persistent lower workspace tray;
+- one consistent drag handle, sort area, and map/list toggle;
+- four contextual actions in fixed positions;
 - persistent icon-above-label bottom navigation;
-- contextual details and teaming in mobile sheets or modals;
-- account, organization, membership, credits, notifications, and secondary functions inside Menu.
+- contextual details in sheets or modals.
 
-Desktop retains the expanded Exchange workspace rather than imitating a phone, but uses the same four-mode information architecture and stable command-bar conventions.
+The tray may change its action labels for Intelligence, Referrals, Opportunities, and Resources, but it must not move, disappear, or use a different structure between primary views.
+
+## Desktop workspace contract
+
+Desktop retains the expanded Exchange workspace rather than imitating a phone. All four primary modes use the same Hi Exchange command bar and desktop tab navigation. No primary mode may replace it with a one-off header.
+
+## Map contract
+
+The Exchange map is a functional geographic surface, never a decorative CSS approximation.
+
+- Use Mapbox when `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is configured.
+- Use the Leaflet/OpenStreetMap fallback when no Mapbox token is configured.
+- Opportunities may display RFx and territory markers when verified coordinates exist.
+- Intelligence, Referrals, and Resources display real launch-market territory context immediately.
+- Domain-specific markers appear only when authorized records include verified coordinates.
+- Records without verified geography remain available through lists and detail surfaces; the application must not invent marker positions.
+
+## Resources
+
+Resources uses the same command bar, responsive application frame, lower mobile tray, and real geographic surface as the other primary views. Placeholder gradients and simulated map markers are prohibited.
 
 ## Implemented acceptance coverage
 
-Automated tests verify:
+Automated tests and CI verify:
 
 - the mobile navigation labels and exact order;
 - Businesses and Teaming are absent from primary navigation;
 - legacy Businesses and Teaming states resolve to Opportunities;
 - legacy Connections resolves to Referrals;
 - Team up is available from an opportunity detail;
-- `/exchange` continues to render `ExchangeWorkspace`, never the legacy RFx page.
+- `/exchange` continues to render `ExchangeWorkspace`, never the legacy RFx page;
+- lint, Exchange tests, inherited security, Run 3, Run 4, production build, and clean-diff checks pass.
 
 A final browser-based visual comparison against the supplied 390×844 and 430×932 references remains a manual design-acceptance step before release. Automated code, security, and production-build validation does not by itself prove pixel-level visual parity.
