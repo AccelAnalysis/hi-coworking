@@ -76,7 +76,7 @@ export function ExchangeResourcesView({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
       <ExchangeCommandBar
         view="resources"
         searchQuery={state.searchQuery}
@@ -97,9 +97,14 @@ export function ExchangeResourcesView({
         onRefresh={refresh}
       />
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[22rem_minmax(0,1fr)_20rem]">
-        <aside className="min-h-0 overflow-y-auto border-r border-slate-200 bg-white" aria-label="Resource categories">
-          <div className="border-b border-slate-200 p-4">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <ExchangeContextMap view="resources" demoMode={demoMode} className="absolute inset-0 h-full min-h-0 w-full border-0" />
+
+        <aside className={cn(
+          "absolute bottom-3 left-3 top-3 z-30 hidden min-h-0 overflow-y-auto rounded-2xl border border-white/60 bg-white/72 shadow-[0_20px_55px_rgba(15,23,42,0.24)] backdrop-blur-2xl lg:block",
+          state.surfaceMode === "list" ? "w-[min(44rem,48vw)]" : "w-[22rem]",
+        )} aria-label="Resource categories">
+          <div className="border-b border-white/70 bg-white/42 p-4">
             <p className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-700">
               <BookOpenText className="h-4 w-4" aria-hidden="true" /> Resource exchange
             </p>
@@ -108,7 +113,7 @@ export function ExchangeResourcesView({
               Browse support by need while verified provider and program records are connected to the launch-market map.
             </p>
           </div>
-          <div className="grid gap-2 p-3">
+          <div className={cn("grid gap-2 p-3", state.surfaceMode === "list" && "sm:grid-cols-2")}>
             {filtered.length ? filtered.map((record) => {
               const Icon = record.icon;
               const active = selectedCategory === record.id;
@@ -118,13 +123,13 @@ export function ExchangeResourcesView({
                   type="button"
                   onClick={() => setSelectedCategory(active ? "all" : record.id)}
                   className={cn(
-                    "rounded-2xl border p-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
+                    "rounded-2xl border p-4 text-left shadow-sm backdrop-blur-xl outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
                     active
-                      ? "border-blue-600 bg-blue-50 shadow-sm"
-                      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50",
+                      ? "border-blue-500/70 bg-blue-50/82"
+                      : "border-white/75 bg-white/48 hover:bg-white/78",
                   )}
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-blue-700">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-white/65 text-blue-700 shadow-sm">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
                   <span className="mt-3 block text-sm font-black text-slate-950">{record.title}</span>
@@ -132,18 +137,14 @@ export function ExchangeResourcesView({
                 </button>
               );
             }) : (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
+              <div className="rounded-2xl border border-dashed border-white/80 bg-white/45 p-5 text-sm text-slate-600">
                 No resource categories match this search.
               </div>
             )}
           </div>
         </aside>
 
-        <main className="hidden min-h-0 min-w-0 lg:block" aria-label="Resource geography">
-          <ExchangeContextMap view="resources" demoMode={demoMode} />
-        </main>
-
-        <aside className="hidden min-h-0 overflow-y-auto border-l border-slate-200 bg-white p-5 lg:block" aria-label="Resource detail">
+        <aside className="absolute bottom-3 right-3 top-3 z-30 hidden w-[20rem] min-h-0 overflow-y-auto rounded-2xl border border-white/60 bg-white/72 p-5 shadow-[0_20px_55px_rgba(15,23,42,0.24)] backdrop-blur-2xl xl:block" aria-label="Resource detail">
           <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">Selected resource lens</p>
           <h2 className="mt-2 text-lg font-black text-slate-950">
             {selectedCategory === "all"
@@ -151,10 +152,10 @@ export function ExchangeResourcesView({
               : RESOURCE_CATEGORIES.find((record) => record.id === selectedCategory)?.title}
           </h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            The map is now a real geographic surface. It shows launch-market territory context immediately and will add provider or program markers only when records contain verified coordinates.
+            The full-screen map shows launch-market territory context immediately and adds provider or program markers only when records contain verified coordinates.
           </p>
-          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-900">
-            This view no longer represents a decorative map as live functionality. Records without verified geography remain list-only until enriched.
+          <div className="mt-5 rounded-2xl border border-amber-200/80 bg-amber-50/78 p-4 text-xs leading-5 text-amber-900 backdrop-blur-xl">
+            Records without verified geography remain list-only until enriched. The Exchange does not fabricate locations.
           </div>
         </aside>
       </div>
