@@ -190,7 +190,7 @@ export function ExchangeWorkspace() {
         ) : null}
       </div>
 
-      {!mobileMenuOpen ? (
+      {!mobileMenuOpen && activeView !== "opportunities" ? (
         <ExchangeMobileWorkspaceTray
           view={activeView}
           surfaceMode={state.surfaceMode}
