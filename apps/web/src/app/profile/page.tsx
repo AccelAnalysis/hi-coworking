@@ -258,16 +258,17 @@ function ProfileContent() {
       .filter(Boolean);
 
     return {
-      businessName: form.businessName || undefined,
-      bio: form.bio || undefined,
-      website: form.website || undefined,
-      linkedin: form.linkedin || undefined,
-      naicsCodes: naicsCodes.length > 0 ? naicsCodes : undefined,
-      certifications:
-        form.certifications.length > 0 ? form.certifications : undefined,
-      uei: form.uei || undefined,
-      duns: form.duns || undefined,
-      cageCode: form.cageCode || undefined,
+      ...(form.businessName ? { businessName: form.businessName } : {}),
+      ...(form.bio ? { bio: form.bio } : {}),
+      ...(form.website ? { website: form.website } : {}),
+      ...(form.linkedin ? { linkedin: form.linkedin } : {}),
+      ...(naicsCodes.length > 0 ? { naicsCodes } : {}),
+      ...(form.certifications.length > 0
+        ? { certifications: form.certifications }
+        : {}),
+      ...(form.uei ? { uei: form.uei } : {}),
+      ...(form.duns ? { duns: form.duns } : {}),
+      ...(form.cageCode ? { cageCode: form.cageCode } : {}),
       capabilityStatementUrl: capStatementUrl,
       capabilityStatementStoragePath: capStatementStoragePath,
       photoUrl,
