@@ -194,13 +194,7 @@ export function ExchangeWorkspace() {
 
         <div className={cn(
           "relative h-full min-h-0",
-          contextMapView && [
-            "lg:[&>div]:bg-transparent",
-            "lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/70 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl",
-            "lg:[&_main]:bg-white/25 lg:[&_main]:backdrop-blur-sm",
-            "lg:[_.bg-white]:bg-white/60 lg:[_.bg-slate-50]:bg-white/40 lg:[_.bg-slate-100]:bg-white/30",
-            "lg:[_.border-slate-200]:border-white/60",
-          ],
+          contextMapView && "lg:[&>div]:bg-transparent lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/70 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl lg:[&_main]:bg-white/25 lg:[&_main]:backdrop-blur-sm lg:[_.bg-white]:bg-white/60 lg:[_.bg-slate-50]:bg-white/40 lg:[_.bg-slate-100]:bg-white/30 lg:[_.border-slate-200]:border-white/60",
         )}>
           {activeContent}
         </div>
