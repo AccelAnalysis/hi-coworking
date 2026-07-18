@@ -3,12 +3,15 @@ import {
   DEFAULT_EXCHANGE_CONNECTION_MODE,
   DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
   DEFAULT_EXCHANGE_LOCAL_FIRST,
+  DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
   DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
   DEFAULT_EXCHANGE_SURFACE_MODE,
   DEFAULT_EXCHANGE_VIEW,
   isExchangeCompensationFilter,
   isExchangeConnectionMode,
   isExchangeIntelligenceMetric,
+  isExchangeOpportunitySort,
+  isExchangePersonalizedFilter,
   isExchangeReferralStatus,
   isExchangeRelationshipFilter,
   isExchangeRfxStatus,
@@ -20,20 +23,19 @@ import {
   type ExchangeViewport,
   type ExchangeWorkspaceState,
 } from "./exchangeWorkspaceTypes";
-import { normalizeExchangeViewport } from "./exchangeWorkspaceReducer";
+import {
+  normalizeExchangeViewport,
+  normalizeOpportunityLocation,
+} from "./exchangeWorkspaceReducer";
 
-const MAX_SEARCH_LENGTH = 200;
+const MAX_SEARCH_LENGTH = 240;
 const MAX_ENTITY_ID_LENGTH = 160;
-const MAX_FILTER_COUNT = 50;
+const MAX_FILTER_COUNT = 60;
 const NAICS_PATTERN = /^\d{2,6}$/;
-const TERRITORY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
-const INDUSTRY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
+const SAFE_FILTER_PATTERN = /^[^\u0000-\u001f\u007f]{1,160}$/;
 
 function asSearchParams(input: URLSearchParams | string): URLSearchParams {
-  if (input instanceof URLSearchParams) {
-    return new URLSearchParams(input);
-  }
-
+  if (input instanceof URLSearchParams) return new URLSearchParams(input);
   const value = input.trim();
   if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) {
     try {
@@ -47,7 +49,7 @@ function asSearchParams(input: URLSearchParams | string): URLSearchParams {
 
 function parseCsv(
   value: string | null,
-  isValid: (candidate: string) => boolean,
+  isValid: (candidate: string) => boolean = (candidate) => SAFE_FILTER_PATTERN.test(candidate),
 ): string[] {
   if (!value) return [];
   const seen = new Set<string>();
@@ -68,13 +70,17 @@ function parseNumber(value: string | null): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseBoolean(value: string | null): boolean | undefined {
+  if (value === "1") return true;
+  if (value === "0") return false;
+  return undefined;
+}
+
 function parseViewport(params: URLSearchParams): ExchangeViewport | undefined {
   const longitude = parseNumber(params.get("lng"));
   const latitude = parseNumber(params.get("lat"));
   const zoom = parseNumber(params.get("z"));
-  if (longitude === undefined || latitude === undefined || zoom === undefined) {
-    return undefined;
-  }
+  if (longitude === undefined || latitude === undefined || zoom === undefined) return undefined;
 
   const bearing = parseNumber(params.get("b"));
   const pitch = parseNumber(params.get("p"));
@@ -87,6 +93,29 @@ function parseViewport(params: URLSearchParams): ExchangeViewport | undefined {
   });
 }
 
+function parseOpportunityLocation(params: URLSearchParams) {
+  const label = params.get("place")?.slice(0, 240);
+  const latitude = parseNumber(params.get("placeLat"));
+  const longitude = parseNumber(params.get("placeLng"));
+  const radiusMiles = parseNumber(params.get("radius"));
+  const includeRemote = parseBoolean(params.get("includeRemote"));
+  const west = parseNumber(params.get("west"));
+  const south = parseNumber(params.get("south"));
+  const east = parseNumber(params.get("east"));
+  const north = parseNumber(params.get("north"));
+  const bounds = [west, south, east, north].every((value) => value !== undefined)
+    ? { west: west as number, south: south as number, east: east as number, north: north as number }
+    : undefined;
+  return normalizeOpportunityLocation({
+    ...(label ? { label } : {}),
+    ...(latitude !== undefined ? { latitude } : {}),
+    ...(longitude !== undefined ? { longitude } : {}),
+    ...(radiusMiles !== undefined ? { radiusMiles } : {}),
+    ...(bounds ? { bounds } : {}),
+    ...(includeRemote !== undefined ? { includeRemote } : {}),
+  });
+}
+
 function parseSelection(
   params: URLSearchParams,
   view: ExchangeUrlState["view"],
@@ -94,15 +123,11 @@ function parseSelection(
   const entityType = params.get("entity");
   const entityId = params.get("selected") ?? "";
   if (
-    !["rfx", "territory", "referral", "relationship", "industry"].includes(
-      entityType ?? "",
-    )
+    !["rfx", "territory", "referral", "relationship", "industry"].includes(entityType ?? "")
     || entityId.length === 0
     || entityId.length > MAX_ENTITY_ID_LENGTH
     || /[\u0000-\u001f\u007f]/.test(entityId)
-  ) {
-    return null;
-  }
+  ) return null;
   const allowedForView = view === "opportunities"
     ? entityType === "rfx" || entityType === "territory"
     : view === "connections" || view === "referrals"
@@ -124,10 +149,28 @@ export function createDefaultExchangeUrlState(): ExchangeUrlState {
     selection: null,
     searchQuery: "",
     naicsFilters: [],
+    industryFilters: [],
+    capabilityFilters: [],
     territoryFilters: [],
     rfxStatusFilters: [],
     territoryStatusFilters: [],
+    opportunityTypeFilters: [],
+    rfxTypeFilters: [],
+    buyerTypeFilters: [],
+    workArrangementFilters: [],
+    visibilityFilters: [],
+    certificationFilters: [],
+    setAsideFilters: [],
+    primeClassificationFilters: [],
+    awardClassificationFilters: [],
+    personalizedFilters: [],
     localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+    closingSoon: false,
+    teamingSuitable: false,
+    budgetMin: undefined,
+    budgetMax: undefined,
+    opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
+    opportunityLocation: undefined,
     connectionMode: DEFAULT_EXCHANGE_CONNECTION_MODE,
     referralStatusFilters: [],
     connectionIndustryFilters: [],
@@ -148,64 +191,51 @@ export function parseExchangeUrlState(
 
   const view = params.get("view");
   if (isExchangeView(view)) state.view = view;
-
   const mode = params.get("mode");
   if (isExchangeSurfaceMode(mode)) state.surfaceMode = mode;
-
   const query = params.get("q");
-  if (query !== null && query.length <= MAX_SEARCH_LENGTH) {
-    state.searchQuery = query;
-  }
+  if (query !== null && query.length <= MAX_SEARCH_LENGTH) state.searchQuery = query;
 
-  state.territoryFilters = parseCsv(
-    params.get("territory"),
-    (candidate) => TERRITORY_PATTERN.test(candidate),
-  );
-  state.naicsFilters = parseCsv(
-    params.get("naics"),
-    (candidate) => NAICS_PATTERN.test(candidate),
-  );
-  state.rfxStatusFilters = parseCsv(
-    params.get("rfxStatus"),
-    isExchangeRfxStatus,
-  ).filter(isExchangeRfxStatus);
-  state.territoryStatusFilters = parseCsv(
-    params.get("territoryStatus"),
-    isExchangeTerritoryStatus,
-  ).filter(isExchangeTerritoryStatus);
+  state.territoryFilters = parseCsv(params.get("territory"));
+  state.naicsFilters = parseCsv(params.get("naics"), (candidate) => NAICS_PATTERN.test(candidate));
+  state.industryFilters = parseCsv(params.get("industryFilter"));
+  state.capabilityFilters = parseCsv(params.get("capability"));
+  state.rfxStatusFilters = parseCsv(params.get("rfxStatus"), isExchangeRfxStatus).filter(isExchangeRfxStatus);
+  state.territoryStatusFilters = parseCsv(params.get("territoryStatus"), isExchangeTerritoryStatus).filter(isExchangeTerritoryStatus);
+  state.opportunityTypeFilters = parseCsv(params.get("opportunityType"));
+  state.rfxTypeFilters = parseCsv(params.get("rfxType"));
+  state.buyerTypeFilters = parseCsv(params.get("buyerType"));
+  state.workArrangementFilters = parseCsv(params.get("work"));
+  state.visibilityFilters = parseCsv(params.get("visibility"));
+  state.certificationFilters = parseCsv(params.get("certification"));
+  state.setAsideFilters = parseCsv(params.get("setAside"));
+  state.primeClassificationFilters = parseCsv(params.get("prime"));
+  state.awardClassificationFilters = parseCsv(params.get("award"));
+  state.personalizedFilters = parseCsv(params.get("personalized"), isExchangePersonalizedFilter)
+    .filter(isExchangePersonalizedFilter);
 
-  const local = params.get("local");
-  if (local === "0") state.localFirst = false;
-  if (local === "1") state.localFirst = true;
+  const local = parseBoolean(params.get("local"));
+  if (local !== undefined) state.localFirst = local;
+  state.closingSoon = parseBoolean(params.get("closingSoon")) ?? false;
+  state.teamingSuitable = parseBoolean(params.get("teaming")) ?? false;
+  state.budgetMin = parseNumber(params.get("budgetMin"));
+  state.budgetMax = parseNumber(params.get("budgetMax"));
+  const sort = params.get("sort");
+  if (isExchangeOpportunitySort(sort)) state.opportunitySort = sort;
+  state.opportunityLocation = parseOpportunityLocation(params);
 
   const connectionMode = params.get("connectionMode");
-  if (isExchangeConnectionMode(connectionMode)) {
-    state.connectionMode = connectionMode;
-  }
-  state.referralStatusFilters = parseCsv(
-    params.get("referralStatus"),
-    isExchangeReferralStatus,
-  ).filter(isExchangeReferralStatus);
-  state.connectionIndustryFilters = parseCsv(
-    params.get("industry"),
-    (candidate) => INDUSTRY_PATTERN.test(candidate),
-  );
-  state.connectionTerritoryFilters = parseCsv(
-    params.get("connectionTerritory"),
-    (candidate) => TERRITORY_PATTERN.test(candidate),
-  );
+  if (isExchangeConnectionMode(connectionMode)) state.connectionMode = connectionMode;
+  state.referralStatusFilters = parseCsv(params.get("referralStatus"), isExchangeReferralStatus)
+    .filter(isExchangeReferralStatus);
+  state.connectionIndustryFilters = parseCsv(params.get("industry"));
+  state.connectionTerritoryFilters = parseCsv(params.get("connectionTerritory"));
   const compensation = params.get("compensation");
-  if (isExchangeCompensationFilter(compensation)) {
-    state.compensationFilter = compensation;
-  }
+  if (isExchangeCompensationFilter(compensation)) state.compensationFilter = compensation;
   const relationship = params.get("relationship");
-  if (isExchangeRelationshipFilter(relationship)) {
-    state.relationshipFilter = relationship;
-  }
+  if (isExchangeRelationshipFilter(relationship)) state.relationshipFilter = relationship;
   const metric = params.get("metric");
-  if (isExchangeIntelligenceMetric(metric)) {
-    state.intelligenceMetric = metric;
-  }
+  if (isExchangeIntelligenceMetric(metric)) state.intelligenceMetric = metric;
 
   state.selection = parseSelection(params, state.view);
   state.viewport = parseViewport(params);
@@ -224,6 +254,10 @@ function serializeCsv(
   if (values.length > 0) params.set(name, values.join(","));
 }
 
+function serializeNumber(params: URLSearchParams, name: string, value?: number): void {
+  if (value !== undefined && Number.isFinite(value)) params.set(name, stableNumber(value));
+}
+
 /**
  * Serializes only the explicit public interaction-state allowlist above.
  * Fetched documents, user identity, auth state, panel state, and arbitrary
@@ -235,36 +269,53 @@ export function serializeExchangeUrlState(
   const params = new URLSearchParams();
 
   if (state.view !== DEFAULT_EXCHANGE_VIEW) params.set("view", state.view);
-  if (state.surfaceMode !== DEFAULT_EXCHANGE_SURFACE_MODE) {
-    params.set("mode", state.surfaceMode);
-  }
+  if (state.surfaceMode !== DEFAULT_EXCHANGE_SURFACE_MODE) params.set("mode", state.surfaceMode);
   if (state.searchQuery) params.set("q", state.searchQuery.slice(0, MAX_SEARCH_LENGTH));
   serializeCsv(params, "territory", state.territoryFilters);
   serializeCsv(params, "naics", state.naicsFilters);
+  serializeCsv(params, "industryFilter", state.industryFilters);
+  serializeCsv(params, "capability", state.capabilityFilters);
   serializeCsv(params, "rfxStatus", state.rfxStatusFilters);
   serializeCsv(params, "territoryStatus", state.territoryStatusFilters);
-  if (state.localFirst !== DEFAULT_EXCHANGE_LOCAL_FIRST) {
-    params.set("local", state.localFirst ? "1" : "0");
+  serializeCsv(params, "opportunityType", state.opportunityTypeFilters);
+  serializeCsv(params, "rfxType", state.rfxTypeFilters);
+  serializeCsv(params, "buyerType", state.buyerTypeFilters);
+  serializeCsv(params, "work", state.workArrangementFilters);
+  serializeCsv(params, "visibility", state.visibilityFilters);
+  serializeCsv(params, "certification", state.certificationFilters);
+  serializeCsv(params, "setAside", state.setAsideFilters);
+  serializeCsv(params, "prime", state.primeClassificationFilters);
+  serializeCsv(params, "award", state.awardClassificationFilters);
+  serializeCsv(params, "personalized", state.personalizedFilters);
+  if (state.localFirst !== DEFAULT_EXCHANGE_LOCAL_FIRST) params.set("local", state.localFirst ? "1" : "0");
+  if (state.closingSoon) params.set("closingSoon", "1");
+  if (state.teamingSuitable) params.set("teaming", "1");
+  serializeNumber(params, "budgetMin", state.budgetMin);
+  serializeNumber(params, "budgetMax", state.budgetMax);
+  if (state.opportunitySort !== DEFAULT_EXCHANGE_OPPORTUNITY_SORT) params.set("sort", state.opportunitySort);
+
+  const location = normalizeOpportunityLocation(state.opportunityLocation);
+  if (location) {
+    if (location.label) params.set("place", location.label);
+    serializeNumber(params, "placeLat", location.latitude);
+    serializeNumber(params, "placeLng", location.longitude);
+    serializeNumber(params, "radius", location.radiusMiles);
+    if (location.includeRemote === false) params.set("includeRemote", "0");
+    if (location.bounds) {
+      serializeNumber(params, "west", location.bounds.west);
+      serializeNumber(params, "south", location.bounds.south);
+      serializeNumber(params, "east", location.bounds.east);
+      serializeNumber(params, "north", location.bounds.north);
+    }
   }
-  if (state.connectionMode !== DEFAULT_EXCHANGE_CONNECTION_MODE) {
-    params.set("connectionMode", state.connectionMode);
-  }
+
+  if (state.connectionMode !== DEFAULT_EXCHANGE_CONNECTION_MODE) params.set("connectionMode", state.connectionMode);
   serializeCsv(params, "referralStatus", state.referralStatusFilters);
   serializeCsv(params, "industry", state.connectionIndustryFilters);
-  serializeCsv(
-    params,
-    "connectionTerritory",
-    state.connectionTerritoryFilters,
-  );
-  if (state.compensationFilter !== DEFAULT_EXCHANGE_COMPENSATION_FILTER) {
-    params.set("compensation", state.compensationFilter);
-  }
-  if (state.relationshipFilter !== DEFAULT_EXCHANGE_RELATIONSHIP_FILTER) {
-    params.set("relationship", state.relationshipFilter);
-  }
-  if (state.intelligenceMetric !== DEFAULT_EXCHANGE_INTELLIGENCE_METRIC) {
-    params.set("metric", state.intelligenceMetric);
-  }
+  serializeCsv(params, "connectionTerritory", state.connectionTerritoryFilters);
+  if (state.compensationFilter !== DEFAULT_EXCHANGE_COMPENSATION_FILTER) params.set("compensation", state.compensationFilter);
+  if (state.relationshipFilter !== DEFAULT_EXCHANGE_RELATIONSHIP_FILTER) params.set("relationship", state.relationshipFilter);
+  if (state.intelligenceMetric !== DEFAULT_EXCHANGE_INTELLIGENCE_METRIC) params.set("metric", state.intelligenceMetric);
 
   if (state.selection) {
     params.set("entity", state.selection.entityType);
@@ -276,12 +327,8 @@ export function serializeExchangeUrlState(
     params.set("lng", stableNumber(viewport.longitude));
     params.set("lat", stableNumber(viewport.latitude));
     params.set("z", stableNumber(viewport.zoom));
-    if (viewport.bearing !== undefined && viewport.bearing !== 0) {
-      params.set("b", stableNumber(viewport.bearing));
-    }
-    if (viewport.pitch !== undefined && viewport.pitch !== 0) {
-      params.set("p", stableNumber(viewport.pitch));
-    }
+    if (viewport.bearing !== undefined && viewport.bearing !== 0) params.set("b", stableNumber(viewport.bearing));
+    if (viewport.pitch !== undefined && viewport.pitch !== 0) params.set("p", stableNumber(viewport.pitch));
   }
 
   return params;
