@@ -1,4 +1,4 @@
-import { BookOpenText, BriefcaseBusiness, ChartNoAxesCombined, Handshake, MapPinned, Users } from "lucide-react";
+import { BookOpenText, ChartNoAxesCombined, Handshake, MapPinned } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ExchangeView } from "../state/exchangeWorkspaceTypes";
 
@@ -7,12 +7,10 @@ const VIEWS: Array<{
   label: string;
   icon: typeof MapPinned;
 }> = [
-  { view: "businesses", label: "Businesses", icon: BriefcaseBusiness },
-  { view: "opportunities", label: "Opportunities", icon: MapPinned },
-  { view: "referrals", label: "Referrals", icon: Handshake },
-  { view: "teaming", label: "Teaming", icon: Users },
-  { view: "resources", label: "Resources", icon: BookOpenText },
   { view: "intelligence", label: "Intelligence", icon: ChartNoAxesCombined },
+  { view: "referrals", label: "Referrals", icon: Handshake },
+  { view: "opportunities", label: "Opportunities", icon: MapPinned },
+  { view: "resources", label: "Resources", icon: BookOpenText },
 ];
 
 export function ExchangeViewTabs({
@@ -24,7 +22,7 @@ export function ExchangeViewTabs({
 }) {
   return (
     <nav
-      className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900 p-1 [scrollbar-width:none]"
+      className="hidden min-w-0 items-center gap-1 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900 p-1 [scrollbar-width:none] lg:flex"
       aria-label="Exchange views"
     >
       {VIEWS.map(({ view: candidate, label, icon: Icon }) => (
@@ -34,7 +32,7 @@ export function ExchangeViewTabs({
           onClick={() => onChange(candidate)}
           aria-current={view === candidate ? "page" : undefined}
           className={cn(
-            "inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400 sm:min-h-9",
+            "inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400",
             view === candidate
               ? "bg-white text-slate-950 shadow-sm"
               : "text-slate-300 hover:bg-slate-800 hover:text-white",
