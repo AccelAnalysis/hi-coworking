@@ -61,6 +61,13 @@ describe("uniform Exchange workspace contract", () => {
     expect(commandBar).not.toContain('opportunityOverlay ? "hidden"');
   });
 
+  it("keeps the Opportunity fit-results action below the mobile 2D/3D switch", () => {
+    const toolbar = read("apps/web/src/features/exchange/components/ExchangeMobileToolbar.tsx");
+    expect(toolbar).toContain('data-exchange-map-control="fit-results"');
+    expect(toolbar).toContain("top-[5.75rem]");
+    expect(toolbar).not.toContain("justify-between");
+  });
+
   it("keeps the Opportunity map mounted while list results expand in the mobile drawer", () => {
     const opportunities = read("apps/web/src/features/exchange/views/ExchangeOpportunitiesView.tsx");
     expect(opportunities).toContain('className="absolute inset-0 h-full min-h-0 w-full border-0"');
