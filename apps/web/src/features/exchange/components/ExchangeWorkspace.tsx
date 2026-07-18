@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { ConnectionsWorkspace } from "../connections/ConnectionsWorkspace";
 import {
   createLiveExchangeRun3Gateway,
@@ -168,24 +169,43 @@ export function ExchangeWorkspace() {
     onViewChange,
   };
   const mobileMapVisible = activeView !== "opportunities" && state.surfaceMode !== "list";
+  const contextMapView = activeView === "opportunities" ? null : activeView;
+  const activeContent = activeView === "opportunities" ? (
+    <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
+  ) : activeView === "referrals" ? (
+    <ConnectionsWorkspace {...shared} gateway={gateway} />
+  ) : activeView === "intelligence" ? (
+    <IntelligenceWorkspace {...shared} gateway={gateway} />
+  ) : (
+    <ExchangeResourcesView {...shared} demoMode={demoMode} />
+  );
 
   return (
     <div className="fixed inset-0 z-[60] flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-100 lg:relative lg:inset-auto lg:z-auto lg:h-full">
       {demoMode ? <ExchangeDemoBanner /> : null}
       <div className="relative min-h-0 flex-1 pb-[4.75rem] lg:pb-0">
-        {activeView === "opportunities" ? (
-          <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
-        ) : activeView === "referrals" ? (
-          <ConnectionsWorkspace {...shared} gateway={gateway} />
-        ) : activeView === "intelligence" ? (
-          <IntelligenceWorkspace {...shared} gateway={gateway} />
-        ) : (
-          <ExchangeResourcesView {...shared} demoMode={demoMode} />
-        )}
+        {contextMapView ? (
+          <div className="absolute inset-0 z-0 hidden lg:block">
+            <ExchangeContextMap view={contextMapView} demoMode={demoMode} className="absolute inset-0 h-full min-h-0 w-full border-0" />
+          </div>
+        ) : null}
 
-        {mobileMapVisible ? (
+        <div className={cn(
+          "relative z-10 h-full min-h-0",
+          contextMapView && [
+            "lg:[&>div]:bg-transparent",
+            "lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/68 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl",
+            "lg:[&_main]:bg-white/24 lg:[&_main]:backdrop-blur-sm",
+            "lg:[_.bg-white]:bg-white/62 lg:[_.bg-slate-50]:bg-white/42 lg:[_.bg-slate-100]:bg-white/28",
+            "lg:[_.border-slate-200]:border-white/60",
+          ],
+        )}>
+          {activeContent}
+        </div>
+
+        {mobileMapVisible && contextMapView ? (
           <div className="absolute inset-x-0 bottom-0 top-[4.25rem] z-20 lg:hidden">
-            <ExchangeContextMap view={activeView} demoMode={demoMode} />
+            <ExchangeContextMap view={contextMapView} demoMode={demoMode} />
           </div>
         ) : null}
       </div>
