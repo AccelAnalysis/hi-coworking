@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 import type { ExchangeSelection } from "../state/exchangeWorkspaceTypes";
 import { ExchangeRfxCard } from "./ExchangeRfxCard";
 import { ExchangeTerritoryCard } from "./ExchangeTerritoryCard";
+
+const COMPACT_BATCH = 12;
+const STANDARD_BATCH = 24;
 
 export function ExchangeResultsList({
   rfx,
@@ -22,7 +25,9 @@ export function ExchangeResultsList({
   onSelect: (selection: Exclude<ExchangeSelection, null>) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [visibleLimit, setVisibleLimit] = useState(compact ? 40 : 60);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const batchSize = compact ? COMPACT_BATCH : STANDARD_BATCH;
+  const [visibleLimit, setVisibleLimit] = useState(batchSize);
   const selectedRfxIndex = selection?.entityType === "rfx"
     ? rfx.findIndex((record) => record.id === selection.entityId)
     : -1;
@@ -36,6 +41,11 @@ export function ExchangeResultsList({
   );
   const totalCount = rfx.length + territories.length;
   const visibleCount = visibleRfx.length + visibleTerritories.length;
+  const hasMore = visibleCount < totalCount;
+
+  useEffect(() => {
+    setVisibleLimit(batchSize);
+  }, [batchSize, rfx.length, territories.length]);
 
   useEffect(() => {
     if (!selection || !containerRef.current) return;
@@ -47,6 +57,24 @@ export function ExchangeResultsList({
     const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     selected?.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
   }, [selection]);
+
+  const loadMore = useCallback(() => {
+    setVisibleLimit((current) => Math.min(totalCount, current + batchSize));
+  }, [batchSize, totalCount]);
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = containerRef.current;
+    if (!sentinel || !root || !hasMore || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMore();
+      },
+      { root, rootMargin: "240px 0px", threshold: 0.01 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
 
   return (
     <div ref={containerRef} className="h-full overflow-y-auto overscroll-contain px-3 py-3" aria-label="Exchange results">
@@ -95,15 +123,25 @@ export function ExchangeResultsList({
         </section>
       ) : null}
 
-      {visibleCount < totalCount ? (
-        <button
-          type="button"
-          onClick={() => setVisibleLimit((current) => Math.min(totalCount, current + 60))}
-          className="mt-4 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-indigo-500"
-        >
-          Show more results ({totalCount - visibleCount} remaining)
-        </button>
+      {!totalCount ? (
+        <div className="flex min-h-40 items-center justify-center rounded-2xl border border-dashed border-white/80 bg-white/45 px-6 text-center text-sm font-semibold text-slate-600 backdrop-blur-xl">
+          No results match the current search and filters.
+        </div>
       ) : null}
+
+      <div ref={sentinelRef} className="flex min-h-12 items-center justify-center" aria-live="polite">
+        {hasMore ? (
+          <button
+            type="button"
+            onClick={loadMore}
+            className="min-h-10 rounded-xl border border-white/80 bg-white/65 px-4 text-xs font-black text-slate-700 shadow-sm backdrop-blur-xl outline-none hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            Loading more results…
+          </button>
+        ) : totalCount ? (
+          <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">All results loaded</span>
+        ) : null}
+      </div>
     </div>
   );
 }
