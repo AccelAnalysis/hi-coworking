@@ -40,7 +40,7 @@ describe("AppShell contract", () => {
   it("uses workspace mode on the canonical Exchange and redirects legacy product routes into its views", () => {
     expect(source("apps/web/src/app/exchange/page.tsx")).toContain('variant="workspace"');
     expect(source("apps/web/src/app/rfx/page.tsx")).toContain('redirect("/exchange?view=opportunities")');
-    expect(source("apps/web/src/app/directory/page.tsx")).toContain('redirect("/exchange?view=businesses")');
+    expect(source("apps/web/src/app/directory/page.tsx")).toContain('redirect("/exchange?view=opportunities")');
     expect(source("apps/web/src/app/referrals/page.tsx")).toContain('redirect("/exchange?view=referrals")');
   });
 });
