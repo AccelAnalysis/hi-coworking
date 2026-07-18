@@ -6,6 +6,7 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ConnectionsWorkspace } from "../connections/ConnectionsWorkspace";
@@ -34,9 +35,16 @@ import {
 import { ExchangeOpportunitiesView } from "../views/ExchangeOpportunitiesView";
 import { ExchangeDomainLayerView } from "../views/ExchangeDomainLayerView";
 import type { ExchangeHistoryMode } from "../views/exchangeViewTypes";
+import { ExchangeMobileNavigation } from "./ExchangeMobileNavigation";
 
 function exchangeUrl(query: string): string {
   return query ? `/exchange?${query}` : "/exchange";
+}
+
+function canonicalExchangeView(view: ExchangeView): ExchangeView {
+  if (view === "connections") return "referrals";
+  if (view === "businesses" || view === "teaming") return "opportunities";
+  return view;
 }
 
 export function ExchangeWorkspace() {
@@ -51,6 +59,7 @@ export function ExchangeWorkspace() {
       exchangeWorkspaceActions.hydrateFromUrl(parseExchangeUrlState(query)),
     ),
   );
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const stateRef = useRef<ExchangeWorkspaceState>(state);
   const selfWrittenQueriesRef = useRef<Set<string>>(new Set());
   const browserHistoryNavigationRef = useRef(false);
@@ -60,6 +69,7 @@ export function ExchangeWorkspace() {
     () => demoMode ? getExchangeDemoGateway() : createLiveExchangeRun3Gateway(),
     [demoMode],
   );
+  const activeView = canonicalExchangeView(state.view);
 
   useEffect(() => {
     stateRef.current = state;
@@ -101,6 +111,11 @@ export function ExchangeWorkspace() {
   }, [writeUrl]);
 
   useEffect(() => {
+    if (activeView === state.view) return;
+    applyAction(exchangeWorkspaceActions.setView(activeView), "replace");
+  }, [activeView, applyAction, state.view]);
+
+  useEffect(() => {
     const fromBrowserHistory = browserHistoryNavigationRef.current;
     browserHistoryNavigationRef.current = false;
     if (!fromBrowserHistory && selfWrittenQueriesRef.current.delete(currentQuery)) {
@@ -134,30 +149,39 @@ export function ExchangeWorkspace() {
   }, []);
 
   const onViewChange = useCallback((view: ExchangeView) => {
-    applyAction(exchangeWorkspaceActions.setView(view), "push");
+    setMobileMenuOpen(false);
+    applyAction(exchangeWorkspaceActions.setView(canonicalExchangeView(view)), "push");
   }, [applyAction]);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
   const shared = {
-    state,
+    state: activeView === state.view ? state : { ...state, view: activeView },
     applyAction,
     scheduleUrlReplace,
     onViewChange,
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
+    <div className="fixed inset-0 z-[60] flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-100 lg:relative lg:inset-auto lg:z-auto lg:h-full">
       {demoMode ? <ExchangeDemoBanner /> : null}
-      <div className="min-h-0 flex-1">
-        {state.view === "opportunities" ? (
+      <div className="min-h-0 flex-1 pb-[4.75rem] lg:pb-0">
+        {activeView === "opportunities" ? (
           <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
-        ) : state.view === "connections" || state.view === "referrals" ? (
+        ) : activeView === "referrals" ? (
           <ConnectionsWorkspace {...shared} gateway={gateway} />
-        ) : state.view === "intelligence" ? (
+        ) : activeView === "intelligence" ? (
           <IntelligenceWorkspace {...shared} gateway={gateway} />
         ) : (
-          <ExchangeDomainLayerView view={state.view} onViewChange={onViewChange} />
+          <ExchangeDomainLayerView view="resources" onViewChange={onViewChange} />
         )}
       </div>
+      <ExchangeMobileNavigation
+        view={activeView}
+        menuOpen={mobileMenuOpen}
+        onChange={onViewChange}
+        onMenuOpen={() => setMobileMenuOpen(true)}
+        onMenuClose={closeMobileMenu}
+      />
     </div>
   );
 }
