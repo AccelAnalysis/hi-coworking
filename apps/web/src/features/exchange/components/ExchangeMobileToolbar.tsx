@@ -10,6 +10,10 @@ export function ExchangeMobileToolbar({
   resultCount: number;
   mapVisible: boolean;
   onFitResults: () => void;
+  /** Retained temporarily for call-site compatibility; filters live in the shared command bar. */
+  activeFilterCount?: number;
+  filtersOpen?: boolean;
+  onOpenFilters?: () => void;
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-3 top-3 z-30 flex items-start justify-between lg:hidden">
