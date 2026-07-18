@@ -8,7 +8,12 @@ import {
   rfx_savedSearch_upsert,
   rfx_setSaved,
 } from "./opportunityDiscovery";
+import {
+  ensureOpportunityProjection,
+  fallbackOpportunityDiscovery,
+} from "./opportunityDiscoveryFallback";
 
+type RecordData = Record<string, unknown>;
 type RunnableCallable = {
   run: (request: CallableRequest<unknown>) => Promise<unknown>;
 };
@@ -39,6 +44,18 @@ function runnable(value: unknown): RunnableCallable {
   return candidate as RunnableCallable;
 }
 
+function record(value: unknown): RecordData {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as RecordData
+    : {};
+}
+
+async function ensurePayloadProjection(payload: unknown): Promise<void> {
+  const rfxId = record(payload).rfxId;
+  if (typeof rfxId !== "string" || !rfxId) return;
+  await ensureOpportunityProjection(rfxId);
+}
+
 /**
  * Compatibility gateway used by the already-exported rfx_listManaged callable.
  * This avoids adding a second public endpoint during the branch rollout while
@@ -47,9 +64,7 @@ function runnable(value: unknown): RunnableCallable {
 export async function handleOpportunityDiscoveryGateway(
   request: CallableRequest<unknown>,
 ): Promise<unknown> {
-  const data = request.data && typeof request.data === "object" && !Array.isArray(request.data)
-    ? request.data as Record<string, unknown>
-    : {};
+  const data = record(request.data);
   const operation = data.operation;
   const payload = data.payload ?? {};
   const delegatedRequest = {
@@ -58,11 +73,17 @@ export async function handleOpportunityDiscoveryGateway(
   } as CallableRequest<unknown>;
 
   switch (operation) {
-    case "discover":
-      return runnable(rfx_discover).run(delegatedRequest);
+    case "discover": {
+      const primary = record(await runnable(rfx_discover).run(delegatedRequest));
+      const records = Array.isArray(primary.records) ? primary.records : [];
+      if (records.length > 0 || primary.nextCursor) return primary;
+      return fallbackOpportunityDiscovery(request, payload);
+    }
     case "setSaved":
+      await ensurePayloadProjection(payload);
       return runnable(rfx_setSaved).run(delegatedRequest);
     case "markViewed":
+      await ensurePayloadProjection(payload);
       return runnable(rfx_markViewed).run(delegatedRequest);
     case "savedSearchUpsert":
       return runnable(rfx_savedSearch_upsert).run(delegatedRequest);
