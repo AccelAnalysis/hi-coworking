@@ -141,13 +141,7 @@ export function ExchangeOpportunitiesView({
     [allTerritories, filterState, releasedFips, rfx],
   );
   const manageableSet = useMemo(() => new Set(manageableRfxIds), [manageableRfxIds]);
-
-  const mapAvailable = Boolean(process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN);
-  useEffect(() => {
-    if (!mapAvailable && stateRef.current.surfaceMode !== "list") {
-      applyAction(exchangeWorkspaceActions.setSurfaceMode("list"), "replace");
-    }
-  }, [applyAction, mapAvailable]);
+  const mapAvailable = true;
 
   useEffect(() => {
     if (splitSupported === false && stateRef.current.surfaceMode === "split") {
@@ -226,11 +220,9 @@ export function ExchangeOpportunitiesView({
     : undefined;
   const detailTitle = selectedRfx?.title || selectedTerritory?.name || "Selected Exchange record";
 
-  const effectiveMode: ExchangeSurfaceMode = !mapAvailable
-    ? "list"
-    : splitSupported !== true && state.surfaceMode === "split"
-      ? "map"
-      : state.surfaceMode;
+  const effectiveMode: ExchangeSurfaceMode = splitSupported !== true && state.surfaceMode === "split"
+    ? "map"
+    : state.surfaceMode;
   const hasGeocodedRfx = filtered.rfx.some((record) =>
     isValidLatitude(record.geo?.lat) && isValidLongitude(record.geo?.lng));
 
@@ -350,29 +342,25 @@ export function ExchangeOpportunitiesView({
               effectiveMode === "list" && "pointer-events-none invisible absolute inset-0",
               effectiveMode === "split" && "relative",
             )}>
-              {mapAvailable ? (
-                <ExchangeMap
-                  key={mapRetryKey}
-                  rfxList={filtered.rfx}
-                  releasedTerritories={filtered.releasedTerritories}
-                  scheduledTerritories={filtered.scheduledTerritories}
-                  selection={opportunitySelection}
-                  initialViewport={state.viewport ?? DEFAULT_EXCHANGE_MAP_VIEWPORT}
-                  viewport={state.viewport}
-                  fitRequest={fitRequest}
-                  resizeSignal={`${state.leftPanelCollapsed}:${state.rightPanelOpen}:${state.mobileFilterOpen}:${state.mobileDetailOpen}:${effectiveMode}`}
-                  className="h-full min-h-0 w-full border-0"
-                  onSelect={(selection) => {
-                    if (selection) selectEntity(selection);
-                  }}
-                  onBackgroundClick={clearSelection}
-                  onViewportChange={handleViewportChange}
-                  onStatusChange={handleMapStatus}
-                  onRetry={retryMap}
-                />
-              ) : (
-                <ExchangeStateView kind="token-missing" />
-              )}
+              <ExchangeMap
+                key={mapRetryKey}
+                rfxList={filtered.rfx}
+                releasedTerritories={filtered.releasedTerritories}
+                scheduledTerritories={filtered.scheduledTerritories}
+                selection={opportunitySelection}
+                initialViewport={state.viewport ?? DEFAULT_EXCHANGE_MAP_VIEWPORT}
+                viewport={state.viewport}
+                fitRequest={fitRequest}
+                resizeSignal={`${state.leftPanelCollapsed}:${state.rightPanelOpen}:${state.mobileFilterOpen}:${state.mobileDetailOpen}:${effectiveMode}`}
+                className="h-full min-h-0 w-full border-0"
+                onSelect={(selection) => {
+                  if (selection) selectEntity(selection);
+                }}
+                onBackgroundClick={clearSelection}
+                onViewportChange={handleViewportChange}
+                onStatusChange={handleMapStatus}
+                onRetry={retryMap}
+              />
               <button
                 type="button"
                 onClick={() => setFitRequest((value) => value + 1)}
@@ -382,7 +370,7 @@ export function ExchangeOpportunitiesView({
               </button>
               {filtered.rfx.length > 0 && !hasGeocodedRfx ? (
                 <div className="absolute inset-x-3 bottom-8 z-10 mx-auto max-w-lg rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-center text-xs font-semibold text-amber-900 shadow-lg backdrop-blur" role="status">
-                  Matching RFx have no map coordinates. Switch to list view to inspect them.
+                  Matching opportunities have no map coordinates. Switch to list view to inspect them.
                 </div>
               ) : null}
               <ExchangeMobileToolbar
@@ -401,11 +389,7 @@ export function ExchangeOpportunitiesView({
                 effectiveMode === "list" && "absolute inset-0",
                 effectiveMode === "split" && "relative border-l border-slate-200",
               )}>
-                {!mapAvailable ? (
-                  <div className="border-b border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900" role="status">
-                    Map view is unavailable. List view works without <code>NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN</code>.
-                  </div>
-                ) : mapStatus === "error" ? (
+                {mapStatus === "error" ? (
                   <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900" role="alert">
                     <span>Map load failed. Results remain available here.</span>
                     <button type="button" onClick={retryMap} className="min-h-9 rounded-lg border border-amber-300 bg-white px-3 outline-none focus-visible:ring-2 focus-visible:ring-amber-700">Retry map</button>
