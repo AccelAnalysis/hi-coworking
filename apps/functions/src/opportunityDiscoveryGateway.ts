@@ -12,6 +12,7 @@ import {
   ensureOpportunityProjection,
   fallbackOpportunityDiscovery,
 } from "./opportunityDiscoveryFallback";
+import { applyOpportunityPersonalization } from "./opportunityPersonalization";
 
 type RecordData = Record<string, unknown>;
 type RunnableCallable = {
@@ -56,6 +57,36 @@ async function ensurePayloadProjection(payload: unknown): Promise<void> {
   await ensureOpportunityProjection(rfxId);
 }
 
+function expandPersonalizedPage(payload: unknown): unknown {
+  const input = record(payload);
+  const filters = record(input.filters);
+  const personalized = Array.isArray(filters.personalized)
+    ? filters.personalized
+    : [];
+  if (!personalized.length) return payload;
+  const requestedSize = typeof input.pageSize === "number" && Number.isFinite(input.pageSize)
+    ? input.pageSize
+    : 40;
+  return {
+    ...input,
+    pageSize: Math.min(100, Math.max(requestedSize, requestedSize * 3)),
+  };
+}
+
+function trimPersonalizedPage(payload: unknown, pageValue: unknown): RecordData {
+  const input = record(payload);
+  const page = record(pageValue);
+  const requestedSize = typeof input.pageSize === "number" && Number.isFinite(input.pageSize)
+    ? Math.max(1, Math.min(100, Math.trunc(input.pageSize)))
+    : 40;
+  const records = Array.isArray(page.records) ? page.records : [];
+  return {
+    ...page,
+    records: records.slice(0, requestedSize),
+    truncated: page.truncated === true || records.length > requestedSize,
+  };
+}
+
 /**
  * Compatibility gateway used by the already-exported rfx_listManaged callable.
  * This avoids adding a second public endpoint during the branch rollout while
@@ -74,10 +105,22 @@ export async function handleOpportunityDiscoveryGateway(
 
   switch (operation) {
     case "discover": {
-      const primary = record(await runnable(rfx_discover).run(delegatedRequest));
+      const expandedPayload = expandPersonalizedPage(payload);
+      const expandedRequest = {
+        ...request,
+        data: expandedPayload,
+      } as CallableRequest<unknown>;
+      const primary = record(await runnable(rfx_discover).run(expandedRequest));
       const records = Array.isArray(primary.records) ? primary.records : [];
-      if (records.length > 0 || primary.nextCursor) return primary;
-      return fallbackOpportunityDiscovery(request, payload);
+      const page = records.length > 0 || primary.nextCursor
+        ? primary
+        : await fallbackOpportunityDiscovery(request, expandedPayload);
+      const personalized = await applyOpportunityPersonalization(
+        request,
+        payload,
+        page,
+      );
+      return trimPersonalizedPage(payload, personalized);
     }
     case "setSaved":
       await ensurePayloadProjection(payload);
