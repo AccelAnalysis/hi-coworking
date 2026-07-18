@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 import "mapbox-gl/dist/mapbox-gl.css";
+import "./exchangeMapLayering.css";
 
 import { cn } from "@/lib/utils";
 import {
@@ -45,12 +46,82 @@ export interface ExchangeMapProps extends ExchangeMapCallbacks {
 
 export function ExchangeMap({
   accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN,
+  className = "h-full min-h-[360px] w-full",
+  ariaLabel = "Hi Exchange geographic workspace",
   ...props
 }: ExchangeMapProps) {
-  if (!accessToken) {
-    return <ExchangeLeafletMap {...props} />;
+  const normalizedToken = accessToken?.trim();
+
+  if (!normalizedToken) {
+    return (
+      <ExchangeLeafletFallback
+        {...props}
+        className={className}
+        ariaLabel={ariaLabel}
+        tokenState="missing"
+        message="Mapbox token not detected"
+      />
+    );
   }
-  return <ExchangeMapboxCanvas {...props} accessToken={accessToken} />;
+
+  if (!normalizedToken.startsWith("pk.")) {
+    return (
+      <ExchangeLeafletFallback
+        {...props}
+        className={className}
+        ariaLabel={ariaLabel}
+        tokenState="invalid"
+        message="Mapbox requires a public pk. token"
+      />
+    );
+  }
+
+  return (
+    <ExchangeMapboxCanvas
+      {...props}
+      className={className}
+      ariaLabel={ariaLabel}
+      accessToken={normalizedToken}
+    />
+  );
+}
+
+function ExchangeLeafletFallback({
+  className,
+  ariaLabel,
+  tokenState,
+  message,
+  ...props
+}: Omit<ExchangeMapProps, "accessToken"> & {
+  tokenState: "missing" | "invalid";
+  message: string;
+}) {
+  return (
+    <div
+      className={`${className ?? "h-full min-h-[360px] w-full"} exchange-map-root relative isolate overflow-hidden bg-slate-100`}
+      role="region"
+      aria-label={ariaLabel}
+      data-map-provider="leaflet-openstreetmap"
+      data-map-token-state={tokenState}
+    >
+      <ExchangeLeafletMap
+        {...props}
+        className="absolute inset-0 h-full min-h-0 w-full border-0"
+        ariaLabel={ariaLabel}
+      />
+      <div
+        className={cn(
+          "pointer-events-none absolute left-3 top-3 z-30 max-w-[calc(100%-5.5rem)] rounded-full border px-3 py-1.5 text-[10px] font-black shadow-lg backdrop-blur-xl",
+          tokenState === "missing"
+            ? "border-amber-200/80 bg-amber-50/88 text-amber-900"
+            : "border-red-200/80 bg-red-50/88 text-red-900",
+        )}
+        role="status"
+      >
+        OpenStreetMap fallback · {message}
+      </div>
+    </div>
+  );
 }
 
 function ExchangeMapboxCanvas({
@@ -106,16 +177,17 @@ function ExchangeMapboxCanvas({
 
   return (
     <div
-      className={`${className} relative overflow-hidden border border-white/40 bg-slate-100`}
+      className={`${className} exchange-map-root relative isolate z-0 overflow-hidden border border-white/40 bg-slate-100`}
       role="region"
       aria-label={ariaLabel}
       aria-busy={status === "initializing"}
       data-map-status={status}
       data-map-provider="mapbox"
+      data-map-token-state="configured"
       data-map-dimension={dimension}
     >
-      <div ref={containerRef} className="absolute inset-0" />
-      <div className="absolute right-3 top-3 z-20 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">
+      <div ref={containerRef} className="absolute inset-0 z-0" />
+      <div className="absolute right-3 top-3 z-30 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">
         {(["2d", "3d"] as const).map((candidate) => (
           <button
             key={candidate}
@@ -135,7 +207,7 @@ function ExchangeMapboxCanvas({
       </div>
       {status === "initializing" ? (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-100/55 text-sm font-semibold text-slate-700 backdrop-blur-sm"
+          className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-slate-100/55 text-sm font-semibold text-slate-700 backdrop-blur-sm"
           role="status"
         >
           Loading Mapbox…
@@ -143,7 +215,7 @@ function ExchangeMapboxCanvas({
       ) : null}
       {status === "error" ? (
         <div
-          className="absolute inset-0 flex items-center justify-center bg-slate-50/75 p-6 text-center backdrop-blur-md"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-slate-50/75 p-6 text-center backdrop-blur-md"
           role="alert"
         >
           <div className="max-w-md rounded-3xl border border-white/70 bg-white/80 p-6 shadow-2xl backdrop-blur-2xl">
@@ -151,6 +223,7 @@ function ExchangeMapboxCanvas({
             <p className="mt-1 text-sm text-slate-600">
               Verify the public token and its allowed URLs. The result list remains available.
             </p>
+            {error?.message ? <p className="mt-2 text-xs text-slate-500">{error.message}</p> : null}
             {onRetry ? (
               <button
                 type="button"
