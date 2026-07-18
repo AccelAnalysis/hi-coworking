@@ -149,7 +149,7 @@ export function ExchangeCommandBar({
         </Link>
 
         <label className={cn(
-          "order-first flex min-w-0 basis-full items-center rounded-xl border px-3 focus-within:ring-2 lg:order-none lg:basis-auto lg:flex-1 xl:max-w-2xl",
+          "order-first flex min-w-0 flex-1 basis-auto items-center rounded-xl border px-3 focus-within:ring-2 lg:order-none lg:basis-auto xl:max-w-2xl",
           "border-slate-200 bg-white shadow-lg focus-within:border-blue-500 focus-within:ring-blue-500/20",
           "lg:border-slate-700 lg:bg-slate-900 lg:shadow-none lg:focus-within:border-cyan-400 lg:focus-within:ring-cyan-400/20",
         )}>
@@ -186,7 +186,7 @@ export function ExchangeCommandBar({
                   disabled={disabled}
                   aria-pressed={surfaceMode === mode}
                   aria-label={`${label} view`}
-                  title={disabled ? "Mapbox token required" : `${label} view`}
+                  title={disabled ? "Map service unavailable" : `${label} view`}
                   className={cn(
                     "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-cyan-400",
                     mode === "split" && "hidden xl:inline-flex",
@@ -206,14 +206,15 @@ export function ExchangeCommandBar({
           type="button"
           onClick={onOpenFilters}
           className={cn(
-            "relative min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-lg outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden",
+            "relative min-h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-lg outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 lg:hidden",
             opportunityOverlay ? "hidden" : "inline-flex",
           )}
           aria-label={activeFilterCount ? `Open filters, ${activeFilterCount} active` : "Open filters"}
           aria-expanded={filtersOpen}
           aria-controls="exchange-filter-drawer"
         >
-          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" /> Filters
+          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden min-[380px]:inline">Filters</span>
           {activeFilterCount ? (
             <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-700 px-1 text-[10px] font-bold text-white">{activeFilterCount}</span>
           ) : null}
