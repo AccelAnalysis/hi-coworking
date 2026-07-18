@@ -80,7 +80,7 @@ export function ExchangeCommandBar({
   const currentView = canonicalView(view);
 
   return (
-    <header className="relative z-50 shrink-0 border-b border-white/15 bg-slate-950/78 px-3 py-2 text-white shadow-[0_12px_35px_rgba(15,23,42,0.24)] backdrop-blur-2xl sm:px-4 lg:m-3 lg:mb-0 lg:rounded-2xl lg:border">
+    <header className="relative z-[1100] shrink-0 isolate border-b border-white/15 bg-slate-950/78 px-3 py-2 text-white shadow-[0_12px_35px_rgba(15,23,42,0.24)] backdrop-blur-2xl sm:px-4 lg:z-50 lg:m-3 lg:mb-0 lg:rounded-2xl lg:border">
       <div className="flex items-center gap-2">
         <div className="mr-1 hidden min-w-fit items-center gap-2 lg:flex">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl rounded-bl-none border border-white/30 bg-gradient-to-br from-emerald-300/95 to-cyan-400/95 text-slate-950 shadow-lg shadow-emerald-400/10">
