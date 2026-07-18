@@ -71,7 +71,7 @@ export function ExchangeMobileNavigation({
   return (
     <>
       <nav
-        className="absolute inset-x-0 bottom-0 z-[70] grid h-[4.75rem] grid-cols-5 border-t border-white/60 bg-white/76 px-1 pb-[max(env(safe-area-inset-bottom),0.25rem)] shadow-[0_-12px_38px_rgba(15,23,42,0.18)] backdrop-blur-2xl lg:hidden"
+        className="absolute inset-x-0 bottom-0 z-[1300] grid h-[4.75rem] isolate grid-cols-5 border-t border-white/60 bg-white/76 px-1 pb-[max(env(safe-area-inset-bottom),0.25rem)] shadow-[0_-12px_38px_rgba(15,23,42,0.18)] backdrop-blur-2xl lg:hidden"
         aria-label="Primary Exchange navigation"
       >
         {PRIMARY_ITEMS.map(({ view: candidate, label, icon: Icon }) => {
@@ -115,7 +115,7 @@ export function ExchangeMobileNavigation({
       </nav>
 
       {menuOpen ? (
-        <div className="absolute inset-0 z-[90] lg:hidden" role="presentation">
+        <div className="absolute inset-0 z-[1500] isolate lg:hidden" role="presentation">
           <button
             type="button"
             className="absolute inset-0 bg-slate-950/45 backdrop-blur-md"
