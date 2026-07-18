@@ -38,9 +38,9 @@ import { ExchangeResourcesView } from "../views/ExchangeResourcesView";
 import type { ExchangeHistoryMode } from "../views/exchangeViewTypes";
 import { ExchangeContextMap } from "./ExchangeContextMap";
 import { ExchangeMobileNavigation } from "./ExchangeMobileNavigation";
-import { ExchangeMobileWorkspaceTray } from "./ExchangeMobileWorkspaceTray";
 
 type CanonicalExchangeView = "intelligence" | "referrals" | "opportunities" | "resources";
+type ContextMapView = "intelligence" | "referrals";
 
 function exchangeUrl(query: string): string {
   return query ? `/exchange?${query}` : "/exchange";
@@ -168,8 +168,10 @@ export function ExchangeWorkspace() {
     scheduleUrlReplace,
     onViewChange,
   };
-  const mobileMapVisible = activeView !== "opportunities" && state.surfaceMode !== "list";
-  const contextMapView = activeView === "opportunities" ? null : activeView;
+  const contextMapView: ContextMapView | null = activeView === "intelligence" || activeView === "referrals"
+    ? activeView
+    : null;
+  const mobileContextMapVisible = Boolean(contextMapView && state.surfaceMode !== "list");
   const activeContent = activeView === "opportunities" ? (
     <ExchangeOpportunitiesView {...shared} demoMode={demoMode} />
   ) : activeView === "referrals" ? (
@@ -194,29 +196,22 @@ export function ExchangeWorkspace() {
           "relative z-10 h-full min-h-0",
           contextMapView && [
             "lg:[&>div]:bg-transparent",
-            "lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/68 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl",
-            "lg:[&_main]:bg-white/24 lg:[&_main]:backdrop-blur-sm",
-            "lg:[_.bg-white]:bg-white/62 lg:[_.bg-slate-50]:bg-white/42 lg:[_.bg-slate-100]:bg-white/28",
+            "lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/70 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl",
+            "lg:[&_main]:bg-white/25 lg:[&_main]:backdrop-blur-sm",
+            "lg:[_.bg-white]:bg-white/60 lg:[_.bg-slate-50]:bg-white/40 lg:[_.bg-slate-100]:bg-white/30",
             "lg:[_.border-slate-200]:border-white/60",
           ],
         )}>
           {activeContent}
         </div>
 
-        {mobileMapVisible && contextMapView ? (
+        {mobileContextMapVisible && contextMapView ? (
           <div className="absolute inset-x-0 bottom-0 top-[4.25rem] z-20 lg:hidden">
             <ExchangeContextMap view={contextMapView} demoMode={demoMode} />
           </div>
         ) : null}
       </div>
 
-      {!mobileMenuOpen && activeView !== "opportunities" ? (
-        <ExchangeMobileWorkspaceTray
-          view={activeView}
-          surfaceMode={state.surfaceMode}
-          onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
-        />
-      ) : null}
       <ExchangeMobileNavigation
         view={activeView}
         menuOpen={mobileMenuOpen}
