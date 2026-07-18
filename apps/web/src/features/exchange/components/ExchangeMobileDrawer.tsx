@@ -22,7 +22,7 @@ export function ExchangeMobileDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] lg:hidden">
+    <div className="fixed inset-0 z-[1400] isolate lg:hidden">
       <button
         type="button"
         className="absolute inset-0 bg-slate-950/55 backdrop-blur-[2px]"
@@ -35,9 +35,9 @@ export function ExchangeMobileDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="exchange-filter-drawer-title"
-        className="absolute inset-y-0 right-0 flex w-[min(92vw,390px)] flex-col bg-white shadow-2xl motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:transition-none"
+        className="absolute inset-y-0 right-0 flex w-[min(92vw,390px)] flex-col border-l border-white/60 bg-white/86 shadow-2xl backdrop-blur-2xl motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:transition-none"
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
+        <header className="flex shrink-0 items-center justify-between border-b border-white/70 bg-white/58 px-4 py-3 backdrop-blur-xl">
           <div>
             <h2 id="exchange-filter-drawer-title" className="flex items-center gap-2 text-base font-bold text-slate-950">
               <SlidersHorizontal className="h-4 w-4" aria-hidden="true" /> Filters
@@ -47,19 +47,19 @@ export function ExchangeMobileDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 outline-none hover:bg-white/80 focus-visible:ring-2 focus-visible:ring-indigo-500"
             aria-label="Close filters"
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">{children}</div>
-        <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-slate-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <footer className="grid shrink-0 grid-cols-2 gap-2 border-t border-white/70 bg-white/68 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] backdrop-blur-xl">
           <button
             type="button"
             onClick={onClear}
             disabled={activeFilterCount === 0}
-            className="min-h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-40"
+            className="min-h-11 rounded-xl border border-slate-300 bg-white/90 px-4 text-sm font-bold text-slate-700 outline-none hover:bg-white focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-40"
           >
             Clear
           </button>
