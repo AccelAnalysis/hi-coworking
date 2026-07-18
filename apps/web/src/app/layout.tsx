@@ -16,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Hi Coworking",
   description: "Big ideas. Intimate space. A micro-coworking space designed for focus, flexibility, and real local use.",
+  // URL-restricted Mapbox browser tokens require a Referer value. Preserve the
+  // origin for cross-origin style, tile, glyph, and map-session requests.
+  referrer: "origin-when-cross-origin",
 };
 
 export default function RootLayout({
