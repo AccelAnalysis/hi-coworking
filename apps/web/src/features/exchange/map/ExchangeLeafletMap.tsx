@@ -28,6 +28,10 @@ interface ExchangeLeafletMapProps extends ExchangeMapCallbacks {
   onStatusChange?: (status: ExchangeMapStatus, error: Error | null) => void;
 }
 
+type LeafletCallbacks = ExchangeMapCallbacks & {
+  onStatusChange?: (status: ExchangeMapStatus, error: Error | null) => void;
+};
+
 function validCoordinate(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -82,34 +86,38 @@ export function ExchangeLeafletMap({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
-  const callbacksRef = useRef({
-    onSelect,
-    onSelectRfx,
-    onSelectTerritory,
-    onBackgroundClick,
-    onViewportChange,
-    onError,
-    onLoad,
-    onStatusChange,
-  });
-
-  callbacksRef.current = {
-    onSelect,
-    onSelectRfx,
-    onSelectTerritory,
-    onBackgroundClick,
-    onViewportChange,
-    onError,
-    onLoad,
-    onStatusChange,
-  };
+  const callbacksRef = useRef<LeafletCallbacks>({});
+  const initialViewportRef = useRef(viewport ?? initialViewport);
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    callbacksRef.current = {
+      onSelect,
+      onSelectRfx,
+      onSelectTerritory,
+      onBackgroundClick,
+      onViewportChange,
+      onError,
+      onLoad,
+      onStatusChange,
+    };
+  }, [
+    onBackgroundClick,
+    onError,
+    onLoad,
+    onSelect,
+    onSelectRfx,
+    onSelectTerritory,
+    onStatusChange,
+    onViewportChange,
+  ]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || mapRef.current) return;
     try {
       callbacksRef.current.onStatusChange?.("initializing", null);
-      const starting = viewport ?? initialViewport;
-      const map = L.map(containerRef.current, {
+      const starting = initialViewportRef.current;
+      const map = L.map(container, {
         center: [starting.latitude, starting.longitude],
         zoom: starting.zoom,
         zoomControl: false,
