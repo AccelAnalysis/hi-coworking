@@ -9,11 +9,3 @@
   isolation: isolate;
   z-index: 0;
 }
-
-[data-map-provider="leaflet-openstreetmap"] .leaflet-map-pane,
-[data-map-provider="leaflet-openstreetmap"] .leaflet-control-container,
-[data-map-provider="mapbox"] .mapboxgl-canvas-container,
-[data-map-provider="mapbox"] .mapboxgl-control-container {
-  position: relative;
-  z-index: 0;
-}
