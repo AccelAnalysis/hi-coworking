@@ -84,6 +84,7 @@ export function useExchangeMap({
 }: UseExchangeMapOptions): UseExchangeMapResult {
   const mapRef = useRef<MapboxMap | null>(null);
   const loadedRef = useRef(false);
+  const renderReadyRef = useRef(false);
   const selectionRef = useRef<ExchangeMapSelection>(selection);
   const previousSelectionRef = useRef<ExchangeMapSelection>(null);
   const viewportRef = useRef<ExchangeMapViewport | undefined>(viewport);
@@ -134,7 +135,7 @@ export function useExchangeMap({
       onBackgroundClick,
       onViewportChange,
       onError: (mapError) => {
-        if (!loadedRef.current) {
+        if (!renderReadyRef.current) {
           setError(mapError);
           setStatus("error");
         }
@@ -232,8 +233,29 @@ export function useExchangeMap({
         attributionControl: true,
       });
       mapRef.current = map;
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
       removeBaseEvents = registerExchangeMapBaseEvents(map, externalCallbacksRef);
+
+      const finalizeReady = () => {
+        if (
+          destroyed
+          || !map
+          || renderReadyRef.current
+          || !loadedRef.current
+          || !map.loaded()
+          || !map.areTilesLoaded()
+        ) {
+          return;
+        }
+        renderReadyRef.current = true;
+        setError(null);
+        setStatus("ready");
+        externalCallbacksRef.current.onLoad?.();
+        const currentBounds = readExchangeMapBounds(map);
+        if (currentBounds) {
+          externalCallbacksRef.current.onViewportChange?.(currentBounds);
+        }
+      };
 
       const handleLoad = () => {
         if (destroyed || !map) return;
@@ -255,14 +277,9 @@ export function useExchangeMap({
           ) {
             completedFitRequestRef.current = fitRequestRef.current;
           }
-          setError(null);
-          setStatus("ready");
-          externalCallbacksRef.current.onLoad?.();
-          const currentBounds = readExchangeMapBounds(map);
-          if (currentBounds) {
-            externalCallbacksRef.current.onViewportChange?.(currentBounds);
-          }
           scheduleResize();
+          map.triggerRepaint();
+          window.requestAnimationFrame(finalizeReady);
         } catch (loadError) {
           const normalized =
             loadError instanceof Error ? loadError : new Error("The map could not be loaded.");
@@ -272,7 +289,10 @@ export function useExchangeMap({
         }
       };
 
+      const handleIdle = () => finalizeReady();
+
       map.on("load", handleLoad);
+      map.on("idle", handleIdle);
 
       if (typeof ResizeObserver !== "undefined") {
         observer = new ResizeObserver(scheduleResize);
@@ -289,9 +309,11 @@ export function useExchangeMap({
         removeInteractionEvents?.();
         removeBaseEvents?.();
         map?.off("load", handleLoad);
+        map?.off("idle", handleIdle);
         map?.remove();
         mapRef.current = null;
         loadedRef.current = false;
+        renderReadyRef.current = false;
         previousSelectionRef.current = null;
       };
     } catch (constructionError) {
