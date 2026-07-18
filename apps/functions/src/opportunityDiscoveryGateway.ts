@@ -13,6 +13,10 @@ import {
   fallbackOpportunityDiscovery,
 } from "./opportunityDiscoveryFallback";
 import { applyOpportunityPersonalization } from "./opportunityPersonalization";
+import {
+  handleOpportunityGovernanceOperation,
+  OPPORTUNITY_GOVERNANCE_OPERATIONS,
+} from "./opportunityGovernance";
 
 type RecordData = Record<string, unknown>;
 type RunnableCallable = {
@@ -26,6 +30,7 @@ const OPERATIONS = new Set([
   "savedSearchUpsert",
   "savedSearchDelete",
   "savedSearchList",
+  ...OPPORTUNITY_GOVERNANCE_OPERATIONS,
 ]);
 
 export function isOpportunityDiscoveryGatewayRequest(value: unknown): boolean {
@@ -135,6 +140,9 @@ export async function handleOpportunityDiscoveryGateway(
     case "savedSearchList":
       return runnable(rfx_savedSearch_list).run(delegatedRequest);
     default:
+      if (OPPORTUNITY_GOVERNANCE_OPERATIONS.has(String(operation))) {
+        return handleOpportunityGovernanceOperation(request, operation, payload);
+      }
       throw new HttpsError("invalid-argument", "Unsupported opportunity discovery operation");
   }
 }
