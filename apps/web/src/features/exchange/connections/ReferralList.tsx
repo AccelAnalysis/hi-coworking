@@ -9,15 +9,15 @@ import { cn } from "@/lib/utils";
 import type { ReferralWorkspaceRecord } from "../data/exchangeRun3Gateway";
 
 const STATUS_STYLES: Record<ReferralWorkspaceRecord["status"], string> = {
-  draft: "border-slate-300 bg-slate-100 text-slate-700",
-  sent: "border-blue-200 bg-blue-50 text-blue-700",
-  accepted: "border-indigo-200 bg-indigo-50 text-indigo-700",
-  declined: "border-red-200 bg-red-50 text-red-700",
-  in_progress: "border-cyan-200 bg-cyan-50 text-cyan-800",
-  converted: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  closed: "border-slate-300 bg-slate-100 text-slate-600",
-  withdrawn: "border-amber-200 bg-amber-50 text-amber-800",
-  expired: "border-slate-300 bg-slate-100 text-slate-500",
+  draft: "border-slate-300 bg-slate-100/80 text-slate-700",
+  sent: "border-blue-200 bg-blue-50/80 text-blue-700",
+  accepted: "border-indigo-200 bg-indigo-50/80 text-indigo-700",
+  declined: "border-red-200 bg-red-50/80 text-red-700",
+  in_progress: "border-cyan-200 bg-cyan-50/80 text-cyan-800",
+  converted: "border-emerald-200 bg-emerald-50/80 text-emerald-700",
+  closed: "border-slate-300 bg-slate-100/80 text-slate-600",
+  withdrawn: "border-amber-200 bg-amber-50/80 text-amber-800",
+  expired: "border-slate-300 bg-slate-100/80 text-slate-500",
 };
 
 export function ReferralList({
@@ -34,13 +34,13 @@ export function ReferralList({
   if (loading) {
     return (
       <div className="space-y-3 p-3" role="status" aria-label="Loading referrals">
-        {[0, 1, 2, 3].map((value) => <div key={value} className="h-32 animate-pulse rounded-xl bg-slate-200 motion-reduce:animate-none" />)}
+        {[0, 1, 2, 3].map((value) => <div key={value} className="h-32 animate-pulse rounded-2xl border border-white/70 bg-white/45 backdrop-blur-xl motion-reduce:animate-none" />)}
       </div>
     );
   }
   if (records.length === 0) {
     return (
-      <div className="px-6 py-12 text-center">
+      <div className="m-3 rounded-2xl border border-dashed border-white/75 bg-white/45 px-6 py-12 text-center backdrop-blur-xl">
         <p className="text-sm font-bold text-slate-800">No referrals match this view.</p>
         <p className="mt-1 text-xs text-slate-500">Adjust the search, lifecycle, industry, or territory filters.</p>
       </div>
@@ -57,8 +57,8 @@ export function ReferralList({
             onClick={() => onSelect(record)}
             aria-pressed={selectedId === record.id}
             className={cn(
-              "w-full rounded-xl border bg-white p-3 text-left outline-none transition hover:border-indigo-300 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500",
-              selectedId === record.id ? "border-indigo-500 ring-1 ring-indigo-500" : "border-slate-200",
+              "w-full rounded-2xl border bg-white/58 p-3 text-left shadow-sm backdrop-blur-xl outline-none transition hover:border-indigo-300 hover:bg-white/78 hover:shadow-md focus-visible:ring-2 focus-visible:ring-indigo-500",
+              selectedId === record.id ? "border-indigo-500 ring-1 ring-indigo-500" : "border-white/75",
             )}
           >
             <div className="flex items-start justify-between gap-2">
@@ -69,7 +69,7 @@ export function ReferralList({
               <span className={cn(
                 "rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize",
                 record.activeDispute
-                  ? "border-orange-300 bg-orange-50 text-orange-800"
+                  ? "border-orange-300 bg-orange-50/80 text-orange-800"
                   : STATUS_STYLES[record.status],
               )}>
                 {record.activeDispute ? "Disputed" : record.status.replaceAll("_", " ")}
@@ -85,16 +85,16 @@ export function ReferralList({
               {record.territoryLabel ? <span>· {record.territoryLabel}</span> : null}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-semibold text-slate-600">
+              <span className="inline-flex items-center gap-1 rounded-md bg-white/62 px-1.5 py-1 text-[10px] font-semibold text-slate-600">
                 <CircleDollarSign className="h-3 w-3" aria-hidden="true" /> {record.compensation.label}
               </span>
               {record.linkedEntities.length ? (
-                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-1.5 py-1 text-[10px] font-semibold text-indigo-700">
+                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50/80 px-1.5 py-1 text-[10px] font-semibold text-indigo-700">
                   <Link2 className="h-3 w-3" aria-hidden="true" /> {record.linkedEntities.length} linked
                 </span>
               ) : null}
               {record.activeDispute ? (
-                <span className="inline-flex items-center gap-1 rounded-md bg-orange-50 px-1.5 py-1 text-[10px] font-semibold text-orange-800">
+                <span className="inline-flex items-center gap-1 rounded-md bg-orange-50/80 px-1.5 py-1 text-[10px] font-semibold text-orange-800">
                   <ShieldAlert className="h-3 w-3" aria-hidden="true" /> Review hold
                 </span>
               ) : null}
