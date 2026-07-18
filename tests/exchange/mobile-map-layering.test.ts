@@ -38,12 +38,15 @@ describe("Exchange mobile map layering", () => {
     expect(toolbar).not.toContain("Map layers and filters");
   });
 
-  it("makes Mapbox configuration state visible instead of silently falling back", () => {
+  it("makes required Mapbox configuration and render failures visible", () => {
     const map = source("apps/web/src/features/exchange/map/ExchangeMap.tsx");
 
     expect(map).toContain("data-map-token-state");
+    expect(map).toContain("data-map-token-fingerprint");
     expect(map).toContain("Mapbox token not detected");
-    expect(map).toContain("Mapbox requires a public pk. token");
-    expect(map).toContain("OpenStreetMap fallback");
+    expect(map).toContain("Mapbox public token required");
+    expect(map).toContain("Mapbox configuration check failed");
+    expect(map).toContain("Mapbox passed access checks but did not render");
+    expect(map).not.toContain("OpenStreetMap fallback");
   });
 });
