@@ -19,6 +19,7 @@ import {
 import { ReadinessMeter } from "@/components/profile/ReadinessMeter";
 import { useProfileAssetUrl } from "@/components/profile/ProfileAssetImage";
 import { storage } from "@/lib/firebase";
+import { diagnoseProfileUpdateError } from "@/lib/profileUpdateDiagnostics";
 import { ref, uploadBytesResumable } from "firebase/storage";
 import Image from "next/image";
 import { computeReadinessTier, type ProfileDoc } from "@hi/shared";
@@ -338,8 +339,20 @@ function ProfileContent() {
       }));
       setSaved(true);
     } catch (err) {
-      console.error("Failed to save profile:", err);
-      setError("Failed to save. Please try again.");
+      const diagnostic = diagnoseProfileUpdateError(err, {
+        configuredProjectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        expectedProjectId: process.env.NEXT_PUBLIC_EXPECTED_FIREBASE_PROJECT_ID,
+        hasAuthenticatedUser: Boolean(user),
+      });
+      console.error("Profile update failed", {
+        diagnosticCode: diagnostic.code,
+        retryable: diagnostic.retryable,
+      });
+      setError(
+        process.env.NODE_ENV === "development"
+          ? `${diagnostic.userMessage} Diagnostic: ${diagnostic.code}.`
+          : diagnostic.userMessage,
+      );
     } finally {
       setSaving(false);
     }
