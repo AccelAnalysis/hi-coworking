@@ -17,6 +17,14 @@ describe("uniform Exchange workspace contract", () => {
     expect(example).toContain("NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.");
   });
 
+  it("requires a completed tile render before declaring Mapbox ready", () => {
+    const hook = read("apps/web/src/features/exchange/map/useExchangeMap.ts");
+    expect(hook).toContain("renderReadyRef");
+    expect(hook).toContain("map.areTilesLoaded()");
+    expect(hook).toContain('map.on("idle", handleIdle)');
+    expect(hook).toContain('NavigationControl({ showCompass: false }), "bottom-right"');
+  });
+
   it("falls back instead of leaving a permanently gray Mapbox loading surface", () => {
     const map = read("apps/web/src/features/exchange/map/ExchangeMap.tsx");
     expect(map).toContain("MAPBOX_LOAD_TIMEOUT_MS");
