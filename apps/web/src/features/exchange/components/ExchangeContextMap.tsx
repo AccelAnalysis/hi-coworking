@@ -25,6 +25,7 @@ const ExchangeMap = dynamic(
 const VIEW_LABELS: Partial<Record<ExchangeView, string>> = {
   intelligence: "Intelligence coverage",
   referrals: "Referral geography",
+  opportunities: "Opportunity geography",
   resources: "Resource coverage",
 };
 
@@ -33,7 +34,7 @@ export function ExchangeContextMap({
   demoMode,
   className = "h-full min-h-[22rem] w-full border-0",
 }: {
-  view: "intelligence" | "referrals" | "resources";
+  view: "intelligence" | "referrals" | "opportunities" | "resources";
   demoMode: boolean;
   className?: string;
 }) {
@@ -59,6 +60,7 @@ export function ExchangeContextMap({
       : EXCHANGE_DEMO_TERRITORIES.filter((territory) => territory.status === "scheduled"),
     [scheduledTerritories],
   );
+  const viewLabel = VIEW_LABELS[view] ?? "Exchange geography";
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-slate-200">
@@ -68,10 +70,10 @@ export function ExchangeContextMap({
         scheduledTerritories={scheduled}
         fitRequest={1}
         className={className}
-        ariaLabel={`${VIEW_LABELS[view]} map`}
+        ariaLabel={`${viewLabel} map`}
       />
       <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[calc(100%-1.5rem)] rounded-2xl border border-white/80 bg-white/92 px-3 py-2 shadow-lg backdrop-blur">
-        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">{VIEW_LABELS[view]}</p>
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">{viewLabel}</p>
         <p className="mt-1 text-xs font-semibold text-slate-700">
           Territory markers show the current launch-market geography. Domain record markers appear only when verified coordinates are available.
         </p>
