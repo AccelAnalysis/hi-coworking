@@ -1,7 +1,12 @@
 import type {
+  OpportunityLocationFilter,
+  OpportunitySort,
+} from "@hi/shared/opportunity-discovery";
+import type {
   ExchangeCompensationFilter,
   ExchangeConnectionMode,
   ExchangeIntelligenceMetric,
+  ExchangePersonalizedFilter,
   ExchangeReferralStatus,
   ExchangeRelationshipFilter,
   ExchangeRfxStatus,
@@ -15,10 +20,29 @@ import type {
 
 export interface ExchangeFilterUpdate {
   naicsFilters?: string[];
+  industryFilters?: string[];
+  capabilityFilters?: string[];
   territoryFilters?: string[];
   rfxStatusFilters?: ExchangeRfxStatus[];
   territoryStatusFilters?: ExchangeTerritoryStatus[];
+  opportunityTypeFilters?: string[];
+  rfxTypeFilters?: string[];
+  buyerTypeFilters?: string[];
+  workArrangementFilters?: string[];
+  visibilityFilters?: string[];
+  certificationFilters?: string[];
+  setAsideFilters?: string[];
+  primeClassificationFilters?: string[];
+  awardClassificationFilters?: string[];
+  personalizedFilters?: ExchangePersonalizedFilter[];
   localFirst?: boolean;
+  closingSoon?: boolean;
+  teamingSuitable?: boolean;
+  budgetMin?: number;
+  budgetMax?: number;
+  opportunitySort?: OpportunitySort;
+  opportunityLocation?: OpportunityLocationFilter;
+  clearOpportunityLocation?: boolean;
   referralStatusFilters?: ExchangeReferralStatus[];
   connectionIndustryFilters?: string[];
   connectionTerritoryFilters?: string[];
@@ -31,6 +55,8 @@ export type ExchangeWorkspaceAction =
   | { type: "SET_SEARCH"; query: string }
   | { type: "SET_FILTERS"; filters: ExchangeFilterUpdate }
   | { type: "CLEAR_FILTERS" }
+  | { type: "SET_OPPORTUNITY_SORT"; sort: OpportunitySort }
+  | { type: "SET_OPPORTUNITY_LOCATION"; location?: OpportunityLocationFilter }
   | { type: "SET_SURFACE_MODE"; mode: ExchangeSurfaceMode }
   | { type: "SET_CONNECTION_MODE"; mode: ExchangeConnectionMode }
   | { type: "SET_INTELLIGENCE_METRIC"; metric: ExchangeIntelligenceMetric }
@@ -59,6 +85,14 @@ export const exchangeWorkspaceActions = {
   },
   clearFilters(): ExchangeWorkspaceAction {
     return { type: "CLEAR_FILTERS" };
+  },
+  setOpportunitySort(sort: OpportunitySort): ExchangeWorkspaceAction {
+    return { type: "SET_OPPORTUNITY_SORT", sort };
+  },
+  setOpportunityLocation(
+    location?: OpportunityLocationFilter,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_OPPORTUNITY_LOCATION", location };
   },
   setSurfaceMode(mode: ExchangeSurfaceMode): ExchangeWorkspaceAction {
     return { type: "SET_SURFACE_MODE", mode };
