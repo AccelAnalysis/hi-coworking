@@ -71,7 +71,7 @@ export function ExchangeMobileWorkspaceTray({
   return (
     <section
       className={cn(
-        "fixed inset-x-0 bottom-[4.75rem] z-[65] flex flex-col overflow-hidden rounded-t-[1.75rem] border border-b-0 border-white/60 bg-white/78 shadow-[0_-18px_50px_rgba(15,23,42,0.22)] backdrop-blur-2xl transition-[height] duration-300 motion-reduce:transition-none lg:hidden",
+        "fixed inset-x-0 bottom-[4.75rem] z-[1200] flex flex-col isolate overflow-hidden rounded-t-[1.75rem] border border-b-0 border-white/60 bg-white/78 shadow-[0_-18px_50px_rgba(15,23,42,0.22)] backdrop-blur-2xl transition-[height] duration-300 motion-reduce:transition-none lg:hidden",
         listVisible
           ? "h-[min(76dvh,calc(100dvh-7.75rem))]"
           : "h-[10.75rem]",
