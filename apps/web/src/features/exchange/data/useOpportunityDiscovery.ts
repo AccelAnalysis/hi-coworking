@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { OpportunityDiscoveryPage } from "@hi/shared/opportunity-discovery";
+import type {
+  OpportunityDiscoveryPage,
+  OpportunityDiscoveryQuery,
+} from "@hi/shared/opportunity-discovery";
 import type { ExchangeWorkspaceState } from "../state/exchangeWorkspaceTypes";
 import {
   discoverOpportunities,
@@ -52,14 +55,22 @@ function deduplicate(
   return [...records.values()];
 }
 
-export function useOpportunityDiscovery(state: ExchangeWorkspaceState) {
+export function useOpportunityDiscovery(
+  state: ExchangeWorkspaceState,
+  options: { enabled?: boolean } = {},
+) {
+  const enabled = options.enabled !== false;
   const [result, setResult] = useState<OpportunityDiscoveryState>(INITIAL_STATE);
   const requestVersion = useRef(0);
   const loadMoreVersion = useRef(0);
-  const query = useMemo(() => workspaceToOpportunityQuery(state), [state]);
-  const queryKey = useMemo(() => JSON.stringify(query), [query]);
+  const queryKey = JSON.stringify(workspaceToOpportunityQuery(state));
+  const query = useMemo(
+    () => JSON.parse(queryKey) as OpportunityDiscoveryQuery,
+    [queryKey],
+  );
 
   const execute = useCallback(async (version: number) => {
+    if (!enabled) return;
     try {
       const page = await discoverOpportunities(query);
       if (version !== requestVersion.current) return;
@@ -86,9 +97,15 @@ export function useOpportunityDiscovery(state: ExchangeWorkspaceState) {
         error: normalizeExchangeDataError(error),
       }));
     }
-  }, [query]);
+  }, [enabled, query]);
 
   useEffect(() => {
+    if (!enabled) {
+      requestVersion.current += 1;
+      loadMoreVersion.current += 1;
+      setResult(INITIAL_STATE);
+      return;
+    }
     const version = ++requestVersion.current;
     loadMoreVersion.current += 1;
     setResult((current) => ({
@@ -104,17 +121,18 @@ export function useOpportunityDiscovery(state: ExchangeWorkspaceState) {
       requestVersion.current += 1;
       loadMoreVersion.current += 1;
     };
-  }, [execute, queryKey]);
+  }, [enabled, execute, queryKey]);
 
   const retry = useCallback(() => {
+    if (!enabled) return;
     const version = ++requestVersion.current;
     setResult((current) => ({ ...current, loading: true, error: null }));
     void execute(version);
-  }, [execute]);
+  }, [enabled, execute]);
 
   const loadMore = useCallback(async () => {
     const cursor = result.nextCursor;
-    if (!cursor || result.loadingMore) return;
+    if (!enabled || !cursor || result.loadingMore) return;
     const version = ++loadMoreVersion.current;
     setResult((current) => ({ ...current, loadingMore: true }));
     try {
@@ -142,7 +160,7 @@ export function useOpportunityDiscovery(state: ExchangeWorkspaceState) {
         error: normalizeExchangeDataError(error),
       }));
     }
-  }, [query, result.loadingMore, result.nextCursor]);
+  }, [enabled, query, result.loadingMore, result.nextCursor]);
 
   const setSaved = useCallback(async (rfxId: string, saved: boolean) => {
     const previous = result.rfx;
@@ -188,10 +206,12 @@ export function useOpportunityDiscovery(state: ExchangeWorkspaceState) {
           }
         : record),
     }));
-    void markOpportunityViewed(rfxId).catch(() => {
-      // Viewing remains usable when the relationship write is unavailable.
-    });
-  }, []);
+    if (enabled) {
+      void markOpportunityViewed(rfxId).catch(() => {
+        // Viewing remains usable when the relationship write is unavailable.
+      });
+    }
+  }, [enabled]);
 
   return {
     ...result,
