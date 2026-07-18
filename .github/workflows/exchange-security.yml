@@ -36,7 +36,11 @@ jobs:
       - run: npm run test:security
       - run: npm run test:run3
       - run: npm run test:run4
-      - run: npm run build
+      - name: Run production build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee exchange-build.log
         env:
           SKIP_BOOKSTORE_SYNC: "true"
           NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
@@ -46,4 +50,12 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
           NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
+      - name: Upload production build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exchange-production-build-log
+          path: exchange-build.log
+          if-no-files-found: ignore
+          retention-days: 7
       - run: git diff --check
