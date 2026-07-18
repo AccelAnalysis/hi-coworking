@@ -13,6 +13,45 @@ export type ExchangeDiscoveryRfx = RfxDoc & {
   discovery?: OpportunityDiscoveryRecord;
 };
 
+export interface OpportunityAddendum {
+  id: string;
+  rfxId: string;
+  version: number;
+  title: string;
+  summary: string;
+  materialChanges: string[];
+  deadlineChanged: boolean;
+  previousDeadline?: number;
+  newDeadline?: number;
+  acknowledgmentRequired: boolean;
+  publishedAt: number;
+}
+
+export interface OpportunityQuestion {
+  id: string;
+  rfxId: string;
+  question: string;
+  answer?: string;
+  status: string;
+  visibility: "public" | "private";
+  submittedAt: number;
+  answeredAt?: number;
+  isMine: boolean;
+}
+
+export interface OpportunityGovernanceSnapshot {
+  addenda: OpportunityAddendum[];
+  questions: OpportunityQuestion[];
+  questionDeadline?: number;
+  preBidMeeting?: string;
+  siteVisit?: string;
+  submissionInstructions?: string;
+  addendaTruncated: boolean;
+  questionsTruncated: boolean;
+  canManage: boolean;
+  canAsk: boolean;
+}
+
 interface GatewayInput {
   operation:
     | "discover"
@@ -20,7 +59,12 @@ interface GatewayInput {
     | "markViewed"
     | "savedSearchUpsert"
     | "savedSearchDelete"
-    | "savedSearchList";
+    | "savedSearchList"
+    | "governanceList"
+    | "addendumCreate"
+    | "addendumAcknowledge"
+    | "questionSubmit"
+    | "questionAnswer";
   payload: unknown;
 }
 
@@ -140,4 +184,86 @@ export async function upsertSavedOpportunitySearch(input: {
 
 export async function deleteSavedOpportunitySearch(id: string): Promise<void> {
   await gateway({ operation: "savedSearchDelete", payload: { id } });
+}
+
+function idempotencyKey(prefix: string): string {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${random}`.slice(0, 160);
+}
+
+export async function loadOpportunityGovernance(
+  rfxId: string,
+): Promise<OpportunityGovernanceSnapshot> {
+  const response = await gateway({
+    operation: "governanceList",
+    payload: { rfxId, includePrivate: true },
+  });
+  return response.data as OpportunityGovernanceSnapshot;
+}
+
+export async function submitOpportunityQuestion(input: {
+  rfxId: string;
+  question: string;
+  visibilityRequested: "public" | "private";
+  organizationId?: string;
+}): Promise<{ id: string; replayed: boolean }> {
+  const response = await gateway({
+    operation: "questionSubmit",
+    payload: {
+      ...input,
+      idempotencyKey: idempotencyKey("question"),
+    },
+  });
+  return response.data as { id: string; replayed: boolean };
+}
+
+export async function answerOpportunityQuestion(input: {
+  rfxId: string;
+  questionId: string;
+  answer: string;
+  visibility: "public" | "private";
+}): Promise<void> {
+  await gateway({
+    operation: "questionAnswer",
+    payload: {
+      ...input,
+      idempotencyKey: idempotencyKey("answer"),
+    },
+  });
+}
+
+export async function createOpportunityAddendum(input: {
+  rfxId: string;
+  title: string;
+  summary: string;
+  materialChanges: string[];
+  deadlineChanged: boolean;
+  previousDeadline?: number;
+  newDeadline?: number;
+  acknowledgmentRequired: boolean;
+}): Promise<{ id: string; version: number; replayed: boolean }> {
+  const response = await gateway({
+    operation: "addendumCreate",
+    payload: {
+      ...input,
+      idempotencyKey: idempotencyKey("addendum"),
+    },
+  });
+  return response.data as { id: string; version: number; replayed: boolean };
+}
+
+export async function acknowledgeOpportunityAddendum(input: {
+  rfxId: string;
+  addendumId: string;
+  organizationId?: string;
+}): Promise<void> {
+  await gateway({
+    operation: "addendumAcknowledge",
+    payload: {
+      ...input,
+      idempotencyKey: idempotencyKey("acknowledge"),
+    },
+  });
 }
