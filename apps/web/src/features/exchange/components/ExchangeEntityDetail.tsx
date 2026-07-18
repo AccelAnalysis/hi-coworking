@@ -22,6 +22,7 @@ import {
 import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
 import { labelForNaics } from "../data/naicsCatalog";
 import { formatExchangeDate, titleCaseExchangeStatus } from "../utils/formatting";
+import { OpportunityGovernancePanel } from "./OpportunityGovernancePanel";
 
 function relationshipSummary(rfx: ExchangeDiscoveryRfx): string {
   const relationship = rfx.discovery?.relationship;
@@ -151,14 +152,7 @@ export function ExchangeEntityDetail({
               </div>
             </details>
 
-            <details className="rounded-2xl border border-slate-200 bg-white">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">Addenda, Q&amp;A, and procurement calendar</summary>
-              <div className="space-y-2 border-t border-slate-100 p-4 text-sm text-slate-700">
-                <p><strong>Addenda:</strong> {discovery?.addendumCount ?? 0}</p>
-                <p><strong>Q&amp;A:</strong> {discovery?.qAndAStatus?.replaceAll("_", " ") ?? "Not available"}</p>
-                <p className="text-slate-500">Version history, acknowledgments, meetings, site visits, and submission instructions remain governed by the secured RFx record.</p>
-              </div>
-            </details>
+            <OpportunityGovernancePanel rfxId={rfx.id} />
 
             <details className="rounded-2xl border border-slate-200 bg-white">
               <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold text-slate-900 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">Issuer and related actions</summary>
