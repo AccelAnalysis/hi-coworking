@@ -71,10 +71,10 @@ export function ExchangeMobileNavigation({
   return (
     <>
       <nav
-        className="absolute inset-x-0 bottom-0 z-50 grid h-[4.75rem] grid-cols-5 border-t border-slate-200 bg-white px-1 pb-[max(env(safe-area-inset-bottom),0.25rem)] shadow-[0_-10px_30px_rgba(15,23,42,0.12)] lg:hidden"
+        className="absolute inset-x-0 bottom-0 z-[70] grid h-[4.75rem] grid-cols-5 border-t border-white/60 bg-white/76 px-1 pb-[max(env(safe-area-inset-bottom),0.25rem)] shadow-[0_-12px_38px_rgba(15,23,42,0.18)] backdrop-blur-2xl lg:hidden"
         aria-label="Primary Exchange navigation"
       >
-        {PRIMARY_ITEMS.slice(0, 4).map(({ view: candidate, label, icon: Icon }) => {
+        {PRIMARY_ITEMS.map(({ view: candidate, label, icon: Icon }) => {
           const active = view === candidate && !menuOpen;
           return (
             <button
@@ -83,7 +83,7 @@ export function ExchangeMobileNavigation({
               onClick={() => onChange(candidate)}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500",
+                "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500",
                 active ? "text-blue-700" : "text-slate-500 hover:text-slate-900",
               )}
             >
@@ -103,7 +103,7 @@ export function ExchangeMobileNavigation({
           aria-expanded={menuOpen}
           aria-controls="exchange-mobile-menu"
           className={cn(
-            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500",
+            "flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[10px] font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-500",
             menuOpen ? "text-blue-700" : "text-slate-500 hover:text-slate-900",
           )}
         >
@@ -115,10 +115,10 @@ export function ExchangeMobileNavigation({
       </nav>
 
       {menuOpen ? (
-        <div className="absolute inset-0 z-[70] lg:hidden" role="presentation">
+        <div className="absolute inset-0 z-[90] lg:hidden" role="presentation">
           <button
             type="button"
-            className="absolute inset-0 bg-slate-950/45 backdrop-blur-sm"
+            className="absolute inset-0 bg-slate-950/45 backdrop-blur-md"
             onClick={onMenuClose}
             aria-label="Close Exchange menu"
           />
@@ -127,9 +127,9 @@ export function ExchangeMobileNavigation({
             role="dialog"
             aria-modal="true"
             aria-labelledby="exchange-mobile-menu-title"
-            className="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-[2rem] bg-white pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl"
+            className="absolute inset-x-0 bottom-0 max-h-[78dvh] overflow-y-auto rounded-t-[2rem] border border-b-0 border-white/60 bg-white/82 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-2xl"
           >
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
+            <div className="sticky top-0 flex items-center justify-between border-b border-white/70 bg-white/72 px-5 py-4 backdrop-blur-2xl">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-700">Hi Exchange</p>
                 <h2 id="exchange-mobile-menu-title" className="mt-1 text-xl font-black text-slate-950">Menu</h2>
@@ -138,7 +138,7 @@ export function ExchangeMobileNavigation({
                 ref={closeRef}
                 type="button"
                 onClick={onMenuClose}
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-slate-100 text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                className="flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/65 text-slate-700 shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
                 aria-label="Close menu"
               >
                 <X className="h-5 w-5" aria-hidden="true" />
@@ -150,9 +150,9 @@ export function ExchangeMobileNavigation({
                   key={href}
                   href={href}
                   onClick={onMenuClose}
-                  className="flex min-h-14 items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 shadow-sm outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-600"
+                  className="flex min-h-14 items-center gap-4 rounded-2xl border border-white/80 bg-white/55 px-4 text-sm font-bold text-slate-800 shadow-sm backdrop-blur-xl outline-none hover:bg-white/85 focus-visible:ring-2 focus-visible:ring-blue-600"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/80 bg-blue-50/80 text-blue-700">
                     <Icon className="h-5 w-5" aria-hidden="true" />
                   </span>
                   {label}
