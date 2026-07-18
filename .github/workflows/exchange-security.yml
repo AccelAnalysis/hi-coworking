@@ -32,11 +32,7 @@ jobs:
       - run: npm run build:shared
       - run: npm run build:functions
       - run: npm run lint
-      - name: Run Exchange tests
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run test:exchange 2>&1 | tee exchange-test.log
+      - run: npm run test:exchange
       - run: npm run test:security
       - run: npm run test:run3
       - run: npm run test:run4
@@ -54,14 +50,6 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
           NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
-      - name: Upload Exchange test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: exchange-test-log
-          path: exchange-test.log
-          if-no-files-found: ignore
-          retention-days: 7
       - name: Upload production build log
         if: always()
         uses: actions/upload-artifact@v4
