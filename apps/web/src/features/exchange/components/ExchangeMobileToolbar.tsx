@@ -16,15 +16,16 @@ export function ExchangeMobileToolbar({
   onOpenFilters?: () => void;
 }) {
   return (
-    <div className="pointer-events-none absolute inset-x-3 top-3 z-30 flex items-start justify-between lg:hidden">
-      <span className="pointer-events-auto rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-lg backdrop-blur-xl">
+    <div className="pointer-events-none absolute inset-x-3 top-3 z-30 lg:hidden">
+      <span className="pointer-events-auto inline-flex rounded-full border border-white/70 bg-white/78 px-3 py-1.5 text-[10px] font-bold text-slate-600 shadow-lg backdrop-blur-xl">
         {resultCount.toLocaleString("en-US")} visible result{resultCount === 1 ? "" : "s"}
       </span>
       {mapVisible ? (
         <button
           type="button"
           onClick={onFitResults}
-          className="pointer-events-auto flex h-11 w-11 items-center justify-center rounded-xl border border-white/70 bg-white/78 text-blue-700 shadow-lg outline-none backdrop-blur-xl hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-blue-600"
+          data-exchange-map-control="fit-results"
+          className="pointer-events-auto absolute right-0 top-[5.75rem] flex h-11 w-11 items-center justify-center rounded-xl border border-white/70 bg-white/78 text-blue-700 shadow-lg outline-none backdrop-blur-xl hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-blue-600"
           aria-label="Return map to visible results"
           title="Fit visible results"
         >
