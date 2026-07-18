@@ -144,6 +144,7 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
   const memberLinks = [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/exchange", label: "Exchange", icon: Compass },
+    { href: "/exchange/onboarding", label: "Connect Organization", icon: Building2 },
     { href: "/exchange/wallet", label: "Membership & Credits", icon: Coins },
   ];
 
@@ -154,6 +155,7 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
   const adminLinks = [
     { href: "/admin/dashboard", label: "Admin", icon: LayoutDashboard },
     { href: "/admin/exchange-launch", label: "Launch", icon: Compass },
+    { href: "/admin/exchange-claims", label: "Organization Claims", icon: Building2 },
   ];
 
   // Claims-based role check (PR-02)
