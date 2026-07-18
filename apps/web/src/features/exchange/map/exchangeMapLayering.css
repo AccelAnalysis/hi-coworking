@@ -1,0 +1,19 @@
+/*
+ * Mapbox GL and Leaflet both create internal panes with their own z-indexes.
+ * Keep those panes inside one low-level map stacking context so they can never
+ * cover the Exchange command bar, result drawer, navigation, filters, or sheets.
+ */
+.exchange-map-root,
+[data-map-provider="mapbox"],
+[data-map-provider="leaflet-openstreetmap"] {
+  isolation: isolate;
+  z-index: 0;
+}
+
+[data-map-provider="leaflet-openstreetmap"] .leaflet-map-pane,
+[data-map-provider="leaflet-openstreetmap"] .leaflet-control-container,
+[data-map-provider="mapbox"] .mapboxgl-canvas-container,
+[data-map-provider="mapbox"] .mapboxgl-control-container {
+  position: relative;
+  z-index: 0;
+}
