@@ -12,6 +12,21 @@ describe("uniform Exchange workspace contract", () => {
     expect(example).toContain("NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=pk.");
   });
 
+  it("falls back instead of leaving a permanently gray Mapbox loading surface", () => {
+    const map = read("apps/web/src/features/exchange/map/ExchangeMap.tsx");
+    expect(map).toContain("MAPBOX_LOAD_TIMEOUT_MS");
+    expect(map).toContain('tokenState="provider-error"');
+    expect(map).toContain("Retry Mapbox");
+    expect(map).toContain("token URL restrictions");
+  });
+
+  it("keeps Firestore opportunity discovery usable when optional Functions are absent", () => {
+    const repository = read("apps/web/src/features/exchange/data/exchangeRepository.ts");
+    expect(repository).toContain("listReleasedTerritoriesFn({}).catch(() => null)");
+    expect(repository).toContain("territoryResult?.data.released ?? []");
+    expect(repository).toContain("backend functions are not available");
+  });
+
   it("keeps Opportunity search and filters in the shared command bar", () => {
     const commandBar = read("apps/web/src/features/exchange/components/ExchangeCommandBar.tsx");
     expect(commandBar).toContain("Business name, opportunity, industry, or location");
