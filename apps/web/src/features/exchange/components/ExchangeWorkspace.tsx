@@ -193,7 +193,7 @@ export function ExchangeWorkspace() {
         ) : null}
 
         <div className={cn(
-          "relative z-10 h-full min-h-0",
+          "relative h-full min-h-0",
           contextMapView && [
             "lg:[&>div]:bg-transparent",
             "lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/70 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl",
