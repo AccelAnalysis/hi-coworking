@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LocateFixed, TriangleAlert, WifiOff } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { ExchangeActiveFilters, getActiveExchangeFilterLabels } from "../components/ExchangeActiveFilters";
 import { ExchangeCommandBar } from "../components/ExchangeCommandBar";
 import { ExchangeDetailSheet } from "../components/ExchangeDetailSheet";
@@ -12,6 +11,7 @@ import { ExchangeFilters } from "../components/ExchangeFilters";
 import { ExchangeLeftPanel } from "../components/ExchangeLeftPanel";
 import { ExchangeMobileDrawer } from "../components/ExchangeMobileDrawer";
 import { ExchangeMobileToolbar } from "../components/ExchangeMobileToolbar";
+import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { ExchangeResultsList } from "../components/ExchangeResultsList";
 import { ExchangeRightPanel } from "../components/ExchangeRightPanel";
 import { ExchangeStateView, type ExchangeStateKind } from "../components/ExchangeStateView";
@@ -104,6 +104,7 @@ export function ExchangeOpportunitiesView({
   const selectedRfxId = opportunitySelection?.entityType === "rfx"
     ? opportunitySelection.entityId
     : null;
+
   useEffect(() => {
     pinSelectedRfx(selectedRfxId);
   }, [pinSelectedRfx, rfx, selectedRfxId]);
@@ -141,7 +142,6 @@ export function ExchangeOpportunitiesView({
     [allTerritories, filterState, releasedFips, rfx],
   );
   const manageableSet = useMemo(() => new Set(manageableRfxIds), [manageableRfxIds]);
-  const mapAvailable = true;
 
   useEffect(() => {
     if (splitSupported === false && stateRef.current.surfaceMode === "split") {
@@ -174,18 +174,10 @@ export function ExchangeOpportunitiesView({
     scheduleUrlReplace(250);
   }, [applyAction, scheduleUrlReplace]);
 
-  const handleMapStatus = useCallback((status: ExchangeMapStatus) => {
-    setMapStatus(status);
-    if (status === "error" && stateRef.current.surfaceMode !== "list") {
-      applyAction(exchangeWorkspaceActions.setSurfaceMode("list"), "replace");
-    }
-  }, [applyAction]);
-
   const retryMap = useCallback(() => {
     setMapRetryKey((value) => value + 1);
     setMapStatus("initializing");
-    applyAction(exchangeWorkspaceActions.setSurfaceMode("map"), "push");
-  }, [applyAction]);
+  }, []);
 
   const selectEntity = useCallback((selection: Exclude<ExchangeSelection, null>) => {
     applyAction(exchangeWorkspaceActions.selectEntity(selection), "push");
@@ -219,7 +211,6 @@ export function ExchangeOpportunitiesView({
     ? allTerritories.find((record) => record.fips === opportunitySelection.entityId)
     : undefined;
   const detailTitle = selectedRfx?.title || selectedTerritory?.name || "Selected Exchange record";
-
   const effectiveMode: ExchangeSurfaceMode = splitSupported !== true && state.surfaceMode === "split"
     ? "map"
     : state.surfaceMode;
@@ -288,7 +279,7 @@ export function ExchangeOpportunitiesView({
   const degradedError = error && sourceCount > 0 ? error : viewportError;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
       <ExchangeCommandBar
         view="opportunities"
         searchQuery={state.searchQuery}
@@ -296,7 +287,7 @@ export function ExchangeOpportunitiesView({
         resultCount={resultCount}
         activeFilterCount={activeFilterCount}
         filtersOpen={state.mobileFilterOpen}
-        mapAvailable={mapAvailable}
+        mapAvailable
         refreshing={refreshing}
         onViewChange={onViewChange}
         onSearchChange={handleSearchChange}
@@ -308,110 +299,67 @@ export function ExchangeOpportunitiesView({
       <ExchangeActiveFilters state={state} onClear={clearFilters} />
 
       {!online ? (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900" role="status">
-          <WifiOff className="h-4 w-4" aria-hidden="true" /> Offline. Previously loaded results remain available where possible.
+        <div className="absolute left-1/2 top-20 z-50 flex -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
+          <WifiOff className="h-4 w-4" aria-hidden="true" /> Offline. Previously loaded results remain available.
         </div>
       ) : degradedError ? (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900" role="status">
+        <div className="absolute left-1/2 top-20 z-50 flex -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
           <TriangleAlert className="h-4 w-4" aria-hidden="true" /> {degradedError.message}
           <button type="button" onClick={() => void retry()} className="rounded px-1 underline outline-none focus-visible:ring-2 focus-visible:ring-amber-700">Retry</button>
         </div>
       ) : null}
 
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <ExchangeMap
+          key={mapRetryKey}
+          rfxList={filtered.rfx}
+          releasedTerritories={filtered.releasedTerritories}
+          scheduledTerritories={filtered.scheduledTerritories}
+          selection={opportunitySelection}
+          initialViewport={state.viewport ?? DEFAULT_EXCHANGE_MAP_VIEWPORT}
+          viewport={state.viewport}
+          fitRequest={fitRequest}
+          resizeSignal={`${state.leftPanelCollapsed}:${state.rightPanelOpen}:${state.mobileFilterOpen}:${state.mobileDetailOpen}:${effectiveMode}`}
+          className="absolute inset-0 h-full min-h-0 w-full border-0"
+          onSelect={(selection) => {
+            if (selection) selectEntity(selection);
+          }}
+          onBackgroundClick={clearSelection}
+          onViewportChange={handleViewportChange}
+          onStatusChange={setMapStatus}
+          onRetry={retryMap}
+        />
+
+        <button
+          type="button"
+          onClick={() => setFitRequest((value) => value + 1)}
+          className="absolute right-3 top-16 z-20 hidden min-h-10 items-center gap-2 rounded-xl border border-white/60 bg-white/72 px-3 text-xs font-black text-slate-700 shadow-lg backdrop-blur-2xl outline-none hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-indigo-500 lg:inline-flex"
+        >
+          <LocateFixed className="h-4 w-4" aria-hidden="true" /> Fit results
+        </button>
+
+        {filtered.rfx.length > 0 && !hasGeocodedRfx ? (
+          <div className="absolute inset-x-3 bottom-8 z-20 mx-auto max-w-lg rounded-2xl border border-amber-200/80 bg-amber-50/82 px-3 py-2 text-center text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
+            Matching opportunities have no verified coordinates yet. They remain available in the result drawer.
+          </div>
+        ) : null}
+
+        <ExchangeMobileToolbar
+          resultCount={resultCount}
+          activeFilterCount={activeFilterCount}
+          filtersOpen={state.mobileFilterOpen}
+          mapVisible
+          onOpenFilters={() => applyAction(exchangeWorkspaceActions.openMobileFilter())}
+          onFitResults={() => setFitRequest((value) => value + 1)}
+        />
+
         <ExchangeLeftPanel
           collapsed={state.leftPanelCollapsed}
           filterContent={filterContent()}
           resultsContent={resultsContent()}
-          showResults={effectiveMode === "map"}
+          showResults
           onToggle={() => applyAction(exchangeWorkspaceActions.toggleLeftPanel())}
         />
-
-        <section className="relative min-h-0 min-w-0 flex-1 overflow-hidden" aria-label="Exchange discovery surface">
-          <div
-            className={cn(
-              "relative h-full min-h-0",
-              effectiveMode === "split" && "lg:grid lg:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.75fr)]",
-            )}
-            inert={Boolean(blockingState)}
-            aria-hidden={blockingState ? "true" : undefined}
-          >
-            <div className={cn(
-              "min-h-0 overflow-hidden bg-slate-200",
-              effectiveMode === "map" && "absolute inset-0",
-              effectiveMode === "list" && "pointer-events-none invisible absolute inset-0",
-              effectiveMode === "split" && "relative",
-            )}>
-              <ExchangeMap
-                key={mapRetryKey}
-                rfxList={filtered.rfx}
-                releasedTerritories={filtered.releasedTerritories}
-                scheduledTerritories={filtered.scheduledTerritories}
-                selection={opportunitySelection}
-                initialViewport={state.viewport ?? DEFAULT_EXCHANGE_MAP_VIEWPORT}
-                viewport={state.viewport}
-                fitRequest={fitRequest}
-                resizeSignal={`${state.leftPanelCollapsed}:${state.rightPanelOpen}:${state.mobileFilterOpen}:${state.mobileDetailOpen}:${effectiveMode}`}
-                className="h-full min-h-0 w-full border-0"
-                onSelect={(selection) => {
-                  if (selection) selectEntity(selection);
-                }}
-                onBackgroundClick={clearSelection}
-                onViewportChange={handleViewportChange}
-                onStatusChange={handleMapStatus}
-                onRetry={retryMap}
-              />
-              <button
-                type="button"
-                onClick={() => setFitRequest((value) => value + 1)}
-                className="absolute left-3 top-3 z-10 hidden min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 text-xs font-bold text-slate-700 shadow-lg outline-none backdrop-blur hover:bg-white focus-visible:ring-2 focus-visible:ring-indigo-500 lg:inline-flex"
-              >
-                <LocateFixed className="h-4 w-4" aria-hidden="true" /> Fit results
-              </button>
-              {filtered.rfx.length > 0 && !hasGeocodedRfx ? (
-                <div className="absolute inset-x-3 bottom-8 z-10 mx-auto max-w-lg rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-center text-xs font-semibold text-amber-900 shadow-lg backdrop-blur" role="status">
-                  Matching opportunities have no map coordinates. Switch to list view to inspect them.
-                </div>
-              ) : null}
-              <ExchangeMobileToolbar
-                resultCount={resultCount}
-                activeFilterCount={activeFilterCount}
-                filtersOpen={state.mobileFilterOpen}
-                mapVisible={effectiveMode !== "list"}
-                onOpenFilters={() => applyAction(exchangeWorkspaceActions.openMobileFilter())}
-                onFitResults={() => setFitRequest((value) => value + 1)}
-              />
-            </div>
-
-            {effectiveMode !== "map" ? (
-              <div className={cn(
-                "min-h-0 bg-slate-50 flex flex-col",
-                effectiveMode === "list" && "absolute inset-0",
-                effectiveMode === "split" && "relative border-l border-slate-200",
-              )}>
-                {mapStatus === "error" ? (
-                  <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900" role="alert">
-                    <span>Map load failed. Results remain available here.</span>
-                    <button type="button" onClick={retryMap} className="min-h-9 rounded-lg border border-amber-300 bg-white px-3 outline-none focus-visible:ring-2 focus-visible:ring-amber-700">Retry map</button>
-                  </div>
-                ) : null}
-                <div className="min-h-0 flex-1">
-                  {resultsContent(effectiveMode === "split")}
-                </div>
-              </div>
-            ) : null}
-          </div>
-          {blockingState ? (
-            <div className="absolute inset-0 z-40 overflow-y-auto bg-slate-100 p-4 sm:p-8">
-              <ExchangeStateView
-                kind={blockingState}
-                message={blockingState === "error" ? error?.message : undefined}
-                onRetry={blockingState === "error" ? () => void retry() : undefined}
-                onClear={blockingState === "filtered-empty" ? clearFilters : undefined}
-              />
-            </div>
-          ) : null}
-        </section>
 
         <ExchangeRightPanel
           open={Boolean(opportunitySelection && state.rightPanelOpen)}
@@ -420,7 +368,31 @@ export function ExchangeOpportunitiesView({
         >
           {detailContent}
         </ExchangeRightPanel>
+
+        {blockingState ? (
+          <div className="pointer-events-none absolute bottom-5 left-1/2 z-30 w-[min(92%,32rem)] -translate-x-1/2 lg:bottom-4">
+            <div className="pointer-events-auto rounded-3xl border border-white/60 bg-white/76 p-3 shadow-2xl backdrop-blur-2xl">
+              <ExchangeStateView
+                kind={blockingState}
+                compact
+                message={blockingState === "error" ? error?.message : undefined}
+                onRetry={blockingState === "error" ? () => void retry() : undefined}
+                onClear={blockingState === "filtered-empty" ? clearFilters : undefined}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
+
+      <ExchangeMobileWorkspaceTray
+        view="opportunities"
+        surfaceMode={effectiveMode}
+        resultCount={resultCount}
+        loading={loading}
+        onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
+      >
+        {resultsContent(true)}
+      </ExchangeMobileWorkspaceTray>
 
       <ExchangeMobileDrawer
         open={splitSupported === false && state.mobileFilterOpen}
