@@ -66,6 +66,13 @@ function countBoundaryPositions(value: unknown): number {
 }
 
 function parseBoundaryGeometry(value: unknown): BoundaryGeometry | null {
+  if (typeof value === "string") {
+    try {
+      return parseBoundaryGeometry(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
   if (!isRecord(value) || !("coordinates" in value)) return null;
   if (value.type === "Polygon" && isPolygonCoordinates(value.coordinates)) {
     return { type: "Polygon", coordinates: value.coordinates };
@@ -220,7 +227,7 @@ export const territory_create = onCall(async (request) => {
       : {}),
     ...(boundaryGeoJSON === undefined
       ? {}
-      : { boundaryGeoJSON: validateBoundaryGeometry(boundaryGeoJSON) }),
+      : { boundaryGeoJSON: JSON.stringify(validateBoundaryGeometry(boundaryGeoJSON)) }),
     createdAt: now,
     updatedAt: now,
     updatedBy: createdBy,
@@ -355,7 +362,7 @@ export const territory_update = onCall(async (request) => {
   if (boundaryGeoJSON === null) {
     updates.boundaryGeoJSON = FieldValue.delete();
   } else if (boundaryGeoJSON !== undefined) {
-    updates.boundaryGeoJSON = validateBoundaryGeometry(boundaryGeoJSON);
+    updates.boundaryGeoJSON = JSON.stringify(validateBoundaryGeometry(boundaryGeoJSON));
   }
 
   if (statusHistoryEntry) {
