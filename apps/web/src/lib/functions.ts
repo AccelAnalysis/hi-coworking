@@ -419,7 +419,7 @@ export const getDownloadLinkFn = httpsCallable<{ bookId: string }, { url: string
 // Territory
 export const listReleasedTerritoriesFn = httpsCallable<
   Record<string, never>,
-  { released: TerritoryDoc[]; scheduled: TerritoryDoc[] }
+  { released: TerritoryDoc[]; scheduled: TerritoryDoc[]; unreleased: TerritoryDoc[] }
 >(functions, "territory_list_released");
 
 export type AdminTerritoryStatus = "scheduled" | "released" | "paused" | "archived";
@@ -440,6 +440,8 @@ export const updateTerritoryFn = httpsCallable<
     regionTag?: string;
     needsReview?: boolean;
     fipsStateCode?: string;
+    centroid?: { lat: number; lng: number } | null;
+    boundaryGeoJSON?: unknown | null;
   },
   { success: boolean; fips: string }
 >(functions, "territory_update");
@@ -459,6 +461,8 @@ export const createTerritoryFn = httpsCallable<
     regionTag?: string;
     needsReview?: boolean;
     fipsStateCode?: string;
+    centroid?: { lat: number; lng: number };
+    boundaryGeoJSON?: unknown;
   },
   { success: boolean; fips: string }
 >(functions, "territory_create");

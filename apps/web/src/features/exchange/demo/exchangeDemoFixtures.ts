@@ -90,6 +90,13 @@ export const EXCHANGE_DEMO_TERRITORIES: TerritoryDoc[] = [
     status: "released",
     createdAt: BASE - 200 * DAY,
     centroid: { lng: -76.71, lat: 36.91 },
+    type: "county",
+    boundaryGeoJSON: {
+      type: "Polygon",
+      coordinates: [[
+        [-76.86, 36.78], [-76.53, 36.78], [-76.53, 37.05], [-76.86, 37.05], [-76.86, 36.78],
+      ]],
+    },
   },
   {
     fips: "51740",
@@ -98,6 +105,13 @@ export const EXCHANGE_DEMO_TERRITORIES: TerritoryDoc[] = [
     status: "released",
     createdAt: BASE - 160 * DAY,
     centroid: { lng: -76.3, lat: 36.84 },
+    type: "city",
+    boundaryGeoJSON: {
+      type: "Polygon",
+      coordinates: [[
+        [-76.42, 36.76], [-76.18, 36.76], [-76.18, 36.93], [-76.42, 36.93], [-76.42, 36.76],
+      ]],
+    },
   },
   {
     fips: "51175",
@@ -107,6 +121,28 @@ export const EXCHANGE_DEMO_TERRITORIES: TerritoryDoc[] = [
     releaseDate: BASE + 45 * DAY,
     createdAt: BASE - 40 * DAY,
     centroid: { lng: -77.1, lat: 36.7 },
+    type: "county",
+    boundaryGeoJSON: {
+      type: "Polygon",
+      coordinates: [[
+        [-77.32, 36.51], [-76.88, 36.51], [-76.88, 36.89], [-77.32, 36.89], [-77.32, 36.51],
+      ]],
+    },
+  },
+  {
+    fips: "51800",
+    name: "Suffolk",
+    state: "VA",
+    status: "paused",
+    type: "city",
+    createdAt: BASE - 30 * DAY,
+    centroid: { lng: -76.58, lat: 36.73 },
+    boundaryGeoJSON: {
+      type: "Polygon",
+      coordinates: [[
+        [-76.76, 36.59], [-76.43, 36.59], [-76.43, 36.84], [-76.76, 36.84], [-76.76, 36.59],
+      ]],
+    },
   },
 ];
 

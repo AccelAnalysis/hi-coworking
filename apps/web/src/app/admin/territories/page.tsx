@@ -95,6 +95,9 @@ type EditForm = {
   autoReleaseEnabled: boolean;
   autoPauseEnabled: boolean;
   needsReview: boolean;
+  centroidLatitude: string;
+  centroidLongitude: string;
+  boundaryGeoJSON: string;
 };
 
 const DEFAULT_PREVIEW_MODE: PreviewMode = {
@@ -119,6 +122,9 @@ const DEFAULT_NEW_TERRITORY: EditForm = {
   autoReleaseEnabled: true,
   autoPauseEnabled: false,
   needsReview: false,
+  centroidLatitude: "",
+  centroidLongitude: "",
+  boundaryGeoJSON: "",
 };
 
 export default function AdminTerritoriesPage() {
@@ -169,7 +175,13 @@ function AdminTerritoriesContent() {
         getDocs(query(collection(db, "rfxResponses"))),
       ]);
 
-      const territoryRows = territorySnap.docs.map((d) => d.data() as TerritoryRecord);
+      const territoryRows = territorySnap.docs.map((d) => {
+        const territory = d.data() as TerritoryRecord;
+        return {
+          ...territory,
+          boundaryGeoJSON: parseStoredBoundaryGeoJSON(territory.boundaryGeoJSON),
+        };
+      });
       const metrics = computeTerritoryMetrics(
         territoryRows,
         rfxSnap.docs.map((d) => d.data() as Record<string, unknown>),
@@ -311,6 +323,11 @@ function AdminTerritoriesContent() {
       autoReleaseEnabled: t.autoReleaseEnabled ?? true,
       autoPauseEnabled: t.autoPauseEnabled ?? false,
       needsReview: Boolean(t.needsReview),
+      centroidLatitude: typeof t.centroid?.lat === "number" ? String(t.centroid.lat) : "",
+      centroidLongitude: typeof t.centroid?.lng === "number" ? String(t.centroid.lng) : "",
+      boundaryGeoJSON: t.boundaryGeoJSON
+        ? JSON.stringify(t.boundaryGeoJSON, null, 2)
+        : "",
     });
   };
 
@@ -333,12 +350,14 @@ function AdminTerritoriesContent() {
         autoReleaseEnabled: editing.autoReleaseEnabled,
         autoPauseEnabled: editing.autoPauseEnabled,
         needsReview: editing.needsReview,
+        centroid: parseCentroidForm(editing, true),
+        boundaryGeoJSON: parseBoundaryForm(editing.boundaryGeoJSON, true),
       });
       setEditing(null);
       await fetchData();
     } catch (err) {
       console.error("Failed to update territory", err);
-      setError("Failed to update territory. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to update territory. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -362,12 +381,14 @@ function AdminTerritoriesContent() {
         autoReleaseEnabled: form.autoReleaseEnabled,
         autoPauseEnabled: form.autoPauseEnabled,
         needsReview: form.needsReview,
+        centroid: parseCentroidForm(form, false) ?? undefined,
+        boundaryGeoJSON: parseBoundaryForm(form.boundaryGeoJSON, false),
       });
       setCreating(false);
       await fetchData();
     } catch (err) {
       console.error("Failed to create territory", err);
-      setError("Failed to create territory. Verify FIPS and try again.");
+      setError(err instanceof Error ? err.message : "Failed to create territory. Verify FIPS and try again.");
     } finally {
       setSaving(false);
     }
@@ -1008,7 +1029,7 @@ function EditTerritoryModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-xl">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
         <h2 className="text-lg font-bold text-slate-900">{title}</h2>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <TextInput label="FIPS" value={form.fips} onChange={(value) => setForm({ ...form, fips: value })} disabled />
@@ -1035,7 +1056,20 @@ function EditTerritoryModal({
             onChange={(value) => setForm({ ...form, releaseDate: value })}
             type="datetime-local"
           />
+          <TextInput
+            label="Centroid latitude"
+            value={form.centroidLatitude}
+            onChange={(value) => setForm({ ...form, centroidLatitude: value })}
+            placeholder="36.9001"
+          />
+          <TextInput
+            label="Centroid longitude"
+            value={form.centroidLongitude}
+            onChange={(value) => setForm({ ...form, centroidLongitude: value })}
+            placeholder="-76.7075"
+          />
         </div>
+        <BoundaryEditor value={form.boundaryGeoJSON} onChange={(value) => setForm({ ...form, boundaryGeoJSON: value })} />
         <div className="mt-3 rounded-lg border border-slate-200 p-2">
           <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
           <textarea
@@ -1082,7 +1116,7 @@ function CreateTerritoryModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-4 shadow-xl">
+      <div className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-4 shadow-xl">
         <h2 className="text-lg font-bold text-slate-900">Create Territory</h2>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           <TextInput label="FIPS" value={form.fips} onChange={(value) => setForm({ ...form, fips: value })} />
@@ -1109,7 +1143,21 @@ function CreateTerritoryModal({
             onChange={(value) => setForm({ ...form, releaseDate: value })}
             type="datetime-local"
           />
+          <TextInput
+            label="Centroid latitude"
+            value={form.centroidLatitude}
+            onChange={(value) => setForm({ ...form, centroidLatitude: value })}
+            placeholder="36.9001"
+          />
+          <TextInput
+            label="Centroid longitude"
+            value={form.centroidLongitude}
+            onChange={(value) => setForm({ ...form, centroidLongitude: value })}
+            placeholder="-76.7075"
+          />
         </div>
+
+        <BoundaryEditor value={form.boundaryGeoJSON} onChange={(value) => setForm({ ...form, boundaryGeoJSON: value })} />
 
         <div className="mt-3 rounded-lg border border-slate-200 p-2">
           <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Notes</label>
@@ -1143,6 +1191,69 @@ function CreateTerritoryModal({
       </div>
     </div>
   );
+}
+
+function BoundaryEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200 p-2">
+      <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        Boundary GeoJSON geometry
+      </label>
+      <p className="mt-1 text-xs text-slate-500">
+        Paste an authoritative Polygon or MultiPolygon geometry. Feature wrappers and generated approximations are rejected.
+      </p>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={7}
+        spellCheck={false}
+        placeholder={'{\n  "type": "Polygon",\n  "coordinates": [...]\n}'}
+        className="mt-2 w-full rounded-lg border border-slate-200 p-2 font-mono text-xs"
+      />
+    </div>
+  );
+}
+
+function parseBoundaryForm(value: string, allowDelete: boolean): unknown | null | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return allowDelete ? null : undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: unknown };
+    if (parsed?.type !== "Polygon" && parsed?.type !== "MultiPolygon") {
+      throw new Error("Boundary must be a Polygon or MultiPolygon geometry.");
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error("Boundary GeoJSON is not valid JSON.");
+    }
+    throw error;
+  }
+}
+
+function parseStoredBoundaryGeoJSON(value: unknown): unknown | undefined {
+  if (typeof value !== "string") return value ?? undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseCentroidForm(
+  form: Pick<EditForm, "centroidLatitude" | "centroidLongitude">,
+  allowDelete: boolean,
+): { lat: number; lng: number } | null | undefined {
+  const latitude = form.centroidLatitude.trim();
+  const longitude = form.centroidLongitude.trim();
+  if (!latitude && !longitude) return allowDelete ? null : undefined;
+  if (!latitude || !longitude) throw new Error("Both centroid latitude and longitude are required.");
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    throw new Error("Centroid coordinates are outside the valid latitude/longitude range.");
+  }
+  return { lat, lng };
 }
 
 function PreviewModal({
@@ -1237,12 +1348,14 @@ function TextInput({
   onChange,
   type = "text",
   disabled = false,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <label className="rounded-lg border border-slate-200 p-2 text-xs font-semibold text-slate-600">
@@ -1251,6 +1364,7 @@ function TextInput({
         type={type}
         value={value}
         disabled={disabled}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-md border border-slate-200 p-1.5 text-sm text-slate-800 disabled:bg-slate-100"
       />

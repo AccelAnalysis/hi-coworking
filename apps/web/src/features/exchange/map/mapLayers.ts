@@ -28,12 +28,21 @@ export function createExchangeMapLayerSpecifications(): LayerSpecification[] {
       },
     },
     {
+      id: EXCHANGE_MAP_LAYER_IDS.unreleasedTerritoryFill,
+      type: "fill",
+      source: EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries,
+      paint: {
+        "fill-color": "#64748b",
+        "fill-opacity": 0.28,
+      },
+    },
+    {
       id: EXCHANGE_MAP_LAYER_IDS.scheduledTerritoryFill,
       type: "fill",
       source: EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryBoundaries,
       paint: {
-        "fill-color": ["case", selected, "#d97706", "#f59e0b"],
-        "fill-opacity": ["case", selected, 0.24, 0.1],
+        "fill-color": ["case", selected, "#78716c", "#94a3b8"],
+        "fill-opacity": ["case", selected, 0.28, 0.18],
       },
     },
     {
@@ -46,11 +55,21 @@ export function createExchangeMapLayerSpecifications(): LayerSpecification[] {
       },
     },
     {
+      id: EXCHANGE_MAP_LAYER_IDS.unreleasedTerritoryOutline,
+      type: "line",
+      source: EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries,
+      paint: {
+        "line-color": "#475569",
+        "line-width": 1.5,
+        "line-opacity": 0.72,
+      },
+    },
+    {
       id: EXCHANGE_MAP_LAYER_IDS.scheduledTerritoryOutline,
       type: "line",
       source: EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryBoundaries,
       paint: {
-        "line-color": "#92400e",
+        "line-color": "#64748b",
         "line-width": ["case", selected, 3, 1.5],
         "line-opacity": ["case", selected, 0.95, 0.55],
       },

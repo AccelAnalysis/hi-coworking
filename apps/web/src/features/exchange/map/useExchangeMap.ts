@@ -42,6 +42,7 @@ export interface UseExchangeMapOptions extends ExchangeMapCallbacks {
   rfxList: readonly RfxDoc[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
+  unreleasedTerritories: readonly TerritoryDoc[];
   selection?: ExchangeMapSelection;
   initialViewport?: ExchangeMapViewport;
   viewport?: ExchangeMapViewport;
@@ -68,6 +69,7 @@ export function useExchangeMap({
   rfxList,
   releasedTerritories,
   scheduledTerritories,
+  unreleasedTerritories,
   selection = null,
   initialViewport,
   viewport,
@@ -100,8 +102,8 @@ export function useExchangeMap({
   const [error, setError] = useState<Error | null>(null);
 
   const data = useMemo(
-    () => buildExchangeMapGeoJson(rfxList, releasedTerritories, scheduledTerritories),
-    [rfxList, releasedTerritories, scheduledTerritories],
+    () => buildExchangeMapGeoJson(rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories),
+    [rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories],
   );
   const dataRef = useRef(data);
   const externalCallbacksRef = useRef<ExchangeMapCallbacks>({});

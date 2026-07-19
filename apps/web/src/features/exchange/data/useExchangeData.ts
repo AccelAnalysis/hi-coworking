@@ -19,6 +19,7 @@ export interface ExchangeDataState {
   pinnedRfx: RfxDoc | null;
   releasedTerritories: TerritoryDoc[];
   scheduledTerritories: TerritoryDoc[];
+  unreleasedTerritories: TerritoryDoc[];
   manageableRfxIds: string[];
   loading: boolean;
   refreshing: boolean;
@@ -35,6 +36,7 @@ const INITIAL_STATE: ExchangeDataState = {
   pinnedRfx: null,
   releasedTerritories: [],
   scheduledTerritories: [],
+  unreleasedTerritories: [],
   manageableRfxIds: [],
   loading: true,
   refreshing: false,
