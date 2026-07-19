@@ -20,6 +20,7 @@ export interface ExchangeRepositorySnapshot {
   rfx: RfxDoc[];
   releasedTerritories: TerritoryDoc[];
   scheduledTerritories: TerritoryDoc[];
+  unreleasedTerritories: TerritoryDoc[];
   manageableRfxIds: string[];
 }
 
@@ -93,6 +94,8 @@ export async function loadExchangeSnapshot(): Promise<ExchangeRepositorySnapshot
       .filter((territory) => territory.status === "released"),
     scheduledTerritories: (territoryResult?.data.scheduled ?? [])
       .filter((territory) => territory.status === "scheduled"),
+    unreleasedTerritories: (territoryResult?.data.unreleased ?? [])
+      .filter((territory) => territory.status === "paused" || territory.status === "archived"),
     manageableRfxIds: managedResult?.data.manageableRfxIds ?? [],
   };
 }

@@ -369,6 +369,7 @@ export const userDocSchema = z.object({
 
   // Membership track (PR-08: personalization)
   membershipTrack: membershipTrackSchema.optional(),
+  primaryOrganizationId: z.string().optional(),
 
   // Credits & Monetization
   credits: z.number().default(0),
@@ -390,6 +391,11 @@ export const orgDocSchema = z.object({
   logoUrl: z.string().optional(),
   website: z.string().url().optional(),
   address: z.string().optional(),
+  city: z.string().optional(),
+  county: z.string().optional(),
+  state: z.string().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
   seatsPurchased: z.number().int().nonnegative().default(0),
   seatsUsed: z.number().int().nonnegative().default(0),
   billingEmail: z.string().email().optional(),
@@ -518,12 +524,15 @@ export function computeReadinessTier(
 
 export const territoryStatusSchema = z.enum(["scheduled", "released", "paused", "archived"]);
 export type TerritoryStatus = z.infer<typeof territoryStatusSchema>;
+export const territoryTypeSchema = z.enum(["county", "city", "custom_polygon"]);
+export type TerritoryType = z.infer<typeof territoryTypeSchema>;
 
 export const territoryDocSchema = z.object({
   fips: z.string(),
   name: z.string(),
   state: z.string(),
   status: territoryStatusSchema,
+  type: territoryTypeSchema.optional(),
   releaseDate: z.number().optional(),
   pausedAt: z.number().optional(),
   notes: z.string().optional(),

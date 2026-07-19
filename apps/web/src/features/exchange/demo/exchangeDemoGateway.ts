@@ -392,6 +392,9 @@ export const exchangeDemoOpportunityRepository = {
       scheduledTerritories: structuredClone(
         EXCHANGE_DEMO_TERRITORIES.filter((territory) => territory.status === "scheduled"),
       ),
+      unreleasedTerritories: structuredClone(
+        EXCHANGE_DEMO_TERRITORIES.filter((territory) => territory.status === "paused" || territory.status === "archived"),
+      ),
       manageableRfxIds: ["demo-rfx-water"],
     };
   },

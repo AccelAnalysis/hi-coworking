@@ -277,6 +277,85 @@ afterAll(async () => {
   await deleteAdminApp(adminApp);
 });
 
+describe("Territory map projection and admin geometry", () => {
+  it("classifies admin statuses, returns only map fields, and rejects malformed boundaries", async () => {
+    const administrator = await createActor("territory-map-admin", "admin");
+    const member = await createActor("territory-map-member");
+    const validBoundary = {
+      type: "Polygon",
+      coordinates: [[
+        [-76.8, 36.8],
+        [-76.6, 36.8],
+        [-76.6, 37],
+        [-76.8, 37],
+        [-76.8, 36.8],
+      ]],
+    };
+
+    await callFunction(administrator, "territory_create", {
+      fips: "51800",
+      name: "Inactive City",
+      state: "VA",
+      type: "city",
+      status: "paused",
+      notes: "Private operations note",
+      centroid: { lat: 36.9, lng: -76.7 },
+      boundaryGeoJSON: validBoundary,
+    });
+    await Promise.all([
+      db.collection("territories").doc("51093").set({
+        fips: "51093",
+        name: "Released County",
+        state: "VA",
+        status: "released",
+        type: "county",
+        boundaryGeoJSON: validBoundary,
+        notes: "Must not be projected",
+        statusHistory: [{ status: "released", at: Date.now(), by: administrator.uid }],
+        createdAt: Date.now(),
+      }),
+      db.collection("territories").doc("51175").set({
+        fips: "51175",
+        name: "Scheduled County",
+        state: "VA",
+        status: "scheduled",
+        type: "county",
+        releaseDate: Date.now() + FUTURE,
+        boundaryGeoJSON: validBoundary,
+        createdAt: Date.now(),
+      }),
+    ]);
+
+    const result = await callFunction<{
+      released: Array<Record<string, unknown>>;
+      scheduled: Array<Record<string, unknown>>;
+      unreleased: Array<Record<string, unknown>>;
+    }>(member, "territory_list_released", {});
+    expect(result.released.map((territory) => territory.fips)).toEqual(["51093"]);
+    expect(result.scheduled.map((territory) => territory.fips)).toEqual(["51175"]);
+    expect(result.unreleased).toMatchObject([{
+      fips: "51800",
+      status: "paused",
+      type: "city",
+      centroid: { lat: 36.9, lng: -76.7 },
+      boundaryGeoJSON: validBoundary,
+    }]);
+    expect(result.released[0]).not.toHaveProperty("notes");
+    expect(result.released[0]).not.toHaveProperty("statusHistory");
+
+    await expectCallableError(
+      callFunction(administrator, "territory_update", {
+        fips: "51800",
+        boundaryGeoJSON: {
+          type: "Polygon",
+          coordinates: [[[-76.8, 36.8], [-76.6, 36.8], [-76.6, 37], [-76.7, 36.9]]],
+        },
+      }),
+      "invalid-argument",
+    );
+  });
+});
+
 describe("RFx callable authority and transaction boundaries", () => {
   it("rejects caller-controlled fields, fails closed on territory/verification, and publishes idempotently", async () => {
     const publisher = await createActor("rfx-publisher", "member", { verified: false });

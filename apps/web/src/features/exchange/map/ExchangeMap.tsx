@@ -29,6 +29,7 @@ export interface ExchangeMapProps extends ExchangeMapCallbacks {
   rfxList: readonly RfxDoc[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
+  unreleasedTerritories: readonly TerritoryDoc[];
   selection?: ExchangeMapSelection;
   initialViewport?: ExchangeMapViewport;
   viewport?: ExchangeMapViewport;
@@ -246,6 +247,7 @@ function ExchangeMapboxCanvas({
   rfxList,
   releasedTerritories,
   scheduledTerritories,
+  unreleasedTerritories,
   selection = null,
   initialViewport,
   viewport,
@@ -260,7 +262,11 @@ function ExchangeMapboxCanvas({
   ...callbacks
 }: ExchangeMapProps & { accessToken: string; diagnostics: MapboxRuntimeDiagnostics }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [dimension, setDimension] = useState<ExchangeMapDimension>("2d");
+  const [dimension, setDimension] = useState<ExchangeMapDimension>(() =>
+    (initialViewport?.pitch ?? viewport?.pitch ?? 0) > 0 ? "3d" : "2d",
+  );
+  const dimensionChangeOriginRef = useRef<"initial" | "external" | "user">("initial");
+  const pendingUserDimensionRef = useRef<ExchangeMapDimension | null>(null);
   const [loadTimeoutError, setLoadTimeoutError] = useState<Error | null>(null);
   const { mapRef, status, error } = useExchangeMap({
     containerRef,
@@ -268,6 +274,7 @@ function ExchangeMapboxCanvas({
     rfxList,
     releasedTerritories,
     scheduledTerritories,
+    unreleasedTerritories,
     selection,
     initialViewport,
     viewport,
@@ -276,6 +283,19 @@ function ExchangeMapboxCanvas({
     onStatusChange,
     ...callbacks,
   });
+
+  useEffect(() => {
+    const nextDimension = (viewport?.pitch ?? initialViewport?.pitch ?? 0) > 0 ? "3d" : "2d";
+    if (pendingUserDimensionRef.current) {
+      if (nextDimension === pendingUserDimensionRef.current) {
+        pendingUserDimensionRef.current = null;
+      }
+      return;
+    }
+    if (nextDimension === dimension) return;
+    dimensionChangeOriginRef.current = "external";
+    setDimension(nextDimension);
+  }, [dimension, initialViewport?.pitch, viewport?.pitch]);
 
   useEffect(() => {
     if (status !== "initializing") {
@@ -311,12 +331,15 @@ function ExchangeMapboxCanvas({
         threeDimensional ? "visible" : "none",
       );
     }
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    map.easeTo({
-      pitch: threeDimensional ? EXCHANGE_3D_VIEWPORT.pitch : 0,
-      bearing: threeDimensional ? EXCHANGE_3D_VIEWPORT.bearing : 0,
-      duration: reduceMotion ? 0 : 500,
-    });
+    if (dimensionChangeOriginRef.current === "user") {
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      map.easeTo({
+        pitch: threeDimensional ? EXCHANGE_3D_VIEWPORT.pitch : 0,
+        bearing: threeDimensional ? EXCHANGE_3D_VIEWPORT.bearing : 0,
+        duration: reduceMotion ? 0 : 500,
+      });
+    }
+    dimensionChangeOriginRef.current = "initial";
   }, [dimension, mapRef, status]);
 
   const providerError = error ?? loadTimeoutError;
@@ -336,12 +359,24 @@ function ExchangeMapboxCanvas({
       data-map-style={EXCHANGE_MAP_STYLE}
     >
       <div ref={containerRef} className="absolute inset-0 z-0 min-h-full min-w-full" />
+      {(releasedTerritories.length > 0 || scheduledTerritories.length > 0 || unreleasedTerritories.length > 0) ? (
+        <div className="pointer-events-none absolute left-3 top-3 z-30 flex max-w-[calc(100%-8rem)] flex-wrap gap-1.5 rounded-xl border border-white/60 bg-white/76 px-2.5 py-2 text-[10px] font-bold text-slate-700 shadow-lg backdrop-blur-xl" aria-label="Territory availability legend">
+          <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-emerald-500/80" /> Released</span>
+          <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400/80" /> Scheduled</span>
+          <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-600/80" /> Not active</span>
+        </div>
+      ) : null}
       <div className="absolute right-3 top-3 z-30 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">
         {(["2d", "3d"] as const).map((candidate) => (
           <button
             key={candidate}
             type="button"
-            onClick={() => setDimension(candidate)}
+            onClick={() => {
+              if (candidate === dimension) return;
+              pendingUserDimensionRef.current = candidate;
+              dimensionChangeOriginRef.current = "user";
+              setDimension(candidate);
+            }}
             aria-pressed={dimension === candidate}
             className={cn(
               "min-h-9 rounded-lg px-3 text-xs font-black uppercase tracking-[0.08em] outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",

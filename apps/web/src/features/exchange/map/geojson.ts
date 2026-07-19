@@ -1,6 +1,7 @@
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 
-export type ExchangeTerritoryMapStatus = "released" | "scheduled";
+export type ExchangeTerritoryMapStatus = TerritoryDoc["status"];
+type ExchangeVisibleTerritoryMapStatus = "released" | "scheduled";
 
 export interface RfxMapProperties {
   entityType: "rfx";
@@ -40,6 +41,7 @@ export interface ExchangeMapGeoJson {
   releasedTerritoryBoundaries: TerritoryBoundaryFeatureCollection;
   scheduledTerritoryPoints: TerritoryPointFeatureCollection;
   scheduledTerritoryBoundaries: TerritoryBoundaryFeatureCollection;
+  unreleasedTerritoryBoundaries: TerritoryBoundaryFeatureCollection;
 }
 
 export interface ExchangeMapDataBounds {
@@ -115,12 +117,15 @@ export function parseTerritoryBoundaryGeometry(value: unknown): TerritoryBoundar
 
 function territoryProperties(
   territory: TerritoryDoc,
-  requestedStatus: ExchangeTerritoryMapStatus,
+  requestedStatus: ExchangeVisibleTerritoryMapStatus | "unreleased",
 ): TerritoryMapProperties | null {
   const fips = typeof territory.fips === "string" ? territory.fips.trim() : "";
-  if (!fips || territory.status !== requestedStatus) return null;
+  const matchesStatus = requestedStatus === "unreleased"
+    ? territory.status === "paused" || territory.status === "archived"
+    : territory.status === requestedStatus;
+  if (!fips || !matchesStatus) return null;
 
-  const status = requestedStatus;
+  const status = territory.status;
   const releaseDate =
     typeof territory.releaseDate === "number" && Number.isFinite(territory.releaseDate)
       ? territory.releaseDate
@@ -179,7 +184,7 @@ export function toRfxFeatureCollection(rfxList: readonly RfxDoc[]): RfxFeatureCo
 
 export function toTerritoryPointFeatureCollection(
   territories: readonly TerritoryDoc[],
-  status: ExchangeTerritoryMapStatus,
+  status: ExchangeVisibleTerritoryMapStatus,
 ): TerritoryPointFeatureCollection {
   const features: Array<GeoJSON.Feature<GeoJSON.Point, TerritoryMapProperties>> = [];
 
@@ -202,7 +207,7 @@ export function toTerritoryPointFeatureCollection(
 
 export function toTerritoryBoundaryFeatureCollection(
   territories: readonly TerritoryDoc[],
-  status: ExchangeTerritoryMapStatus,
+  status: ExchangeVisibleTerritoryMapStatus | "unreleased",
 ): TerritoryBoundaryFeatureCollection {
   const features: Array<GeoJSON.Feature<TerritoryBoundaryGeometry, TerritoryMapProperties>> = [];
 
@@ -226,6 +231,7 @@ export function buildExchangeMapGeoJson(
   rfxList: readonly RfxDoc[],
   releasedTerritories: readonly TerritoryDoc[],
   scheduledTerritories: readonly TerritoryDoc[],
+  unreleasedTerritories: readonly TerritoryDoc[] = [],
 ): ExchangeMapGeoJson {
   return {
     rfx: toRfxFeatureCollection(rfxList),
@@ -233,6 +239,7 @@ export function buildExchangeMapGeoJson(
     releasedTerritoryBoundaries: toTerritoryBoundaryFeatureCollection(releasedTerritories, "released"),
     scheduledTerritoryPoints: toTerritoryPointFeatureCollection(scheduledTerritories, "scheduled"),
     scheduledTerritoryBoundaries: toTerritoryBoundaryFeatureCollection(scheduledTerritories, "scheduled"),
+    unreleasedTerritoryBoundaries: toTerritoryBoundaryFeatureCollection(unreleasedTerritories, "unreleased"),
   };
 }
 
@@ -252,7 +259,7 @@ function visitPositionBounds(
   };
 }
 
-/** Bounds over every valid mapped RFx point, territory centroid, and boundary. */
+/** Bounds over discoverable RFx points and released/scheduled territory data. */
 export function getExchangeMapDataBounds(data: ExchangeMapGeoJson): ExchangeMapDataBounds | null {
   let bounds: ExchangeMapDataBounds | null = null;
 

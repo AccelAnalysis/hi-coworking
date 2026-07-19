@@ -5,10 +5,13 @@ export const EXCHANGE_MAP_SOURCE_IDS = Object.freeze({
   releasedTerritoryBoundaries: "exchange-territory-released-boundaries",
   scheduledTerritoryPoints: "exchange-territory-scheduled-points",
   scheduledTerritoryBoundaries: "exchange-territory-scheduled-boundaries",
+  unreleasedTerritoryBoundaries: "exchange-territory-unreleased-boundaries",
 } as const);
 
 export const EXCHANGE_MAP_LAYER_IDS = Object.freeze({
   buildings3d: "exchange-buildings-3d",
+  unreleasedTerritoryFill: "exchange-territory-unreleased-fill",
+  unreleasedTerritoryOutline: "exchange-territory-unreleased-outline",
   scheduledTerritoryFill: "exchange-territory-scheduled-fill",
   releasedTerritoryFill: "exchange-territory-released-fill",
   scheduledTerritoryOutline: "exchange-territory-scheduled-outline",

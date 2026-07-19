@@ -44,6 +44,11 @@ export function createExchangeMapSourceSpecifications(
       data: data.scheduledTerritoryBoundaries,
       promoteId: "id",
     },
+    [EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries]: {
+      type: "geojson",
+      data: data.unreleasedTerritoryBoundaries,
+      promoteId: "id",
+    },
   };
 }
 
@@ -91,6 +96,11 @@ export function updateExchangeMapSources(map: MapboxMap, data: ExchangeMapGeoJso
     map,
     EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryBoundaries,
     data.scheduledTerritoryBoundaries,
+  );
+  setGeoJsonSourceData(
+    map,
+    EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries,
+    data.unreleasedTerritoryBoundaries,
   );
 }
 

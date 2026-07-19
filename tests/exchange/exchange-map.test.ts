@@ -107,7 +107,17 @@ describe("Exchange map GeoJSON", () => {
       centroid: { lng: -77.1, lat: 36.7 },
     });
 
-    const data = buildExchangeMapGeoJson([], [released], [scheduled]);
+    const unreleased = territory({
+      fips: "51800",
+      name: "Suffolk",
+      status: "paused",
+      centroid: { lng: -79, lat: 38 },
+      boundaryGeoJSON: {
+        type: "Polygon",
+        coordinates: [[[-79.1, 37.9], [-78.9, 37.9], [-78.9, 38.1], [-79.1, 37.9]]],
+      },
+    });
+    const data = buildExchangeMapGeoJson([], [released], [scheduled], [unreleased]);
 
     expect(data.releasedTerritoryPoints.features[0].properties).toMatchObject({
       id: "51093",
@@ -122,6 +132,12 @@ describe("Exchange map GeoJSON", () => {
     });
     expect(data.releasedTerritoryBoundaries.features[0].id).toBe("51093");
     expect(data.scheduledTerritoryBoundaries.features[0].id).toBe("51175");
+    expect(data.unreleasedTerritoryBoundaries.features[0]).toMatchObject({
+      id: "51800",
+      properties: { status: "paused" },
+    });
+    // Fit Results remains scoped to discoverable records; inactive context
+    // geometry does not pull the camera away from the current workspace.
     expect(getExchangeMapDataBounds(data)).toEqual({
       west: -77.1,
       south: 36.7,
@@ -169,6 +185,7 @@ describe("Exchange map source, layer, and selection contracts", () => {
       releasedTerritoryBoundaries: "exchange-territory-released-boundaries",
       scheduledTerritoryPoints: "exchange-territory-scheduled-points",
       scheduledTerritoryBoundaries: "exchange-territory-scheduled-boundaries",
+      unreleasedTerritoryBoundaries: "exchange-territory-unreleased-boundaries",
     });
     expect(new Set(Object.values(EXCHANGE_MAP_SOURCE_IDS)).size).toBe(
       Object.values(EXCHANGE_MAP_SOURCE_IDS).length,
@@ -218,6 +235,25 @@ describe("Exchange map source, layer, and selection contracts", () => {
     expect(
       layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.selectedRfxPoint)?.source,
     ).toBe(EXCHANGE_MAP_SOURCE_IDS.selectedRfx);
+  });
+
+  it("renders scheduled and inactive admin territory boundaries as non-discoverable gray context", () => {
+    const paused = territory({ fips: "51800", status: "paused" });
+    const data = buildExchangeMapGeoJson([], [], [], [paused]);
+    const sources = createExchangeMapSourceSpecifications(data);
+    const layers = createExchangeMapLayerSpecifications();
+
+    expect(sources[EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries]).toMatchObject({
+      type: "geojson",
+      promoteId: "id",
+      data: { features: [{ properties: { status: "paused" } }] },
+    });
+    expect(layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.unreleasedTerritoryFill)).toMatchObject({
+      type: "fill",
+      source: EXCHANGE_MAP_SOURCE_IDS.unreleasedTerritoryBoundaries,
+      paint: { "fill-color": "#64748b", "fill-opacity": 0.28 },
+    });
+    expect(JSON.stringify(layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.scheduledTerritoryFill))).toContain("#94a3b8");
   });
 
   it("maps RFx and territory selection props to feature-state source targets", () => {
