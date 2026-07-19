@@ -375,7 +375,7 @@ function AdminTerritoriesContent() {
         autoReleaseEnabled: form.autoReleaseEnabled,
         autoPauseEnabled: form.autoPauseEnabled,
         needsReview: form.needsReview,
-        centroid: parseCentroidForm(form, false),
+        centroid: parseCentroidForm(form, false) ?? undefined,
         boundaryGeoJSON: parseBoundaryForm(form.boundaryGeoJSON, false),
       });
       setCreating(false);
