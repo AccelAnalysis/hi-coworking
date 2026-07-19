@@ -9,6 +9,10 @@ function argument(name) {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+function hasFlag(name) {
+  return process.argv.includes(name);
+}
+
 function rows(file) {
   return fs.readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map((line, index) => {
     try { return JSON.parse(line); }
@@ -90,11 +94,51 @@ function resolveProjectId() {
     || process.env.FIREBASE_CONFIG && JSON.parse(process.env.FIREBASE_CONFIG).projectId;
 }
 
-function assertProjectSafety(projectId, dryRun, confirmation) {
-  if (!projectId) throw new Error("--project is required; refusing an unscoped import");
-  if (!dryRun && !projectId.startsWith("demo-") && confirmation !== projectId) {
-    throw new Error(`Refusing a non-demo write. Re-run with --confirm-production ${projectId} after reviewing the dry-run, privacy, and rollback reports.`);
+function normalizeSafetyOptions(projectId, optionsOrDryRun, legacyConfirmation) {
+  if (typeof optionsOrDryRun === "boolean") {
+    return {
+      dryRun: optionsOrDryRun,
+      apply: !optionsOrDryRun,
+      environment: projectId.startsWith("demo-") ? "emulator" : "production",
+      confirmProduction: legacyConfirmation,
+    };
   }
+  return {
+    dryRun: optionsOrDryRun?.dryRun !== false,
+    apply: optionsOrDryRun?.apply === true,
+    environment: optionsOrDryRun?.environment || (projectId.startsWith("demo-") ? "emulator" : "development"),
+    confirmDevelopment: optionsOrDryRun?.confirmDevelopment,
+    confirmProduction: optionsOrDryRun?.confirmProduction,
+  };
+}
+
+function assertProjectSafety(projectId, optionsOrDryRun = { dryRun: true }, legacyConfirmation) {
+  if (!projectId) throw new Error("--project is required; refusing an unscoped import");
+  const options = normalizeSafetyOptions(projectId, optionsOrDryRun, legacyConfirmation);
+  if (options.dryRun || !options.apply) return;
+
+  if (options.environment === "emulator") {
+    if (!projectId.startsWith("demo-")) {
+      throw new Error(`Refusing emulator-mode writes to non-demo project ${projectId}.`);
+    }
+    return;
+  }
+
+  if (options.environment === "development") {
+    if (options.confirmDevelopment !== projectId) {
+      throw new Error(`Refusing development write. Re-run with --apply --environment development --confirm-development ${projectId} after reviewing the dry-run, privacy, and rollback reports.`);
+    }
+    return;
+  }
+
+  if (options.environment === "production") {
+    if (options.confirmProduction !== projectId) {
+      throw new Error(`Refusing production write. Re-run with --apply --environment production --confirm-production ${projectId} after release approval and rollback review.`);
+    }
+    return;
+  }
+
+  throw new Error(`Unknown import environment '${options.environment}'. Use emulator, development, or production.`);
 }
 
 async function importRows(db, file, collectionName, restricted, batchId, dryRun) {
@@ -144,10 +188,20 @@ async function importRows(db, file, collectionName, restricted, batchId, dryRun)
 async function main() {
   const organizations = argument("--organizations");
   const targeting = argument("--targeting");
-  const dryRun = process.argv.includes("--dry-run");
+  const apply = hasFlag("--apply");
+  const explicitDryRun = hasFlag("--dry-run");
+  if (apply && explicitDryRun) throw new Error("Choose either --apply or --dry-run, not both");
+  const dryRun = !apply;
   if (!organizations || !targeting) throw new Error("--organizations and --targeting are required");
   const projectId = resolveProjectId();
-  assertProjectSafety(projectId, dryRun, argument("--confirm-production"));
+  const environment = argument("--environment") || (projectId?.startsWith("demo-") ? "emulator" : "development");
+  assertProjectSafety(projectId, {
+    dryRun,
+    apply,
+    environment,
+    confirmDevelopment: argument("--confirm-development"),
+    confirmProduction: argument("--confirm-production"),
+  });
   if (!admin.apps.length) admin.initializeApp({ projectId });
   const db = admin.firestore();
   const batchId = argument("--batch-id") || `exchange_seed_${new Date().toISOString().slice(0, 10)}`;
@@ -155,8 +209,10 @@ async function main() {
   const targetingResult = await importRows(db, path.resolve(targeting), "organizationSourceCandidates", true, batchId, dryRun);
   const report = {
     projectId,
+    environment,
     batchId,
     dryRun,
+    apply,
     organizations: organizationResult,
     targeting: targetingResult,
     privacy: {
@@ -165,6 +221,9 @@ async function main() {
       restrictedTargetingServerOnly: true,
       fabricatedCoordinates: false,
     },
+    nextStep: dryRun
+      ? `Review this report, then re-run with --apply --environment ${environment} and the matching exact confirmation flag.`
+      : "Record this batch ID and retain the rollback query before further development acceptance.",
   };
   if (!dryRun) {
     await db.collection("organizationSeedImports").doc(batchId).set({
@@ -188,6 +247,7 @@ module.exports = {
   assertProjectSafety,
   contentHash,
   importRows,
+  normalizeSafetyOptions,
   publicProjection,
   rows,
   stableJson,

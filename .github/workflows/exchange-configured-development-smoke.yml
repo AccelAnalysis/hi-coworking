@@ -1,0 +1,100 @@
+name: Exchange configured-development smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      allow_mutations:
+        description: "Allow creation of disposable development organizations and dedicated claim-review writes"
+        required: true
+        default: false
+        type: boolean
+      claim_organization_name:
+        description: "Optional dedicated seeded organization used only for claim smoke testing"
+        required: false
+        type: string
+      claim_review_action:
+        description: "Safer default is reject; approval should use a disposable dedicated organization"
+        required: true
+        default: reject
+        type: choice
+        options:
+          - reject
+          - approve
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exchange-configured-development-smoke
+  cancel-in-progress: false
+
+jobs:
+  configured-development-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: exchange-development
+    env:
+      EXCHANGE_DEV_BASE_URL: ${{ secrets.EXCHANGE_DEV_BASE_URL }}
+      EXCHANGE_DEV_PROJECT_ID: hi-coworking-plat
+      EXCHANGE_DEV_TEST_EMAIL: ${{ secrets.EXCHANGE_DEV_TEST_EMAIL }}
+      EXCHANGE_DEV_TEST_PASSWORD: ${{ secrets.EXCHANGE_DEV_TEST_PASSWORD }}
+      EXCHANGE_DEV_ADMIN_EMAIL: ${{ secrets.EXCHANGE_DEV_ADMIN_EMAIL }}
+      EXCHANGE_DEV_ADMIN_PASSWORD: ${{ secrets.EXCHANGE_DEV_ADMIN_PASSWORD }}
+      EXCHANGE_DEV_ALLOW_MUTATIONS: ${{ inputs.allow_mutations }}
+      EXCHANGE_DEV_CLAIM_ORGANIZATION_NAME: ${{ inputs.claim_organization_name }}
+      EXCHANGE_DEV_CLAIM_REVIEW_ACTION: ${{ inputs.claim_review_action }}
+      EXCHANGE_DEV_REQUIRE_SMOKE: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write configured-development public browser environment
+        shell: bash
+        env:
+          FIREBASE_API_KEY: ${{ secrets.EXCHANGE_DEV_FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.EXCHANGE_DEV_FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.EXCHANGE_DEV_FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXCHANGE_DEV_FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_APP_ID: ${{ secrets.EXCHANGE_DEV_FIREBASE_APP_ID }}
+          MAPBOX_PUBLIC_TOKEN: ${{ secrets.EXCHANGE_DEV_MAPBOX_PUBLIC_TOKEN }}
+        run: |
+          cat > apps/web/.env.local <<EOF
+          NEXT_PUBLIC_FIREBASE_API_KEY=${FIREBASE_API_KEY}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${FIREBASE_AUTH_DOMAIN}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID=hi-coworking-plat
+          NEXT_PUBLIC_EXPECTED_FIREBASE_PROJECT_ID=hi-coworking-plat
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=${FIREBASE_STORAGE_BUCKET}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${FIREBASE_MESSAGING_SENDER_ID}
+          NEXT_PUBLIC_FIREBASE_APP_ID=${FIREBASE_APP_ID}
+          NEXT_PUBLIC_USE_FIREBASE_EMULATOR=false
+          NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${MAPBOX_PUBLIC_TOKEN}
+          EOF
+
+      - name: Configured-development readiness check
+        run: npm run check:exchange-dev:strict -- --project hi-coworking-plat
+
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run configured-development browser smoke
+        run: npm run test:browser:configured-dev
+
+      - name: Upload smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exchange-configured-development-smoke-artifacts
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
