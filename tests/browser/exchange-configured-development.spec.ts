@@ -20,15 +20,16 @@ async function login(page: import("@playwright/test").Page, email: string, passw
   await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
 }
 
-test.beforeEach(async ({}, testInfo) => {
-  if (!requiredConfiguredDevelopmentInputsPresent()) {
-    if (requireSmoke) {
-      throw new Error(
-        "Configured-development smoke credentials are required. Set EXCHANGE_DEV_BASE_URL, EXCHANGE_DEV_TEST_EMAIL, and EXCHANGE_DEV_TEST_PASSWORD.",
-      );
-    }
-    testInfo.skip(true, "Configured-development smoke environment is not supplied.");
+test.beforeEach(async () => {
+  if (!requiredConfiguredDevelopmentInputsPresent() && requireSmoke) {
+    throw new Error(
+      "Configured-development smoke credentials are required. Set EXCHANGE_DEV_BASE_URL, EXCHANGE_DEV_TEST_EMAIL, and EXCHANGE_DEV_TEST_PASSWORD.",
+    );
   }
+  test.skip(
+    !requiredConfiguredDevelopmentInputsPresent(),
+    "Configured-development smoke environment is not supplied.",
+  );
 });
 
 test("configured development permits sign-in, Exchange access, and a profile save", async ({ page }) => {
@@ -45,7 +46,8 @@ test("configured development permits sign-in, Exchange access, and a profile sav
 });
 
 test("configured development can create a disposable organization when explicitly enabled", async ({ page }, testInfo) => {
-  testInfo.skip(!allowMutations, "Set EXCHANGE_DEV_ALLOW_MUTATIONS=true to exercise controlled development writes.");
+  test.skip(testInfo.project.name !== "configured-development-chromium", "Mutating smoke runs once in Chromium.");
+  test.skip(!allowMutations, "Set EXCHANGE_DEV_ALLOW_MUTATIONS=true to exercise controlled development writes.");
 
   await login(page, memberEmail!, memberPassword!);
   const suffix = `${Date.now()}-${testInfo.project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
@@ -62,6 +64,8 @@ test("configured development can create a disposable organization when explicitl
 });
 
 test("configured development can submit and review a dedicated seeded claim when explicitly enabled", async ({ page, browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "configured-development-chromium", "Mutating smoke runs once in Chromium.");
+
   const claimOrganizationName = process.env.EXCHANGE_DEV_CLAIM_ORGANIZATION_NAME;
   const claimOrganizationCity = process.env.EXCHANGE_DEV_CLAIM_ORGANIZATION_CITY || "Smithfield";
   const reviewAction = process.env.EXCHANGE_DEV_CLAIM_REVIEW_ACTION === "approve" ? "Approve" : "Reject";
@@ -72,7 +76,7 @@ test("configured development can submit and review a dedicated seeded claim when
     && adminPassword,
   );
 
-  testInfo.skip(
+  test.skip(
     !claimInputsPresent,
     "Set mutation mode, a dedicated seeded organization, and development admin credentials to exercise claim review.",
   );
