@@ -309,7 +309,7 @@ describe("Territory map projection and admin geometry", () => {
         state: "VA",
         status: "released",
         type: "county",
-        boundaryGeoJSON: validBoundary,
+        boundaryGeoJSON: JSON.stringify(validBoundary),
         notes: "Must not be projected",
         statusHistory: [{ status: "released", at: Date.now(), by: administrator.uid }],
         createdAt: Date.now(),
@@ -321,7 +321,7 @@ describe("Territory map projection and admin geometry", () => {
         status: "scheduled",
         type: "county",
         releaseDate: Date.now() + FUTURE,
-        boundaryGeoJSON: validBoundary,
+        boundaryGeoJSON: JSON.stringify(validBoundary),
         createdAt: Date.now(),
       }),
     ]);
