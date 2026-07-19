@@ -19,6 +19,7 @@
     "emulators:exchange": "npm run build:shared && npm run build:functions && firebase emulators:start --project demo-hi-coworking --only auth,firestore,functions,storage",
     "seed:exchange-demo": "GCLOUD_PROJECT=demo-hi-coworking FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9100 node scripts/seed-exchange-demo.mjs",
     "seed:organizations:dev:dry": "node apps/functions/scripts/import-organizations.cjs --project hi-coworking-plat --environment development --organizations data/seed/prepared/isle-of-wight-organizations.jsonl --targeting data/seed/prepared/exchange-targeting-restricted.jsonl",
+    "bootstrap:exchange-dev:dry": "node apps/functions/scripts/bootstrap-development-accounts.cjs --project hi-coworking-plat",
     "dev:exchange": "NEXT_PUBLIC_USE_FIREBASE_EMULATOR=true NEXT_PUBLIC_FIREBASE_API_KEY=demo-key NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-hi-coworking.firebaseapp.com NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-hi-coworking NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=demo-hi-coworking.appspot.com NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890 NEXT_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:demo npm run dev --workspace web -- --port 3002",
     "dev:exchange:demo": "NEXT_PUBLIC_EXCHANGE_DEMO_MODE=true NEXT_PUBLIC_FIREBASE_API_KEY=demo-key NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-hi-coworking.firebaseapp.com NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-hi-coworking NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=demo-hi-coworking.appspot.com NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=1234567890 NEXT_PUBLIC_FIREBASE_APP_ID=1:1234567890:web:demo npm run dev --workspace web -- --port 3002",
     "test": "npm run test:security",
@@ -30,7 +31,8 @@
     "test:run3": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/run3 tests/functions/run3-*.test.ts\"",
     "migrate:exchange-run4:dry": "node scripts/migrate-exchange-run4.mjs --project=demo-hi-coworking",
     "test:run4": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/run4\"",
-    "test:week1-org": "npm run build:functions && node --test apps/functions/test/exchange-organization-model.test.cjs apps/functions/test/organization-import.test.cjs && vitest run tests/exchange/week1-organization-reconciliation.test.ts",
+    "test:development-readiness": "node --test apps/functions/test/development-account-bootstrap.test.cjs apps/functions/test/organization-import.test.cjs",
+    "test:week1-org": "npm run build:functions && node --test apps/functions/test/exchange-organization-model.test.cjs apps/functions/test/organization-import.test.cjs apps/functions/test/development-account-bootstrap.test.cjs && vitest run tests/exchange/week1-organization-reconciliation.test.ts",
     "seed:organizations:verify": "python3 apps/functions/scripts/verify-organization-seed.py data/seed/prepared/isle-of-wight-organizations.jsonl",
     "test:browser:week1-org": "playwright test tests/browser/exchange-organization-reconciliation.spec.ts",
     "test:browser:configured-dev": "playwright test --config=playwright.config.development.ts"
