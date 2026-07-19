@@ -73,7 +73,32 @@ test("public projection suppresses ownership, source IDs, and home address", () 
   assert.equal(publicRow.sourceIds, undefined);
 });
 
-test("project guard requires an exact production confirmation", () => {
+test("project guard is dry-run first and distinguishes development from production", () => {
+  assert.doesNotThrow(() => assertProjectSafety("demo-hi-coworking", { dryRun: false, apply: true, environment: "emulator" }));
+  assert.doesNotThrow(() => assertProjectSafety("hi-coworking-plat", { dryRun: true, apply: false, environment: "development" }));
+  assert.throws(
+    () => assertProjectSafety("hi-coworking-plat", { dryRun: false, apply: true, environment: "development" }),
+    /confirm-development/,
+  );
+  assert.doesNotThrow(() => assertProjectSafety("hi-coworking-plat", {
+    dryRun: false,
+    apply: true,
+    environment: "development",
+    confirmDevelopment: "hi-coworking-plat",
+  }));
+  assert.throws(
+    () => assertProjectSafety("hi-coworking-prod", { dryRun: false, apply: true, environment: "production" }),
+    /confirm-production/,
+  );
+  assert.doesNotThrow(() => assertProjectSafety("hi-coworking-prod", {
+    dryRun: false,
+    apply: true,
+    environment: "production",
+    confirmProduction: "hi-coworking-prod",
+  }));
+});
+
+test("legacy project guard behavior remains compatible", () => {
   assert.doesNotThrow(() => assertProjectSafety("demo-hi-coworking", false));
   assert.doesNotThrow(() => assertProjectSafety("hi-coworking-prod", true));
   assert.throws(() => assertProjectSafety("hi-coworking-prod", false), /Refusing/);
