@@ -64,7 +64,7 @@ async function applyAccount({ auth, db, email, password, role, displayName }) {
 
   await auth.setCustomUserClaims(user.uid, { role, developmentTestAccount: true });
   const now = Date.now();
-  await db.collection("users").doc(user.uid).set({
+  const userDoc = {
     uid: user.uid,
     email,
     displayName,
@@ -73,8 +73,9 @@ async function applyAccount({ auth, db, email, password, role, displayName }) {
     developmentTestAccount: true,
     developmentPurpose: "configured_exchange_smoke",
     updatedAt: now,
-    createdAt: now,
-  }, { merge: true });
+  };
+  if (!existing) userDoc.createdAt = now;
+  await db.collection("users").doc(user.uid).set(userDoc, { merge: true });
 
   return {
     uid: user.uid,
