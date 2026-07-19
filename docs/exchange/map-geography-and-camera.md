@@ -4,6 +4,10 @@ The Exchange opportunity workspace uses Mapbox Streets v12 as its required map r
 
 ## Territory geography
 
+Validated boundary geometry is serialized at the Firestore persistence boundary because Firestore
+does not accept GeoJSON's nested coordinate arrays. Callables and UI code continue to exchange
+normal Polygon or MultiPolygon geometry objects.
+
 Territory status and geometry are controlled from the Admin Territory Manager.
 
 - `released` territory boundaries remain visible with a restrained green treatment.
