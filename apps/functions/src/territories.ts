@@ -212,15 +212,15 @@ export const territory_create = onCall(async (request) => {
     needsReview: Boolean(needsReview),
     fipsStateCode: typeof fipsStateCode === "string" ? fipsStateCode.trim() : fips.slice(0, 2),
     status: finalStatus,
-    releaseDate: typeof releaseDate === "number" ? releaseDate : undefined,
-    pausedAt: finalStatus === "paused" ? now : undefined,
+    ...(typeof releaseDate === "number" ? { releaseDate } : {}),
+    ...(finalStatus === "paused" ? { pausedAt: now } : {}),
     notes: notes?.trim() || "",
-    centroid: centroid && isValidCentroid(centroid)
-      ? { lat: centroid.lat, lng: centroid.lng }
-      : undefined,
-    boundaryGeoJSON: boundaryGeoJSON === undefined
-      ? undefined
-      : validateBoundaryGeometry(boundaryGeoJSON),
+    ...(centroid && isValidCentroid(centroid)
+      ? { centroid: { lat: centroid.lat, lng: centroid.lng } }
+      : {}),
+    ...(boundaryGeoJSON === undefined
+      ? {}
+      : { boundaryGeoJSON: validateBoundaryGeometry(boundaryGeoJSON) }),
     createdAt: now,
     updatedAt: now,
     updatedBy: createdBy,
