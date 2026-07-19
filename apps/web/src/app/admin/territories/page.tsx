@@ -175,7 +175,13 @@ function AdminTerritoriesContent() {
         getDocs(query(collection(db, "rfxResponses"))),
       ]);
 
-      const territoryRows = territorySnap.docs.map((d) => d.data() as TerritoryRecord);
+      const territoryRows = territorySnap.docs.map((d) => {
+        const territory = d.data() as TerritoryRecord;
+        return {
+          ...territory,
+          boundaryGeoJSON: parseStoredBoundaryGeoJSON(territory.boundaryGeoJSON),
+        };
+      });
       const metrics = computeTerritoryMetrics(
         territoryRows,
         rfxSnap.docs.map((d) => d.data() as Record<string, unknown>),
@@ -1222,6 +1228,15 @@ function parseBoundaryForm(value: string, allowDelete: boolean): unknown | null 
       throw new Error("Boundary GeoJSON is not valid JSON.");
     }
     throw error;
+  }
+}
+
+function parseStoredBoundaryGeoJSON(value: unknown): unknown | undefined {
+  if (typeof value !== "string") return value ?? undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
   }
 }
 
