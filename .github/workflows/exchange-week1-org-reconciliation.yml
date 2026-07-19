@@ -47,6 +47,7 @@ jobs:
       - run: npm run test:exchange
       - run: npm run test:development-readiness
       - run: npm run test:week1-org
+      - run: npx playwright test --config=playwright.config.development.ts --list
       - run: npx playwright install --with-deps chromium
       - run: npm run build:shared && npm run build:functions && npx firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage "npm run test:browser:week1-org"
       - run: git diff --check
