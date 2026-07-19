@@ -29,7 +29,7 @@ export interface ExchangeMapProps extends ExchangeMapCallbacks {
   rfxList: readonly RfxDoc[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
-  unreleasedTerritories: readonly TerritoryDoc[];
+  unreleasedTerritories?: readonly TerritoryDoc[];
   selection?: ExchangeMapSelection;
   initialViewport?: ExchangeMapViewport;
   viewport?: ExchangeMapViewport;
@@ -247,7 +247,7 @@ function ExchangeMapboxCanvas({
   rfxList,
   releasedTerritories,
   scheduledTerritories,
-  unreleasedTerritories,
+  unreleasedTerritories = [],
   selection = null,
   initialViewport,
   viewport,
