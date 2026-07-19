@@ -253,6 +253,32 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Canonical privacy-minimized organization discovery projection.
+    // Full organization records remain member/staff scoped above.
+    match /publicOrganizations/{organizationId} {
+      allow read: if resource.data.status == "active";
+      allow create, update, delete: if false;
+    }
+
+    // Organization onboarding, claims, restricted seed candidates, rate
+    // limiting, and import evidence are callable/server-authoritative.
+    match /organizationClaims/{claimId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationSourceCandidates/{candidateId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationSearchRateLimits/{limitId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationSeedImports/{importId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
     // --- rfx/{rfxId} ---
     // Public read if not member-only; member-only requires auth.
     // Authenticated users can create; owner or admin can update/delete.

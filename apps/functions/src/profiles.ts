@@ -7,6 +7,8 @@ import {
   sanitizePublicProfile,
 } from "./exchange/publicProfiles";
 
+const PROFILE_SCHEMA_VERSION = 2;
+
 const PROFILE_ASSET_FIELD_PAIRS = [
   ["capabilityStatementStoragePath", "capabilityStatementUrl"],
   ["photoStoragePath", "photoUrl"],
@@ -42,7 +44,18 @@ function computeReadiness(profile: Record<string, unknown>): "seat_ready" | "bid
 
 export const profile_update = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
-  const input = parseCallableInput(profileUpdateInputSchema, request.data);
+  let input;
+  try {
+    input = parseCallableInput(profileUpdateInputSchema, request.data);
+  } catch (error) {
+    if (error instanceof HttpsError && error.code === "invalid-argument") {
+      throw new HttpsError("invalid-argument", error.message, {
+        ...(error.details && typeof error.details === "object" ? error.details : {}),
+        diagnosticCode: "INVALID_PROFILE_DATA",
+      });
+    }
+    throw error;
+  }
   const invalidAssetPaths = getInvalidProfileAssetStoragePathFields(
     actor.uid,
     input as Record<string, unknown>,
@@ -51,7 +64,7 @@ export const profile_update = onCall(async (request) => {
     throw new HttpsError(
       "invalid-argument",
       "Profile asset paths must belong to the authenticated profile",
-      { fields: invalidAssetPaths },
+      { fields: invalidAssetPaths, diagnosticCode: "STORAGE_REFERENCE_INVALID" },
     );
   }
   const db = getDb();
@@ -68,6 +81,8 @@ export const profile_update = onCall(async (request) => {
       uid: actor.uid,
       createdAt: previous.createdAt ?? now,
       updatedAt: now,
+      profileSchemaVersion: PROFILE_SCHEMA_VERSION,
+      ...(previous.profileSchemaVersion ? {} : { legacyMigratedAt: now }),
     };
 
     const inputRecord = input as Record<string, unknown>;
@@ -107,6 +122,7 @@ export const profile_update = onCall(async (request) => {
       profileCompletenessScore: merged.profileCompletenessScore as number,
       readinessTier: merged.readinessTier as string,
       published: input.published,
+      profileSchemaVersion: PROFILE_SCHEMA_VERSION,
     };
   });
 });

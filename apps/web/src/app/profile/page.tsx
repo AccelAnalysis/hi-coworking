@@ -19,6 +19,7 @@ import {
 import { ReadinessMeter } from "@/components/profile/ReadinessMeter";
 import { useProfileAssetUrl } from "@/components/profile/ProfileAssetImage";
 import { storage } from "@/lib/firebase";
+import { diagnoseProfileUpdateError } from "@/lib/profileUpdateDiagnostics";
 import { ref, uploadBytesResumable } from "firebase/storage";
 import Image from "next/image";
 import { computeReadinessTier, type ProfileDoc } from "@hi/shared";
@@ -257,16 +258,17 @@ function ProfileContent() {
       .filter(Boolean);
 
     return {
-      businessName: form.businessName || undefined,
-      bio: form.bio || undefined,
-      website: form.website || undefined,
-      linkedin: form.linkedin || undefined,
-      naicsCodes: naicsCodes.length > 0 ? naicsCodes : undefined,
-      certifications:
-        form.certifications.length > 0 ? form.certifications : undefined,
-      uei: form.uei || undefined,
-      duns: form.duns || undefined,
-      cageCode: form.cageCode || undefined,
+      ...(form.businessName ? { businessName: form.businessName } : {}),
+      ...(form.bio ? { bio: form.bio } : {}),
+      ...(form.website ? { website: form.website } : {}),
+      ...(form.linkedin ? { linkedin: form.linkedin } : {}),
+      ...(naicsCodes.length > 0 ? { naicsCodes } : {}),
+      ...(form.certifications.length > 0
+        ? { certifications: form.certifications }
+        : {}),
+      ...(form.uei ? { uei: form.uei } : {}),
+      ...(form.duns ? { duns: form.duns } : {}),
+      ...(form.cageCode ? { cageCode: form.cageCode } : {}),
       capabilityStatementUrl: capStatementUrl,
       capabilityStatementStoragePath: capStatementStoragePath,
       photoUrl,
@@ -338,8 +340,20 @@ function ProfileContent() {
       }));
       setSaved(true);
     } catch (err) {
-      console.error("Failed to save profile:", err);
-      setError("Failed to save. Please try again.");
+      const diagnostic = diagnoseProfileUpdateError(err, {
+        configuredProjectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        expectedProjectId: process.env.NEXT_PUBLIC_EXPECTED_FIREBASE_PROJECT_ID,
+        hasAuthenticatedUser: Boolean(user),
+      });
+      console.error("Profile update failed", {
+        diagnosticCode: diagnostic.code,
+        retryable: diagnostic.retryable,
+      });
+      setError(
+        process.env.NODE_ENV === "development"
+          ? `${diagnostic.userMessage} Diagnostic: ${diagnostic.code}.`
+          : diagnostic.userMessage,
+      );
     } finally {
       setSaving(false);
     }

@@ -163,6 +163,16 @@ import { enrichment_search, enrichment_link } from "./enrichment";
 import { verification_submit, verification_review, verification_flag } from "./verification";
 import { profile_update } from "./profiles";
 import {
+  exchange_organizationSearch,
+  exchange_organizationCreate,
+  exchange_organizationRequestClaim,
+  exchange_organizationListMyClaims,
+  exchange_adminListOrganizationClaims,
+  exchange_adminGetOrganizationClaim,
+  exchange_adminReviewOrganizationClaim,
+} from "./exchange/organizations";
+
+import {
   team_listMine,
   team_create,
   team_invite,
@@ -252,6 +262,18 @@ export { rfx_backfillGeo };
 export { rfx_refreshSuggestions };
 export { rfx_listManaged };
 export { exchange_privateStorage, exchange_normalizeSensitiveStorageMetadata };
+
+
+// Organization identity, discovery, creation, and claim administration
+export {
+  exchange_organizationSearch,
+  exchange_organizationCreate,
+  exchange_organizationRequestClaim,
+  exchange_organizationListMyClaims,
+  exchange_adminListOrganizationClaims,
+  exchange_adminGetOrganizationClaim,
+  exchange_adminReviewOrganizationClaim,
+};
 
 // Exchange commercial foundation (organization scoped; physical membership remains separate)
 export {
