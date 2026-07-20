@@ -45,3 +45,6 @@ Thumbs.db
 # Misc
 *.tsbuildinfo
 .turbo/
+
+# Private source workbooks containing sensitive data
+data/seed/source-private/
