@@ -2,10 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LocateFixed, TriangleAlert, WifiOff } from "lucide-react";
+import { LocateFixed, MapPinned, TriangleAlert, WifiOff, X } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import { getOrg, getUserOrgs } from "@/lib/firestore";
-import { ExchangeActiveFilters, getActiveExchangeFilterLabels } from "../components/ExchangeActiveFilters";
+import {
+  ExchangeActiveFilters,
+  getActiveExchangeFilters,
+  type ActiveExchangeFilter,
+} from "../components/ExchangeActiveFilters";
 import { ExchangeCommandBar } from "../components/ExchangeCommandBar";
 import { ExchangeDetailSheet } from "../components/ExchangeDetailSheet";
 import { ExchangeEntityDetail } from "../components/ExchangeEntityDetail";
@@ -16,11 +20,15 @@ import { ExchangeMobileToolbar } from "../components/ExchangeMobileToolbar";
 import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { ExchangeResultsList } from "../components/ExchangeResultsList";
 import { ExchangeRightPanel } from "../components/ExchangeRightPanel";
+import { SavedOpportunitySearchManager } from "../components/SavedOpportunitySearchManager";
 import { ExchangeStateView, type ExchangeStateKind } from "../components/ExchangeStateView";
 import { resolveExchangeBlockingState } from "../data/exchangePresentationState";
 import { selectExchangeResults } from "../data/exchangeSelectors";
 import { liveExchangeOpportunityRepository } from "../data/exchangeRepository";
 import { useExchangeData } from "../data/useExchangeData";
+import { useOpportunityDiscovery } from "../data/useOpportunityDiscovery";
+import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
+import { opportunityQueryToWorkspaceHydration } from "../data/opportunityDiscoveryState";
 import { exchangeDemoOpportunityRepository } from "../demo/exchangeDemoGateway";
 import { isValidLatitude, isValidLongitude } from "../map/geojson";
 import {
@@ -69,6 +77,10 @@ function useSupportsSplitMode(): boolean | null {
   return supported;
 }
 
+function removeFrom(values: readonly string[], value: string): string[] {
+  return values.filter((candidate) => candidate !== value);
+}
+
 async function loadPrimaryBusinessAnchor(
   uid: string,
   preferredOrganizationId?: string,
@@ -115,11 +127,14 @@ export function ExchangeOpportunitiesView({
   demoMode,
 }: ExchangeViewProps & { demoMode: boolean }) {
   const stateRef = useRef(state);
+  const mapMoveCount = useRef(0);
   const { user, userDoc, loading: authLoading } = useAuth();
   const splitSupported = useSupportsSplitMode();
   const [mapStatus, setMapStatus] = useState<ExchangeMapStatus>("initializing");
   const [mapRetryKey, setMapRetryKey] = useState(0);
   const [fitRequest, setFitRequest] = useState(0);
+  const [pendingMapBounds, setPendingMapBounds] = useState<ExchangeMapBounds | null>(null);
+  const [mapAreaDirty, setMapAreaDirty] = useState(false);
   const [initialMapViewport, setInitialMapViewport] = useState(() =>
     state.viewport ?? (demoMode ? { ...DEFAULT_EXCHANGE_MAP_VIEWPORT } : null),
   );
@@ -132,22 +147,24 @@ export function ExchangeOpportunitiesView({
     stateRef.current = state;
   }, [state]);
 
+  const baseData = useExchangeData(repository);
+  const discovery = useOpportunityDiscovery(state, { enabled: !demoMode });
   const {
-    rfx,
+    rfx: repositoryRfx,
     releasedTerritories,
     scheduledTerritories,
     unreleasedTerritories,
     manageableRfxIds,
-    loading,
-    refreshing,
-    error,
+    loading: repositoryLoading,
+    refreshing: repositoryRefreshing,
+    error: repositoryError,
     viewportError,
     online,
     lastUpdatedAt,
-    retry,
+    retry: retryRepository,
     updateViewport,
     pinSelectedRfx,
-  } = useExchangeData(repository);
+  } = baseData;
 
   useEffect(() => {
     if (initialViewportResolvedRef.current) return;
@@ -161,7 +178,7 @@ export function ExchangeOpportunitiesView({
       setInitialMapViewport({ ...DEFAULT_EXCHANGE_MAP_VIEWPORT });
       return;
     }
-    if (authLoading || loading || !user) return;
+    if (authLoading || repositoryLoading || !user) return;
 
     let active = true;
     void (async () => {
@@ -181,7 +198,7 @@ export function ExchangeOpportunitiesView({
     return () => {
       active = false;
     };
-  }, [authLoading, demoMode, loading, releasedTerritories, state.viewport, user, userDoc?.primaryOrganizationId]);
+  }, [authLoading, demoMode, repositoryLoading, releasedTerritories, state.viewport, user, userDoc?.primaryOrganizationId]);
 
   const opportunitySelection: ExchangeMapSelection = state.selection
     && (state.selection.entityType === "rfx" || state.selection.entityType === "territory")
@@ -193,7 +210,7 @@ export function ExchangeOpportunitiesView({
 
   useEffect(() => {
     pinSelectedRfx(selectedRfxId);
-  }, [pinSelectedRfx, rfx, selectedRfxId]);
+  }, [pinSelectedRfx, repositoryRfx, selectedRfxId]);
 
   const allTerritories = useMemo(
     () => [...releasedTerritories, ...scheduledTerritories],
@@ -203,7 +220,7 @@ export function ExchangeOpportunitiesView({
     () => releasedTerritories.map((territory) => territory.fips),
     [releasedTerritories],
   );
-  const filterState = useMemo(() => ({
+  const baseFilterState = useMemo(() => ({
     searchQuery: state.searchQuery,
     naicsFilters: state.naicsFilters,
     territoryFilters: state.territoryFilters,
@@ -218,15 +235,28 @@ export function ExchangeOpportunitiesView({
     state.territoryFilters,
     state.territoryStatusFilters,
   ]);
-  const filtered = useMemo(
+  const demoFiltered = useMemo(
     () => selectExchangeResults(
-      rfx,
+      repositoryRfx,
       allTerritories,
-      filterState,
+      baseFilterState,
       { priorityTerritoryFips: releasedFips },
     ),
-    [allTerritories, filterState, releasedFips, rfx],
+    [allTerritories, baseFilterState, releasedFips, repositoryRfx],
   );
+  const filteredTerritories = useMemo(
+    () => selectExchangeResults(
+      [],
+      allTerritories,
+      baseFilterState,
+      { priorityTerritoryFips: releasedFips },
+    ),
+    [allTerritories, baseFilterState, releasedFips],
+  );
+  const opportunityRfx = (demoMode
+    ? demoFiltered.rfx
+    : discovery.rfx) as ExchangeDiscoveryRfx[];
+  const visibleTerritories = demoMode ? demoFiltered : filteredTerritories;
   const manageableSet = useMemo(() => new Set(manageableRfxIds), [manageableRfxIds]);
 
   useEffect(() => {
@@ -252,15 +282,13 @@ export function ExchangeOpportunitiesView({
     }
     applyAction(exchangeWorkspaceActions.setViewport(nextViewport));
     scheduleUrlReplace(350);
+    setPendingMapBounds(bounds);
+    mapMoveCount.current += 1;
+    if (mapMoveCount.current > 1) setMapAreaDirty(true);
   }, [applyAction, demoMode, scheduleUrlReplace, updateViewport, user]);
 
   const handleSearchChange = useCallback((query: string) => {
     applyAction(exchangeWorkspaceActions.setSearch(query));
-    scheduleUrlReplace(250);
-  }, [applyAction, scheduleUrlReplace]);
-
-  const handleNaicsChange = useCallback((values: string[]) => {
-    applyAction(exchangeWorkspaceActions.setFilters({ naicsFilters: values }));
     scheduleUrlReplace(250);
   }, [applyAction, scheduleUrlReplace]);
 
@@ -270,8 +298,9 @@ export function ExchangeOpportunitiesView({
   }, []);
 
   const selectEntity = useCallback((selection: Exclude<ExchangeSelection, null>) => {
+    if (selection.entityType === "rfx") discovery.markViewed(selection.entityId);
     applyAction(exchangeWorkspaceActions.selectEntity(selection), "push");
-  }, [applyAction]);
+  }, [applyAction, discovery]);
 
   const clearSelection = useCallback(() => {
     applyAction(exchangeWorkspaceActions.clearSelection(), "push");
@@ -288,14 +317,56 @@ export function ExchangeOpportunitiesView({
     applyAction(exchangeWorkspaceActions.clearFilters(), "push");
   }, [applyAction]);
 
-  const activeFilterLabels = getActiveExchangeFilterLabels(state);
-  const activeFilterCount = activeFilterLabels.length;
-  const sourceCount = rfx.length + allTerritories.length;
-  const resultCount = filtered.rfx.length + filtered.territories.length;
+  const removeActiveFilter = useCallback((filter: ActiveExchangeFilter) => {
+    const [kind, ...rest] = filter.id.split(":");
+    const value = rest.join(":");
+    switch (kind) {
+      case "search": handleSearchChange(""); break;
+      case "location": setFilters({ clearOpportunityLocation: true }); break;
+      case "naics": setFilters({ naicsFilters: removeFrom(state.naicsFilters, value) }); break;
+      case "industry": setFilters({ industryFilters: removeFrom(state.industryFilters, value) }); break;
+      case "capability": setFilters({ capabilityFilters: removeFrom(state.capabilityFilters, value) }); break;
+      case "territory": setFilters({ territoryFilters: removeFrom(state.territoryFilters, value) }); break;
+      case "rfxStatus": setFilters({ rfxStatusFilters: state.rfxStatusFilters.filter((candidate) => candidate !== value) }); break;
+      case "territoryStatus": setFilters({ territoryStatusFilters: state.territoryStatusFilters.filter((candidate) => candidate !== value) }); break;
+      case "opportunityType": setFilters({ opportunityTypeFilters: removeFrom(state.opportunityTypeFilters, value) }); break;
+      case "rfxType": setFilters({ rfxTypeFilters: removeFrom(state.rfxTypeFilters, value) }); break;
+      case "buyerType": setFilters({ buyerTypeFilters: removeFrom(state.buyerTypeFilters, value) }); break;
+      case "work": setFilters({ workArrangementFilters: removeFrom(state.workArrangementFilters, value) }); break;
+      case "visibility": setFilters({ visibilityFilters: removeFrom(state.visibilityFilters, value) }); break;
+      case "certification": setFilters({ certificationFilters: removeFrom(state.certificationFilters, value) }); break;
+      case "setAside": setFilters({ setAsideFilters: removeFrom(state.setAsideFilters, value) }); break;
+      case "prime": setFilters({ primeClassificationFilters: removeFrom(state.primeClassificationFilters, value) }); break;
+      case "award": setFilters({ awardClassificationFilters: removeFrom(state.awardClassificationFilters, value) }); break;
+      case "personalized": setFilters({ personalizedFilters: state.personalizedFilters.filter((candidate) => candidate !== value) }); break;
+      case "closingSoon": setFilters({ closingSoon: false }); break;
+      case "teamingSuitable": setFilters({ teamingSuitable: false }); break;
+      case "budgetMin": setFilters({ budgetMin: undefined }); break;
+      case "budgetMax": setFilters({ budgetMax: undefined }); break;
+      case "localFirst": setFilters({ localFirst: true }); break;
+      default: break;
+    }
+  }, [handleSearchChange, setFilters, state]);
+
+  const activeFilters = getActiveExchangeFilters(state);
+  const activeFilterCount = activeFilters.length;
+  const loadedResultCount = opportunityRfx.length + visibleTerritories.territories.length;
+  const resultCount = !demoMode && discovery.totalCount !== undefined
+    ? discovery.totalCount + visibleTerritories.territories.length
+    : loadedResultCount;
+  const sourceCount = demoMode
+    ? repositoryRfx.length + allTerritories.length
+    : opportunityRfx.length + allTerritories.length;
   const isFiltered = activeFilterCount > 0;
+  const loading = demoMode ? repositoryLoading : discovery.loading;
+  const refreshing = demoMode
+    ? repositoryRefreshing
+    : discovery.loading || discovery.loadingMore;
+  const error = demoMode ? repositoryError : discovery.error;
 
   const selectedRfx = opportunitySelection?.entityType === "rfx"
-    ? rfx.find((record) => record.id === opportunitySelection.entityId)
+    ? opportunityRfx.find((record) => record.id === opportunitySelection.entityId)
+      ?? repositoryRfx.find((record) => record.id === opportunitySelection.entityId) as ExchangeDiscoveryRfx | undefined
     : undefined;
   const selectedTerritory = opportunitySelection?.entityType === "territory"
     ? allTerritories.find((record) => record.fips === opportunitySelection.entityId)
@@ -304,33 +375,51 @@ export function ExchangeOpportunitiesView({
   const effectiveMode: ExchangeSurfaceMode = splitSupported !== true && state.surfaceMode === "split"
     ? "map"
     : state.surfaceMode;
-  const hasGeocodedRfx = filtered.rfx.some((record) =>
+  const hasGeocodedRfx = opportunityRfx.some((record) =>
     isValidLatitude(record.geo?.lat) && isValidLongitude(record.geo?.lng));
 
   const filterContent = () => (
-    <ExchangeFilters
-      territories={allTerritories}
-      naicsFilters={state.naicsFilters}
-      territoryFilters={state.territoryFilters}
-      territoryStatusFilters={state.territoryStatusFilters}
-      localFirst={state.localFirst}
-      activeFilterCount={activeFilterCount}
-      onNaicsChange={handleNaicsChange}
-      onTerritoryChange={(values) => setFilters({ territoryFilters: values })}
-      onTerritoryStatusChange={(values) => setFilters({ territoryStatusFilters: values })}
-      onLocalFirstChange={(value) => setFilters({ localFirst: value })}
-      onClear={clearFilters}
-    />
+    <div>
+      <ExchangeFilters
+        state={state}
+        territories={allTerritories}
+        activeFilterCount={activeFilterCount}
+        onChange={setFilters}
+        onClear={clearFilters}
+      />
+      {!demoMode ? (
+        <div className="px-4 pb-4">
+          <SavedOpportunitySearchManager
+            state={state}
+            onRun={(query, id) => {
+              applyAction(
+                exchangeWorkspaceActions.hydrateFromUrl(
+                  {
+                    ...opportunityQueryToWorkspaceHydration(query),
+                    activeSavedSearchId: id,
+                  },
+                ),
+                "push",
+              );
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 
   const resultsContent = (compact = false) => (
     <ExchangeResultsList
-      rfx={filtered.rfx}
-      territories={filtered.territories}
+      rfx={opportunityRfx}
+      territories={visibleTerritories.territories}
       selection={opportunitySelection}
       manageableRfxIds={manageableSet}
       compact={compact}
+      hasMore={!demoMode && Boolean(discovery.nextCursor)}
+      loadingMore={!demoMode && discovery.loadingMore}
       onSelect={selectEntity}
+      onSave={!demoMode ? discovery.setSaved : undefined}
+      onLoadMore={!demoMode ? discovery.loadMore : undefined}
     />
   );
 
@@ -348,7 +437,13 @@ export function ExchangeOpportunitiesView({
       <ExchangeEntityDetail
         rfx={selectedRfx}
         territory={selectedTerritory}
-        manageable={selectedRfx ? manageableSet.has(selectedRfx.id) : false}
+        manageable={selectedRfx
+          ? manageableSet.has(selectedRfx.id)
+            || Boolean(selectedRfx.discovery?.relationship.managed)
+          : false}
+        onSave={selectedRfx && !demoMode
+          ? (saved) => discovery.setSaved(selectedRfx.id, saved)
+          : undefined}
       />
     );
   } else if (loading || (lastUpdatedAt === null && !error)) {
@@ -359,14 +454,19 @@ export function ExchangeOpportunitiesView({
         kind={error.kind === "permission" ? "permission" : "error"}
         compact
         message={error.message}
-        onRetry={() => void retry()}
+        onRetry={() => void (demoMode ? retryRepository() : discovery.retry())}
       />
     );
   } else {
     detailContent = <ExchangeStateView kind="selection-unavailable" compact />;
   }
 
-  const degradedError = error && sourceCount > 0 ? error : viewportError;
+  const degradedError = demoMode && repositoryError && sourceCount > 0
+    ? repositoryError
+    : viewportError;
+  const conciseWarning = !demoMode && discovery.warnings.length
+    ? discovery.warnings[0]
+    : degradedError?.message;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
@@ -377,34 +477,51 @@ export function ExchangeOpportunitiesView({
         resultCount={resultCount}
         activeFilterCount={activeFilterCount}
         filtersOpen={state.mobileFilterOpen}
-        mapAvailable
+        mapAvailable={mapStatus !== "error" && mapStatus !== "unavailable"}
         refreshing={refreshing}
+        opportunitySort={state.opportunitySort}
+        opportunityLocation={state.opportunityLocation}
         onViewChange={onViewChange}
         onSearchChange={handleSearchChange}
         onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
         onOpenFilters={() => applyAction(exchangeWorkspaceActions.openMobileFilter())}
         onClearFilters={clearFilters}
-        onRefresh={() => void retry()}
+        onRefresh={() => void Promise.all([
+          retryRepository(),
+          ...(demoMode ? [] : [Promise.resolve(discovery.retry())]),
+        ])}
+        onOpportunitySortChange={(sort) => applyAction(
+          exchangeWorkspaceActions.setOpportunitySort(sort),
+          "push",
+        )}
+        onOpportunityLocationChange={(location) => applyAction(
+          exchangeWorkspaceActions.setOpportunityLocation(location),
+          "push",
+        )}
       />
-      <ExchangeActiveFilters state={state} onClear={clearFilters} />
+      <ExchangeActiveFilters
+        state={state}
+        onClear={clearFilters}
+        onRemove={removeActiveFilter}
+      />
 
       {!online ? (
-        <div className="absolute left-1/2 top-20 z-50 flex -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
+        <div className="absolute left-1/2 top-32 z-[1150] flex max-w-[90%] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
           <WifiOff className="h-4 w-4" aria-hidden="true" /> Offline. Previously loaded results remain available.
         </div>
-      ) : degradedError ? (
-        <div className="absolute left-1/2 top-20 z-50 flex -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
-          <TriangleAlert className="h-4 w-4" aria-hidden="true" /> {degradedError.message}
-          <button type="button" onClick={() => void retry()} className="rounded px-1 underline outline-none focus-visible:ring-2 focus-visible:ring-amber-700">Retry</button>
+      ) : conciseWarning ? (
+        <div className="absolute left-1/2 top-32 z-[1150] flex max-w-[90%] -translate-x-1/2 items-center justify-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/88 px-4 py-2 text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
+          <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="line-clamp-1">{conciseWarning}</span>
         </div>
       ) : null}
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {initialMapViewport ? <ExchangeMap
           key={mapRetryKey}
-          rfxList={filtered.rfx}
-          releasedTerritories={filtered.releasedTerritories}
-          scheduledTerritories={filtered.scheduledTerritories}
+          rfxList={opportunityRfx}
+          releasedTerritories={visibleTerritories.releasedTerritories}
+          scheduledTerritories={visibleTerritories.scheduledTerritories}
           unreleasedTerritories={unreleasedTerritories}
           selection={opportunitySelection}
           initialViewport={initialMapViewport}
@@ -425,26 +542,59 @@ export function ExchangeOpportunitiesView({
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={() => setFitRequest((value) => value + 1)}
-          className="absolute right-3 top-16 z-20 hidden min-h-10 items-center gap-2 rounded-xl border border-white/60 bg-white/72 px-3 text-xs font-black text-slate-700 shadow-lg backdrop-blur-2xl outline-none hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-indigo-500 lg:inline-flex"
-        >
-          <LocateFixed className="h-4 w-4" aria-hidden="true" /> Fit results
-        </button>
+        <div className="absolute left-3 top-16 z-20 hidden max-w-[calc(100%-7rem)] flex-wrap gap-2 lg:left-[22rem] lg:flex">
+          <button
+            type="button"
+            onClick={() => setFitRequest((value) => value + 1)}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/60 bg-white/78 px-3 text-xs font-black text-slate-700 shadow-lg backdrop-blur-2xl outline-none hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            <LocateFixed className="h-4 w-4" aria-hidden="true" /> Fit results
+          </button>
+          {mapAreaDirty && pendingMapBounds ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFilters({
+                  opportunityLocation: {
+                    label: "Current map area",
+                    bounds: {
+                      west: pendingMapBounds.west,
+                      south: pendingMapBounds.south,
+                      east: pendingMapBounds.east,
+                      north: pendingMapBounds.north,
+                    },
+                    includeRemote: false,
+                  },
+                });
+                setMapAreaDirty(false);
+              }}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-950/86 px-3 text-xs font-black text-white shadow-lg backdrop-blur-2xl outline-none hover:bg-slate-900 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
+              <MapPinned className="h-4 w-4" aria-hidden="true" /> Search this map area
+            </button>
+          ) : null}
+          {state.opportunityLocation?.bounds ? (
+            <button
+              type="button"
+              onClick={() => setFilters({ clearOpportunityLocation: true })}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/60 bg-white/78 text-slate-700 shadow-lg backdrop-blur-2xl outline-none hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-indigo-500"
+              aria-label="Clear map-area filter"
+              title="Clear map-area filter"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
+        </div>
 
-        {filtered.rfx.length > 0 && !hasGeocodedRfx ? (
+        {opportunityRfx.length > 0 && !hasGeocodedRfx ? (
           <div className="absolute inset-x-3 bottom-8 z-20 mx-auto max-w-lg rounded-2xl border border-amber-200/80 bg-amber-50/82 px-3 py-2 text-center text-xs font-semibold text-amber-900 shadow-lg backdrop-blur-xl" role="status">
-            Matching opportunities have no verified coordinates yet. They remain available in the result drawer.
+            Matching opportunities have no authoritative coordinates. They remain available in the result drawer and are not placed at fabricated centroids.
           </div>
         ) : null}
 
         <ExchangeMobileToolbar
           resultCount={resultCount}
-          activeFilterCount={activeFilterCount}
-          filtersOpen={state.mobileFilterOpen}
           mapVisible
-          onOpenFilters={() => applyAction(exchangeWorkspaceActions.openMobileFilter())}
           onFitResults={() => setFitRequest((value) => value + 1)}
         />
 
@@ -471,7 +621,9 @@ export function ExchangeOpportunitiesView({
                 kind={blockingState}
                 compact
                 message={blockingState === "error" ? error?.message : undefined}
-                onRetry={blockingState === "error" ? () => void retry() : undefined}
+                onRetry={blockingState === "error"
+                  ? () => void (demoMode ? retryRepository() : discovery.retry())
+                  : undefined}
                 onClear={blockingState === "filtered-empty" ? clearFilters : undefined}
               />
             </div>

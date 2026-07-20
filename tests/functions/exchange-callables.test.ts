@@ -178,6 +178,101 @@ async function callFunction<Result>(
   return (await callable(data)).data;
 }
 
+function createUnauthenticatedFunctions(): Functions {
+  const app = initializeApp(
+    {
+      apiKey: "demo-api-key",
+      authDomain: `${PROJECT_ID}.firebaseapp.com`,
+      projectId: PROJECT_ID,
+    },
+    `exchange-callable-test-${++clientSequence}`,
+  );
+  clientApps.push(app);
+  const functions = getFunctions(app, REGION);
+  connectFunctionsEmulator(functions, FUNCTIONS_EMULATOR_HOST, FUNCTIONS_EMULATOR_PORT);
+  return functions;
+}
+
+async function callUnauthenticatedFunction<Result>(
+  functions: Functions,
+  name: string,
+  data: Record<string, unknown>,
+): Promise<Result> {
+  const callable = httpsCallable<Record<string, unknown>, Result>(functions, name);
+  return (await callable(data)).data;
+}
+
+function discoveryQuery(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    contractVersion: 1,
+    query: "",
+    filters: {
+      naics: [],
+      industries: [],
+      capabilities: [],
+      opportunityTypes: [],
+      rfxTypes: [],
+      buyerTypes: [],
+      workArrangements: [],
+      visibility: [],
+      requiredCertifications: [],
+      setAsideDesignations: [],
+      territoryFips: [],
+      primeClassifications: [],
+      awardClassifications: [],
+      personalized: [],
+    },
+    sort: "recommended",
+    pageSize: 40,
+    ...overrides,
+  };
+}
+
+function discoveryProjection(
+  id: string,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const now = Date.now();
+  return {
+    projectionVersion: 1,
+    id,
+    title: `Opportunity ${id}`,
+    searchableDescription: "Commercial HVAC and building automation services.",
+    issuerDisplayName: "Test Public Works",
+    issuerType: "government",
+    issuerVerified: true,
+    rfxType: "RFP",
+    opportunityType: "services",
+    naicsCodes: ["238220"],
+    industryLabels: ["Construction"],
+    capabilityKeywords: ["HVAC", "building automation"],
+    searchTokens: ["opportunity", "commercial", "hvac", "building", "automation"],
+    postedAt: now - 1_000,
+    updatedAt: now,
+    currency: "USD",
+    workArrangement: "on_site",
+    visibility: "public",
+    requiredCertifications: [],
+    setAsideDesignations: [],
+    primeClassification: "either",
+    awardClassification: "single",
+    teamingSuitable: true,
+    addendumCount: 0,
+    qAndAStatus: "open",
+    status: "open",
+    adminApprovalStatus: "approved",
+    discoverable: true,
+    recommendedRank: now,
+    projectionUpdatedAt: now,
+    ownerUid: `owner-${id}`,
+    createdBy: `owner-${id}`,
+    normalizedTitle: `opportunity ${id}`,
+    normalizedIssuer: "test public works",
+    protectedResponderNames: ["must never leave the server"],
+    ...overrides,
+  };
+}
+
 async function privateStorageRequest(
   actor: TestActor,
   operation: "upload" | "download",
@@ -275,6 +370,319 @@ afterAll(async () => {
   await Promise.all([clearFirestore(), clearAuth()]);
   await db.terminate();
   await deleteAdminApp(adminApp);
+});
+
+describe("Opportunity discovery gateway boundaries", () => {
+  it("supports anonymous and authenticated discovery without leaking protected fields", async () => {
+    const member = await createActor("discovery-member");
+    const unauthenticatedFunctions = createUnauthenticatedFunctions();
+    await Promise.all([
+      db.collection("opportunityDiscovery").doc("public-opportunity").set(
+        discoveryProjection("public-opportunity"),
+      ),
+      db.collection("opportunityDiscovery").doc("member-opportunity").set(
+        discoveryProjection("member-opportunity", { visibility: "members" }),
+      ),
+      db.collection("opportunityDiscovery").doc("restricted-opportunity").set(
+        discoveryProjection("restricted-opportunity", { visibility: "restricted" }),
+      ),
+    ]);
+
+    const anonymous = await callUnauthenticatedFunction<{
+      records: Array<Record<string, unknown>>;
+    }>(unauthenticatedFunctions, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery(),
+    });
+    expect(anonymous.records.map((record) => record.id)).toEqual(["public-opportunity"]);
+
+    const authenticated = await callFunction<{
+      records: Array<Record<string, unknown>>;
+    }>(member, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery(),
+    });
+    expect(authenticated.records.map((record) => record.id).sort()).toEqual([
+      "member-opportunity",
+      "public-opportunity",
+    ]);
+    for (const record of [...anonymous.records, ...authenticated.records]) {
+      expect(record).not.toHaveProperty("ownerUid");
+      expect(record).not.toHaveProperty("createdBy");
+      expect(record).not.toHaveProperty("adminApprovalStatus");
+      expect(record).not.toHaveProperty("discoverable");
+      expect(record).not.toHaveProperty("recommendedRank");
+      expect(record).not.toHaveProperty("protectedResponderNames");
+      expect(record.searchTokens).toEqual([]);
+    }
+  });
+
+  it("limits restricted issuer opportunities to current exact organization managers", async () => {
+    const manager = await createActor("discovery-issuer-manager");
+    const participant = await createActor("discovery-issuer-participant");
+    const outsider = await createActor("discovery-outsider");
+    await Promise.all([
+      db.collection("orgs").doc("discovery-issuer-org").set({
+        id: "discovery-issuer-org",
+        name: "Discovery Issuer",
+        status: "active",
+        naicsCodes: ["238220"],
+        capabilityKeywords: ["building automation"],
+      }),
+      db.collection("orgMembers").doc(`discovery-issuer-org_${manager.uid}`).set({
+        orgId: "discovery-issuer-org",
+        uid: manager.uid,
+        role: "owner",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc(`discovery-issuer-org_${participant.uid}`).set({
+        orgId: "discovery-issuer-org",
+        uid: participant.uid,
+        role: "member",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc("malformed-discovery-membership").set({
+        orgId: "discovery-issuer-org",
+        uid: outsider.uid,
+        role: "owner",
+        status: "active",
+      }),
+      db.collection("opportunityDiscovery").doc("issuer-restricted").set(
+        discoveryProjection("issuer-restricted", {
+          visibility: "restricted",
+          issuerOrganizationId: "discovery-issuer-org",
+        }),
+      ),
+    ]);
+
+    for (const [actor, expectedIds] of [
+      [manager, ["issuer-restricted"]],
+      [participant, []],
+      [outsider, []],
+    ] as const) {
+      const result = await callFunction<{ records: Array<Record<string, unknown>> }>(
+        actor,
+        "rfx_listManaged",
+        { operation: "discover", payload: discoveryQuery() },
+      );
+      expect(result.records.map((record) => record.id)).toEqual(expectedIds);
+    }
+  });
+
+  it("validates geography and cursor paging while keeping pages bounded and stable", async () => {
+    const member = await createActor("discovery-pagination-member");
+    await Promise.all(Array.from({ length: 25 }, (_, index) => {
+      const id = `paged-${String(index).padStart(2, "0")}`;
+      return db.collection("opportunityDiscovery").doc(id).set(discoveryProjection(id, {
+        recommendedRank: 10_000 - index,
+        updatedAt: 10_000 - index,
+      }));
+    }));
+
+    const first = await callFunction<{
+      records: Array<Record<string, unknown>>;
+      nextCursor?: string;
+    }>(member, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({ pageSize: 10 }),
+    });
+    expect(first.records).toHaveLength(10);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await callFunction<typeof first>(member, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({ pageSize: 10, cursor: first.nextCursor }),
+    });
+    expect(second.records).toHaveLength(10);
+    expect(new Set([
+      ...first.records.map((record) => record.id),
+      ...second.records.map((record) => record.id),
+    ]).size).toBe(20);
+
+    await expectCallableError(callFunction(member, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({
+        location: {
+          latitude: 36.8,
+          longitude: -76.2,
+          radiusMiles: 501,
+          includeRemote: false,
+        },
+      }),
+    }), "invalid-argument");
+    await expectCallableError(callFunction(member, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({
+        location: {
+          bounds: { west: -77, south: 38, east: -75, north: 36 },
+          includeRemote: false,
+        },
+      }),
+    }), "invalid-argument");
+  });
+
+  it("keeps saved items, saved searches, alerts, and recent searches exactly owner scoped", async () => {
+    const owner = await createActor("discovery-state-owner");
+    const outsider = await createActor("discovery-state-outsider");
+    await db.collection("opportunityDiscovery").doc("stateful-opportunity").set(
+      discoveryProjection("stateful-opportunity", {
+        title: "HVAC controls modernization",
+        searchTokens: [
+          "hvac",
+          "heating",
+          "ventilation",
+          "air conditioning",
+          "238220",
+          "controls",
+          "modernization",
+        ],
+      }),
+    );
+
+    await callFunction(owner, "rfx_listManaged", {
+      operation: "setSaved",
+      payload: { rfxId: "stateful-opportunity", saved: true },
+    });
+    const ownerDiscovery = await callFunction<{
+      records: Array<{ id: string; relationship: { saved: boolean } }>;
+    }>(owner, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({ query: "hvac" }),
+    });
+    const outsiderDiscovery = await callFunction<typeof ownerDiscovery>(
+      outsider,
+      "rfx_listManaged",
+      { operation: "discover", payload: discoveryQuery({ query: "hvac" }) },
+    );
+    expect(ownerDiscovery.records[0]).toMatchObject({
+      id: "stateful-opportunity",
+      relationship: { saved: true },
+    });
+    expect(outsiderDiscovery.records[0]).toMatchObject({
+      id: "stateful-opportunity",
+      relationship: { saved: false },
+    });
+
+    const saved = await callFunction<{ id: string }>(owner, "rfx_listManaged", {
+      operation: "savedSearchUpsert",
+      payload: {
+        name: "Owner HVAC alerts",
+        query: discoveryQuery({ query: "hvac" }),
+        alertFrequency: "weekly",
+      },
+    });
+    const ownerSaved = await callFunction<{
+      searches: Array<Record<string, unknown>>;
+    }>(owner, "rfx_listManaged", {
+      operation: "savedSearchList",
+      payload: { maxResults: 10 },
+    });
+    expect(ownerSaved.searches).toHaveLength(1);
+    expect(ownerSaved.searches[0]).toMatchObject({
+      id: saved.id,
+      ownerUid: owner.uid,
+      name: "Owner HVAC alerts",
+      alertFrequency: "weekly",
+    });
+    expect(ownerSaved.searches[0]?.createdAt).toEqual(expect.any(Number));
+    expect(ownerSaved.searches[0]?.updatedAt).toEqual(expect.any(Number));
+
+    const outsiderSaved = await callFunction<typeof ownerSaved>(
+      outsider,
+      "rfx_listManaged",
+      { operation: "savedSearchList", payload: { maxResults: 10 } },
+    );
+    expect(outsiderSaved.searches).toEqual([]);
+    await expectCallableError(callFunction(outsider, "rfx_listManaged", {
+      operation: "savedSearchDelete",
+      payload: { id: saved.id },
+    }), "permission-denied");
+
+    const ownerRecent = await callFunction<{
+      searches: Array<Record<string, unknown>>;
+    }>(owner, "rfx_listManaged", {
+      operation: "recentSearchList",
+      payload: { maxResults: 10 },
+    });
+    expect(ownerRecent.searches).toHaveLength(1);
+    expect(ownerRecent.searches[0]).toMatchObject({
+      ownerUid: owner.uid,
+      label: "hvac",
+      normalizedVersion: 1,
+    });
+    expect(ownerRecent.searches[0]?.lastUsedAt).toEqual(expect.any(Number));
+  });
+
+  it("keeps addenda and Q&A mutations issuer-only and private questions private", async () => {
+    const issuer = await createActor("governance-issuer");
+    const supplier = await createActor("governance-supplier");
+    const rfxId = "governed-opportunity";
+    await db.collection("rfx").doc(rfxId).set({
+      id: rfxId,
+      ownerUid: issuer.uid,
+      createdBy: issuer.uid,
+      title: "Governed opportunity",
+      description: "Governance tests",
+      status: "open",
+      adminApprovalStatus: "approved",
+      visibility: "public",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    await expectCallableError(callFunction(supplier, "rfx_listManaged", {
+      operation: "addendumCreate",
+      payload: {
+        rfxId,
+        title: "Unauthorized addendum",
+        summary: "A supplier cannot publish this.",
+        materialChanges: ["No change"],
+        deadlineChanged: false,
+        acknowledgmentRequired: false,
+        idempotencyKey: "unauthorized-addendum-0001",
+      },
+    }), "permission-denied");
+
+    await callFunction(issuer, "rfx_listManaged", {
+      operation: "addendumCreate",
+      payload: {
+        rfxId,
+        title: "Schedule clarification",
+        summary: "The response schedule has been clarified.",
+        materialChanges: ["Clarified submission schedule"],
+        deadlineChanged: false,
+        acknowledgmentRequired: true,
+        idempotencyKey: "issuer-addendum-0001",
+      },
+    });
+    await callFunction(supplier, "rfx_listManaged", {
+      operation: "questionSubmit",
+      payload: {
+        rfxId,
+        question: "Can the supplier submit a private clarification?",
+        visibilityRequested: "private",
+        idempotencyKey: "supplier-question-0001",
+      },
+    });
+
+    const supplierView = await callFunction<{
+      addenda: unknown[];
+      questions: Array<Record<string, unknown>>;
+      canManage: boolean;
+    }>(supplier, "rfx_listManaged", {
+      operation: "governanceList",
+      payload: { rfxId, includePrivate: true },
+    });
+    expect(supplierView.addenda).toHaveLength(1);
+    expect(supplierView.questions).toHaveLength(1);
+    expect(supplierView.canManage).toBe(false);
+
+    const outsider = await createActor("governance-outsider");
+    const outsiderView = await callFunction<typeof supplierView>(outsider, "rfx_listManaged", {
+      operation: "governanceList",
+      payload: { rfxId, includePrivate: true },
+    });
+    expect(outsiderView.questions).toEqual([]);
+  });
 });
 
 describe("Territory map projection and admin geometry", () => {

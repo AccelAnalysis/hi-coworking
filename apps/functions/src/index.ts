@@ -186,6 +186,7 @@ import {
   rfx_refreshSuggestions_scheduled,
 } from "./rfxSuggestions";
 import { rfx_listManaged } from "./rfxQueries";
+import { rfx_syncDiscoveryProjection } from "./opportunityDiscovery";
 import {
   exchange_privateStorage,
   exchange_normalizeSensitiveStorageMetadata,
@@ -236,6 +237,7 @@ export { exchange_expireCredits };
 
 // Firestore Triggers
 export { onReferralWritten };
+export { rfx_syncDiscoveryProjection };
 
 // Access Control Functions
 export {

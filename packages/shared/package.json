@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./opportunity-discovery": {
+      "types": "./src/opportunityDiscovery.ts",
+      "default": "./src/opportunityDiscovery.ts"
     }
   },
   "scripts": {

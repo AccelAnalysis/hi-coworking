@@ -333,6 +333,40 @@ describe("Run 1 Firestore authorization matrix", () => {
     await assertFails(deleteDoc(doc(bob, "rfxResponses/response-one")));
   });
 
+  test("Opportunity Discovery projections and account state remain callable-only", async () => {
+    const alice = authenticated("alice").firestore();
+    const admin = authenticated("admin", { role: "admin" }).firestore();
+    const anonymous = testEnv.unauthenticatedContext().firestore();
+    const protectedCollections = [
+      "opportunityDiscovery",
+      "opportunitySavedItems",
+      "opportunityRecentViews",
+      "opportunitySavedSearches",
+      "opportunityRecentSearches",
+      "rfxAddenda",
+      "rfxAddendumAcknowledgments",
+      "rfxQuestions",
+      "opportunityNotificationJobs",
+    ];
+
+    await seed(Object.fromEntries(
+      protectedCollections.map((collectionName) => [
+        `${collectionName}/record`,
+        { ownerUid: "alice", rfxId: "public-rfx", status: "active" },
+      ]),
+    ));
+
+    for (const collectionName of protectedCollections) {
+      const path = `${collectionName}/record`;
+      await assertFails(getDoc(doc(anonymous, path)));
+      await assertFails(getDoc(doc(alice, path)));
+      await assertFails(getDoc(doc(admin, path)));
+      await assertFails(setDoc(doc(alice, `${collectionName}/forged`), { ownerUid: "alice" }));
+      await assertFails(updateDoc(doc(alice, path), { status: "forged" }));
+      await assertFails(deleteDoc(doc(admin, path)));
+    }
+  });
+
   test("legacy and business referrals are visible only to individual or organization parties", async () => {
     await seed({
       "orgMembers/referrer-org_ref-org-user": {

@@ -1,4 +1,8 @@
 import type { RfxStatus } from "@hi/shared";
+import type {
+  OpportunityLocationFilter,
+  OpportunitySort,
+} from "@hi/shared/opportunity-discovery";
 
 export const EXCHANGE_SURFACE_MODES = ["map", "list", "split"] as const;
 export type ExchangeSurfaceMode = (typeof EXCHANGE_SURFACE_MODES)[number];
@@ -77,6 +81,36 @@ export const EXCHANGE_RFX_STATUSES = [
 ] as const satisfies readonly RfxStatus[];
 export type ExchangeRfxStatus = (typeof EXCHANGE_RFX_STATUSES)[number];
 
+export const EXCHANGE_OPPORTUNITY_SORTS = [
+  "recommended",
+  "relevance",
+  "nearest",
+  "newest",
+  "updated",
+  "deadline_soonest",
+  "deadline_latest",
+  "local_first",
+  "capability_match",
+  "budget_high",
+  "budget_low",
+] as const satisfies readonly OpportunitySort[];
+
+export const EXCHANGE_PERSONALIZED_FILTERS = [
+  "matches_organization",
+  "matches_naics",
+  "matches_capabilities",
+  "matches_service_territory",
+  "saved",
+  "viewed",
+  "responded",
+  "managed",
+  "new_since_last_visit",
+  "updated_since_viewed",
+  "exclude_issued_by_my_org",
+] as const;
+export type ExchangePersonalizedFilter =
+  (typeof EXCHANGE_PERSONALIZED_FILTERS)[number];
+
 export type ExchangeSelection =
   | { entityType: "rfx"; entityId: string }
   | { entityType: "territory"; entityId: string }
@@ -100,10 +134,29 @@ export interface ExchangeWorkspaceState {
 
   searchQuery: string;
   naicsFilters: string[];
+  industryFilters: string[];
+  capabilityFilters: string[];
   territoryFilters: string[];
   rfxStatusFilters: ExchangeRfxStatus[];
   territoryStatusFilters: ExchangeTerritoryStatus[];
+  opportunityTypeFilters: string[];
+  rfxTypeFilters: string[];
+  buyerTypeFilters: string[];
+  workArrangementFilters: string[];
+  visibilityFilters: string[];
+  certificationFilters: string[];
+  setAsideFilters: string[];
+  primeClassificationFilters: string[];
+  awardClassificationFilters: string[];
+  personalizedFilters: ExchangePersonalizedFilter[];
   localFirst: boolean;
+  closingSoon: boolean;
+  teamingSuitable: boolean;
+  budgetMin?: number;
+  budgetMax?: number;
+  opportunitySort: OpportunitySort;
+  opportunityLocation?: OpportunityLocationFilter;
+  activeSavedSearchId?: string;
 
   connectionMode: ExchangeConnectionMode;
   referralStatusFilters: ExchangeReferralStatus[];
@@ -133,10 +186,29 @@ export type ExchangeUrlState = Pick<
   | "selection"
   | "searchQuery"
   | "naicsFilters"
+  | "industryFilters"
+  | "capabilityFilters"
   | "territoryFilters"
   | "rfxStatusFilters"
   | "territoryStatusFilters"
+  | "opportunityTypeFilters"
+  | "rfxTypeFilters"
+  | "buyerTypeFilters"
+  | "workArrangementFilters"
+  | "visibilityFilters"
+  | "certificationFilters"
+  | "setAsideFilters"
+  | "primeClassificationFilters"
+  | "awardClassificationFilters"
+  | "personalizedFilters"
   | "localFirst"
+  | "closingSoon"
+  | "teamingSuitable"
+  | "budgetMin"
+  | "budgetMax"
+  | "opportunitySort"
+  | "opportunityLocation"
+  | "activeSavedSearchId"
   | "connectionMode"
   | "referralStatusFilters"
   | "connectionIndustryFilters"
@@ -152,6 +224,7 @@ export type ExchangeWorkspaceHydration = Partial<ExchangeUrlState>;
 export const DEFAULT_EXCHANGE_VIEW: ExchangeView = "opportunities";
 export const DEFAULT_EXCHANGE_SURFACE_MODE: ExchangeSurfaceMode = "split";
 export const DEFAULT_EXCHANGE_LOCAL_FIRST = true;
+export const DEFAULT_EXCHANGE_OPPORTUNITY_SORT: OpportunitySort = "recommended";
 export const DEFAULT_EXCHANGE_CONNECTION_MODE: ExchangeConnectionMode = "sent";
 export const DEFAULT_EXCHANGE_COMPENSATION_FILTER: ExchangeCompensationFilter = "all";
 export const DEFAULT_EXCHANGE_RELATIONSHIP_FILTER: ExchangeRelationshipFilter = "all";
@@ -164,10 +237,29 @@ export function createInitialExchangeWorkspaceState(): ExchangeWorkspaceState {
     selection: null,
     searchQuery: "",
     naicsFilters: [],
+    industryFilters: [],
+    capabilityFilters: [],
     territoryFilters: [],
     rfxStatusFilters: [],
     territoryStatusFilters: [],
+    opportunityTypeFilters: [],
+    rfxTypeFilters: [],
+    buyerTypeFilters: [],
+    workArrangementFilters: [],
+    visibilityFilters: [],
+    certificationFilters: [],
+    setAsideFilters: [],
+    primeClassificationFilters: [],
+    awardClassificationFilters: [],
+    personalizedFilters: [],
     localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+    closingSoon: false,
+    teamingSuitable: false,
+    budgetMin: undefined,
+    budgetMax: undefined,
+    opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
+    opportunityLocation: undefined,
+    activeSavedSearchId: undefined,
     connectionMode: DEFAULT_EXCHANGE_CONNECTION_MODE,
     referralStatusFilters: [],
     connectionIndustryFilters: [],
@@ -245,4 +337,18 @@ export function isExchangeTerritoryStatus(
 ): value is ExchangeTerritoryStatus {
   return typeof value === "string"
     && (EXCHANGE_TERRITORY_STATUSES as readonly string[]).includes(value);
+}
+
+export function isExchangeOpportunitySort(
+  value: unknown,
+): value is OpportunitySort {
+  return typeof value === "string"
+    && (EXCHANGE_OPPORTUNITY_SORTS as readonly string[]).includes(value);
+}
+
+export function isExchangePersonalizedFilter(
+  value: unknown,
+): value is ExchangePersonalizedFilter {
+  return typeof value === "string"
+    && (EXCHANGE_PERSONALIZED_FILTERS as readonly string[]).includes(value);
 }
