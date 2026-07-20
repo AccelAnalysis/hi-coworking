@@ -88,7 +88,7 @@ for (const sort of [
   "budget_high",
   "budget_low",
 ]) {
-  if (workspaceTypes.includes(`\"${sort}\"`)) pass(`workspace sort: ${sort}`);
+  if (workspaceTypes.includes(`"${sort}"`)) pass(`workspace sort: ${sort}`);
   else fail(`workspace sort missing: ${sort}`);
 }
 
@@ -106,7 +106,7 @@ for (const parameter of [
   "budgetMin",
   "budgetMax",
 ]) {
-  if (urlState.includes(`\"${parameter}\"`)) pass(`URL state includes ${parameter}`);
+  if (urlState.includes(`"${parameter}"`)) pass(`URL state includes ${parameter}`);
   else fail(`URL state missing ${parameter}`);
 }
 
@@ -119,10 +119,14 @@ if (opportunitiesView.match(/openMobileFilter/g)?.length === 1) pass("one Opport
 else fail("unexpected duplicate Opportunities mobile filter entry point");
 
 const commandBar = await text("apps/web/src/features/exchange/components/ExchangeCommandBar.tsx");
-if (commandBar.includes("OpportunityLocationSearch")) pass("location search is integrated into command bar");
-else fail("location search not integrated into command bar");
+if (!commandBar.includes("OpportunityLocationSearch")) pass("command bar avoids duplicate location search");
+else fail("duplicate location search remains in command bar");
 if (commandBar.includes("aria-controls=\"exchange-filter-drawer\"")) pass("filter button identifies drawer");
 else fail("filter button does not identify drawer");
+
+const filters = await text("apps/web/src/features/exchange/components/ExchangeFilters.tsx");
+if (filters.includes("OpportunityLocationSearch")) pass("location search is integrated into canonical filter panel");
+else fail("location search missing from canonical filter panel");
 
 const card = await text("apps/web/src/features/exchange/components/ExchangeRfxCard.tsx");
 for (const behavior of ["Remove saved opportunity", "Share", "Team up", "Closing soon"]) {
