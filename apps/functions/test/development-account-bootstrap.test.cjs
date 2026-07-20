@@ -4,6 +4,7 @@ const {
   assertDevelopmentAccountEmail,
   assertPassword,
   assertSafety,
+  buildAccountSpecs,
 } = require("../scripts/bootstrap-development-accounts.cjs");
 
 test("development account bootstrap accepts dedicated smoke identities", () => {
@@ -35,4 +36,46 @@ test("development writes require exact project confirmation while dry runs remai
     apply: true,
     confirmation: "hi-coworking-plat",
   }));
+});
+
+test("development account matrix keeps organization authority roles as dedicated member identities", () => {
+  const specs = buildAccountSpecs({
+    EXCHANGE_DEV_TEST_EMAIL: "ordinary+exchange-dev@example.test",
+    EXCHANGE_DEV_TEST_PASSWORD: "ordinary-development-password",
+    EXCHANGE_DEV_ADMIN_EMAIL: "reviewer+exchange-dev@example.test",
+    EXCHANGE_DEV_ADMIN_PASSWORD: "reviewer-development-password",
+    EXCHANGE_DEV_OWNER_EMAIL: "owner+exchange-dev@example.test",
+    EXCHANGE_DEV_OWNER_PASSWORD: "owner-development-password",
+    EXCHANGE_DEV_UNRELATED_EMAIL: "unrelated+exchange-dev@example.test",
+    EXCHANGE_DEV_UNRELATED_PASSWORD: "unrelated-development-password",
+    EXCHANGE_DEV_ISSUER_EMAIL: "issuer+exchange-dev@example.test",
+    EXCHANGE_DEV_ISSUER_PASSWORD: "issuer-development-password",
+  });
+
+  assert.equal(specs.length, 5);
+  assert.deepEqual(specs.map((spec) => spec.role), ["member", "admin", "member", "member", "member"]);
+  assert.deepEqual(specs.map((spec) => spec.developmentPurpose), [
+    "configured_exchange_ordinary_member",
+    "configured_exchange_claim_reviewer",
+    "configured_exchange_organization_owner",
+    "configured_exchange_unrelated_member",
+    "configured_exchange_issuer_manager",
+  ]);
+});
+
+test("development account matrix rejects partial optional identities and duplicate accounts", () => {
+  const base = {
+    EXCHANGE_DEV_TEST_EMAIL: "ordinary+exchange-dev@example.test",
+    EXCHANGE_DEV_TEST_PASSWORD: "ordinary-development-password",
+    EXCHANGE_DEV_ADMIN_EMAIL: "reviewer+exchange-dev@example.test",
+    EXCHANGE_DEV_ADMIN_PASSWORD: "reviewer-development-password",
+  };
+  assert.throws(
+    () => buildAccountSpecs({ ...base, EXCHANGE_DEV_OWNER_EMAIL: "owner+exchange-dev@example.test" }),
+    /both be supplied or both be omitted/,
+  );
+  assert.throws(
+    () => buildAccountSpecs({ ...base, EXCHANGE_DEV_OWNER_EMAIL: base.EXCHANGE_DEV_TEST_EMAIL, EXCHANGE_DEV_OWNER_PASSWORD: "owner-development-password" }),
+    /separate account/,
+  );
 });

@@ -149,6 +149,7 @@ function ProfileContent() {
   const [linkingMatch, setLinkingMatch] = useState(false);
   const [submittingVerification, setSubmittingVerification] = useState(false);
   const [enrichmentCandidates, setEnrichmentCandidates] = useState<EnrichmentCandidate[]>([]);
+  const [enrichmentRequestId, setEnrichmentRequestId] = useState<string | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<EnrichmentCandidate | null>(null);
   const [attestationText, setAttestationText] = useState("");
   const [attestationAuthorized, setAttestationAuthorized] = useState(false);
@@ -425,7 +426,14 @@ function ProfileContent() {
       });
 
       setEnrichmentCandidates(data.candidates || []);
+      setEnrichmentRequestId(data.requestId || null);
       setSelectedCandidate((data.candidates || [])[0] || null);
+      if ((data.candidates || []).length === 0) {
+        const configuredProviderAvailable = Object.values(data.providerStatus).some((status) => status === "ok");
+        setError(configuredProviderAvailable
+          ? "No entity match was found. You can continue with manual profile entry."
+          : "Automated entity matching is not configured or is temporarily unavailable. You can continue with manual profile entry.");
+      }
     } catch (err) {
       console.error("Failed to search enrichment matches", err);
       setError("Unable to search entity matches right now. Please try again.");
@@ -440,6 +448,10 @@ function ProfileContent() {
       setError("Select a company match before linking.");
       return;
     }
+    if (!enrichmentRequestId) {
+      setError("Search again before linking this company match.");
+      return;
+    }
     if (attestationText.trim() !== EXPECTED_ATTESTATION) {
       setError("Type the attestation message exactly to continue.");
       return;
@@ -452,8 +464,8 @@ function ProfileContent() {
     setLinkingMatch(true);
     try {
       await enrichmentLinkFn({
+        requestId: enrichmentRequestId,
         matchId: selectedCandidate.matchId,
-        selectedCandidate: selectedCandidate as unknown as Record<string, unknown>,
         attestationText: attestationText.trim(),
         acknowledgedConsequences: attestationConsequences,
       });

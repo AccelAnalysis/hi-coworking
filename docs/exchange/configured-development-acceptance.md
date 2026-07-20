@@ -47,13 +47,19 @@ The checker never prints Firebase or Mapbox credential values. It reports only w
 
 ## 3. Create dedicated development identities
 
-Use two dedicated addresses containing `exchange-dev` or `exchange-smoke`. Do not use a founder, staff, customer, or other general-purpose account.
+Use dedicated addresses containing `exchange-dev` or `exchange-smoke`. Do not use a founder, staff, customer, or other general-purpose account. The member and claim-review identities are required. Organization-owner, unrelated-member, and issuer-manager identities are optional to the bootstrap command but required for the complete company acceptance matrix.
 
 ```bash
 export EXCHANGE_DEV_TEST_EMAIL='member+exchange-dev@example.com'
 export EXCHANGE_DEV_TEST_PASSWORD='replace-with-a-long-development-password'
 export EXCHANGE_DEV_ADMIN_EMAIL='admin+exchange-dev@example.com'
 export EXCHANGE_DEV_ADMIN_PASSWORD='replace-with-a-different-long-development-password'
+export EXCHANGE_DEV_OWNER_EMAIL='owner+exchange-dev@example.com'
+export EXCHANGE_DEV_OWNER_PASSWORD='replace-with-a-long-development-password'
+export EXCHANGE_DEV_UNRELATED_EMAIL='unrelated+exchange-dev@example.com'
+export EXCHANGE_DEV_UNRELATED_PASSWORD='replace-with-a-long-development-password'
+export EXCHANGE_DEV_ISSUER_EMAIL='issuer+exchange-dev@example.com'
+export EXCHANGE_DEV_ISSUER_PASSWORD='replace-with-a-long-development-password'
 ```
 
 Preview the account plan:

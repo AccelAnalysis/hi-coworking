@@ -2897,6 +2897,129 @@ describe("short-lived storage grant cleanup concurrency", () => {
   });
 });
 
+describe("profile save and enrichment identity boundaries", () => {
+  it("saves current-schema and legacy profiles without weakening the strict input contract", async () => {
+    const member = await createActor("profile-current-member", "member");
+    await db.collection("profiles").doc(member.uid).update({ profileSchemaVersion: 2 });
+
+    const currentResult = await callFunction<{
+      success: boolean;
+      profileSchemaVersion: number;
+    }>(member, "profile_update", {
+      businessName: "Current Schema Member LLC",
+      capabilityStatementUrl: null,
+      capabilityStatementStoragePath: null,
+      photoUrl: null,
+      photoStoragePath: null,
+      videoIntroUrl: null,
+      videoIntroStoragePath: null,
+      videoIntroPosterUrl: null,
+      videoIntroPosterStoragePath: null,
+      published: false,
+    });
+    expect(currentResult).toMatchObject({ success: true, profileSchemaVersion: 2 });
+    expect((await db.collection("profiles").doc(member.uid).get()).data()).toMatchObject({
+      uid: member.uid,
+      businessName: "Current Schema Member LLC",
+      profileSchemaVersion: 2,
+    });
+
+    const legacy = await createActor("profile-legacy-admin", "admin");
+    await db.collection("profiles").doc(legacy.uid).set({
+      uid: legacy.uid,
+      businessName: "Legacy Administrator LLC",
+      published: false,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await callFunction(legacy, "profile_update", { published: false });
+    const migrated = (await db.collection("profiles").doc(legacy.uid).get()).data();
+    expect(migrated).toMatchObject({
+      uid: legacy.uid,
+      businessName: "Legacy Administrator LLC",
+      profileSchemaVersion: 2,
+      createdAt: 1,
+    });
+    expect(Number(migrated?.legacyMigratedAt)).toBeGreaterThan(1);
+
+    await expectCallableError(
+      callFunction(member, "profile_update", {
+        orgId: "browser-supplied-organization",
+        published: false,
+      }),
+      "invalid-argument",
+    );
+  });
+
+  it("links only a live server-recorded enrichment candidate owned by the caller", async () => {
+    const member = await createActor("enrichment-member", "member");
+    const other = await createActor("enrichment-other", "member");
+    const candidate = {
+      matchId: "sam_verified-candidate",
+      legalName: "Verified Candidate LLC",
+      state: "VA",
+      uei: "SERVER-RECORDED-UEI",
+      confidenceScore: 90,
+      matchReason: "exact name match + state match",
+      source: "sam_gov",
+    };
+    await db.collection("enrichmentRequests").doc("request-owned-by-member").set({
+      id: "request-owned-by-member",
+      uid: member.uid,
+      candidates: [candidate],
+      status: "open",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const result = await callFunction<{ success: boolean; matchId: string }>(member, "enrichment_link", {
+      requestId: "request-owned-by-member",
+      matchId: candidate.matchId,
+      selectedCandidate: { legalName: "Browser Forgery LLC", source: "manual" },
+      attestationText: "I confirm I am authorized to represent this company.",
+      acknowledgedConsequences: true,
+    });
+    expect(result).toEqual({ success: true, matchId: candidate.matchId });
+    expect((await db.collection("profiles").doc(member.uid).get()).data()).toMatchObject({
+      enrichmentMatchId: candidate.matchId,
+      enrichmentData: candidate,
+      enrichmentSource: "sam_gov",
+      enrichmentProvenance: {
+        requestId: "request-owned-by-member",
+        provider: "sam_gov",
+      },
+    });
+
+    await expectCallableError(
+      callFunction(other, "enrichment_link", {
+        requestId: "request-owned-by-member",
+        matchId: candidate.matchId,
+        attestationText: "I confirm I am authorized to represent this company.",
+        acknowledgedConsequences: true,
+      }),
+      "permission-denied",
+    );
+
+    await db.collection("enrichmentRequests").doc("request-forged-match").set({
+      id: "request-forged-match",
+      uid: other.uid,
+      candidates: [candidate],
+      status: "open",
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+    });
+    await expectCallableError(
+      callFunction(other, "enrichment_link", {
+        requestId: "request-forged-match",
+        matchId: "browser-fabricated-match",
+        attestationText: "I confirm I am authorized to represent this company.",
+        acknowledgedConsequences: true,
+      }),
+      "invalid-argument",
+    );
+  });
+});
+
 describe("verification callable identity and review boundaries", () => {
   it("rejects another user's storage path, accepts canonical evidence idempotently, and blocks self-review", async () => {
     const submitter = await createActor("verification-staff", "staff", { verified: false });

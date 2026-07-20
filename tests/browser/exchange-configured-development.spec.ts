@@ -20,6 +20,44 @@ async function login(page: import("@playwright/test").Page, email: string, passw
   await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
 }
 
+async function gotoStable(page: import("@playwright/test").Page, path: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(path);
+      await expect(page).toHaveURL(new RegExp(`${path.replaceAll("/", "\\/")}(?:\\?|$)`));
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!String(error).includes("interrupted by another navigation")) throw error;
+    }
+  }
+  throw lastError;
+}
+
+function captureSanitizedFunctionDiagnostics(page: import("@playwright/test").Page) {
+  const diagnostics: Array<Record<string, unknown>> = [];
+  page.on("response", (response) => {
+    const url = new URL(response.url());
+    if (!url.hostname.endsWith("cloudfunctions.net")) return;
+    diagnostics.push({
+      type: "response",
+      functionName: url.pathname.split("/").filter(Boolean).at(-1),
+      status: response.status(),
+    });
+  });
+  page.on("requestfailed", (request) => {
+    const url = new URL(request.url());
+    if (!url.hostname.endsWith("cloudfunctions.net")) return;
+    diagnostics.push({
+      type: "request-failed",
+      functionName: url.pathname.split("/").filter(Boolean).at(-1),
+      failure: request.failure()?.errorText || "unknown",
+    });
+  });
+  return diagnostics;
+}
+
 test.beforeEach(async () => {
   if (!requiredConfiguredDevelopmentInputsPresent() && requireSmoke) {
     throw new Error(
@@ -32,17 +70,26 @@ test.beforeEach(async () => {
   );
 });
 
-test("configured development permits sign-in, Exchange access, and a profile save", async ({ page }) => {
+test("configured development permits sign-in, Exchange access, and a profile save", async ({ page }, testInfo) => {
+  const functionDiagnostics = captureSanitizedFunctionDiagnostics(page);
   await login(page, memberEmail!, memberPassword!);
 
-  await page.goto("/exchange");
+  await gotoStable(page, "/exchange");
   await expect(page).toHaveURL(/\/exchange/);
   await expect(page.locator("body")).toContainText(/Intelligence|Referrals|Opportunities|Resources/);
 
-  await page.goto("/profile");
+  await gotoStable(page, "/profile");
   await expect(page.getByRole("button", { name: "Save Profile" })).toBeVisible();
   await page.getByRole("button", { name: "Save Profile" }).click();
-  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  const outcome = await Promise.race([
+    page.getByText("Saved", { exact: true }).waitFor({ state: "visible" }).then(() => "saved" as const),
+    page.getByText(/Diagnostic:/).waitFor({ state: "visible" }).then(() => "error" as const),
+  ]);
+  await testInfo.attach("configured-function-diagnostics.json", {
+    body: Buffer.from(JSON.stringify(functionDiagnostics, null, 2)),
+    contentType: "application/json",
+  });
+  expect(outcome, `Configured profile save failed: ${JSON.stringify(functionDiagnostics)}`).toBe("saved");
 });
 
 test("configured development can create a disposable organization when explicitly enabled", async ({ page }, testInfo) => {
@@ -54,7 +101,7 @@ test("configured development can create a disposable organization when explicitl
   const organizationName = `Exchange Development Smoke ${suffix}`;
   const city = process.env.EXCHANGE_DEV_TEST_CITY || "Smithfield";
 
-  await page.goto("/exchange/onboarding");
+  await gotoStable(page, "/exchange/onboarding");
   await page.getByLabel("Organization name").fill(organizationName);
   await page.getByLabel("City").fill(city);
   await page.getByRole("button", { name: "Search organizations" }).click();
@@ -82,7 +129,7 @@ test("configured development can submit and review a dedicated seeded claim when
   );
 
   await login(page, memberEmail!, memberPassword!);
-  await page.goto("/exchange/onboarding");
+  await gotoStable(page, "/exchange/onboarding");
   await page.getByLabel("Organization name").fill(claimOrganizationName!);
   await page.getByLabel("City").fill(claimOrganizationCity);
   await page.getByRole("button", { name: "Search organizations" }).click();
@@ -96,7 +143,7 @@ test("configured development can submit and review a dedicated seeded claim when
   const adminContext = await browser.newContext();
   const adminPage = await adminContext.newPage();
   await login(adminPage, adminEmail!, adminPassword!);
-  await adminPage.goto("/admin/exchange-claims");
+  await gotoStable(adminPage, "/admin/exchange-claims");
 
   const claimCard = adminPage.locator("article").filter({ hasText: claimOrganizationName! }).first();
   await expect(claimCard).toBeVisible();

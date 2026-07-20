@@ -56,7 +56,7 @@ async function planAccount(auth, email, role) {
   };
 }
 
-async function applyAccount({ auth, db, email, password, role, displayName }) {
+async function applyAccount({ auth, db, email, password, role, displayName, developmentPurpose }) {
   const existing = await findUser(auth, email);
   const user = existing
     ? await auth.updateUser(existing.uid, { password, displayName, emailVerified: true, disabled: false })
@@ -71,7 +71,7 @@ async function applyAccount({ auth, db, email, password, role, displayName }) {
     role,
     membershipStatus: "none",
     developmentTestAccount: true,
-    developmentPurpose: "configured_exchange_smoke",
+    developmentPurpose,
     updatedAt: now,
   };
   if (!existing) userDoc.createdAt = now;
@@ -85,24 +85,64 @@ async function applyAccount({ auth, db, email, password, role, displayName }) {
   };
 }
 
+function optionalAccount(env, prefix, label, developmentPurpose) {
+  const email = env[`EXCHANGE_DEV_${prefix}_EMAIL`];
+  const password = env[`EXCHANGE_DEV_${prefix}_PASSWORD`];
+  if (!email && !password) return null;
+  if (!email || !password) {
+    throw new Error(`${label} email and password must either both be supplied or both be omitted.`);
+  }
+  return {
+    email,
+    password,
+    role: "member",
+    displayName: `Exchange Development ${label}`,
+    label,
+    developmentPurpose,
+  };
+}
+
+function buildAccountSpecs(env = process.env) {
+  const accounts = [
+    {
+      email: env.EXCHANGE_DEV_TEST_EMAIL,
+      password: env.EXCHANGE_DEV_TEST_PASSWORD,
+      role: "member",
+      displayName: "Exchange Development Member",
+      label: "Member",
+      developmentPurpose: "configured_exchange_ordinary_member",
+    },
+    {
+      email: env.EXCHANGE_DEV_ADMIN_EMAIL,
+      password: env.EXCHANGE_DEV_ADMIN_PASSWORD,
+      role: "admin",
+      displayName: "Exchange Development Admin",
+      label: "Admin",
+      developmentPurpose: "configured_exchange_claim_reviewer",
+    },
+    optionalAccount(env, "OWNER", "Organization Owner", "configured_exchange_organization_owner"),
+    optionalAccount(env, "UNRELATED", "Unrelated Member", "configured_exchange_unrelated_member"),
+    optionalAccount(env, "ISSUER", "Issuer Manager", "configured_exchange_issuer_manager"),
+  ].filter(Boolean);
+
+  for (const account of accounts) {
+    assertDevelopmentAccountEmail(account.email, account.label);
+    assertPassword(account.password, account.label);
+  }
+  const normalizedEmails = accounts.map((account) => account.email.toLowerCase());
+  if (new Set(normalizedEmails).size !== normalizedEmails.length) {
+    throw new Error("Every configured-development role must use a separate account.");
+  }
+  return accounts;
+}
+
 async function main() {
   const projectId = argument("--project") || process.env.EXCHANGE_DEV_PROJECT_ID || "hi-coworking-plat";
   const apply = hasFlag("--apply");
   const confirmation = argument("--confirm-development");
   assertSafety({ projectId, apply, confirmation });
 
-  const memberEmail = process.env.EXCHANGE_DEV_TEST_EMAIL;
-  const memberPassword = process.env.EXCHANGE_DEV_TEST_PASSWORD;
-  const adminEmail = process.env.EXCHANGE_DEV_ADMIN_EMAIL;
-  const adminPassword = process.env.EXCHANGE_DEV_ADMIN_PASSWORD;
-
-  assertDevelopmentAccountEmail(memberEmail, "Member");
-  assertDevelopmentAccountEmail(adminEmail, "Admin");
-  assertPassword(memberPassword, "Member");
-  assertPassword(adminPassword, "Admin");
-  if (memberEmail.toLowerCase() === adminEmail.toLowerCase()) {
-    throw new Error("Member and admin smoke identities must be separate accounts.");
-  }
+  const accountSpecs = buildAccountSpecs();
 
   if (!admin.apps.length) admin.initializeApp({ projectId });
   const auth = admin.auth();
@@ -113,28 +153,8 @@ async function main() {
     dryRun: !apply,
     generatedAt: new Date().toISOString(),
     accounts: apply
-      ? [
-          await applyAccount({
-            auth,
-            db,
-            email: memberEmail,
-            password: memberPassword,
-            role: "member",
-            displayName: "Exchange Development Member",
-          }),
-          await applyAccount({
-            auth,
-            db,
-            email: adminEmail,
-            password: adminPassword,
-            role: "admin",
-            displayName: "Exchange Development Admin",
-          }),
-        ]
-      : [
-          await planAccount(auth, memberEmail, "member"),
-          await planAccount(auth, adminEmail, "admin"),
-        ],
+      ? await Promise.all(accountSpecs.map((account) => applyAccount({ auth, db, ...account })))
+      : await Promise.all(accountSpecs.map((account) => planAccount(auth, account.email, account.role))),
     safeguards: {
       dedicatedEmailMarkerRequired: true,
       exactProjectConfirmationRequiredForWrites: true,
@@ -160,4 +180,5 @@ module.exports = {
   assertDevelopmentAccountEmail,
   assertPassword,
   assertSafety,
+  buildAccountSpecs,
 };

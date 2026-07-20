@@ -2,7 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 const samGovApiKey = defineSecret("SAM_GOV_API_KEY");
 
@@ -18,6 +18,15 @@ type EnrichmentCandidate = {
   matchReason: string;
   source: "sam_gov" | "usaspending";
 };
+
+type EnrichmentProviderStatus = "ok" | "not_configured" | "unavailable";
+
+type EnrichmentProviderResult = {
+  candidates: EnrichmentCandidate[];
+  status: EnrichmentProviderStatus;
+};
+
+const ENRICHMENT_REQUEST_TTL_MS = 30 * 60 * 1_000;
 
 function getDb() {
   return admin.firestore();
@@ -131,8 +140,9 @@ async function searchSamGov(params: {
   uei?: string;
   cage?: string;
   duns?: string;
-}): Promise<EnrichmentCandidate[]> {
-  const key = samGovApiKey.value();
+}): Promise<EnrichmentProviderResult> {
+  const key = samGovApiKey.value().trim();
+  if (!key) return { candidates: [], status: "not_configured" };
   const url = new URL("https://api.sam.gov/entity-information/v3/entities");
   url.searchParams.set("api_key", key);
   url.searchParams.set("legalBusinessName", params.businessName);
@@ -148,7 +158,7 @@ async function searchSamGov(params: {
 
     if (!response.ok) {
       logger.warn("SAM.gov request failed", { status: response.status });
-      return [];
+      return { candidates: [], status: "unavailable" };
     }
 
     const data = (await response.json()) as {
@@ -157,7 +167,7 @@ async function searchSamGov(params: {
     };
 
     const rows = data.entityData || data.entities || [];
-    return rows.slice(0, 15).map((row, index) => {
+    const candidates = rows.slice(0, 15).map((row, index) => {
       const legalName = String(
         row.legalBusinessName || row.entityName || row.legalName || params.businessName
       );
@@ -181,9 +191,10 @@ async function searchSamGov(params: {
         source: "sam_gov" as const,
       };
     });
+    return { candidates, status: "ok" };
   } catch (err) {
     logger.error("SAM.gov enrichment error", { err });
-    return [];
+    return { candidates: [], status: "unavailable" };
   }
 }
 
@@ -194,7 +205,7 @@ async function searchUsaSpending(params: {
   uei?: string;
   cage?: string;
   duns?: string;
-}): Promise<EnrichmentCandidate[]> {
+}): Promise<EnrichmentProviderResult> {
   const url = "https://api.usaspending.gov/api/v2/recipient/duns/";
 
   try {
@@ -215,13 +226,13 @@ async function searchUsaSpending(params: {
 
     if (!response.ok) {
       logger.warn("USAspending request failed", { status: response.status });
-      return [];
+      return { candidates: [], status: "unavailable" };
     }
 
     const data = (await response.json()) as { results?: Array<Record<string, unknown>> };
     const rows = data.results || [];
 
-    return rows.slice(0, 10).map((row, index) => {
+    const candidates = rows.slice(0, 10).map((row, index) => {
       const legalName = String(row.recipient_name || row.legal_name || params.businessName);
       const city = String(row.city_name || row.city || "") || undefined;
       const state = String(row.state_code || row.state || "") || undefined;
@@ -241,10 +252,34 @@ async function searchUsaSpending(params: {
         source: "usaspending" as const,
       };
     });
+    return { candidates, status: "ok" };
   } catch (err) {
     logger.error("USAspending enrichment error", { err });
-    return [];
+    return { candidates: [], status: "unavailable" };
   }
+}
+
+async function recordEnrichmentRequest(input: {
+  uid: string;
+  query: Record<string, string | undefined>;
+  candidates: EnrichmentCandidate[];
+  providerStatus: { samGov: EnrichmentProviderStatus; usaSpending: EnrichmentProviderStatus };
+  sourceCacheKey: string;
+  now: number;
+}): Promise<string> {
+  const requestId = randomUUID();
+  await getDb().collection("enrichmentRequests").doc(requestId).set({
+    id: requestId,
+    uid: input.uid,
+    query: input.query,
+    candidates: input.candidates,
+    providerStatus: input.providerStatus,
+    sourceCacheKey: input.sourceCacheKey,
+    status: "open",
+    createdAt: input.now,
+    expiresAt: input.now + ENRICHMENT_REQUEST_TTL_MS,
+  });
+  return requestId;
 }
 
 export const enrichment_search = onCall(
@@ -284,35 +319,74 @@ export const enrichment_search = onCall(
     const now = Date.now();
 
     const cacheSnap = await cacheRef.get();
+    let candidates: EnrichmentCandidate[];
+    let providerStatus: {
+      samGov: EnrichmentProviderStatus;
+      usaSpending: EnrichmentProviderStatus;
+    };
+    let cached = false;
     if (cacheSnap.exists) {
-      const cacheData = cacheSnap.data() as { expiresAt?: number; candidates?: EnrichmentCandidate[] } | undefined;
+      const cacheData = cacheSnap.data() as {
+        expiresAt?: number;
+        candidates?: EnrichmentCandidate[];
+        providerStatus?: {
+          samGov?: EnrichmentProviderStatus;
+          usaSpending?: EnrichmentProviderStatus;
+        };
+      } | undefined;
       if (cacheData?.expiresAt && cacheData.expiresAt > now && Array.isArray(cacheData.candidates)) {
-        return { candidates: cacheData.candidates, cached: true };
+        candidates = cacheData.candidates;
+        providerStatus = {
+          samGov: cacheData.providerStatus?.samGov ?? "unavailable",
+          usaSpending: cacheData.providerStatus?.usaSpending ?? "unavailable",
+        };
+        cached = true;
       }
     }
 
-    const [samResults, spendingResults] = await Promise.all([
-      searchSamGov(normalized),
-      searchUsaSpending(normalized),
-    ]);
+    if (!cached) {
+      const [samResult, spendingResult] = await Promise.all([
+        searchSamGov(normalized),
+        searchUsaSpending(normalized),
+      ]);
 
-    const candidates = [...samResults, ...spendingResults]
-      .sort((a, b) => b.confidenceScore - a.confidenceScore)
-      .slice(0, 20);
+      candidates = [...samResult.candidates, ...spendingResult.candidates]
+        .sort((a, b) => b.confidenceScore - a.confidenceScore)
+        .slice(0, 20);
+      providerStatus = {
+        samGov: samResult.status,
+        usaSpending: spendingResult.status,
+      };
 
-    await cacheRef.set(
-      {
-        id: cacheKey,
-        query: normalized,
-        candidates,
-        createdAt: now,
-        updatedAt: now,
-        expiresAt: now + 24 * 60 * 60 * 1000,
-      },
-      { merge: true }
-    );
+      await cacheRef.set(
+        {
+          id: cacheKey,
+          query: normalized,
+          candidates,
+          providerStatus,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + 24 * 60 * 60 * 1000,
+        },
+        { merge: true }
+      );
+    }
 
-    return { candidates, cached: false };
+    const requestId = await recordEnrichmentRequest({
+      uid: request.auth.uid,
+      query: normalized,
+      candidates: candidates!,
+      providerStatus: providerStatus!,
+      sourceCacheKey: cacheKey,
+      now,
+    });
+
+    return {
+      requestId,
+      candidates: candidates!,
+      providerStatus: providerStatus!,
+      cached,
+    };
   }
 );
 
@@ -323,17 +397,20 @@ export const enrichment_link = onCall(async (request) => {
 
   const uid = request.auth.uid;
   const {
+    requestId,
     matchId,
-    selectedCandidate,
     attestationText,
     acknowledgedConsequences,
   } = request.data as {
+    requestId?: string;
     matchId?: string;
-    selectedCandidate?: Record<string, unknown>;
     attestationText?: string;
     acknowledgedConsequences?: boolean;
   };
 
+  if (!requestId) {
+    throw new HttpsError("invalid-argument", "requestId is required");
+  }
   if (!matchId) {
     throw new HttpsError("invalid-argument", "matchId is required");
   }
@@ -349,23 +426,54 @@ export const enrichment_link = onCall(async (request) => {
 
   const db = getDb();
   const profileRef = db.collection("profiles").doc(uid);
+  const requestRef = db.collection("enrichmentRequests").doc(requestId);
   const now = Date.now();
 
-  await profileRef.set(
-    {
+  let selectedCandidate: EnrichmentCandidate | undefined;
+  await db.runTransaction(async (transaction) => {
+    const [requestSnapshot, profileSnapshot] = await Promise.all([
+      transaction.get(requestRef),
+      transaction.get(profileRef),
+    ]);
+    const enrichmentRequest = requestSnapshot.data();
+    if (!requestSnapshot.exists || enrichmentRequest?.uid !== uid) {
+      throw new HttpsError("permission-denied", "Enrichment request is not available to this account");
+    }
+    if (Number(enrichmentRequest.expiresAt || 0) <= now || enrichmentRequest.status !== "open") {
+      throw new HttpsError("failed-precondition", "Enrichment request has expired or was already used");
+    }
+    const candidates = Array.isArray(enrichmentRequest.candidates)
+      ? enrichmentRequest.candidates as EnrichmentCandidate[]
+      : [];
+    selectedCandidate = candidates.find((candidate) => candidate.matchId === matchId);
+    if (!selectedCandidate) {
+      throw new HttpsError("invalid-argument", "Selected match was not returned by this enrichment request");
+    }
+
+    const previous = profileSnapshot.data() ?? {};
+    transaction.set(profileRef, {
       uid,
       enrichmentMatchId: matchId,
-      enrichmentData: selectedCandidate || {},
-      enrichmentSource: String(selectedCandidate?.source || "manual"),
+      enrichmentData: selectedCandidate,
+      enrichmentSource: selectedCandidate.source,
+      enrichmentProvenance: {
+        requestId,
+        provider: selectedCandidate.source,
+        matchedAt: now,
+      },
       enrichmentLinkedAt: now,
       attestationText: expectedAttestation,
       attestationTimestamp: now,
       attestationAcknowledgedConsequences: true,
       updatedAt: now,
-      createdAt: now,
-    },
-    { merge: true }
-  );
+      createdAt: previous.createdAt ?? now,
+    }, { merge: true });
+    transaction.update(requestRef, {
+      status: "linked",
+      linkedMatchId: matchId,
+      linkedAt: now,
+    });
+  });
 
   const auditRef = db.collection("verificationAuditLog").doc();
   await auditRef.set({

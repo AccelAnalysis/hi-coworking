@@ -495,13 +495,21 @@ export const enrichmentSearchFn = httpsCallable<
     cage?: string;
     duns?: string;
   },
-  { candidates: EnrichmentCandidate[]; cached: boolean }
+  {
+    requestId: string;
+    candidates: EnrichmentCandidate[];
+    cached: boolean;
+    providerStatus: {
+      samGov: "ok" | "not_configured" | "unavailable";
+      usaSpending: "ok" | "not_configured" | "unavailable";
+    };
+  }
 >(functions, "enrichment_search");
 
 export const enrichmentLinkFn = httpsCallable<
   {
+    requestId: string;
     matchId: string;
-    selectedCandidate: Record<string, unknown>;
     attestationText: string;
     acknowledgedConsequences: boolean;
   },

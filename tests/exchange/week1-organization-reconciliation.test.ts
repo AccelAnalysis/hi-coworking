@@ -72,6 +72,16 @@ describe("Week 1 organization reconciliation contract", () => {
     expect(page).not.toContain('setError("Failed to save. Please try again.")');
   });
 
+  it("links enrichment only from a server-owned, caller-scoped request", () => {
+    const enrichment = read("apps/functions/src/enrichment.ts");
+    const browserFunctions = read("apps/web/src/lib/functions.ts");
+    expect(enrichment).toContain('collection("enrichmentRequests")');
+    expect(enrichment).toContain("enrichmentRequest?.uid !== uid");
+    expect(enrichment).toContain("Selected match was not returned by this enrichment request");
+    expect(browserFunctions).toContain("requestId: string");
+    expect(browserFunctions).not.toContain("selectedCandidate: Record<string, unknown>");
+  });
+
   it("keeps seed imports guarded, idempotent, and privacy-reporting", () => {
     const importer = read("apps/functions/scripts/import-organizations.cjs");
     expect(importer).toContain("--confirm-production");

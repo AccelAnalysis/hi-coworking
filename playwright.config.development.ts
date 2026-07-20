@@ -14,7 +14,9 @@ export default defineConfig({
     baseURL,
     actionTimeout: 20_000,
     navigationTimeout: 40_000,
-    trace: "retain-on-failure",
+    // Playwright traces retain request headers, including Firebase bearer
+    // tokens. Configured-development evidence must remain credential-free.
+    trace: "off",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
