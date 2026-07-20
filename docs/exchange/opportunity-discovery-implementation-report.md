@@ -97,7 +97,7 @@ manual and opt-in.
 
 ## Validation evidence
 
-The local gate passed 13 focused shared/Functions tests, nine web state and
+The local gate passed 14 focused shared/Functions tests, nine web state and
 location-provider tests, 67 static integration checks, 27 index definitions,
 three synthetic fixture sets (100, 1,000, and 10,000 records), 15 compiled
 Playwright scenarios, 88 Exchange tests, nine configured-development tests,

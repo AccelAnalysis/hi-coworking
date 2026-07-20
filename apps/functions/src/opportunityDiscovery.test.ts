@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   buildOpportunityDiscoveryProjection,
+  planOpportunityDiscoveryProjectionChange,
   sanitizeOpportunityDiscoveryPage,
 } from "./opportunityDiscovery";
 
@@ -94,6 +95,33 @@ test("only approved and open records receive a public discovery projection", () 
     assert.equal(buildOpportunityDiscoveryProjection(id, source(overrides)), null, id);
   }
   assert.ok(buildOpportunityDiscoveryProjection("approved-open", source()));
+});
+
+test("projection synchronization avoids writes for never-discoverable RFx", () => {
+  assert.deepEqual(
+    planOpportunityDiscoveryProjectionChange(
+      "legacy-draft",
+      source({ status: "draft" }),
+      source({ status: "under_review", adminApprovalStatus: "pending" }),
+    ),
+    { action: "noop" },
+  );
+  assert.equal(
+    planOpportunityDiscoveryProjectionChange(
+      "newly-approved",
+      source({ status: "draft" }),
+      source(),
+    ).action,
+    "upsert",
+  );
+  assert.deepEqual(
+    planOpportunityDiscoveryProjectionChange(
+      "newly-closed",
+      source(),
+      source({ status: "closed" }),
+    ),
+    { action: "delete" },
+  );
 });
 
 test("callable sanitizer strips authority, ranking, and protected responder fields", () => {

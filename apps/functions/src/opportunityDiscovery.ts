@@ -455,6 +455,30 @@ export function buildOpportunityDiscoveryProjection(
   };
 }
 
+export function planOpportunityDiscoveryProjectionChange(
+  id: string,
+  beforeValue: unknown | null,
+  afterValue: unknown | null,
+):
+  | { action: "noop" }
+  | { action: "delete" }
+  | { action: "upsert"; projection: RecordData } {
+  const previousProjection = beforeValue === null
+    ? null
+    : buildOpportunityDiscoveryProjection(id, beforeValue);
+  const nextProjection = afterValue === null
+    ? null
+    : buildOpportunityDiscoveryProjection(id, afterValue);
+
+  if (nextProjection) {
+    return { action: "upsert", projection: nextProjection };
+  }
+  if (previousProjection) {
+    return { action: "delete" };
+  }
+  return { action: "noop" };
+}
+
 /**
  * Final callable-response allowlist. Discovery storage contains query and
  * authority fields that are intentionally never returned to browsers.
@@ -1126,15 +1150,19 @@ export const rfx_savedSearch_list = onCall(async (request) => {
 export const rfx_syncDiscoveryProjection = onDocumentWritten("rfx/{rfxId}", async (event) => {
   const id = event.params.rfxId;
   const target = getDb().collection("opportunityDiscovery").doc(id);
+  const before = event.data?.before;
   const after = event.data?.after;
-  if (!after?.exists) {
+  const change = planOpportunityDiscoveryProjectionChange(
+    id,
+    before?.exists ? before.data() : null,
+    after?.exists ? after.data() : null,
+  );
+  if (change.action === "noop") {
+    return;
+  }
+  if (change.action === "delete") {
     await target.delete();
     return;
   }
-  const projection = buildOpportunityDiscoveryProjection(id, after.data());
-  if (!projection) {
-    await target.delete();
-    return;
-  }
-  await target.set(projection, { merge: false });
+  await target.set(change.projection, { merge: false });
 });

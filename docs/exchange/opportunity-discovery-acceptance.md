@@ -95,7 +95,7 @@ The following gates passed on 2026-07-20:
 | --- | --- |
 | Locked dependency installation | `npm ci` passed; local Node 22 differs from repository Node 20 |
 | Shared and Functions builds | Passed with zero TypeScript errors |
-| Focused discovery suite | 13 Node tests, 9 Vitest tests, 67 static checks passed |
+| Focused discovery suite | 14 Node tests, 9 Vitest tests, 67 static checks passed |
 | Firestore discovery indexes | 27 definitions present, unique, ordered, and current |
 | Synthetic fixtures | 100, 1,000, and 10,000 records schema validated |
 | Configured browser suite compile | 15 Playwright scenarios enumerated; execution remains opt-in |
