@@ -24,7 +24,6 @@ import type {
   ExchangeView,
 } from "../state/exchangeWorkspaceTypes";
 import { ExchangeViewTabs } from "./ExchangeViewTabs";
-import { OpportunityLocationSearch } from "./OpportunityLocationSearch";
 
 const MODES: Array<{ mode: ExchangeSurfaceMode; label: string; icon: typeof Map }> = [
   { mode: "map", label: "Map", icon: Map },
@@ -71,7 +70,6 @@ export function ExchangeCommandBar({
   mapAvailable,
   refreshing,
   opportunitySort,
-  opportunityLocation,
   onViewChange,
   onSearchChange,
   onSurfaceModeChange,
@@ -79,7 +77,6 @@ export function ExchangeCommandBar({
   onClearFilters,
   onRefresh,
   onOpportunitySortChange,
-  onOpportunityLocationChange,
   onCreateReferral,
   onExportAnalytics,
 }: {
@@ -105,10 +102,9 @@ export function ExchangeCommandBar({
   onExportAnalytics?: () => void;
 }) {
   const currentView = canonicalView(view);
-  const opportunityControls = currentView === "opportunities"
+  const opportunitySortControls = currentView === "opportunities"
     && opportunitySort
-    && onOpportunitySortChange
-    && onOpportunityLocationChange;
+    && onOpportunitySortChange;
 
   return (
     <header className="relative z-[1100] shrink-0 isolate border-b border-white/15 bg-slate-950/78 px-3 py-2 text-white shadow-[0_12px_35px_rgba(15,23,42,0.24)] backdrop-blur-2xl sm:px-4 lg:z-50 lg:m-3 lg:mb-0 lg:rounded-2xl lg:border">
@@ -147,16 +143,6 @@ export function ExchangeCommandBar({
           ) : null}
         </label>
 
-        {opportunityControls ? (
-          <div className="hidden min-w-[15rem] max-w-[22rem] flex-1 xl:block">
-            <OpportunityLocationSearch
-              compact
-              value={opportunityLocation}
-              onChange={onOpportunityLocationChange}
-            />
-          </div>
-        ) : null}
-
         <button
           type="button"
           onClick={onOpenFilters}
@@ -176,8 +162,8 @@ export function ExchangeCommandBar({
           {resultCount.toLocaleString("en-US")} result{resultCount === 1 ? "" : "s"}
         </p>
 
-        {opportunityControls ? (
-          <label className="hidden xl:block">
+        {opportunitySortControls ? (
+          <label className="hidden lg:block">
             <span className="sr-only">Sort opportunities</span>
             <select
               value={opportunitySort}
@@ -273,28 +259,6 @@ export function ExchangeCommandBar({
           <LayoutDashboard className="h-4 w-4" aria-hidden="true" />
         </Link>
       </div>
-
-      {opportunityControls ? (
-        <div className="mt-2 flex items-center gap-2 xl:hidden">
-          <OpportunityLocationSearch
-            compact
-            value={opportunityLocation}
-            onChange={onOpportunityLocationChange}
-          />
-          <label className="hidden shrink-0 sm:block">
-            <span className="sr-only">Sort opportunities</span>
-            <select
-              value={opportunitySort}
-              onChange={(event) => onOpportunitySortChange(event.target.value as OpportunitySort)}
-              className="h-11 max-w-[10rem] rounded-xl border border-white/65 bg-white/88 px-3 text-xs font-bold text-slate-800 shadow-lg outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/25"
-            >
-              {OPPORTUNITY_SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-      ) : null}
     </header>
   );
 }
