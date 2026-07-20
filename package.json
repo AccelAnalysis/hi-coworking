@@ -27,7 +27,7 @@
     "test:functions": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/functions\"",
     "test:migrations": "npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only firestore \"vitest run tests/migrations\"",
     "test:exchange": "vitest run tests/exchange",
-    "test:security": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/rules tests/functions tests/migrations\"",
+    "test:security": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run --no-file-parallelism --maxWorkers=1 tests/rules tests/functions tests/migrations\"",
     "test:run3": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/run3 tests/functions/run3-*.test.ts\"",
     "migrate:exchange-run4:dry": "node scripts/migrate-exchange-run4.mjs --project=demo-hi-coworking",
     "test:run4": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/run4\"",

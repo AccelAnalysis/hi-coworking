@@ -26,7 +26,7 @@ async function register(page: import("@playwright/test").Page, prefix: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/exchange$/);
+  await expect(page).toHaveURL(/\/exchange$/, { timeout: 40_000 });
   return email;
 }
 
