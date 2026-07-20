@@ -299,6 +299,45 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Opportunity Discovery projections, account state, governance, and
+    // notification queues are callable/server-authoritative. Browser reads
+    // use privacy-minimized callable responses; browser writes are denied.
+    match /opportunityDiscovery/{opportunityId} {
+      allow read, write: if false;
+    }
+
+    match /opportunitySavedItems/{savedItemId} {
+      allow read, write: if false;
+    }
+
+    match /opportunityRecentViews/{viewId} {
+      allow read, write: if false;
+    }
+
+    match /opportunitySavedSearches/{searchId} {
+      allow read, write: if false;
+    }
+
+    match /opportunityRecentSearches/{searchId} {
+      allow read, write: if false;
+    }
+
+    match /rfxAddenda/{addendumId} {
+      allow read, write: if false;
+    }
+
+    match /rfxAddendumAcknowledgments/{acknowledgmentId} {
+      allow read, write: if false;
+    }
+
+    match /rfxQuestions/{questionId} {
+      allow read, write: if false;
+    }
+
+    match /opportunityNotificationJobs/{jobId} {
+      allow read, write: if false;
+    }
+
     // --- rfxTeams/{teamId} ---
     // Team members (and admin) can read; writes are server-authoritative.
     match /rfxTeams/{teamId} {
