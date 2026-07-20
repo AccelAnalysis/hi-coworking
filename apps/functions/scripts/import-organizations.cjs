@@ -65,6 +65,7 @@ function publicProjection(row) {
     city: row.city || "",
     county: row.county || "",
     state: row.state || "",
+    territoryFips: row.territoryFips || "",
     website: row.website || "",
     organizationType: row.organizationType || "",
     description: row.description || "",
@@ -82,6 +83,9 @@ function publicProjection(row) {
   if (!privacySuppressed) {
     for (const key of ["addressLine1", "postalCode", "latitude", "longitude", "geohash"]) {
       if (row[key] !== undefined && row[key] !== "") projection[key] = row[key];
+    }
+    if (["authoritative", "verified", "approximate"].includes(row.coordinateConfidence)) {
+      projection.coordinateConfidence = row.coordinateConfidence;
     }
   }
   return projection;
@@ -144,6 +148,7 @@ function assertProjectSafety(projectId, optionsOrDryRun = { dryRun: true }, lega
 async function importRows(db, file, collectionName, restricted, batchId, dryRun) {
   const result = { created: 0, updated: 0, skipped: 0, duplicate: 0, invalid: 0, invalidRows: [] };
   const seen = new Set();
+  const prepared = [];
   for (const [index, row] of rows(file).entries()) {
     const errors = validate(row, restricted);
     if (errors.length) {
@@ -154,8 +159,23 @@ async function importRows(db, file, collectionName, restricted, batchId, dryRun)
     if (seen.has(row.id)) { result.duplicate += 1; continue; }
     seen.add(row.id);
     const ref = db.collection(collectionName).doc(row.id);
-    const existing = await ref.get();
     const sourceContentHash = contentHash(row);
+    prepared.push({ row, ref, sourceContentHash });
+  }
+
+  const existingSnapshots = [];
+  if (typeof db.getAll === "function") {
+    for (let index = 0; index < prepared.length; index += 200) {
+      const chunk = prepared.slice(index, index + 200);
+      existingSnapshots.push(...await db.getAll(...chunk.map((entry) => entry.ref)));
+    }
+  } else {
+    for (const entry of prepared) existingSnapshots.push(await entry.ref.get());
+  }
+
+  for (const [index, entry] of prepared.entries()) {
+    const { row, ref, sourceContentHash } = entry;
+    const existing = existingSnapshots[index];
     if (existing.data()?.sourceContentHash === sourceContentHash) {
       result.skipped += 1;
       continue;

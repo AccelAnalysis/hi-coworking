@@ -12,6 +12,7 @@ intentionally discarded.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import re
@@ -95,12 +96,28 @@ def source_id(row: dict[str, str]) -> str:
     return stable_id("iow", normalize_name(row.get("Company Name", "")), row.get("Physical City", ""), row.get("Physical State", ""))
 
 
+def bounded_coordinate(value: object, minimum: float, maximum: float) -> float | None:
+    raw = text(value)
+    if not raw:
+        return None
+    try:
+        coordinate = float(raw)
+    except ValueError:
+        return None
+    return coordinate if minimum <= coordinate <= maximum else None
+
+
 def prepare(args):
     home_rows = list(read_xlsx_rows(args.home, "Company Details"))
     home_ids = {source_id(row) for row in home_rows}
     organizations = {}
+    company_rows = list(read_xlsx_rows(args.companies, "Company Details"))
+    company_identity_counts = Counter(
+        source_id(row) for row in company_rows if text(row.get("Company Name"))
+    )
+    invalid_coordinate_rows = 0
 
-    for row in read_xlsx_rows(args.companies, "Company Details"):
+    for row in company_rows:
         name = text(row.get("Company Name"))
         if not name:
             continue
@@ -112,6 +129,18 @@ def prepare(args):
             website = f"https://{website}"
         city = text(row.get("Physical City"))
         state = text(row.get("Physical State"))
+        county = text(row.get("Physical County"))
+        latitude = bounded_coordinate(row.get("Latitude"), -90, 90)
+        longitude = bounded_coordinate(row.get("Longtitude"), -180, 180)
+        has_any_coordinate = bool(text(row.get("Latitude")) or text(row.get("Longtitude")))
+        if has_any_coordinate and (latitude is None or longitude is None):
+            invalid_coordinate_rows += 1
+            latitude = None
+            longitude = None
+        territory_fips = "51093" if (
+            normalize_name(county) == "isle of wight"
+            and normalize_name(state) in {"va", "virginia"}
+        ) else ""
         record = {
             "id": stable_id("org", identity),
             "schemaVersion": 2,
@@ -121,14 +150,18 @@ def prepare(args):
             "description": text(row.get("Line of Business")),
             "city": city,
             "state": state,
-            "county": text(row.get("Physical County")),
+            "county": county,
+            "territoryFips": territory_fips,
             "privacySuppressed": home_based,
             "postalCode": "" if home_based else re.sub(r"\.0$", "", text(row.get("Physical Zipcode")))[:5],
             "addressLine1": "" if home_based else text(row.get("Physical Address")),
             "website": website,
             "publicPhone": "" if home_based else text(row.get("Phone No")),
-            "latitude": None if home_based else float(row["Latitude"]) if text(row.get("Latitude")) else None,
-            "longitude": None if home_based else float(row["Longtitude"]) if text(row.get("Longtitude")) else None,
+            "latitude": None if home_based else latitude,
+            "longitude": None if home_based else longitude,
+            "coordinateConfidence": "approximate" if (
+                not home_based and latitude is not None and longitude is not None
+            ) else "",
             "naicsCodes": [text(row.get("Primary NAICS Code"))] if text(row.get("Primary NAICS Code")) else [],
             "sourceIds": {"duns": duns} if duns else {"iow": identity},
             "sources": ["iow_companies"] + (["iow_home_businesses"] if home_based else []),
@@ -139,15 +172,21 @@ def prepare(args):
         }
         organizations[identity] = {key: value for key, value in record.items() if value not in (None, "", [])}
 
-    restricted = []
-    for index, row in enumerate(read_xlsx_rows(args.targeting)):
+    targeting_rows = list(read_xlsx_rows(args.targeting))
+    targeting_identity_counts: Counter[str] = Counter()
+    restricted_by_identity: dict[str, dict[str, object]] = {}
+    for row in targeting_rows:
         name = text(row.get("Account Name"))
         if not name:
             continue
         city = text(row.get("Mailing City"))
         state = text(row.get("Mailing State/Province"))
-        restricted.append({
-            "id": stable_id("target", name, city, state, str(index)),
+        identity_key = "|".join((normalize_name(name), normalize_name(city), normalize_name(state)))
+        targeting_identity_counts[identity_key] += 1
+        if identity_key in restricted_by_identity:
+            continue
+        restricted_by_identity[identity_key] = {
+            "id": stable_id("target", identity_key),
             "name": name,
             "normalizedName": normalize_name(name),
             "city": city,
@@ -157,7 +196,8 @@ def prepare(args):
             "restrictedMatchOnly": True,
             "privacySuppressed": True,
             "schemaVersion": 2,
-        })
+        }
+    restricted = list(restricted_by_identity.values())
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with (args.output_dir / "isle-of-wight-organizations.jsonl").open("w", encoding="utf-8") as handle:
@@ -166,12 +206,52 @@ def prepare(args):
     with (args.output_dir / "exchange-targeting-restricted.jsonl").open("w", encoding="utf-8") as handle:
         for record in restricted:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
-    print(json.dumps({
+    prepared_coordinate_count = sum(
+        1 for row in organizations.values()
+        if row.get("latitude") is not None and row.get("longitude") is not None
+    )
+    report = {
+        "source": {
+            "companyRows": len(company_rows),
+            "companyRowsWithoutName": sum(1 for row in company_rows if not text(row.get("Company Name"))),
+            "homeBusinessRows": len(home_rows),
+            "homeBusinessIdentitiesMatched": len(home_ids.intersection(organizations)),
+            "homeBusinessIdentitiesUnmatched": len(home_ids.difference(organizations)),
+            "targetingRows": len(targeting_rows),
+            "targetingRowsWithoutName": sum(1 for row in targeting_rows if not text(row.get("Account Name"))),
+        },
         "organizations": len(organizations),
         "homeBased": sum(1 for row in organizations.values() if row.get("homeBased")),
+        "coordinateMarkersEligible": prepared_coordinate_count,
+        "listOnlyOrganizations": len(organizations) - prepared_coordinate_count,
+        "invalidCoordinateRows": invalid_coordinate_rows,
+        "duplicateOrganizationIdentityGroups": sum(
+            1 for count in company_identity_counts.values() if count > 1
+        ),
         "restrictedTargetingCandidates": len(restricted),
+        "duplicateTargetingIdentityGroups": sum(
+            1 for count in targeting_identity_counts.values() if count > 1
+        ),
+        "duplicateTargetingIdentityRows": sum(
+            count for count in targeting_identity_counts.values() if count > 1
+        ),
+        "duplicateTargetingRowsSuppressed": sum(
+            count - 1 for count in targeting_identity_counts.values() if count > 1
+        ),
+        "privacy": {
+            "homeAddressesSuppressed": True,
+            "homeCoordinatesSuppressed": True,
+            "targetingCandidatesRestrictedMatchOnly": True,
+            "targetingContactDemographicAndBirthFieldsExcluded": True,
+            "fabricatedCoordinates": False,
+        },
         "outputDirectory": str(args.output_dir),
-    }, indent=2))
+    }
+    (args.output_dir / "seed-preparation-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
 
 
 if __name__ == "__main__":

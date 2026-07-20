@@ -65,12 +65,33 @@ test("public projection suppresses ownership, source IDs, and home address", () 
     postalCode: "23430",
     ownerUid: "private-owner",
     sourceIds: { duns: "private" },
+    territoryFips: "51093",
+    coordinateConfidence: "authoritative",
     updatedAt: 1,
   });
   assert.equal(publicRow.addressLine1, undefined);
   assert.equal(publicRow.postalCode, undefined);
   assert.equal(publicRow.ownerUid, undefined);
   assert.equal(publicRow.sourceIds, undefined);
+  assert.equal(publicRow.territoryFips, "51093");
+  assert.equal(publicRow.coordinateConfidence, undefined);
+});
+
+test("public projection retains only approved map provenance for non-suppressed records", () => {
+  const publicRow = publicProjection({
+    id: "public_1",
+    name: "Public",
+    normalizedName: "public",
+    slug: "public-1",
+    territoryFips: "51093",
+    latitude: 36.9,
+    longitude: -76.7,
+    coordinateConfidence: "authoritative",
+    updatedAt: 1,
+  });
+  assert.equal(publicRow.territoryFips, "51093");
+  assert.equal(publicRow.coordinateConfidence, "authoritative");
+  assert.equal(publicRow.latitude, 36.9);
 });
 
 test("project guard is dry-run first and distinguishes development from production", () => {

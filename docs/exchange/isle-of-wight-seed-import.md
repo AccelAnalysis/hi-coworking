@@ -11,6 +11,24 @@ No production import is performed by this branch.
 3. Run `npm run seed:organizations:verify` on the public organization output.
 4. Review all home-based suppression, source provenance, organization counts, and invalid rows before any write.
 
+Configured preparation command:
+
+```bash
+python3 apps/functions/scripts/prepare-organization-seeds.py \
+  --companies data/seed/source-private/isle-of-wight-companies.xlsx \
+  --home data/seed/source-private/isle-of-wight_home-businesses.xlsx \
+  --targeting "data/seed/source-private/Targeting List 1 - Cleaned.xlsx" \
+  --output-dir data/seed/prepared
+```
+
+The private source directory and generated prepared directory are gitignored.
+The preparation report is written to
+`data/seed/prepared/seed-preparation-report.json`. It records only counts and
+privacy decisions, never source row values. Company financial and executive
+sheets are not ingested. Source-provided coordinates are range-checked and
+labeled `approximate`; no coordinate is generated from a street, ZIP, or
+territory centroid.
+
 ## Dry run first
 
 The importer is now dry-run by default. Omitting `--apply` never writes records.

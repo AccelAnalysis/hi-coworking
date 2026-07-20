@@ -114,6 +114,7 @@ export function sanitizePublicOrganization(
     city: cleanPublicString(source.city, 100) ?? "",
     county: cleanPublicString(source.county, 100) ?? "",
     state: cleanPublicString(source.state, 40) ?? "",
+    territoryFips: cleanPublicString(source.territoryFips, 12) ?? "",
     claimStatus: ["unclaimed", "claim_pending", "claimed"].includes(String(source.claimStatus))
       ? source.claimStatus : "unclaimed",
     verificationStatus: cleanPublicString(source.exchangeVerificationStatus ?? source.verificationStatus, 40) ?? "unverified",
@@ -137,6 +138,9 @@ export function sanitizePublicOrganization(
     if (typeof source.latitude === "number" && Number.isFinite(source.latitude)) result.latitude = source.latitude;
     if (typeof source.longitude === "number" && Number.isFinite(source.longitude)) result.longitude = source.longitude;
     if (typeof source.geohash === "string" && source.geohash.trim()) result.geohash = source.geohash.trim();
+    if (["authoritative", "verified", "approximate"].includes(String(source.coordinateConfidence))) {
+      result.coordinateConfidence = source.coordinateConfidence;
+    }
   }
   return result;
 }

@@ -34,7 +34,7 @@
     "test:development-readiness": "node --test apps/functions/test/development-account-bootstrap.test.cjs apps/functions/test/organization-import.test.cjs",
     "test:week1-org": "npm run build:functions && node --test apps/functions/test/exchange-organization-model.test.cjs apps/functions/test/organization-import.test.cjs apps/functions/test/development-account-bootstrap.test.cjs && vitest run tests/exchange/week1-organization-reconciliation.test.ts",
     "test:opportunity-discovery": "npm run build:shared && npm run build:functions && node --test packages/shared/dist/opportunityDiscovery.test.js apps/functions/lib/opportunityDiscovery.test.js && vitest run apps/web/src/features/exchange/state/opportunityDiscoveryState.test.ts apps/web/src/features/exchange/data/opportunityLocationSearchProvider.test.ts && node scripts/validate-opportunity-discovery.mjs && node scripts/merge-opportunity-discovery-indexes.mjs --check",
-    "seed:organizations:verify": "python3 apps/functions/scripts/verify-organization-seed.py data/seed/prepared/isle-of-wight-organizations.jsonl",
+    "seed:organizations:verify": "python3 apps/functions/scripts/verify-organization-seed.py data/seed/prepared/isle-of-wight-organizations.jsonl --targeting data/seed/prepared/exchange-targeting-restricted.jsonl",
     "test:browser:week1-org": "playwright test tests/browser/exchange-organization-reconciliation.spec.ts",
     "test:browser:configured-dev": "playwright test --config=playwright.config.development.ts",
     "test:browser:opportunity-discovery": "playwright test --config=playwright.opportunity-discovery.config.ts"

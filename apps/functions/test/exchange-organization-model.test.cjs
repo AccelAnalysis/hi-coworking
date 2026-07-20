@@ -31,6 +31,8 @@ test("public organization projection suppresses private home-business location",
     postalCode: "23430",
     latitude: 36.9,
     longitude: -76.7,
+    coordinateConfidence: "authoritative",
+    territoryFips: "51093",
     city: "Smithfield",
     state: "VA",
     sources: ["fixture"],
@@ -38,6 +40,23 @@ test("public organization projection suppresses private home-business location",
   assert.equal(result.city, "Smithfield");
   assert.equal(result.addressLine1, undefined);
   assert.equal(result.latitude, undefined);
+  assert.equal(result.coordinateConfidence, undefined);
+  assert.equal(result.territoryFips, "51093");
   assert.equal(result.ownerUid, undefined);
   assert.equal(result.sourceIds, undefined);
+});
+
+test("public organization projection preserves approved coordinate confidence", () => {
+  const result = sanitizePublicOrganization("org_public", {
+    name: "Public Office",
+    normalizedName: "public office",
+    latitude: 36.9,
+    longitude: -76.7,
+    coordinateConfidence: "verified",
+    territoryFips: "51093",
+  });
+  assert.equal(result.latitude, 36.9);
+  assert.equal(result.longitude, -76.7);
+  assert.equal(result.coordinateConfidence, "verified");
+  assert.equal(result.territoryFips, "51093");
 });

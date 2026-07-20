@@ -48,3 +48,6 @@ Thumbs.db
 
 # Private source workbooks containing sensitive data
 data/seed/source-private/
+
+# Generated review artifacts include restricted match-only organization data.
+data/seed/prepared/
