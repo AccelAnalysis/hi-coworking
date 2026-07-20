@@ -5,6 +5,10 @@ import {
   getDb,
   isOrgManagementRole,
 } from "./exchange/security";
+import {
+  handleOpportunityDiscoveryGateway,
+  isOpportunityDiscoveryGatewayRequest,
+} from "./opportunityDiscoveryGateway";
 
 type RecordData = Record<string, unknown>;
 
@@ -315,8 +319,15 @@ async function countReceivedResponses(
  * Server-filtered discovery for RFx management. Organization scope always
  * wins over creator identity: a former creator receives no organization RFx
  * after their exact active owner/admin membership is removed.
+ *
+ * Versioned discovery operations share this existing callable. Requests
+ * without an `operation` property stay on the management path unchanged.
  */
 export const rfx_listManaged = onCall(async (request) => {
+  if (isOpportunityDiscoveryGatewayRequest(request.data)) {
+    return handleOpportunityDiscoveryGateway(request);
+  }
+
   const actor = getAuthorizedActor(request);
   const parsed = listManagedRfxInputSchema.safeParse(request.data ?? {});
   if (!parsed.success) {
