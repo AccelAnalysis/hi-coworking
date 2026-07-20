@@ -1,6 +1,8 @@
 export const EXCHANGE_MAP_SOURCE_IDS = Object.freeze({
   rfx: "exchange-rfx-points",
   selectedRfx: "exchange-rfx-selected",
+  organizations: "exchange-organization-points",
+  selectedOrganization: "exchange-organization-selected",
   releasedTerritoryPoints: "exchange-territory-released-points",
   releasedTerritoryBoundaries: "exchange-territory-released-boundaries",
   scheduledTerritoryPoints: "exchange-territory-scheduled-points",
@@ -24,6 +26,11 @@ export const EXCHANGE_MAP_LAYER_IDS = Object.freeze({
   rfxPoints: "exchange-rfx-points-unclustered",
   selectedRfxPoint: "exchange-rfx-selected-point",
   rfxLabels: "exchange-rfx-labels",
+  organizationClusters: "exchange-organization-clusters",
+  organizationClusterCount: "exchange-organization-cluster-count",
+  organizationPoints: "exchange-organization-points-unclustered",
+  selectedOrganizationPoint: "exchange-organization-selected-point",
+  organizationLabels: "exchange-organization-labels",
 } as const);
 
 /** Stable aliases for consumers that prefer the shorter names. */
@@ -77,10 +84,19 @@ export const EXCHANGE_RFX_CLUSTER_OPTIONS = Object.freeze({
   clusterMaxZoom: 12,
 } as const);
 
+export const EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS = Object.freeze({
+  cluster: true,
+  clusterRadius: 48,
+  clusterMaxZoom: 13,
+} as const);
+
 export const EXCHANGE_MAP_INTERACTIVE_LAYER_IDS = Object.freeze([
   EXCHANGE_MAP_LAYER_IDS.rfxClusters,
   EXCHANGE_MAP_LAYER_IDS.selectedRfxPoint,
   EXCHANGE_MAP_LAYER_IDS.rfxPoints,
+  EXCHANGE_MAP_LAYER_IDS.organizationClusters,
+  EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint,
+  EXCHANGE_MAP_LAYER_IDS.organizationPoints,
   EXCHANGE_MAP_LAYER_IDS.releasedTerritoryPoints,
   EXCHANGE_MAP_LAYER_IDS.scheduledTerritoryPoints,
   EXCHANGE_MAP_LAYER_IDS.releasedTerritoryFill,

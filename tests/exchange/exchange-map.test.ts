@@ -6,20 +6,25 @@ import {
   getExchangeMapDataBounds,
   parseTerritoryBoundaryGeometry,
   toRfxFeatureCollection,
+  toOrganizationFeatureCollection,
   toTerritoryBoundaryFeatureCollection,
   toTerritoryPointFeatureCollection,
 } from "../../apps/web/src/features/exchange/map/geojson";
 import {
   EXCHANGE_MAP_LAYER_IDS,
   EXCHANGE_MAP_SOURCE_IDS,
+  EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS,
   EXCHANGE_RFX_CLUSTER_OPTIONS,
 } from "../../apps/web/src/features/exchange/map/mapConfig";
 import { createExchangeMapLayerSpecifications } from "../../apps/web/src/features/exchange/map/mapLayers";
 import {
   createExchangeMapSourceSpecifications,
+  updateExchangeSelectedOrganizationSource,
   updateExchangeSelectedRfxSource,
 } from "../../apps/web/src/features/exchange/map/mapSources";
 import { getExchangeSelectionTargets } from "../../apps/web/src/features/exchange/map/selection";
+import { filterPublicOrganizations } from "../../apps/web/src/features/exchange/data/organizationDiscovery";
+import type { PublicOrganizationProjection } from "../../apps/web/src/lib/firestore";
 
 function rfx(overrides: Partial<RfxDoc> = {}): RfxDoc {
   return {
@@ -63,6 +68,29 @@ function territory(overrides: Partial<TerritoryDoc> = {}): TerritoryDoc {
   };
 }
 
+function organization(
+  overrides: Partial<PublicOrganizationProjection> = {},
+): PublicOrganizationProjection {
+  return {
+    id: "org-1",
+    name: "Isle Services",
+    city: "Smithfield",
+    state: "VA",
+    territoryFips: "51093",
+    status: "active",
+    claimStatus: "unclaimed",
+    verificationStatus: "verified",
+    coordinateConfidence: "authoritative",
+    latitude: 36.92,
+    longitude: -76.7,
+    naicsCodes: ["541330"],
+    capabilityKeywords: ["engineering"],
+    certifications: ["SWaM"],
+    description: "Public organization description.",
+    ...overrides,
+  };
+}
+
 describe("Exchange map GeoJSON", () => {
   it("creates stable RFx point IDs and public selection properties", () => {
     const collection = toRfxFeatureCollection([
@@ -94,6 +122,49 @@ describe("Exchange map GeoJSON", () => {
     ]);
 
     expect(collection.features.map((feature) => feature.id)).toEqual(["valid"]);
+  });
+
+  it("creates privacy-minimized organization markers and keeps suppressed records list-only", () => {
+    const collection = toOrganizationFeatureCollection([
+      organization({ id: "visible" }),
+      organization({ id: "home", homeBased: true }),
+      organization({ id: "suppressed", privacySuppressed: true }),
+      organization({ id: "no-coordinate", latitude: undefined, longitude: undefined }),
+      organization({ id: "inactive", status: "inactive" }),
+    ]);
+
+    expect(collection.features).toHaveLength(1);
+    expect(collection.features[0]).toMatchObject({
+      id: "visible",
+      properties: {
+        entityType: "organization",
+        id: "visible",
+        name: "Isle Services",
+        territoryFips: "51093",
+        coordinateConfidence: "authoritative",
+      },
+      geometry: { type: "Point", coordinates: [-76.7, 36.92] },
+    });
+    expect(JSON.stringify(collection)).not.toMatch(/email|phone|address|evidence|owner/i);
+  });
+
+  it("filters and de-duplicates list-only organizations without fabricating coordinates", () => {
+    const records = [
+      organization({ id: "matching", latitude: undefined, longitude: undefined }),
+      organization({ id: "matching", name: "Duplicate" }),
+      organization({ id: "other", capabilityKeywords: ["construction"] }),
+    ];
+    const result = filterPublicOrganizations(records, {
+      searchQuery: "isle engineering",
+      naicsFilters: ["541"],
+      capabilityFilters: ["engineering"],
+      certificationFilters: ["SWaM"],
+      territoryFilters: ["51093"],
+      opportunityLocation: undefined,
+    });
+
+    expect(result.map((record) => record.id)).toEqual(["matching"]);
+    expect(result[0].latitude).toBeUndefined();
   });
 
   it("preserves released and scheduled territory states in points and boundaries", () => {
@@ -181,6 +252,8 @@ describe("Exchange map source, layer, and selection contracts", () => {
     expect(EXCHANGE_MAP_SOURCE_IDS).toEqual({
       rfx: "exchange-rfx-points",
       selectedRfx: "exchange-rfx-selected",
+      organizations: "exchange-organization-points",
+      selectedOrganization: "exchange-organization-selected",
       releasedTerritoryPoints: "exchange-territory-released-points",
       releasedTerritoryBoundaries: "exchange-territory-released-boundaries",
       scheduledTerritoryPoints: "exchange-territory-scheduled-points",
@@ -237,6 +310,30 @@ describe("Exchange map source, layer, and selection contracts", () => {
     ).toBe(EXCHANGE_MAP_SOURCE_IDS.selectedRfx);
   });
 
+  it("keeps organizations in a distinct clustered source and selected overlay", () => {
+    const data = buildExchangeMapGeoJson([], [], [], [], [organization()]);
+    const sources = createExchangeMapSourceSpecifications(data);
+    const layers = createExchangeMapLayerSpecifications();
+
+    expect(sources[EXCHANGE_MAP_SOURCE_IDS.organizations]).toMatchObject({
+      type: "geojson",
+      cluster: true,
+      promoteId: "id",
+      clusterRadius: EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS.clusterRadius,
+      clusterMaxZoom: EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS.clusterMaxZoom,
+    });
+    expect(layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.organizationClusters)).toMatchObject({
+      source: EXCHANGE_MAP_SOURCE_IDS.organizations,
+      filter: ["has", "point_count"],
+    });
+    expect(layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.organizationPoints)).toMatchObject({
+      source: EXCHANGE_MAP_SOURCE_IDS.organizations,
+      filter: ["!", ["has", "point_count"]],
+    });
+    expect(layers.find((layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint)?.source)
+      .toBe(EXCHANGE_MAP_SOURCE_IDS.selectedOrganization);
+  });
+
   it("renders scheduled and inactive admin territory boundaries as non-discoverable gray context", () => {
     const paused = territory({ fips: "51800", status: "paused" });
     const data = buildExchangeMapGeoJson([], [], [], [paused]);
@@ -268,6 +365,9 @@ describe("Exchange map source, layer, and selection contracts", () => {
       { source: EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryPoints, id: "51093" },
       { source: EXCHANGE_MAP_SOURCE_IDS.scheduledTerritoryBoundaries, id: "51093" },
     ]);
+    expect(
+      getExchangeSelectionTargets({ entityType: "organization", entityId: "org-1" }),
+    ).toEqual([{ source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: "org-1" }]);
 
     const selectedExpressions = JSON.stringify(createExchangeMapLayerSpecifications());
     expect(selectedExpressions).toContain('["feature-state","selected"]');
@@ -299,4 +399,45 @@ describe("Exchange map source, layer, and selection contracts", () => {
     );
     expect(selectedData).toMatchObject({ type: "FeatureCollection", features: [] });
   });
+
+  it("projects a selected organization into a non-clustered overlay source", () => {
+    const data = buildExchangeMapGeoJson([], [], [], [], [organization({ id: "selected-org" })]);
+    let selectedData: GeoJSON.GeoJSON | undefined;
+    const map = {
+      getSource: (sourceId: string) => sourceId === EXCHANGE_MAP_SOURCE_IDS.selectedOrganization
+        ? { type: "geojson", setData: (next: GeoJSON.GeoJSON) => { selectedData = next; } }
+        : undefined,
+    };
+
+    updateExchangeSelectedOrganizationSource(
+      map as never,
+      data,
+      { entityType: "organization", entityId: "selected-org" },
+    );
+    expect(selectedData).toMatchObject({
+      type: "FeatureCollection",
+      features: [{ id: "selected-org" }],
+    });
+  });
+
+  it.each([100, 1_000, 10_000])(
+    "builds and serializes %i public organization markers within the regression budget",
+    (count) => {
+      const records = Array.from({ length: count }, (_, index) => organization({
+        id: `scale-${index}`,
+        name: `Scale organization ${index}`,
+        longitude: -76.9 + (index % 100) * 0.002,
+        latitude: 36.7 + (index % 80) * 0.002,
+      }));
+      const startedAt = performance.now();
+      const collection = toOrganizationFeatureCollection(records);
+      const payloadBytes = new TextEncoder().encode(JSON.stringify(collection)).byteLength;
+      const elapsedMs = performance.now() - startedAt;
+
+      expect(collection.features).toHaveLength(count);
+      expect(elapsedMs).toBeLessThan(500);
+      expect(payloadBytes).toBeLessThan(count * 400);
+      console.info(JSON.stringify({ benchmark: "organization-markers", count, elapsedMs, payloadBytes }));
+    },
+  );
 });

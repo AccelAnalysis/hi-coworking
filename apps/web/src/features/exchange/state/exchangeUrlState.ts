@@ -135,7 +135,7 @@ function parseSelection(
   const entityType = params.get("entity");
   const entityId = params.get("selected") ?? "";
   if (
-    !["rfx", "territory", "referral", "relationship", "industry"].includes(
+    !["rfx", "territory", "organization", "referral", "relationship", "industry"].includes(
       entityType ?? "",
     )
     || entityId.length === 0
@@ -144,13 +144,15 @@ function parseSelection(
   ) {
     return null;
   }
-  const allowedForView = view === "opportunities"
-    ? entityType === "rfx" || entityType === "territory"
-    : view === "connections" || view === "referrals"
-      ? entityType === "referral"
-      : entityType === "relationship"
-        || entityType === "territory"
-        || entityType === "industry";
+  const allowedForView = entityType === "organization"
+    ? true
+    : view === "opportunities"
+      ? entityType === "rfx" || entityType === "territory"
+      : view === "connections" || view === "referrals"
+        ? entityType === "referral"
+        : entityType === "relationship"
+          || entityType === "territory"
+          || entityType === "industry";
   if (!allowedForView) return null;
   return {
     entityType: entityType as Exclude<ExchangeSelection, null>["entityType"],

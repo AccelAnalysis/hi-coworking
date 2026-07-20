@@ -114,6 +114,7 @@ export type ExchangePersonalizedFilter =
 export type ExchangeSelection =
   | { entityType: "rfx"; entityId: string }
   | { entityType: "territory"; entityId: string }
+  | { entityType: "organization"; entityId: string }
   | { entityType: "referral"; entityId: string }
   | { entityType: "relationship"; entityId: string }
   | { entityType: "industry"; entityId: string }

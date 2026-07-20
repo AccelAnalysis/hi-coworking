@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerritoryDoc } from "@hi/shared";
+import type { PublicOrganizationProjection } from "@/lib/firestore";
 import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
 import type { ExchangeSelection } from "../state/exchangeWorkspaceTypes";
 import { ExchangeRfxCard } from "./ExchangeRfxCard";
 import { ExchangeTerritoryCard } from "./ExchangeTerritoryCard";
+import { ExchangeOrganizationCard } from "./ExchangeOrganizationCard";
 
 const COMPACT_BATCH = 12;
 const STANDARD_BATCH = 24;
@@ -13,6 +15,7 @@ const STANDARD_BATCH = 24;
 export function ExchangeResultsList({
   rfx,
   territories,
+  organizations,
   selection,
   manageableRfxIds,
   compact = false,
@@ -24,6 +27,7 @@ export function ExchangeResultsList({
 }: {
   rfx: ExchangeDiscoveryRfx[];
   territories: TerritoryDoc[];
+  organizations: PublicOrganizationProjection[];
   selection: ExchangeSelection;
   manageableRfxIds: Set<string>;
   compact?: boolean;
@@ -43,19 +47,26 @@ export function ExchangeResultsList({
   const selectedTerritoryIndex = selection?.entityType === "territory"
     ? territories.findIndex((record) => record.fips === selection.entityId)
     : -1;
+  const selectedOrganizationIndex = selection?.entityType === "organization"
+    ? organizations.findIndex((record) => record.id === selection.entityId)
+    : -1;
   const visibleRfx = rfx.slice(0, Math.max(visibleLimit, selectedRfxIndex + 1));
   const visibleTerritories = territories.slice(
     0,
     Math.max(visibleLimit, selectedTerritoryIndex + 1),
   );
-  const totalCount = rfx.length + territories.length;
-  const visibleCount = visibleRfx.length + visibleTerritories.length;
+  const visibleOrganizations = organizations.slice(
+    0,
+    Math.max(visibleLimit, selectedOrganizationIndex + 1),
+  );
+  const totalCount = rfx.length + territories.length + organizations.length;
+  const visibleCount = visibleRfx.length + visibleTerritories.length + visibleOrganizations.length;
   const hasLocallyHiddenResults = visibleCount < totalCount;
   const canLoad = hasLocallyHiddenResults || hasMore;
 
   useEffect(() => {
     setVisibleLimit(batchSize);
-  }, [batchSize, rfx.length, territories.length]);
+  }, [batchSize, organizations.length, rfx.length, territories.length]);
 
   useEffect(() => {
     if (!selection || !containerRef.current) return;
@@ -133,6 +144,31 @@ export function ExchangeResultsList({
                 selected={selection?.entityType === "territory" && selection.entityId === territory.fips}
                 compact={compact}
                 onSelect={() => onSelect({ entityType: "territory", entityId: territory.fips })}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {visibleOrganizations.length ? (
+        <section
+          className={visibleRfx.length || visibleTerritories.length ? "mt-5" : ""}
+          aria-labelledby={compact ? undefined : "exchange-organization-results-heading"}
+        >
+          {!compact ? (
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 id="exchange-organization-results-heading" className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">Organizations</h2>
+              <span className="text-[11px] font-semibold text-slate-400">{organizations.length}</span>
+            </div>
+          ) : null}
+          <div className="space-y-2.5">
+            {visibleOrganizations.map((organization) => (
+              <ExchangeOrganizationCard
+                key={organization.id}
+                organization={organization}
+                selected={selection?.entityType === "organization" && selection.entityId === organization.id}
+                compact={compact}
+                onSelect={() => onSelect({ entityType: "organization", entityId: organization.id })}
               />
             ))}
           </div>

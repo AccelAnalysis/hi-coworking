@@ -1,6 +1,10 @@
 import type { GeoJSONSource, GeoJSONSourceSpecification, Map as MapboxMap } from "mapbox-gl";
 
-import { EXCHANGE_MAP_SOURCE_IDS, EXCHANGE_RFX_CLUSTER_OPTIONS } from "./mapConfig";
+import {
+  EXCHANGE_MAP_SOURCE_IDS,
+  EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS,
+  EXCHANGE_RFX_CLUSTER_OPTIONS,
+} from "./mapConfig";
 import type { ExchangeMapGeoJson } from "./geojson";
 import type { ExchangeMapSelection } from "./selection";
 
@@ -20,6 +24,17 @@ export function createExchangeMapSourceSpecifications(
       ...EXCHANGE_RFX_CLUSTER_OPTIONS,
     },
     [EXCHANGE_MAP_SOURCE_IDS.selectedRfx]: {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+      promoteId: "id",
+    },
+    [EXCHANGE_MAP_SOURCE_IDS.organizations]: {
+      type: "geojson",
+      data: data.organizations,
+      promoteId: "id",
+      ...EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS,
+    },
+    [EXCHANGE_MAP_SOURCE_IDS.selectedOrganization]: {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
       promoteId: "id",
@@ -77,6 +92,7 @@ function setGeoJsonSourceData(
 /** Update data without replacing the map, source, layers, or listeners. */
 export function updateExchangeMapSources(map: MapboxMap, data: ExchangeMapGeoJson): void {
   setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.rfx, data.rfx);
+  setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.organizations, data.organizations);
   setGeoJsonSourceData(
     map,
     EXCHANGE_MAP_SOURCE_IDS.releasedTerritoryPoints,
@@ -114,6 +130,21 @@ export function updateExchangeSelectedRfxSource(
     ? data.rfx.features.find((feature) => feature.properties.id === selection.entityId)
     : undefined;
   setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.selectedRfx, {
+    type: "FeatureCollection",
+    features: selectedFeature ? [selectedFeature] : [],
+  });
+}
+
+/** Keep a selected organization visible even while its ordinary point is clustered. */
+export function updateExchangeSelectedOrganizationSource(
+  map: MapboxMap,
+  data: ExchangeMapGeoJson,
+  selection: ExchangeMapSelection,
+): void {
+  const selectedFeature = selection?.entityType === "organization"
+    ? data.organizations.features.find((feature) => feature.properties.id === selection.entityId)
+    : undefined;
+  setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.selectedOrganization, {
     type: "FeatureCollection",
     features: selectedFeature ? [selectedFeature] : [],
   });

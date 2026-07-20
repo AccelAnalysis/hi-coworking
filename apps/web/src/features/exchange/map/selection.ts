@@ -4,6 +4,7 @@ import { EXCHANGE_MAP_SOURCE_IDS } from "./mapConfig";
 export type ExchangeMapSelection =
   | { entityType: "rfx"; entityId: string }
   | { entityType: "territory"; entityId: string }
+  | { entityType: "organization"; entityId: string }
   | null;
 
 export interface ExchangeFeatureStateTarget {
@@ -31,6 +32,10 @@ export function getExchangeSelectionTargets(
 
   if (selection.entityType === "rfx") {
     return [{ source: EXCHANGE_MAP_SOURCE_IDS.rfx, id: selection.entityId }];
+  }
+
+  if (selection.entityType === "organization") {
+    return [{ source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: selection.entityId }];
   }
 
   const releasedTargets = [

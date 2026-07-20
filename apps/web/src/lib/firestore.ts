@@ -1310,6 +1310,59 @@ export async function getOrg(orgId: string): Promise<OrgDoc | null> {
   return snap.exists() ? (snap.data() as OrgDoc) : null;
 }
 
+export interface PublicOrganizationProjection {
+  id: string;
+  name: string;
+  city?: string;
+  state?: string;
+  territoryFips?: string;
+  status?: string;
+  claimStatus?: string;
+  verificationStatus?: string;
+  latitude?: number;
+  longitude?: number;
+  homeBased?: boolean;
+  privacySuppressed?: boolean;
+  coordinateConfidence?: "authoritative" | "verified" | "approximate";
+  naicsCodes?: string[];
+  capabilityKeywords?: string[];
+  certifications?: string[];
+  description?: string;
+  website?: string;
+}
+
+/**
+ * Bounded read of the privacy-minimized organization projection. Private org,
+ * contact, claim-evidence, targeting, and ownership records never cross this
+ * client boundary.
+ */
+export async function getPublicOrganizationsForExchange(
+  maxResults = 10_000,
+): Promise<PublicOrganizationProjection[]> {
+  const boundedLimit = Math.max(1, Math.min(10_000, Math.floor(maxResults)));
+  const organizations: PublicOrganizationProjection[] = [];
+  let cursor: QueryDocumentSnapshot<DocumentData> | undefined;
+
+  while (organizations.length < boundedLimit) {
+    const pageSize = Math.min(500, boundedLimit - organizations.length);
+    const constraints = [
+      where("status", "==", "active"),
+      orderBy("name", "asc"),
+      limit(pageSize),
+      ...(cursor ? [startAfter(cursor)] : []),
+    ];
+    const snapshot = await getDocs(query(collection(db, "publicOrganizations"), ...constraints));
+    organizations.push(...snapshot.docs.map((organization) => ({
+      ...(organization.data() as PublicOrganizationProjection),
+      id: organization.id,
+    })));
+    if (snapshot.size < pageSize) break;
+    cursor = snapshot.docs.at(-1);
+  }
+
+  return organizations;
+}
+
 export async function getOrgBySlug(slug: string): Promise<OrgDoc | null> {
   const q = query(collection(db, "orgs"), where("slug", "==", slug), limit(1));
   const snap = await getDocs(q);

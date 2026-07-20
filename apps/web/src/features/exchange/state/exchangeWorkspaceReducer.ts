@@ -75,6 +75,7 @@ function normalizeSelection(value: unknown): ExchangeSelection | undefined {
   if (
     candidate.entityType !== "rfx"
     && candidate.entityType !== "territory"
+    && candidate.entityType !== "organization"
     && candidate.entityType !== "referral"
     && candidate.entityType !== "relationship"
     && candidate.entityType !== "industry"

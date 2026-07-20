@@ -16,7 +16,11 @@ import {
   EXCHANGE_MAP_STYLE,
   type ExchangeMapViewport,
 } from "./mapConfig";
-import { buildExchangeMapGeoJson, getExchangeMapDataBounds } from "./geojson";
+import {
+  buildExchangeMapGeoJson,
+  getExchangeMapDataBounds,
+  type PublicOrganizationMapRecord,
+} from "./geojson";
 import {
   registerExchangeMapBaseEvents,
   registerExchangeMapInteractionEvents,
@@ -27,6 +31,7 @@ import { registerExchangeMapLayers } from "./mapLayers";
 import {
   registerExchangeMapSources,
   updateExchangeMapSources,
+  updateExchangeSelectedOrganizationSource,
   updateExchangeSelectedRfxSource,
 } from "./mapSources";
 import {
@@ -40,6 +45,7 @@ export interface UseExchangeMapOptions extends ExchangeMapCallbacks {
   containerRef: RefObject<HTMLDivElement | null>;
   accessToken?: string;
   rfxList: readonly RfxDoc[];
+  organizations: readonly PublicOrganizationMapRecord[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
   unreleasedTerritories: readonly TerritoryDoc[];
@@ -67,6 +73,7 @@ export function useExchangeMap({
   containerRef,
   accessToken,
   rfxList,
+  organizations,
   releasedTerritories,
   scheduledTerritories,
   unreleasedTerritories,
@@ -77,6 +84,7 @@ export function useExchangeMap({
   resizeSignal,
   onSelect,
   onSelectRfx,
+  onSelectOrganization,
   onSelectTerritory,
   onBackgroundClick,
   onViewportChange,
@@ -102,8 +110,14 @@ export function useExchangeMap({
   const [error, setError] = useState<Error | null>(null);
 
   const data = useMemo(
-    () => buildExchangeMapGeoJson(rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories),
-    [rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories],
+    () => buildExchangeMapGeoJson(
+      rfxList,
+      releasedTerritories,
+      scheduledTerritories,
+      unreleasedTerritories,
+      organizations,
+    ),
+    [organizations, rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories],
   );
   const dataRef = useRef(data);
   const externalCallbacksRef = useRef<ExchangeMapCallbacks>({});
@@ -133,6 +147,7 @@ export function useExchangeMap({
     externalCallbacksRef.current = {
       onSelect,
       onSelectRfx,
+      onSelectOrganization,
       onSelectTerritory,
       onBackgroundClick,
       onViewportChange,
@@ -151,6 +166,7 @@ export function useExchangeMap({
     onLoad,
     onSelect,
     onSelectRfx,
+    onSelectOrganization,
     onSelectTerritory,
     onViewportChange,
   ]);
@@ -271,6 +287,7 @@ export function useExchangeMap({
           loadedRef.current = true;
           updateExchangeMapSelection(map, null, selectionRef.current);
           updateExchangeSelectedRfxSource(map, dataRef.current, selectionRef.current);
+          updateExchangeSelectedOrganizationSource(map, dataRef.current, selectionRef.current);
           previousSelectionRef.current = selectionRef.current;
           synchronizeViewport(map, viewportRef.current);
           if (
@@ -336,6 +353,7 @@ export function useExchangeMap({
     if (map && loadedRef.current) {
       updateExchangeMapSources(map, data);
       updateExchangeSelectedRfxSource(map, data, selectionRef.current);
+      updateExchangeSelectedOrganizationSource(map, data, selectionRef.current);
     }
   }, [data]);
 
@@ -344,6 +362,7 @@ export function useExchangeMap({
     if (!map || !loadedRef.current) return;
     updateExchangeMapSelection(map, previousSelectionRef.current, selection);
     updateExchangeSelectedRfxSource(map, dataRef.current, selection);
+    updateExchangeSelectedOrganizationSource(map, dataRef.current, selection);
     previousSelectionRef.current = selection;
   }, [selection]);
 

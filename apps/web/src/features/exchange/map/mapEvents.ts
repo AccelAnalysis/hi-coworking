@@ -17,6 +17,7 @@ import type { ExchangeMapSelection } from "./selection";
 export interface ExchangeMapCallbacks {
   onSelect?: (selection: ExchangeMapSelection) => void;
   onSelectRfx?: (rfxId: string) => void;
+  onSelectOrganization?: (organizationId: string) => void;
   onSelectTerritory?: (territoryId: string, status: "released" | "scheduled") => void;
   onBackgroundClick?: () => void;
   onViewportChange?: (bounds: ExchangeMapBounds) => void;
@@ -71,6 +72,12 @@ function selectTerritory(
   callbacksRef.current.onSelectTerritory?.(id, status);
 }
 
+function selectOrganization(callbacksRef: ExchangeMapCallbacksRef, id: string): void {
+  if (!id) return;
+  callbacksRef.current.onSelect?.({ entityType: "organization", entityId: id });
+  callbacksRef.current.onSelectOrganization?.(id);
+}
+
 /** Events that must exist before style load, registered once per map. */
 export function registerExchangeMapBaseEvents(
   map: MapboxMap,
@@ -114,11 +121,18 @@ export function registerExchangeMapInteractionEvents(
     const layerId = feature.layer?.id;
     if (!layerId) return;
 
-    if (layerId === EXCHANGE_MAP_LAYER_IDS.rfxClusters) {
+    if (
+      layerId === EXCHANGE_MAP_LAYER_IDS.rfxClusters
+      || layerId === EXCHANGE_MAP_LAYER_IDS.organizationClusters
+    ) {
       const clusterId = Number(feature.properties?.cluster_id);
       const coordinates =
         feature.geometry.type === "Point" ? feature.geometry.coordinates : undefined;
-      const source = map.getSource(EXCHANGE_MAP_SOURCE_IDS.rfx);
+      const source = map.getSource(
+        layerId === EXCHANGE_MAP_LAYER_IDS.rfxClusters
+          ? EXCHANGE_MAP_SOURCE_IDS.rfx
+          : EXCHANGE_MAP_SOURCE_IDS.organizations,
+      );
 
       if (
         source?.type === "geojson" &&
@@ -146,6 +160,14 @@ export function registerExchangeMapInteractionEvents(
       || layerId === EXCHANGE_MAP_LAYER_IDS.selectedRfxPoint
     ) {
       selectRfx(callbacksRef, id);
+      return;
+    }
+
+    if (
+      layerId === EXCHANGE_MAP_LAYER_IDS.organizationPoints
+      || layerId === EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint
+    ) {
+      selectOrganization(callbacksRef, id);
       return;
     }
 
