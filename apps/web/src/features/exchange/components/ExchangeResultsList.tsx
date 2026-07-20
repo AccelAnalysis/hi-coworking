@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RfxDoc, TerritoryDoc } from "@hi/shared";
+import type { TerritoryDoc } from "@hi/shared";
+import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
 import type { ExchangeSelection } from "../state/exchangeWorkspaceTypes";
 import { ExchangeRfxCard } from "./ExchangeRfxCard";
 import { ExchangeTerritoryCard } from "./ExchangeTerritoryCard";
@@ -15,14 +16,22 @@ export function ExchangeResultsList({
   selection,
   manageableRfxIds,
   compact = false,
+  hasMore = false,
+  loadingMore = false,
   onSelect,
+  onSave,
+  onLoadMore,
 }: {
-  rfx: RfxDoc[];
+  rfx: ExchangeDiscoveryRfx[];
   territories: TerritoryDoc[];
   selection: ExchangeSelection;
   manageableRfxIds: Set<string>;
   compact?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
   onSelect: (selection: Exclude<ExchangeSelection, null>) => void;
+  onSave?: (rfxId: string, saved: boolean) => Promise<void> | void;
+  onLoadMore?: () => Promise<void> | void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -41,7 +50,8 @@ export function ExchangeResultsList({
   );
   const totalCount = rfx.length + territories.length;
   const visibleCount = visibleRfx.length + visibleTerritories.length;
-  const hasMore = visibleCount < totalCount;
+  const hasLocallyHiddenResults = visibleCount < totalCount;
+  const canLoad = hasLocallyHiddenResults || hasMore;
 
   useEffect(() => {
     setVisibleLimit(batchSize);
@@ -58,32 +68,37 @@ export function ExchangeResultsList({
     selected?.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
   }, [selection]);
 
-  const loadMore = useCallback(() => {
-    setVisibleLimit((current) => Math.min(totalCount, current + batchSize));
-  }, [batchSize, totalCount]);
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    if (hasLocallyHiddenResults) {
+      setVisibleLimit((current) => Math.min(totalCount, current + batchSize));
+      return;
+    }
+    await onLoadMore?.();
+  }, [batchSize, hasLocallyHiddenResults, loadingMore, onLoadMore, totalCount]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const root = containerRef.current;
-    if (!sentinel || !root || !hasMore || typeof IntersectionObserver === "undefined") return;
+    if (!sentinel || !root || !canLoad || loadingMore || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) loadMore();
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
       },
       { root, rootMargin: "240px 0px", threshold: 0.01 },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loadMore]);
+  }, [canLoad, loadMore, loadingMore]);
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto overscroll-contain px-3 py-3" aria-label="Exchange results">
+    <div ref={containerRef} className="h-full overflow-y-auto overscroll-contain px-3 py-3" aria-label="Exchange results" aria-busy={loadingMore}>
       {visibleRfx.length ? (
         <section aria-labelledby={compact ? undefined : "exchange-rfx-results-heading"}>
           {!compact ? (
             <div className="mb-2 flex items-center justify-between px-1">
               <h2 id="exchange-rfx-results-heading" className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">RFx opportunities</h2>
-              <span className="text-[11px] font-semibold text-slate-400">{rfx.length}</span>
+              <span className="text-[11px] font-semibold text-slate-400">{rfx.length}{hasMore ? "+" : ""}</span>
             </div>
           ) : null}
           <div className="space-y-2.5">
@@ -92,9 +107,10 @@ export function ExchangeResultsList({
                 key={record.id}
                 rfx={record}
                 selected={selection?.entityType === "rfx" && selection.entityId === record.id}
-                manageable={manageableRfxIds.has(record.id)}
+                manageable={manageableRfxIds.has(record.id) || Boolean(record.discovery?.relationship.managed)}
                 compact={compact}
                 onSelect={() => onSelect({ entityType: "rfx", entityId: record.id })}
+                onSave={onSave ? (saved) => onSave(record.id, saved) : undefined}
               />
             ))}
           </div>
@@ -130,13 +146,14 @@ export function ExchangeResultsList({
       ) : null}
 
       <div ref={sentinelRef} className="flex min-h-12 items-center justify-center" aria-live="polite">
-        {hasMore ? (
+        {canLoad ? (
           <button
             type="button"
-            onClick={loadMore}
-            className="min-h-10 rounded-xl border border-white/80 bg-white/65 px-4 text-xs font-black text-slate-700 shadow-sm backdrop-blur-xl outline-none hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-indigo-500"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="min-h-10 rounded-xl border border-white/80 bg-white/65 px-4 text-xs font-black text-slate-700 shadow-sm backdrop-blur-xl outline-none hover:bg-white/90 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-60"
           >
-            Loading more results…
+            {loadingMore ? "Loading more results…" : "Load more results"}
           </button>
         ) : totalCount ? (
           <span className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">All results loaded</span>
