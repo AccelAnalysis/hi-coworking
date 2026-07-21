@@ -31,6 +31,10 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 
+# Generated Firebase Functions output. Source lives in apps/functions/src and
+# Firebase runs the Functions build as a predeploy step.
+apps/functions/lib/
+
 # IDE
 .vscode/
 .idea/
