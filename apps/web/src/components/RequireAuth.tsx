@@ -16,6 +16,8 @@ const ROLE_HIERARCHY: Record<string, number> = {
   econPartner: 30,
 };
 
+export type ServerAuthoritativeCapability = "adminMarketingEmail";
+
 function hasMinimumRole(userRole: UserRole | null, requiredRole: UserRole): boolean {
   if (!userRole) return false;
   return (ROLE_HIERARCHY[userRole] ?? 0) >= (ROLE_HIERARCHY[requiredRole] ?? 0);
@@ -25,13 +27,23 @@ interface RequireAuthProps {
   children: React.ReactNode;
   /** Minimum role required (checked via custom claims) */
   requiredRole?: UserRole;
+  /** Separate server-authoritative capability. Master is the only implicit override. */
+  requiredCapability?: ServerAuthoritativeCapability;
   /** Required membership status (checked via Firestore user doc entitlements) */
   requiredMembershipStatus?: MembershipStatus[];
 }
 
-export function RequireAuth({ children, requiredRole, requiredMembershipStatus }: RequireAuthProps) {
-  const { user, loading, role, userDoc } = useAuth();
+export function RequireAuth({
+  children,
+  requiredRole,
+  requiredCapability,
+  requiredMembershipStatus,
+}: RequireAuthProps) {
+  const { user, loading, role, claims, userDoc } = useAuth();
   const router = useRouter();
+  const hasCapability = !requiredCapability
+    || role === "master"
+    || claims?.[requiredCapability] === true;
 
   useEffect(() => {
     if (loading) return;
@@ -46,14 +58,28 @@ export function RequireAuth({ children, requiredRole, requiredMembershipStatus }
       return;
     }
 
+    if (!hasCapability) {
+      router.push("/dashboard");
+      return;
+    }
+
     if (requiredMembershipStatus && requiredMembershipStatus.length > 0) {
       const status = userDoc?.membershipStatus ?? "none";
       if (!requiredMembershipStatus.includes(status)) {
         router.push("/dashboard");
-        return;
       }
     }
-  }, [user, loading, router, role, userDoc, requiredRole, requiredMembershipStatus]);
+  }, [
+    user,
+    loading,
+    router,
+    role,
+    userDoc,
+    requiredRole,
+    requiredCapability,
+    requiredMembershipStatus,
+    hasCapability,
+  ]);
 
   if (loading) {
     return (
@@ -63,7 +89,7 @@ export function RequireAuth({ children, requiredRole, requiredMembershipStatus }
     );
   }
 
-  if (!user) {
+  if (!user || !hasCapability || (requiredRole && !hasMinimumRole(role, requiredRole))) {
     return null;
   }
 
