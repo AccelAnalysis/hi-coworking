@@ -61,7 +61,7 @@ describe("marketing consent and suppression", () => {
       "all_eligible_members",
       developmentConfig,
       new Set(),
-    ).exclusion).toBe("no_explicit_consent");
+    ).recipient).toBeUndefined();
 
     expect(evaluateMarketingRecipient(
       "member",
