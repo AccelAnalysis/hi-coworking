@@ -1,33 +1,44 @@
 # Configured-development acceptance and seed-activation evidence
 
-Evidence captured on 2026-07-20 from canonical Exchange SHA
-`ccea0f3840e5248bc2eb7f8cfae5e8c3c946f47d`. This is a development-only
-workstream. No production project, live Stripe object, or `main` branch was
-modified.
+Evidence originally captured on 2026-07-20 from canonical Exchange SHA
+`ccea0f3840e5248bc2eb7f8cfae5e8c3c946f47d`, then extended on PR #19 with
+configured-development, seed-review, organization-marker, and optional
+administrative marketing-email work. This is a development-only workstream. No
+production project, live Stripe object, or `main` branch was modified.
 
-## Decision
+## Current decision
 
 The branch must remain draft. Code-side profile, enrichment, organization seed,
-and marker regressions are testable, but configured acceptance cannot pass while
-the required callables, canonical rules, indexes, and Hosting build are absent
-from `hi-coworking-plat`. The privacy-reviewed seed preparation and development
-dry run completed; the seed was not applied because publication permission and
-human record approval are not established by the source files.
+marker, and administrative marketing-email regressions are testable, but the
+configured Exchange acceptance cannot pass until the required core callables,
+canonical rules, indexes, and Hosting build are reviewed and deployed to
+`hi-coworking-plat`.
+
+The privacy-reviewed seed preparation and development dry run completed; the
+full seed was not applied because publication permission and human record
+approval are not established merely by possessing the source files.
+
+The former SendGrid deployment blocker has been removed. SendGrid and the
+inactive Twilio SMS provider are no longer active source providers or deployment
+secret bindings. Optional Microsoft 365 administrative marketing email reads its
+credential only when an authorized marketing send is attempted, so missing
+Microsoft configuration must not block core Exchange deployment or operation.
 
 ## Implementation inventory
 
 | Area | Existing implementation | Configured status | Missing work | Planned action |
 | --- | --- | --- | --- | --- |
-| Readiness | Advisory/strict checker, project guard, Mapbox probe | Both checker modes pass with one alias warning | `default` and `prod` aliases both name the development project | Keep every command explicitly scoped to `hi-coworking-plat`; separate aliases before release |
+| Readiness | Advisory/strict checker, project guard, Mapbox probe | Both checker modes passed with one alias warning in the original assessment | `default` and `prod` aliases both name the development project | Keep every command explicitly scoped to `hi-coworking-plat`; separate aliases before release |
 | Accounts | Idempotent development bootstrap | Five dedicated synthetic roles established | Legacy account remains a read-only diagnostic identity | Keep credentials in protected operator stores; never commit identifiers or passwords |
-| Profiles | Strict `profile_update`, schema normalization, browser diagnostic | Required callable is not deployed; direct request returns HTTP 404 | Deploy and run four-account acceptance | Deploy only the named callable after the configuration gate is clear |
-| Enrichment | Authenticated search/link callables and profile UI | Both callables are not deployed | Provider and configured browser acceptance | Deploy after configuration; retain manual-entry fallback |
-| Organizations/claims | Search, create, claim, review, audit, notifications | Required callables and current rules are not deployed | Configured mutation acceptance | Deploy the exact organization callable set plus reviewed rules/indexes |
-| Seed preparation | Canonical XLSX preparation, verifier, dry-run-first importer | Preparation, privacy verification, projection verification, and live-project dry run pass | Human approval, coordinate publication permission, applied import, idempotency, rollback rehearsal | Do not apply until approval; use a unique reviewed batch ID |
-| Organization markers | Existing Mapbox instance, stable sources/layers, URL selection | Code-side implementation and scale transform pass | Configured data, real Mapbox clustering/browser measurements | Re-run on deployed Hosting after approved seed import |
-| CI/browser | Emulator and configured Playwright suites | Local canonical UI reaches profile in Chromium and Mobile Safari; save fails at missing callable | Configured mutations, Firefox/Safari matrix, accessibility pass | Leave workflow/manual gates non-green until deployment blockers are removed |
+| Profiles | Strict `profile_update`, schema normalization, browser diagnostic | Required callable was absent during original configured test; direct request returned HTTP 404 | Deploy and run four-account acceptance | Deploy only the reviewed minimum coherent callable set |
+| Enrichment | Authenticated search/link callables and profile UI | Both callables were absent during original configured test | Provider and configured browser acceptance | Deploy after configuration review; retain manual-entry fallback |
+| Organizations/claims | Search, create, claim, review, audit, notifications | Required callables and current rules were absent during original configured test | Configured mutation acceptance | Deploy the exact organization callable set plus reviewed rules/indexes |
+| Seed preparation | Canonical XLSX preparation, verifier, dry-run-first importer | Preparation, privacy verification, projection verification, and live-project dry run passed | Human approval, coordinate publication permission, applied import, idempotency, rollback rehearsal | Use the review queue and approved-only export; do not apply the full set without approval |
+| Organization markers | Existing Mapbox instance, stable sources/layers, URL selection | Code-side implementation and scale transform passed | Configured data and real Mapbox/browser measurements | Rerun after approved sample import and canonical Hosting deployment |
+| Admin marketing email | App-only Microsoft Graph provider, `adminMarketingEmail` capability, consent/suppression, test/send/idempotency/audit, unsubscribe route | Code implemented; module disabled unless separately configured | Entra app, Mail.Send consent, Application RBAC, mailbox/aliases, Secret Manager, controlled external test, recipient-visible alias verification | Keep independent from core deployment; do not claim acceptance before external evidence |
+| CI/browser | Emulator and configured Playwright suites | Local canonical UI reached profile in Chromium and mobile emulation; save failed at missing callable | Configured mutations, Firefox/Safari matrix, accessibility pass | Leave configured/manual gates non-green until deployment blockers are removed |
 
-## Exact development environment
+## Exact development environment from original assessment
 
 - Firebase project: `hi-coworking-plat`
 - Functions region: `us-central1`
@@ -35,16 +46,16 @@ human record approval are not established by the source files.
 - Application URL: `https://hi-coworking-plat.web.app`
 - Firestore: `(default)`, Native mode, `nam5`
 - Storage bucket: `hi-coworking-plat.firebasestorage.app`, `US-EAST1`
-- Deployed Functions inventory: 31; required acceptance callables deployed: 0
-- Deployed composite indexes: 55, all `READY`
-- Canonical source composite indexes: 80; 31 source-only and 6 live-only after normalized comparison
-- Browser Firebase project and CLI project both resolve to `hi-coworking-plat`
-- Mapbox: public `pk.` token passed the localhost origin and Streets v12 access probe; dashboard restriction policy was not independently inspectable
-- Stripe: configured secret identifies test mode; no Stripe write is required or performed
-- Firebase alias warning: `.firebaserc` maps both `default` and `prod` to `hi-coworking-plat`
+- Deployed Functions inventory observed: 31; required acceptance callables observed: 0
+- Deployed composite indexes observed: 55, all `READY`
+- Canonical source composite indexes observed: 80; 31 source-only and 6 live-only after normalized comparison
+- Browser Firebase project and CLI project both resolved to `hi-coworking-plat`
+- Mapbox public token passed the localhost origin and Streets v12 access probe; dashboard restriction policy was not independently inspectable
+- Stripe configuration identified test mode; no Stripe write was required or performed
+- `.firebaserc` mapped both `default` and `prod` to `hi-coworking-plat`
 
-The GitHub `exchange-development` Environment was established with the required
-configured-smoke secret names. Values are protected and are not recorded here.
+The GitHub `exchange-development` Environment was established with protected
+configured-smoke secret names. Values are not recorded here.
 
 ## Dedicated identity matrix
 
@@ -59,8 +70,11 @@ It established dedicated synthetic identities for:
 
 Non-administrative workflow identities retain the canonical `member` custom
 claim; organization authority must come from server-side membership records.
+The bootstrap does not create a Microsoft mailbox, connect a mailbox, grant
+member OAuth, or set `adminMarketingEmail`.
+
 The existing legacy super-admin is retained for regression diagnosis only. Its
-read-only inventory shows a legacy `master` role/user record with no profile,
+read-only inventory showed a legacy `master` role/user record with no profile,
 profile schema version, or organization identifier. Passwords, emails, UIDs,
 and tokens are intentionally omitted.
 
@@ -73,13 +87,13 @@ The canonical local web build was exercised against configured Auth/Firestore:
 3. The UI reported a callable diagnostic rather than `Saved`.
 4. Credential-free `OPTIONS` and minimal `POST` probes to `profile_update`
    returned HTTP 404.
-5. The deployed Functions inventory independently confirms that
-   `profile_update` is absent, so there is no Function log or authorization
+5. The deployed Functions inventory independently confirmed that
+   `profile_update` was absent, so there was no Function log or authorization
    decision to inspect.
 
 The live Hosting build redirected a valid login to `/dashboard`, demonstrating
 Hosting drift from the canonical Exchange route. Current-schema profile saving
-therefore fails because of deployment drift, not because the branch weakened or
+therefore failed because of deployment drift, not because the branch weakened or
 bypassed validation. Organization-owner, reviewer, and legacy saves were not
 repeated after the shared routing blocker was proven. Emulator regression covers
 ordinary null/optional normalization, canonical organization authority, and
@@ -87,44 +101,46 @@ controlled legacy schema normalization.
 
 ## Enrichment repair and result
 
-The server now creates a short-lived, caller-bound enrichment request and
-persists the exact server-returned candidate selected by `requestId` and
-`matchId`. Browser-supplied candidate objects cannot nominate or overwrite the
-stored match. Cross-user, fabricated, expired, and replayed selections fail
-closed. Provider status is explicitly `ok`, `not_configured`, or `unavailable`,
-and manual profile entry remains available.
+The server creates a short-lived, caller-bound enrichment request and persists
+the exact server-returned candidate selected by `requestId` and `matchId`.
+Browser-supplied candidate objects cannot nominate or overwrite the stored match.
+Cross-user, fabricated, expired, and replayed selections fail closed. Provider
+status is explicitly `ok`, `not_configured`, or `unavailable`, and manual profile
+entry remains available.
 
-Configured enrichment is not accepted because `enrichment_search` and
-`enrichment_link` are absent from the project. The SAM.gov secret name is
-configured, but no provider call was claimed or executed through a deployed
-callable.
+Configured enrichment was not accepted because `enrichment_search` and
+`enrichment_link` were absent from the project at the time of the configured
+probe. No provider call was claimed or executed through a deployed callable.
 
 ## Human-readable deployment diff
 
-No deployment was performed. A narrow Functions dry run stopped before a write
-because global parameter discovery requires `SENDGRID_API_KEY`, which is not
-configured. Other absent parameter names are Twilio, LinkedIn, and X integration
-settings; none were fabricated.
+No deployment was performed by the original acceptance run. The original narrow
+Functions dry run stopped during global parameter discovery because the old
+source declared SendGrid and Twilio secrets. That evidence is now superseded:
+those provider bindings have been removed, and Firebase runs a fresh Functions
+build before deployment.
 
-| Resource | Current configured version | Proposed source version | Write impact | Rollback |
-| --- | --- | --- | --- | --- |
-| `profile_update` | Absent | Branch Functions source, `us-central1` | New callable; profile writes only after authenticated requests | Delete the new Function in `us-central1` if rollback is required |
-| `enrichment_search`, `enrichment_link` | Absent | Branch Functions source, `us-central1` | New cache/request/profile/audit writes after authenticated requests | Delete new Functions; retain audit/profile data for governed cleanup |
-| Four `exchange_organization*` callables | Absent | Canonical organization source, `us-central1` | New governed organization/claim writes | Delete new Functions; do not delete claimed records blindly |
-| Three `exchange_admin*OrganizationClaim*` callables | Absent | Canonical organization source, `us-central1` | Admin-only claim review, membership, notification, and audit writes | Delete new Functions; reverse ownership only through reviewed migration |
-| Firestore rules | Ruleset `c3f7dd07-66d3-46a0-b29d-57d2f86f1cc5`, updated 2026-07-07; 14,943 bytes | `firestore.rules`, SHA-256 `fc30b919…`, 34,243 bytes | Immediate authorization change; adds canonical organization/public projections and later security boundaries | Restore the recorded ruleset after emulator and diff review |
-| Storage rules | Ruleset `1b2c2e04-bf2f-4cf4-9222-59a4e32949f4`, updated 2026-02-16; 2,427 bytes | `storage.rules`, SHA-256 `4dd3c5f5…`, 10,454 bytes | Immediate authorization change | Restore the recorded ruleset after emulator and diff review |
-| Firestore indexes | 55 ready | 80 source definitions; 31 missing, 6 live-only | Asynchronous index builds; broad deployment could remove live-only indexes | Create only reviewed required indexes or restore deleted definitions |
-| Hosting | Deployed build routes successful login to `/dashboard` | Canonical branch routes successful login to `/exchange` | Static Hosting release replacement | Roll back to the prior Hosting release |
+The minimum coherent core deployment remains:
 
-The exact intended Functions selection is:
+- `profile_update`;
+- `enrichment_search`;
+- `enrichment_link`;
+- `exchange_organizationSearch`;
+- `exchange_organizationCreate`;
+- `exchange_organizationRequestClaim`;
+- `exchange_organizationListMyClaims`;
+- `exchange_adminListOrganizationClaims`;
+- `exchange_adminGetOrganizationClaim`;
+- `exchange_adminReviewOrganizationClaim`;
+- reviewed Firestore rules;
+- reviewed required indexes;
+- Storage rules only where required;
+- canonical Hosting after backend smoke tests.
 
-`profile_update`, `enrichment_search`, `enrichment_link`,
-`exchange_organizationSearch`, `exchange_organizationCreate`,
-`exchange_organizationRequestClaim`, `exchange_organizationListMyClaims`,
-`exchange_adminListOrganizationClaims`,
-`exchange_adminGetOrganizationClaim`, and
-`exchange_adminReviewOrganizationClaim`.
+The optional Microsoft marketing callables may be deployed in disabled mode with
+no Microsoft secret binding. A marketing send remains unavailable until the
+runtime can read the separately configured Secret Manager credential and all
+Microsoft tenant/mailbox gates are complete.
 
 Expected downtime is none for new callables. Indexes build asynchronously; rules
 and Hosting changes take effect as new releases and require a post-deploy smoke.
@@ -138,17 +154,14 @@ Private source workbooks are gitignored. Four inputs were located:
 - cleaned targeting workbook;
 - demographic-analysis workbook.
 
-The company workbooks also contain financial-history and executive/contact
-sheets. Preparation reads only the allowlisted `Company Details` fields and does
-not ingest executive names, gender, direct phones, financial history, marketing
+Preparation reads only the allowlisted `Company Details` fields. It does not
+ingest executive names, gender, direct phones, financial history, marketing
 scores, EINs, or parent-company contact data.
 
-The targeting source contains 3,607 rows and 22 columns, including demographic,
-military, street, email, phone, birth-date, and age fields. The demographic
-analysis reports 3,549 Virginia records and 27 records classified to Isle of
-Wight County, and also contains row-level data-quality examples. Both files must
-remain private. The prepared restricted projection retains only organization
-name, city, state, normalized search tokens, source label, and restriction flags.
+The targeting source contains demographic, military, street, email, phone,
+birth-date, and age fields and must remain private. The prepared restricted
+projection retains only organization name, city, state, normalized search
+tokens, source label, and restriction flags.
 
 Preparation and verification results:
 
@@ -157,7 +170,7 @@ Preparation and verification results:
 - company duplicate identity groups: 0;
 - home-business source rows: 1,903;
 - home identities matched and suppressed: 1,324;
-- unmatched home identities excluded because no company record exists: 579;
+- unmatched home identities excluded: 579;
 - marker-coordinate candidates after suppression: 3,804;
 - list-only home/suppressed organizations: 1,324;
 - invalid source coordinates: 0;
@@ -171,123 +184,95 @@ Preparation and verification results:
 - fabricated coordinates: 0.
 
 All 5,128 company rows identify Isle of Wight County, Virginia. Source-provided
-coordinates are labeled `approximate`; the preparation step never geocodes or
-assigns a centroid. The protected organization seed may retain source IDs and
-approved business contact fields, while `publicOrganizations` excludes source
-IDs, phones, owner data, claim evidence, and suppressed precise locations.
+coordinates are labeled approximate; preparation never geocodes or assigns a
+centroid. The protected organization seed may retain source IDs and approved
+business contact fields, while `publicOrganizations` excludes source IDs, phones,
+owner data, claim evidence, and suppressed precise locations.
 
-Configured-development dry run (`apply: false`) completed in 8.8 seconds:
+The configured-development dry run predicted:
 
-| Collection path | Creates | Updates | Skips | Duplicates | Invalid |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `orgs` plus public projection | 5,128 | 0 | 0 | 0 | 0 |
-| restricted source candidates | 3,545 | 0 | 0 | 0 | 0 |
+- organizations/public projections: 5,128 creates;
+- restricted candidates: 3,545 creates;
+- updates, skips, duplicates, and invalid rows: zero.
 
-No development import was applied. Consequently, configured idempotency and
-rollback were not executed; unit coverage proves dry-run safety and no-op replay
-after an applied fixture import. Applying this real dataset remains gated on
-human record approval and confirmation that its source coordinates may be
-published in a publicly readable development projection.
+No seed write, configured replay, snapshot, or rollback rehearsal was performed.
+The full dataset requires the administrative review queue, approved-only export,
+coordinate publication decisions, a bounded sample import, no-op replay, and
+rollback rehearsal before full application.
 
-## Organization marker implementation and scale evidence
+## Organization marker implementation
 
-The existing Mapbox map now has a distinct organization GeoJSON source,
-clustering/count/point/label layers, a selected-item overlay, and feature-state
-selection. The canonical opportunity result list includes public organization
-cards and a privacy-minimized detail panel. Selection is synchronized through
-the existing URL/workspace reducer. Bounded 500-record pages cap the public
-projection at 10,000 records; organization data is not queried during pan/zoom.
+The existing Mapbox instance has a separate privacy-minimized organization
+GeoJSON source, clusters/counts/points/labels, selected overlay, marker/card/detail
+synchronization, URL selection, bounded 500-record Firestore pages capped at
+10,000, module-level request reuse, and stale-result supersession.
 
-Home-based, privacy-suppressed, inactive, missing-coordinate, non-finite, and
-out-of-range records never produce a marker. They remain eligible for list/search
-when otherwise active. Marker properties contain only ID, name, city/state,
-territory, claim/verification state, and coordinate confidence.
+Home-based, privacy-suppressed, inactive, hidden, deleted, missing-coordinate,
+non-finite, and out-of-range records remain list-only or excluded and never
+receive fabricated markers.
 
-Pure transform-and-serialize measurements on this machine:
+Pure transform-and-serialize measurements from the original run were:
 
-| Organizations | Elapsed | GeoJSON payload |
+| Records | Elapsed | Payload |
 | ---: | ---: | ---: |
 | 100 | 0.35 ms | 34,716 bytes |
 | 1,000 | 1.32 ms | 349,775 bytes |
 | 10,000 | 12.70 ms | 3,527,536 bytes |
 
-The regression guard is 500 ms and fewer than 400 serialized bytes per marker.
-These are code-side projection measurements, not claims about Mapbox worker
-clustering, map-ready time, memory, Mobile Safari responsiveness, or configured
-network latency. Those measurements remain blocked by deployment and approved
-configured data.
+These do not prove Firestore latency, network transfer, Mapbox worker processing,
+first render, mobile memory, frame behavior, or native Safari acceptance.
 
-## Browser evidence and artifact privacy
+## Administrative Microsoft marketing email
 
-The configured browser test disables Playwright traces because traces retain
-Firebase bearer headers. An earlier trace capture was removed to the local Trash
-and is recoverable there; no trace is committed or attached. Sanitized evidence
-contains Function name, response status, and failure class only.
+The active implementation is documented in
+`docs/exchange/microsoft-admin-marketing-email.md`.
 
-Against the local canonical UI plus configured Firebase:
+Key boundaries:
 
-- Chromium desktop: login/Exchange/profile navigation passed; profile save failed at the absent callable;
-- Mobile Safari emulation (iPhone 14): navigation retry repaired an app-router interruption; profile save then failed at the same absent callable;
-- mutation tests: skipped because mutation mode was intentionally disabled;
-- Firefox and native Safari: not accepted;
-- configured accessibility and five-viewport matrix: not accepted;
-- live Hosting: valid login redirected to stale `/dashboard`.
+- one centrally controlled Microsoft 365 mailbox;
+- application-only Microsoft Graph `Mail.Send`;
+- Exchange Online Application RBAC to scope the app to the mailbox;
+- server-controlled sender aliases and Reply-To addresses;
+- explicit `adminMarketingEmail` custom claim, with master override;
+- no implicit access for ordinary admins, review admins, staff, organization
+  owners, or members;
+- no delegated member OAuth, mailbox linking, member compose, or mailbox creation;
+- explicit subscribed status plus recorded source/evidence;
+- unsubscribe, suppression, bounce, administrator exclusion, and development
+  allowlist enforcement;
+- safe plain-text-to-HTML rendering;
+- per-send and hourly recipient limits;
+- recipient-count confirmation and idempotent campaign claiming;
+- bounded audit metadata;
+- optional runtime Secret Manager lookup only during send;
+- no SMS provider implementation.
 
-No configured organization creation, claim review, company-based cross-mode,
-marker/list synchronization, or accessibility success is claimed.
+Microsoft email is not accepted yet. No Entra tenant configuration, application
+consent, mailbox scope, alias setting, client credential, controlled test send, or
+recipient-visible alias verification was performed by this branch.
 
-Against the fully local Firebase emulator suite, two Chromium browser scenarios
-passed. A new ordinary user created an organization, received the canonical
-owner membership and free commercial records, saved a current-schema profile,
-and retained `/exchange`. A separate claimant submitted a seeded-company claim;
-a synthetic legacy `master` reviewer approved it; ownership and audit records
-were verified; and that legacy reviewer's profile was normalized to schema 2 on
-save. The responsive capture loop exercised 390×844, 393×852, 430×932,
-1280×800, and 1440×900. These synthetic emulator results do not substitute for
-configured-development acceptance.
+## Browser and accessibility
 
-The Opportunity Discovery browser runner was also invoked, but all 15 scenarios
-correctly skipped because its preview/Mapbox/fixture opt-in was not supplied.
-No browser, cross-mode, or accessibility pass is inferred from skipped tests.
+Original configured results:
 
-## Automated validation summary
+- Chromium desktop: login/navigation passed; profile save failed at absent callable.
+- iPhone 14 browser emulation: login/navigation passed; profile save failed at the same callable.
+- configured mutation cases were intentionally skipped;
+- emulator Chromium passed the existing organization/profile scenarios and five responsive sizes;
+- the Opportunity Discovery browser runner skipped without configured preview/Mapbox/fixture opt-in;
+- Firefox, native Safari, configured five-viewport matrix, configured cross-mode company acceptance, and configured accessibility were not accepted.
 
-The final source validation sequence recorded these passing results (some
-focused suites intentionally exercise overlapping contracts):
+## Validation and merge decision
 
-| Command or scope | Result |
-| --- | --- |
-| Shared, Functions, and web builds | Pass |
-| Lint | 0 errors; 6 existing non-blocking warnings |
-| `test:exchange` | 11 files; 96 tests passed |
-| `test:development-readiness` | 12 tests passed |
-| `test:week1-org` | 15 Node tests plus 8 Vitest tests passed |
-| `test:security` | 10 files; 92 tests passed |
-| `test:run3` | 7 files; 35 tests passed |
-| `test:run4` | 5 files; 34 tests passed |
-| `test:migrations` | 3 files; 24 tests passed |
-| `test:opportunity-discovery` | 14 Node tests, 9 Vitest tests, 67 static checks, and 27-index validation passed |
-| Emulator-backed organization browser acceptance | 2 tests passed |
-| Configured-development browser acceptance | 2 profile scenarios failed at the absent callable; 4 mutation scenarios skipped |
-| Opportunity Discovery browser acceptance | 15 scenarios skipped because the explicit configured-preview opt-in was absent |
+PR workflows must be evaluated on the final head SHA. Source builds and emulator
+suites do not substitute for configured deployment acceptance or Microsoft tenant
+acceptance.
 
-Seed verification passed for 5,128 organization candidates and 3,545
-restricted matching candidates. The configured dry run remained non-mutating.
-The exact marker transform figures are recorded above; no Mapbox-worker or
-browser-performance claim is made from that pure transform benchmark.
+PR #19 must remain draft until the larger configured-development gates in its PR
+description are resolved. Removing SendGrid resolves a deployment dependency but
+does not itself prove profile, enrichment, organization, seed, marker, browser,
+accessibility, or Microsoft email acceptance.
 
-## Remaining gates
-
-1. Configure the missing deployment parameters or separate unrelated parameter
-   discovery so the narrow callable deployment can be planned and executed.
-2. Review the full rules and index drift before deploying; do not delete the six
-   live-only indexes accidentally.
-3. Obtain explicit human approval and coordinate-publication confirmation for
-   the prepared development seed.
-4. Deploy only to `hi-coworking-plat`, apply the approved seed under a unique
-   batch ID, re-run for idempotency, and rehearse rollback.
-5. Create the configured organization-state fixture matrix through the deployed
-   canonical callables.
-6. Complete current-schema, owner, reviewer, and legacy profile acceptance;
-   enrichment; organization creation/claims; cross-mode; browser; responsive;
-   accessibility; and full marker-performance acceptance.
+No production deployment, production import, production migration, live Stripe
+write, referral payout, member mailbox connection, or `main` modification was
+performed.
