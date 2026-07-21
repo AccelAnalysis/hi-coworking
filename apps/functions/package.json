@@ -1,8 +1,8 @@
 {
   "name": "functions",
   "private": true,
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "lib/firebaseEntry.js",
+  "types": "lib/firebaseEntry.d.ts",
   "engines": {
     "node": "20"
   },
