@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as logger from "firebase-functions/logger";
 
 export interface MarketingEmailMessage {
@@ -155,7 +156,7 @@ export class MicrosoftGraphEmailProvider implements MarketingEmailProvider {
 
   async send(message: MarketingEmailMessage): Promise<MarketingEmailSendResult> {
     const accessToken = await this.accessToken();
-    const clientRequestId = crypto.randomUUID();
+    const clientRequestId = randomUUID();
     const payload = {
       message: {
         subject: message.subject,
