@@ -1,12 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(process.cwd());
 const source = (path: string) => readFile(resolve(root, path), "utf8");
+const exists = async (path: string) => access(resolve(root, path)).then(() => true).catch(() => false);
 
 describe("administrative marketing email source boundaries", () => {
   it("contains no active SendGrid or Twilio provider source", async () => {
+    expect(await exists("apps/functions/src/providers/smsProvider.ts")).toBe(false);
     const files = [
       "apps/functions/src/providers/emailProvider.ts",
       "apps/functions/src/eventMarketing.ts",
