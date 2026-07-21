@@ -32,26 +32,10 @@ import {
 } from "@/lib/adminMarketingFunctions";
 
 const SEGMENTS: Array<{ value: MarketingSegment; label: string; description: string }> = [
-  {
-    value: "all_eligible_members",
-    label: "All eligible members",
-    description: "Only members with an explicit subscribed marketing status.",
-  },
-  {
-    value: "active_members",
-    label: "Active members",
-    description: "Explicitly subscribed members with an active membership.",
-  },
-  {
-    value: "founding_members",
-    label: "Founding members",
-    description: "Explicitly subscribed members associated with a Founding plan.",
-  },
-  {
-    value: "selected_members",
-    label: "Selected members",
-    description: "Choose individual explicitly subscribed members.",
-  },
+  { value: "all_eligible_members", label: "All eligible members", description: "Only members with an explicit subscribed marketing status." },
+  { value: "active_members", label: "Active members", description: "Explicitly subscribed members with an active membership." },
+  { value: "founding_members", label: "Founding members", description: "Explicitly subscribed members associated with a Founding plan." },
+  { value: "selected_members", label: "Selected members", description: "Choose individual explicitly subscribed members." },
 ];
 
 interface RecipientPreviewState {
@@ -92,10 +76,7 @@ function MarketingEmailWorkspace() {
   const [searchingRecipients, setSearchingRecipients] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
-  const selectedIds = useMemo(
-    () => selectedRecipients.map((recipient) => recipient.uid),
-    [selectedRecipients],
-  );
+  const selectedIds = useMemo(() => selectedRecipients.map((recipient) => recipient.uid), [selectedRecipients]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -136,9 +117,7 @@ function MarketingEmailWorkspace() {
       setSearchingRecipients(true);
       try {
         const result = await adminMarketingSearchRecipientsFn({ query: recipientQuery.trim() });
-        setRecipientResults(result.data.recipients.filter(
-          (recipient) => !selectedIds.includes(recipient.uid),
-        ));
+        setRecipientResults(result.data.recipients.filter((recipient) => !selectedIds.includes(recipient.uid)));
       } catch {
         setRecipientResults([]);
       } finally {
@@ -148,10 +127,10 @@ function MarketingEmailWorkspace() {
     return () => window.clearTimeout(timer);
   }, [recipientQuery, segment, selectedIds]);
 
-  const saveDraft = async (): Promise<AdminMarketingCampaign> => {
-    setBusy("save");
+  const saveDraft = async (options: { showNotice?: boolean; manageBusy?: boolean } = {}): Promise<AdminMarketingCampaign> => {
+    if (options.manageBusy !== false) setBusy("save");
     setError("");
-    setNotice("");
+    if (options.showNotice !== false) setNotice("");
     try {
       const result = await adminMarketingSaveDraftFn({
         campaignId,
@@ -164,17 +143,14 @@ function MarketingEmailWorkspace() {
         selectedUserIds: selectedIds,
       });
       setCampaignId(result.data.campaign.id);
-      setHistory((current) => [
-        result.data.campaign,
-        ...current.filter((campaign) => campaign.id !== result.data.campaign.id),
-      ]);
-      setNotice("Draft saved.");
+      setHistory((current) => [result.data.campaign, ...current.filter((campaign) => campaign.id !== result.data.campaign.id)]);
+      if (options.showNotice !== false) setNotice("Draft saved.");
       return result.data.campaign;
     } catch (saveError) {
       setError(readableError(saveError));
       throw saveError;
     } finally {
-      setBusy(null);
+      if (options.manageBusy !== false) setBusy(null);
     }
   };
 
@@ -183,10 +159,7 @@ function MarketingEmailWorkspace() {
     setError("");
     setNotice("");
     try {
-      const result = await adminMarketingPreviewRecipientsFn({
-        segment,
-        selectedUserIds: selectedIds,
-      });
+      const result = await adminMarketingPreviewRecipientsFn({ segment, selectedUserIds: selectedIds });
       setPreview(result.data);
       setNotice(`${result.data.eligibleCount.toLocaleString()} eligible recipient${result.data.eligibleCount === 1 ? "" : "s"}.`);
     } catch (previewError) {
@@ -201,13 +174,7 @@ function MarketingEmailWorkspace() {
     setError("");
     setNotice("");
     try {
-      const result = await adminMarketingSendTestFn({
-        recipient: testRecipient,
-        subject,
-        bodyText,
-        senderAlias,
-        replyTo: replyTo || undefined,
-      });
+      const result = await adminMarketingSendTestFn({ recipient: testRecipient, subject, bodyText, senderAlias, replyTo: replyTo || undefined });
       setNotice(result.data.requiresRecipientVisibleAliasVerification
         ? "Microsoft Graph accepted the test. Verify the displayed From and Reply-To addresses in the recipient mailbox."
         : "Microsoft Graph accepted the test message.");
@@ -228,18 +195,13 @@ function MarketingEmailWorkspace() {
     setError("");
     setNotice("");
     try {
-      const draft = campaignId ? undefined : await saveDraft();
-      const targetCampaignId = campaignId || draft?.id;
-      if (!targetCampaignId) throw new Error("Campaign draft could not be resolved.");
+      const draft = await saveDraft({ showNotice: false, manageBusy: false });
       const result = await adminMarketingSendCampaignFn({
-        campaignId: targetCampaignId,
+        campaignId: draft.id,
         idempotencyKey: crypto.randomUUID(),
         confirmedRecipientCount: preview.eligibleCount,
       });
-      setHistory((current) => [
-        result.data.campaign,
-        ...current.filter((campaign) => campaign.id !== result.data.campaign.id),
-      ]);
+      setHistory((current) => [result.data.campaign, ...current.filter((campaign) => campaign.id !== result.data.campaign.id)]);
       setNotice(result.data.idempotent
         ? "This send request was already processed; no duplicate message was sent."
         : `${result.data.campaign.sentRecipientCount.toLocaleString()} message${result.data.campaign.sentRecipientCount === 1 ? "" : "s"} accepted for delivery.`);
@@ -250,33 +212,16 @@ function MarketingEmailWorkspace() {
     }
   };
 
-  if (loading) {
-    return <AppShell><div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div></AppShell>;
-  }
+  if (loading) return <AppShell><div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div></AppShell>;
 
   return (
     <AppShell>
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="flex items-center gap-3 text-3xl font-bold text-slate-950"><Mail className="h-7 w-7 text-indigo-600" /> Marketing email</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Admin-only outreach through one centrally managed Microsoft 365 mailbox. Members never connect or authorize a mailbox.</p>
-          </div>
+          <div><h1 className="flex items-center gap-3 text-3xl font-bold text-slate-950"><Mail className="h-7 w-7 text-indigo-600" /> Marketing email</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Admin-only outreach through one centrally managed Microsoft 365 mailbox. Members never connect or authorize a mailbox.</p></div>
           <button type="button" onClick={() => void load()} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 hover:bg-slate-50"><RefreshCw className="h-4 w-4" /> Refresh</button>
         </div>
-
-        {configuration && (
-          <section className={`mt-6 rounded-2xl border p-4 ${configuration.enabled ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
-            <div className="flex items-start gap-3">
-              {configuration.enabled ? <ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-700" /> : <TriangleAlert className="mt-0.5 h-5 w-5 text-amber-700" />}
-              <div className="min-w-0">
-                <p className="font-bold text-slate-900">{configuration.enabled ? `Microsoft marketing email enabled in ${configuration.environment} mode` : "Microsoft marketing email is disabled"}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-600">Member mailbox connections: disabled · SMS: not implemented · Unsubscribe: {configuration.unsubscribeConfigured ? "configured" : "required before campaign sending"}</p>
-              </div>
-            </div>
-          </section>
-        )}
-
+        {configuration && <section className={`mt-6 rounded-2xl border p-4 ${configuration.enabled ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex items-start gap-3">{configuration.enabled ? <ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-700" /> : <TriangleAlert className="mt-0.5 h-5 w-5 text-amber-700" />}<div><p className="font-bold text-slate-900">{configuration.enabled ? `Microsoft marketing email enabled in ${configuration.environment} mode` : "Microsoft marketing email is disabled"}</p><p className="mt-1 text-xs leading-5 text-slate-600">Member mailbox connections: disabled · SMS: not implemented · Unsubscribe: {configuration.unsubscribeConfigured ? "configured" : "required before campaign sending"}</p></div></div></section>}
         {error && <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700" role="alert">{error}</div>}
         {notice && <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800" role="status">{notice}</div>}
 
@@ -290,10 +235,7 @@ function MarketingEmailWorkspace() {
               <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Subject</span><input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={160} className="h-11 w-full rounded-xl border border-slate-300 px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" /></label>
               <label className="block sm:col-span-2"><span className="mb-1.5 block text-xs font-bold text-slate-700">Message</span><textarea value={bodyText} onChange={(event) => setBodyText(event.target.value)} maxLength={20000} className="min-h-64 w-full rounded-xl border border-slate-300 p-3 text-sm leading-6 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" placeholder="Write the marketing message in plain text. The server creates safe HTML and appends the unsubscribe link." /></label>
             </div>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" disabled={busy !== null} onClick={() => void saveDraft()} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700 disabled:opacity-50">{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Save draft</button>
-              <button type="button" onClick={() => setShowPreview((current) => !current)} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700"><Eye className="h-4 w-4" /> Preview</button>
-            </div>
+            <div className="mt-4 flex flex-wrap gap-3"><button type="button" disabled={busy !== null} onClick={() => void saveDraft()} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700 disabled:opacity-50">{busy === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Save draft</button><button type="button" onClick={() => setShowPreview((current) => !current)} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700"><Eye className="h-4 w-4" /> Preview</button></div>
             {showPreview && <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-5"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{subject || "Untitled message"}</p><div className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-800">{bodyText || "Your message preview will appear here."}</div><p className="mt-6 border-t border-slate-200 pt-4 text-xs text-slate-500">The live campaign adds a secure unsubscribe link. Test messages do not alter marketing preferences.</p></div>}
           </section>
 
@@ -307,21 +249,12 @@ function MarketingEmailWorkspace() {
               {preview && <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-700"><p className="font-bold">{preview.eligibleCount.toLocaleString()} eligible</p><p className="mt-1">{preview.excludedCount.toLocaleString()} excluded after consent, suppression, role, segment, and environment checks.</p>{Object.keys(preview.excludedByReason).length > 0 && <div className="mt-2 space-y-1 text-slate-500">{Object.entries(preview.excludedByReason).map(([reason, count]) => <p key={reason}>{reason.replaceAll("_", " ")}: {count}</p>)}</div>}</div>}
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="flex items-center gap-2 text-sm font-bold text-slate-950"><TestTube2 className="h-4 w-4" /> Controlled test</h2>
-              <p className="mt-2 text-xs leading-5 text-slate-500">The recipient must be in the server-controlled development allowlist.</p>
-              <input type="email" value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} className="mt-3 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm" placeholder="approved-test@example.com" />
-              <button type="button" disabled={busy !== null} onClick={() => void sendTest()} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 text-sm font-bold text-indigo-800 disabled:opacity-50">{busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />} Send test</button>
-            </section>
-
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="flex items-center gap-2 text-sm font-bold text-slate-950"><TestTube2 className="h-4 w-4" /> Controlled test</h2><p className="mt-2 text-xs leading-5 text-slate-500">The recipient must be in the server-controlled development allowlist.</p><input type="email" value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} className="mt-3 h-11 w-full rounded-xl border border-slate-300 px-3 text-sm" placeholder="approved-test@example.com" /><button type="button" disabled={busy !== null} onClick={() => void sendTest()} className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 text-sm font-bold text-indigo-800 disabled:opacity-50">{busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <TestTube2 className="h-4 w-4" />} Send test</button></section>
             <button type="button" disabled={busy !== null || !configuration?.enabled} onClick={() => void sendCampaign()} className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-bold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50">{busy === "send" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Confirm and send</button>
           </div>
         </div>
 
-        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-950">Campaign history</h2>
-          <div className="mt-4 overflow-x-auto"><table className="min-w-full text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Sender</th><th className="px-3 py-2 text-right">Recipients</th><th className="px-3 py-2">Updated</th></tr></thead><tbody>{history.map((campaign) => <tr key={campaign.id} className="border-b border-slate-100 last:border-0"><td className="px-3 py-3"><strong className="block text-slate-900">{campaign.name}</strong><span className="text-xs text-slate-500">{campaign.subject}</span></td><td className="px-3 py-3 font-semibold text-slate-700">{campaign.status.replaceAll("_", " ")}</td><td className="px-3 py-3 text-slate-600">{campaign.senderAlias}</td><td className="px-3 py-3 text-right text-slate-600">{campaign.sentRecipientCount.toLocaleString()}</td><td className="px-3 py-3 text-slate-500">{new Date(campaign.updatedAt).toLocaleString()}</td></tr>)}{history.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-slate-500">No administrative marketing campaigns yet.</td></tr>}</tbody></table></div>
-        </section>
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><h2 className="text-lg font-bold text-slate-950">Campaign history</h2><div className="mt-4 overflow-x-auto"><table className="min-w-full text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Sender</th><th className="px-3 py-2 text-right">Recipients</th><th className="px-3 py-2">Updated</th></tr></thead><tbody>{history.map((campaign) => <tr key={campaign.id} className="border-b border-slate-100 last:border-0"><td className="px-3 py-3"><strong className="block text-slate-900">{campaign.name}</strong><span className="text-xs text-slate-500">{campaign.subject}</span></td><td className="px-3 py-3 font-semibold text-slate-700">{campaign.status.replaceAll("_", " ")}</td><td className="px-3 py-3 text-slate-600">{campaign.senderAlias}</td><td className="px-3 py-3 text-right text-slate-600">{campaign.sentRecipientCount.toLocaleString()}</td><td className="px-3 py-3 text-slate-500">{new Date(campaign.updatedAt).toLocaleString()}</td></tr>)}{history.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-slate-500">No administrative marketing campaigns yet.</td></tr>}</tbody></table></div></section>
       </main>
     </AppShell>
   );
