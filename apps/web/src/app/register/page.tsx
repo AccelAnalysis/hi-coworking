@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { accountInitializeFn } from "@/lib/functions";
+import { serializeCallableError } from "@/lib/callableDiagnostics";
 import { Loader2 } from "lucide-react";
 
 export default function RegisterPage() {
@@ -14,6 +16,25 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [initializationPending, setInitializationPending] = useState(false);
+  const idempotencyKey = useRef<string | null>(null);
+
+  const finishAccountInitialization = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) throw new Error("Authenticated account is unavailable");
+    idempotencyKey.current ??= `register-${crypto.randomUUID()}`;
+    const result = await accountInitializeFn({
+      displayName: name.trim(),
+      idempotencyKey: idempotencyKey.current,
+      registrationVersion: 1,
+    });
+    if (!result.data.accountInitialized) {
+      throw new Error("Account initialization was not confirmed");
+    }
+    await currentUser.getIdToken(true);
+    setInitializationPending(false);
+    router.push("/profile?onboarding=1");
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,16 +42,30 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await updateProfile(userCredential.user, { displayName: name });
-      router.push("/exchange");
+      if (initializationPending && auth.currentUser) {
+        await finishAccountInitialization();
+        return;
+      }
+      const normalizedName = name.trim().replace(/\s+/g, " ");
+      const normalizedEmail = email.trim().toLowerCase();
+      const userCredential = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
+      await updateProfile(userCredential.user, { displayName: normalizedName });
+      await finishAccountInitialization();
     } catch (err: unknown) {
-      console.error(err);
       const firebaseError = err as { code?: string };
       if (firebaseError.code === "auth/email-already-in-use") {
         setError("This email is already registered.");
       } else if (firebaseError.code === "auth/weak-password") {
         setError("Password should be at least 6 characters.");
+      } else if (auth.currentUser) {
+        setInitializationPending(true);
+        const diagnostic = serializeCallableError(err, {
+          functionName: "account_initialize",
+          projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+          region: "us-central1",
+        });
+        console.warn("Account initialization needs retry", diagnostic);
+        setError("Your sign-in was created, but account setup was not confirmed. Complete setup to continue.");
       } else {
         setError("Failed to create account. Please try again.");
       }
@@ -110,7 +145,9 @@ export default function RegisterPage() {
               disabled={loading}
               className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
+              {loading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : initializationPending ? "Complete account setup" : "Create account"}
             </button>
           </form>
         </div>

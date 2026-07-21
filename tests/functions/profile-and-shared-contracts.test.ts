@@ -22,9 +22,9 @@ describe("profile URL and public-projection contracts", () => {
     "data:text/html,<script>alert(1)</script>",
     "ftp://example.test/profile",
   ])("rejects non-HTTP profile links: %s", (unsafeUrl) => {
-    expect(profileUpdateInputSchema.safeParse({ published: true, website: unsafeUrl }).success)
+    expect(profileUpdateInputSchema.safeParse({ expectedVersion: 0, published: true, website: unsafeUrl }).success)
       .toBe(false);
-    expect(profileUpdateInputSchema.safeParse({ published: true, linkedin: unsafeUrl }).success)
+    expect(profileUpdateInputSchema.safeParse({ expectedVersion: 0, published: true, linkedin: unsafeUrl }).success)
       .toBe(false);
     expect(profileDocSchema.safeParse({ uid: "profile-one", website: unsafeUrl, createdAt: 1 }).success)
       .toBe(false);
@@ -32,6 +32,7 @@ describe("profile URL and public-projection contracts", () => {
 
   it("accepts HTTP(S) profile links and trims callable input", () => {
     const result = profileUpdateInputSchema.safeParse({
+      expectedVersion: 0,
       published: true,
       website: " https://example.test/profile ",
       linkedin: "http://www.linkedin.com/in/example",
@@ -50,7 +51,7 @@ describe("profile URL and public-projection contracts", () => {
         "profileVideos/profile-one/posters/intro.png",
     };
 
-    expect(profileUpdateInputSchema.safeParse({ published: false, ...assets }).success)
+    expect(profileUpdateInputSchema.safeParse({ expectedVersion: 0, published: false, ...assets }).success)
       .toBe(true);
     expect(profileDocSchema.safeParse({
       uid: "profile-one",
@@ -58,6 +59,7 @@ describe("profile URL and public-projection contracts", () => {
       ...assets,
     }).success).toBe(true);
     expect(profileUpdateInputSchema.safeParse({
+      expectedVersion: 0,
       published: false,
       photoStoragePath: "profilePhotos/profile-one/history/old.png",
     }).success).toBe(false);
@@ -131,6 +133,7 @@ describe("profile URL and public-projection contracts", () => {
   it("rejects cross-account canonical paths and drops them from public projections", () => {
     const forgedPath = "profilePhotos/another-user/forged.png";
     expect(profileUpdateInputSchema.safeParse({
+      expectedVersion: 0,
       published: true,
       photoStoragePath: forgedPath,
     }).success).toBe(true);
@@ -156,6 +159,18 @@ describe("profile URL and public-projection contracts", () => {
       photoStoragePath: forgedPath,
       createdAt: 1,
     }).success).toBe(false);
+  });
+
+  it("requires optimistic concurrency and preserves explicit clear semantics", () => {
+    expect(profileUpdateInputSchema.safeParse({ published: false }).success).toBe(false);
+    const clear = profileUpdateInputSchema.safeParse({
+      expectedVersion: 4,
+      published: false,
+      bio: null,
+      website: null,
+      certifications: [],
+    });
+    expect(clear.success).toBe(true);
   });
 });
 

@@ -26,6 +26,8 @@ async function register(page: import("@playwright/test").Page, prefix: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/profile\?onboarding=1$/, { timeout: 40_000 });
+  await page.getByRole("link", { name: "Continue to Exchange" }).click();
   await expect(page).toHaveURL(/\/exchange$/, { timeout: 40_000 });
   return email;
 }
@@ -148,6 +150,6 @@ test("seeded claim is nonblocking, admin approval is audited, and a legacy admin
   await adminPage.goto("/profile");
   await adminPage.getByRole("button", { name: "Save Profile" }).click();
   await expect(adminPage.getByText("Saved", { exact: true })).toBeVisible();
-  expect((await db.collection("profiles").doc("legacy-super-admin").get()).data()?.profileSchemaVersion).toBe(2);
+  expect((await db.collection("profiles").doc("legacy-super-admin").get()).data()?.profileSchemaVersion).toBe(3);
   await adminContext.close();
 });

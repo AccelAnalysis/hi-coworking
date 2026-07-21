@@ -141,6 +141,8 @@ async function createActor(
     businessName: `${uid} LLC`,
     verificationStatus: options.verified === false ? "pending" : "verified",
     verificationVersion: 0,
+    profileSchemaVersion: 3,
+    profileVersion: 0,
     published: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -162,6 +164,40 @@ async function createActor(
   await signInWithEmailAndPassword(auth, email, PASSWORD);
   await auth.currentUser?.getIdToken(true);
 
+  const functions = getFunctions(app, REGION);
+  connectFunctionsEmulator(functions, FUNCTIONS_EMULATOR_HOST, FUNCTIONS_EMULATOR_PORT);
+  const storage = getStorage(app);
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+  return { uid, auth, functions, storage };
+}
+
+async function createUnprovisionedActor(
+  uid: string,
+  role?: PlatformRole,
+): Promise<TestActor> {
+  const email = `${uid}@example.test`;
+  await getAdminAuth(adminApp).createUser({
+    uid,
+    email,
+    password: PASSWORD,
+    emailVerified: true,
+    displayName: `Test ${uid}`,
+  });
+  if (role) await getAdminAuth(adminApp).setCustomUserClaims(uid, { role });
+
+  const app = initializeApp(
+    {
+      apiKey: "demo-api-key",
+      authDomain: `${PROJECT_ID}.firebaseapp.com`,
+      projectId: PROJECT_ID,
+      storageBucket: `${PROJECT_ID}.appspot.com`,
+    },
+    `exchange-callable-test-${++clientSequence}`,
+  );
+  clientApps.push(app);
+  const auth = getAuth(app);
+  connectAuthEmulator(auth, AUTH_EMULATOR_URL, { disableWarnings: true });
+  await signInWithEmailAndPassword(auth, email, PASSWORD);
   const functions = getFunctions(app, REGION);
   connectFunctionsEmulator(functions, FUNCTIONS_EMULATOR_HOST, FUNCTIONS_EMULATOR_PORT);
   const storage = getStorage(app);
@@ -370,6 +406,93 @@ afterAll(async () => {
   await Promise.all([clearFirestore(), clearAuth()]);
   await db.terminate();
   await deleteAdminApp(adminApp);
+});
+
+describe("authoritative account initialization", () => {
+  it("repairs a missing member account idempotently without granting adjacent state", async () => {
+    const actor = await createUnprovisionedActor("account-initialize-member");
+    const input = {
+      displayName: "Configured Member",
+      idempotencyKey: "registration-attempt-0001",
+      registrationVersion: 1,
+    };
+    const first = await callFunction<{
+      accountInitialized: boolean;
+      idempotentReplay: boolean;
+      role: string;
+      profileVersion: number;
+    }>(actor, "account_initialize", input);
+    expect(first).toMatchObject({
+      accountInitialized: true,
+      idempotentReplay: false,
+      role: "member",
+      profileVersion: 0,
+    });
+    await actor.auth.currentUser?.getIdToken(true);
+    expect((await actor.auth.currentUser?.getIdTokenResult())?.claims.role).toBe("member");
+    expect((await db.collection("users").doc(actor.uid).get()).data()).toMatchObject({
+      uid: actor.uid,
+      email: "account-initialize-member@example.test",
+      displayName: "Test account-initialize-member",
+      role: "member",
+      membershipStatus: "none",
+      credits: 0,
+      lifetimeCreditsPurchased: 0,
+      registrationVersion: 1,
+    });
+    expect((await db.collection("profiles").doc(actor.uid).get()).data()).toMatchObject({
+      uid: actor.uid,
+      published: false,
+      verificationStatus: "none",
+      profileSchemaVersion: 3,
+      profileVersion: 0,
+    });
+    expect((await db.collection("orgMembers").where("uid", "==", actor.uid).get()).empty).toBe(true);
+
+    const replay = await callFunction<{ idempotentReplay: boolean }>(
+      actor,
+      "account_initialize",
+      input,
+    );
+    expect(replay.idempotentReplay).toBe(true);
+    await expectCallableError(
+      callFunction(actor, "account_initialize", { ...input, role: "admin" }),
+      "invalid-argument",
+    );
+  });
+
+  it("preserves an existing trusted admin claim and rejects unauthenticated initialization", async () => {
+    const admin = await createUnprovisionedActor("account-initialize-admin", "admin");
+    await db.collection("profiles").doc(admin.uid).set({
+      uid: admin.uid,
+      businessName: "Legacy Admin Profile",
+      published: false,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const result = await callFunction<{ role: string }>(admin, "account_initialize", {
+      idempotencyKey: "admin-repair-attempt-0001",
+      registrationVersion: 1,
+    });
+    expect(result.role).toBe("admin");
+    expect((await db.collection("users").doc(admin.uid).get()).data()?.role).toBe("admin");
+    expect((await db.collection("profiles").doc(admin.uid).get()).data())
+      .not.toHaveProperty("profileSchemaVersion");
+    await callFunction(admin, "profile_update", { expectedVersion: 0, published: false });
+    expect((await db.collection("profiles").doc(admin.uid).get()).data()).toMatchObject({
+      profileSchemaVersion: 3,
+      profileVersion: 1,
+      legacyMigratedAt: expect.any(Number),
+    });
+
+    const unauthenticated = createUnauthenticatedFunctions();
+    await expectCallableError(
+      callUnauthenticatedFunction(unauthenticated, "account_initialize", {
+        idempotencyKey: "unauthenticated-attempt-0001",
+      }),
+      "unauthenticated",
+    );
+  });
 });
 
 describe("Opportunity discovery gateway boundaries", () => {
@@ -2900,13 +3023,16 @@ describe("short-lived storage grant cleanup concurrency", () => {
 describe("profile save and enrichment identity boundaries", () => {
   it("saves current-schema and legacy profiles without weakening the strict input contract", async () => {
     const member = await createActor("profile-current-member", "member");
-    await db.collection("profiles").doc(member.uid).update({ profileSchemaVersion: 2 });
+    await db.collection("profiles").doc(member.uid).update({ profileSchemaVersion: 3 });
 
     const currentResult = await callFunction<{
       success: boolean;
       profileSchemaVersion: number;
+      profileVersion: number;
     }>(member, "profile_update", {
+      expectedVersion: 0,
       businessName: "Current Schema Member LLC",
+      bio: "This field will be explicitly cleared.",
       capabilityStatementUrl: null,
       capabilityStatementStoragePath: null,
       photoUrl: null,
@@ -2917,12 +3043,32 @@ describe("profile save and enrichment identity boundaries", () => {
       videoIntroPosterStoragePath: null,
       published: false,
     });
-    expect(currentResult).toMatchObject({ success: true, profileSchemaVersion: 2 });
+    expect(currentResult).toMatchObject({ success: true, profileSchemaVersion: 3, profileVersion: 1 });
     expect((await db.collection("profiles").doc(member.uid).get()).data()).toMatchObject({
       uid: member.uid,
       businessName: "Current Schema Member LLC",
-      profileSchemaVersion: 2,
+      profileSchemaVersion: 3,
+      profileVersion: 1,
     });
+
+    const staleError = await expectCallableError(
+      callFunction(member, "profile_update", { expectedVersion: 0, published: false }),
+      "aborted",
+    );
+    expect(staleError.details).toMatchObject({
+      diagnosticCode: "PROFILE_VERSION_CONFLICT",
+      currentVersion: 1,
+    });
+
+    await callFunction(member, "profile_update", {
+      expectedVersion: 1,
+      bio: null,
+      certifications: [],
+      published: false,
+    });
+    const cleared = (await db.collection("profiles").doc(member.uid).get()).data();
+    expect(cleared).not.toHaveProperty("bio");
+    expect(cleared).toMatchObject({ certifications: [], profileVersion: 2 });
 
     const legacy = await createActor("profile-legacy-admin", "admin");
     await db.collection("profiles").doc(legacy.uid).set({
@@ -2932,18 +3078,20 @@ describe("profile save and enrichment identity boundaries", () => {
       createdAt: 1,
       updatedAt: 1,
     });
-    await callFunction(legacy, "profile_update", { published: false });
+    await callFunction(legacy, "profile_update", { expectedVersion: 0, published: false });
     const migrated = (await db.collection("profiles").doc(legacy.uid).get()).data();
     expect(migrated).toMatchObject({
       uid: legacy.uid,
       businessName: "Legacy Administrator LLC",
-      profileSchemaVersion: 2,
+      profileSchemaVersion: 3,
+      profileVersion: 1,
       createdAt: 1,
     });
     expect(Number(migrated?.legacyMigratedAt)).toBeGreaterThan(1);
 
     await expectCallableError(
       callFunction(member, "profile_update", {
+        expectedVersion: 2,
         orgId: "browser-supplied-organization",
         published: false,
       }),
@@ -2962,6 +3110,7 @@ describe("profile save and enrichment identity boundaries", () => {
       confidenceScore: 90,
       matchReason: "exact name match + state match",
       source: "sam_gov",
+      providers: ["sam_gov"],
     };
     await db.collection("enrichmentRequests").doc("request-owned-by-member").set({
       id: "request-owned-by-member",
@@ -2972,14 +3121,32 @@ describe("profile save and enrichment identity boundaries", () => {
       expiresAt: Date.now() + 60_000,
     });
 
-    const result = await callFunction<{ success: boolean; matchId: string }>(member, "enrichment_link", {
+    await expectCallableError(
+      callFunction(member, "enrichment_link", {
+        requestId: "request-owned-by-member",
+        matchId: candidate.matchId,
+        selectedCandidate: { legalName: "Browser Forgery LLC", source: "manual" },
+        selectedFields: ["businessName", "uei"],
+        expectedVersion: 0,
+        attestationText: "I confirm I am authorized to represent this company.",
+        acknowledgedConsequences: true,
+      }),
+      "invalid-argument",
+    );
+
+    const result = await callFunction<{
+      success: boolean;
+      matchId: string;
+      profileVersion: number;
+    }>(member, "enrichment_link", {
       requestId: "request-owned-by-member",
       matchId: candidate.matchId,
-      selectedCandidate: { legalName: "Browser Forgery LLC", source: "manual" },
+      selectedFields: ["businessName", "uei"],
+      expectedVersion: 0,
       attestationText: "I confirm I am authorized to represent this company.",
       acknowledgedConsequences: true,
     });
-    expect(result).toEqual({ success: true, matchId: candidate.matchId });
+    expect(result).toMatchObject({ success: true, matchId: candidate.matchId, profileVersion: 1 });
     expect((await db.collection("profiles").doc(member.uid).get()).data()).toMatchObject({
       enrichmentMatchId: candidate.matchId,
       enrichmentData: candidate,
@@ -2988,12 +3155,27 @@ describe("profile save and enrichment identity boundaries", () => {
         requestId: "request-owned-by-member",
         provider: "sam_gov",
       },
+      businessName: candidate.legalName,
+      uei: candidate.uei,
+      profileVersion: 1,
+      enrichmentFieldProvenance: {
+        businessName: {
+          provider: "sam_gov",
+          requestId: "request-owned-by-member",
+        },
+        uei: {
+          provider: "sam_gov",
+          requestId: "request-owned-by-member",
+        },
+      },
     });
 
     await expectCallableError(
       callFunction(other, "enrichment_link", {
         requestId: "request-owned-by-member",
         matchId: candidate.matchId,
+        selectedFields: ["businessName"],
+        expectedVersion: 0,
         attestationText: "I confirm I am authorized to represent this company.",
         acknowledgedConsequences: true,
       }),
@@ -3012,6 +3194,8 @@ describe("profile save and enrichment identity boundaries", () => {
       callFunction(other, "enrichment_link", {
         requestId: "request-forged-match",
         matchId: "browser-fabricated-match",
+        selectedFields: ["businessName"],
+        expectedVersion: 0,
         attestationText: "I confirm I am authorized to represent this company.",
         acknowledgedConsequences: true,
       }),

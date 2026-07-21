@@ -21,7 +21,8 @@ describe("Run 4 Exchange launch navigation", () => {
     const login = read("apps/web/src/app/login/page.tsx");
     const register = read("apps/web/src/app/register/page.tsx");
     expect(login).toContain('router.push("/exchange")');
-    expect(register).toContain('router.push("/exchange")');
+    expect(register).toContain('router.push("/profile?onboarding=1")');
+    expect(register).toContain("accountInitializeFn");
     expect(register).toMatch(/Connecting an organization remains optional/i);
   });
 

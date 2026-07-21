@@ -162,6 +162,7 @@ import {
 import { enrichment_search, enrichment_link } from "./enrichment";
 import { verification_submit, verification_review, verification_flag } from "./verification";
 import { profile_update } from "./profiles";
+import { account_initialize, provisionAccountDocuments } from "./accounts";
 import {
   exchange_organizationSearch,
   exchange_organizationCreate,
@@ -370,6 +371,7 @@ export {
   verification_review,
   verification_flag,
   profile_update,
+  account_initialize,
   team_listMine,
   team_create,
   team_invite,
@@ -558,22 +560,26 @@ export const createBooking = onCall(async (request) => {
 export const authBeforeCreate = beforeUserCreated(async (event) => {
   const user = event.data;
   if (!user) {
-    logger.error("Auth before-create event did not contain a user record");
+    logger.error("Auth before-create event omitted its user record", {
+      diagnosticCode: "ACCOUNT_TRIGGER_EVENT_MISSING",
+    });
     throw new HttpsError("internal", "Account provisioning could not be verified");
   }
-  logger.info(`Creating user doc for ${user.uid} (${user.email})`);
+  if (!user.email) {
+    throw new HttpsError("failed-precondition", "An email address is required for registration");
+  }
 
-  const now = Date.now();
-  const userDoc = {
+  await provisionAccountDocuments({
     uid: user.uid,
-    email: user.email || "",
-    displayName: user.displayName || "",
-    role: "member" as UserRole,
-    membershipStatus: "none",
-    createdAt: now,
-  };
-
-  await db.collection("users").doc(user.uid).set(userDoc);
+    email: user.email,
+    displayName: user.displayName,
+    trustedRole: "member",
+    idempotencyKey: "blocking-trigger-v1",
+    registrationVersion: 1,
+  });
+  logger.info("Authoritative member account initialized by blocking trigger", {
+    diagnosticCode: "ACCOUNT_TRIGGER_INITIALIZED",
+  });
 
   // Set initial custom claims — role only (entitlements stay in Firestore)
   return {

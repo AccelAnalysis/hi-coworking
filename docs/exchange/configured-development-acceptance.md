@@ -2,6 +2,24 @@
 
 This runbook validates the integrated Exchange against the configured Firebase development environment without weakening production security or making configured-environment checks a blocking pull-request gate.
 
+## Recorded result — 2026-07-21
+
+The configured backend target was `hi-coworking-plat`, `us-central1`, with emulator mode off. The local canonical browser build also resolved `NEXT_PUBLIC_FIREBASE_PROJECT_ID` and the expected-project guard to `hi-coworking-plat`.
+
+The deployed minimum set is ACTIVE on second-generation Node 20: `account_initialize`, `profile_update`, `enrichment_search`, and `enrichment_link`. CORS preflight returned 204 for each and unauthenticated callable POSTs returned `UNAUTHENTICATED`, proving the public Cloud Run invoker binding reaches the Firebase callable auth boundary.
+
+Configured acceptance passed:
+
+- disposable ordinary user: registration, member-only authority, authoritative documents, no organization/marketing authority, profile save/reload, USAspending search, field-level review/attestation/link, refresh, new login, persistence, and return to canonical Exchange;
+- existing member, organization owner, and administrator: sign-in, Exchange, and canonical profile save;
+- guarded synthetic schema-less `master`: account repair preserved role/legacy state, canonical save migrated to schema 3/version 1, reload persisted it;
+- Chromium, Firefox, desktop WebKit/Safari, and Mobile Safari emulation at 390×844, 393×852, 430×932, 1280×800, and 1440×900: configured member Exchange/profile save;
+- interactive 430×932 registration inspection: zero horizontal overflow and no browser warnings/errors.
+
+The first enrichment probe exposed an undefined-field Firestore write and was fixed before acceptance. After redeployment, USAspending returned `ok`; SAM.gov was invoked but returned HTTP 400 and was reported `unavailable`. Both disposable identities were removed Auth-first through exact marker/age/purpose guards, followed by their enumerated documents. A final inventory found zero matching synthetic Auth or user artifacts.
+
+No Hosting, rules, indexes, Storage rules, seed batch, Stripe, Microsoft, or production resource was deployed or invoked.
+
 ## Principles
 
 - Emulator development remains available at all times.
@@ -105,6 +123,15 @@ Set smoke-test inputs:
 export EXCHANGE_DEV_BASE_URL='http://127.0.0.1:3000'
 export EXCHANGE_DEV_REQUIRE_SMOKE='true'
 ```
+
+Enable the exact self-cleaning identity journeys separately:
+
+```bash
+export EXCHANGE_DEV_ALLOW_ACCOUNT_JOURNEY='true'
+export EXCHANGE_DEV_ALLOW_LEGACY_JOURNEY='true'
+```
+
+Each flag creates one uniquely named `@example.test` identity in Chromium only and refuses cleanup unless display-name, prefix/suffix, creation-age, and purpose guards match. Auth deletion occurs before Firestore cleanup so the session repair listener cannot recreate an orphan.
 
 Run the non-destructive smoke first:
 

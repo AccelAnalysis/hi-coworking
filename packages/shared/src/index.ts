@@ -375,6 +375,11 @@ export const userDocSchema = z.object({
   credits: z.number().default(0),
   lifetimeCreditsPurchased: z.number().default(0),
 
+  registrationVersion: z.number().int().positive().optional(),
+  accountInitializedAt: z.number().optional(),
+  lastAccountInitializationAt: z.number().optional(),
+  lastAccountInitializationKeyHash: z.string().optional(),
+
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
@@ -422,6 +427,9 @@ export const profileDocSchema = z.object({
   uid: z.string(),
   businessName: z.string().optional(),
   bio: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  domain: z.string().optional(),
   naicsCodes: z.array(z.string()).optional(),
   certifications: z.array(z.string()).optional(),   // e.g. ["8(a)", "WOSB", "HUBZone"]
   verifiedCertifications: z.array(z.string()).optional(), // Server-reviewed; owners edit certifications only
@@ -457,6 +465,12 @@ export const profileDocSchema = z.object({
   enrichmentMatchId: z.string().optional(),
   enrichmentData: z.record(z.string(), z.any()).optional(),
   enrichmentLinkedAt: z.number().optional(),
+  enrichmentFieldProvenance: z.record(z.string(), z.object({
+    provider: z.enum(["sam_gov", "usaspending"]),
+    requestId: z.string(),
+    matchId: z.string(),
+    linkedAt: z.number(),
+  })).optional(),
   attestationText: z.string().optional(),
   attestationTimestamp: z.number().optional(),
   attestationAcknowledgedConsequences: z.boolean().optional(),
@@ -471,6 +485,9 @@ export const profileDocSchema = z.object({
   videoIntroStatus: z.enum(["processing", "ready", "failed"]).optional(),
 
   published: z.boolean().default(false),
+  profileSchemaVersion: z.number().int().positive().optional(),
+  profileVersion: z.number().int().nonnegative().default(0),
+  legacyMigratedAt: z.number().optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 }).superRefine((profile, context) => {

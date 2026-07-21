@@ -484,13 +484,23 @@ export interface EnrichmentCandidate {
   confidenceScore: number;
   matchReason: string;
   source: "sam_gov" | "usaspending";
+  providers: Array<"sam_gov" | "usaspending">;
 }
+
+export type EnrichmentField =
+  | "businessName"
+  | "city"
+  | "state"
+  | "uei"
+  | "duns"
+  | "cageCode";
 
 export const enrichmentSearchFn = httpsCallable<
   {
     businessName: string;
     city?: string;
     state?: string;
+    domain?: string;
     uei?: string;
     cage?: string;
     duns?: string;
@@ -499,6 +509,7 @@ export const enrichmentSearchFn = httpsCallable<
     requestId: string;
     candidates: EnrichmentCandidate[];
     cached: boolean;
+    operationRequestId: string;
     providerStatus: {
       samGov: "ok" | "not_configured" | "unavailable";
       usaSpending: "ok" | "not_configured" | "unavailable";
@@ -510,26 +521,43 @@ export const enrichmentLinkFn = httpsCallable<
   {
     requestId: string;
     matchId: string;
+    selectedFields: EnrichmentField[];
+    expectedVersion: number;
+    replaceExisting?: boolean;
     attestationText: string;
     acknowledgedConsequences: boolean;
   },
-  { success: boolean; matchId: string }
+  {
+    success: boolean;
+    requestId: string;
+    operationRequestId: string;
+    matchId: string;
+    appliedFields: EnrichmentField[];
+    profileVersion: number;
+    profileCompletenessScore: number;
+    readinessTier: string;
+    profile: Record<string, unknown>;
+  }
 >(functions, "enrichment_link");
 
 export interface ProfileUpdateInput {
-  businessName?: string;
-  bio?: string;
+  expectedVersion: number;
+  businessName?: string | null;
+  bio?: string | null;
+  city?: string | null;
+  state?: string | null;
+  domain?: string | null;
   naicsCodes?: string[];
   certifications?: string[];
-  uei?: string;
-  duns?: string;
-  cageCode?: string;
+  uei?: string | null;
+  duns?: string | null;
+  cageCode?: string | null;
   capabilityStatementUrl?: string | null;
   capabilityStatementStoragePath?: string | null;
   photoUrl?: string | null;
   photoStoragePath?: string | null;
-  website?: string;
-  linkedin?: string;
+  website?: string | null;
+  linkedin?: string | null;
   videoIntroUrl?: string | null;
   videoIntroStoragePath?: string | null;
   videoIntroPosterUrl?: string | null;
@@ -541,12 +569,34 @@ export const profileUpdateFn = httpsCallable<
   ProfileUpdateInput,
   {
     success: boolean;
+    requestId: string;
+    profileVersion: number;
     profileCompletenessScore: number;
     readinessTier: string;
     published: boolean;
-    profileSchemaVersion?: number;
+    profileSchemaVersion: number;
+    updatedAt: number;
+    publicProjectionUpdated: boolean;
+    profile: Record<string, unknown>;
   }
 >(functions, "profile_update");
+
+export const accountInitializeFn = httpsCallable<
+  {
+    displayName?: string;
+    idempotencyKey: string;
+    registrationVersion?: 1;
+  },
+  {
+    success: boolean;
+    requestId: string;
+    accountInitialized: boolean;
+    idempotentReplay: boolean;
+    role: string;
+    profileVersion: number;
+    claimsRefreshRequired: boolean;
+  }
+>(functions, "account_initialize");
 
 export const verificationSubmitFn = httpsCallable<
   {

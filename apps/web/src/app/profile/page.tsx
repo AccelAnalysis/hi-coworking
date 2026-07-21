@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
@@ -14,12 +15,14 @@ import {
   profileUpdateFn,
   type ProfileUpdateInput,
   type EnrichmentCandidate,
+  type EnrichmentField,
   verificationSubmitFn,
 } from "@/lib/functions";
 import { ReadinessMeter } from "@/components/profile/ReadinessMeter";
 import { useProfileAssetUrl } from "@/components/profile/ProfileAssetImage";
 import { storage } from "@/lib/firebase";
 import { diagnoseProfileUpdateError } from "@/lib/profileUpdateDiagnostics";
+import { serializeCallableError } from "@/lib/callableDiagnostics";
 import { ref, uploadBytesResumable } from "firebase/storage";
 import Image from "next/image";
 import { computeReadinessTier, type ProfileDoc } from "@hi/shared";
@@ -68,6 +71,9 @@ const CERTIFICATION_OPTIONS = [
 type FormData = {
   businessName: string;
   bio: string;
+  city: string;
+  state: string;
+  domain: string;
   website: string;
   linkedin: string;
   naicsCodes: string;
@@ -91,6 +97,14 @@ interface VerificationUploadDoc {
 }
 
 const EXPECTED_ATTESTATION = "I confirm I am authorized to represent this company.";
+const ENRICHMENT_FIELD_LABELS: Record<EnrichmentField, string> = {
+  businessName: "Business name",
+  city: "City",
+  state: "State",
+  uei: "UEI",
+  duns: "DUNS",
+  cageCode: "CAGE code",
+};
 
 function uniqueAssetFileName(file: File): string {
   const extension = file.name.toLowerCase().match(/\.[a-z0-9]{1,10}$/)?.[0] ?? "";
@@ -124,6 +138,9 @@ function ProfileContent() {
   const [form, setForm] = useState<FormData>({
     businessName: "",
     bio: "",
+    city: "",
+    state: "",
+    domain: "",
     website: "",
     linkedin: "",
     naicsCodes: "",
@@ -147,13 +164,21 @@ function ProfileContent() {
   const [verificationNote, setVerificationNote] = useState("");
   const [searchingMatches, setSearchingMatches] = useState(false);
   const [linkingMatch, setLinkingMatch] = useState(false);
+  const [enrichmentLinked, setEnrichmentLinked] = useState(false);
   const [submittingVerification, setSubmittingVerification] = useState(false);
   const [enrichmentCandidates, setEnrichmentCandidates] = useState<EnrichmentCandidate[]>([]);
   const [enrichmentRequestId, setEnrichmentRequestId] = useState<string | null>(null);
+  const [enrichmentProviderStatus, setEnrichmentProviderStatus] = useState<{
+    samGov: "ok" | "not_configured" | "unavailable";
+    usaSpending: "ok" | "not_configured" | "unavailable";
+  } | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<EnrichmentCandidate | null>(null);
   const [attestationText, setAttestationText] = useState("");
   const [attestationAuthorized, setAttestationAuthorized] = useState(false);
   const [attestationConsequences, setAttestationConsequences] = useState(false);
+  const [selectedEnrichmentFields, setSelectedEnrichmentFields] = useState<EnrichmentField[]>([]);
+  const [replaceExistingConfirmed, setReplaceExistingConfirmed] = useState(false);
+  const [profileVersion, setProfileVersion] = useState(0);
   const [verificationDocs, setVerificationDocs] = useState<Record<VerificationUploadType, VerificationUploadDoc | null>>({
     business_license: null,
     ein_letter: null,
@@ -169,6 +194,7 @@ function ProfileContent() {
   const [videoIntroPosterStoragePath, setVideoIntroPosterStoragePath] = useState<string | null>(null);
   const [videoIntroStatus, setVideoIntroStatus] = useState<"processing" | "ready" | "failed" | null>(null);
   const capFileRef = useRef<HTMLInputElement>(null);
+  const errorSummaryRef = useRef<HTMLDivElement>(null);
   const photoFileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
   const verificationFileRefs = useRef<Record<VerificationUploadType, HTMLInputElement | null>>({
@@ -204,6 +230,9 @@ function ProfileContent() {
           setForm({
             businessName: existing.businessName || "",
             bio: existing.bio || "",
+            city: existing.city || "",
+            state: existing.state || "",
+            domain: existing.domain || "",
             website: existing.website || "",
             linkedin: existing.linkedin || "",
             naicsCodes: existing.naicsCodes?.join(", ") || "",
@@ -217,6 +246,7 @@ function ProfileContent() {
           setPhotoUrl(existing.photoUrl || null);
           setPhotoStoragePath(existing.photoStoragePath || null);
           setPublished(existing.published ?? false);
+          setProfileVersion(existing.profileVersion ?? 0);
           setVerificationStatus(existing.verificationStatus || "none");
           setVerificationNote(existing.verificationRejectionReason || "");
           setVideoIntroUrl(existing.videoIntroUrl || null);
@@ -232,6 +262,10 @@ function ProfileContent() {
       }
     })();
   }, [user]);
+
+  useEffect(() => {
+    if (error) errorSummaryRef.current?.focus();
+  }, [error]);
 
   const updateField = useCallback(
     <K extends keyof FormData>(field: K, value: FormData[K]) => {
@@ -259,17 +293,19 @@ function ProfileContent() {
       .filter(Boolean);
 
     return {
-      ...(form.businessName ? { businessName: form.businessName } : {}),
-      ...(form.bio ? { bio: form.bio } : {}),
-      ...(form.website ? { website: form.website } : {}),
-      ...(form.linkedin ? { linkedin: form.linkedin } : {}),
-      ...(naicsCodes.length > 0 ? { naicsCodes } : {}),
-      ...(form.certifications.length > 0
-        ? { certifications: form.certifications }
-        : {}),
-      ...(form.uei ? { uei: form.uei } : {}),
-      ...(form.duns ? { duns: form.duns } : {}),
-      ...(form.cageCode ? { cageCode: form.cageCode } : {}),
+      expectedVersion: profileVersion,
+      businessName: form.businessName.trim() || null,
+      bio: form.bio.trim() || null,
+      city: form.city.trim() || null,
+      state: form.state.trim() || null,
+      domain: form.domain.trim() || null,
+      website: form.website.trim() || null,
+      linkedin: form.linkedin.trim() || null,
+      naicsCodes,
+      certifications: form.certifications,
+      uei: form.uei.trim() || null,
+      duns: form.duns.trim() || null,
+      cageCode: form.cageCode.trim() || null,
       capabilityStatementUrl: capStatementUrl,
       capabilityStatementStoragePath: capStatementStoragePath,
       photoUrl,
@@ -286,6 +322,7 @@ function ProfileContent() {
     form,
     photoStoragePath,
     photoUrl,
+    profileVersion,
     published,
     videoIntroPosterStoragePath,
     videoIntroPosterUrl,
@@ -294,8 +331,20 @@ function ProfileContent() {
   ]);
 
   const computedProfileData = buildProfileData();
+  const { expectedVersion: _expectedVersion, ...computedProfileFields } = computedProfileData;
+  void _expectedVersion;
   const computedProfileForDisplay: Partial<ProfileDoc> = {
-    ...computedProfileData,
+    ...computedProfileFields,
+    businessName: computedProfileFields.businessName ?? undefined,
+    bio: computedProfileFields.bio ?? undefined,
+    city: computedProfileFields.city ?? undefined,
+    state: computedProfileFields.state ?? undefined,
+    domain: computedProfileFields.domain ?? undefined,
+    website: computedProfileFields.website ?? undefined,
+    linkedin: computedProfileFields.linkedin ?? undefined,
+    uei: computedProfileFields.uei ?? undefined,
+    duns: computedProfileFields.duns ?? undefined,
+    cageCode: computedProfileFields.cageCode ?? undefined,
     capabilityStatementUrl: computedProfileData.capabilityStatementUrl ?? undefined,
     capabilityStatementStoragePath:
       computedProfileData.capabilityStatementStoragePath ?? undefined,
@@ -314,6 +363,15 @@ function ProfileContent() {
     verificationStatus,
   });
   const procReady = readinessTier === "procurement_ready";
+  const canStartEnrichment = Boolean(profile?.businessName);
+  const enrichmentPreview = selectedCandidate ? ([
+    ["businessName", form.businessName, selectedCandidate.legalName],
+    ["city", form.city, selectedCandidate.city],
+    ["state", form.state, selectedCandidate.state],
+    ["uei", form.uei, selectedCandidate.uei],
+    ["duns", form.duns, selectedCandidate.duns],
+    ["cageCode", form.cageCode, selectedCandidate.cage],
+  ] as Array<[EnrichmentField, string, string | undefined]>).filter(([, , proposed]) => Boolean(proposed)) : [];
 
   const handleSave = async () => {
     if (!user) return;
@@ -324,21 +382,9 @@ function ProfileContent() {
       const { data: result } = await profileUpdateFn(data);
       setProfile((previous) => ({
         ...(previous || {}),
-        ...data,
-        capabilityStatementUrl: data.capabilityStatementUrl ?? undefined,
-        capabilityStatementStoragePath:
-          data.capabilityStatementStoragePath ?? undefined,
-        photoUrl: data.photoUrl ?? undefined,
-        photoStoragePath: data.photoStoragePath ?? undefined,
-        videoIntroUrl: data.videoIntroUrl ?? undefined,
-        videoIntroStoragePath: data.videoIntroStoragePath ?? undefined,
-        videoIntroPosterUrl: data.videoIntroPosterUrl ?? undefined,
-        videoIntroPosterStoragePath:
-          data.videoIntroPosterStoragePath ?? undefined,
-        uid: user.uid,
-        profileCompletenessScore: result.profileCompletenessScore,
-        readinessTier: result.readinessTier as ProfileDoc["readinessTier"],
+        ...(result.profile as Partial<ProfileDoc>),
       }));
+      setProfileVersion(result.profileVersion);
       setSaved(true);
     } catch (err) {
       const diagnostic = diagnoseProfileUpdateError(err, {
@@ -346,10 +392,7 @@ function ProfileContent() {
         expectedProjectId: process.env.NEXT_PUBLIC_EXPECTED_FIREBASE_PROJECT_ID,
         hasAuthenticatedUser: Boolean(user),
       });
-      console.error("Profile update failed", {
-        diagnosticCode: diagnostic.code,
-        retryable: diagnostic.retryable,
-      });
+      console.warn("Profile update rejected", diagnostic.safeError);
       setError(
         process.env.NODE_ENV === "development"
           ? `${diagnostic.userMessage} Diagnostic: ${diagnostic.code}.`
@@ -415,19 +458,24 @@ function ProfileContent() {
     }
 
     setSearchingMatches(true);
+    setEnrichmentLinked(false);
     try {
       const { data } = await enrichmentSearchFn({
         businessName: form.businessName.trim(),
-        city: undefined,
-        state: undefined,
-        uei: form.uei || undefined,
-        cage: form.cageCode || undefined,
-        duns: form.duns || undefined,
+        ...(form.city.trim() ? { city: form.city.trim() } : {}),
+        ...(form.state.trim() ? { state: form.state.trim() } : {}),
+        ...(form.domain.trim() ? { domain: form.domain.trim() } : {}),
+        ...(form.uei.trim() ? { uei: form.uei.trim() } : {}),
+        ...(form.cageCode.trim() ? { cage: form.cageCode.trim() } : {}),
+        ...(form.duns.trim() ? { duns: form.duns.trim() } : {}),
       });
 
       setEnrichmentCandidates(data.candidates || []);
       setEnrichmentRequestId(data.requestId || null);
+      setEnrichmentProviderStatus(data.providerStatus);
       setSelectedCandidate((data.candidates || [])[0] || null);
+      setSelectedEnrichmentFields([]);
+      setReplaceExistingConfirmed(false);
       if ((data.candidates || []).length === 0) {
         const configuredProviderAvailable = Object.values(data.providerStatus).some((status) => status === "ok");
         setError(configuredProviderAvailable
@@ -435,7 +483,11 @@ function ProfileContent() {
           : "Automated entity matching is not configured or is temporarily unavailable. You can continue with manual profile entry.");
       }
     } catch (err) {
-      console.error("Failed to search enrichment matches", err);
+      console.warn("Enrichment search rejected", serializeCallableError(err, {
+        functionName: "enrichment_search",
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        region: "us-central1",
+      }));
       setError("Unable to search entity matches right now. Please try again.");
     } finally {
       setSearchingMatches(false);
@@ -460,27 +512,51 @@ function ProfileContent() {
       setError("You must acknowledge both attestation checkboxes.");
       return;
     }
+    if (selectedEnrichmentFields.length === 0) {
+      setError("Select at least one candidate field to apply.");
+      return;
+    }
+    if (
+      profile?.enrichmentMatchId
+      && profile.enrichmentMatchId !== selectedCandidate.matchId
+      && !replaceExistingConfirmed
+    ) {
+      setError("Confirm that you want to replace the existing entity link.");
+      return;
+    }
 
     setLinkingMatch(true);
     try {
-      await enrichmentLinkFn({
+      const { data: result } = await enrichmentLinkFn({
         requestId: enrichmentRequestId,
         matchId: selectedCandidate.matchId,
+        selectedFields: selectedEnrichmentFields,
+        expectedVersion: profileVersion,
+        replaceExisting: replaceExistingConfirmed,
         attestationText: attestationText.trim(),
         acknowledgedConsequences: attestationConsequences,
       });
 
-      setProfile((prev) => ({
-        ...(prev || {}),
-        enrichmentMatchId: selectedCandidate.matchId,
-        enrichmentData: selectedCandidate,
-        attestationText: EXPECTED_ATTESTATION,
-        attestationAcknowledgedConsequences: true,
-        attestationTimestamp: Date.now(),
+      const canonical = result.profile as Partial<ProfileDoc>;
+      setProfile((prev) => ({ ...(prev || {}), ...canonical }));
+      setProfileVersion(result.profileVersion);
+      setForm((previous) => ({
+        ...previous,
+        businessName: canonical.businessName ?? previous.businessName,
+        city: canonical.city ?? previous.city,
+        state: canonical.state ?? previous.state,
+        uei: canonical.uei ?? previous.uei,
+        duns: canonical.duns ?? previous.duns,
+        cageCode: canonical.cageCode ?? previous.cageCode,
       }));
-      setSaved(false);
+      setSaved(true);
+      setEnrichmentLinked(true);
     } catch (err) {
-      console.error("Failed to link selected enrichment match", err);
+      console.warn("Enrichment link rejected", serializeCallableError(err, {
+        functionName: "enrichment_link",
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        region: "us-central1",
+      }));
       setError("Failed to link selected match. Please try again.");
     } finally {
       setLinkingMatch(false);
@@ -648,7 +724,7 @@ function ProfileContent() {
     <AppShell>
       <div className="max-w-3xl mx-auto py-4">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
               Business Profile
@@ -658,7 +734,13 @@ function ProfileContent() {
             </p>
           </div>
 
-          {/* Procurement-Ready badge */}
+          <div className="flex flex-col items-end gap-2">
+          <Link
+            href="/exchange"
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-900"
+          >
+            Continue to Exchange
+          </Link>
           {procReady ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide bg-emerald-100 text-emerald-800 border border-emerald-200">
               <Shield className="h-3.5 w-3.5" />
@@ -669,6 +751,7 @@ function ProfileContent() {
               {completeness}% Complete
             </span>
           )}
+          </div>
         </div>
 
         <ReadinessMeter
@@ -677,7 +760,14 @@ function ProfileContent() {
           verificationStatus={verificationStatus}
         />
 
+        {!canStartEnrichment ? (
+          <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-900">
+            Add and save a business name to begin. All other profile fields are optional, and you can continue to the Exchange at any time.
+          </div>
+        ) : null}
+
         {/* Verification + Enrichment */}
+        {canStartEnrichment ? (
         <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
@@ -722,13 +812,22 @@ function ProfileContent() {
                   Uses secure server-side SAM.gov + USAspending enrichment.
                 </p>
               </div>
+              {enrichmentProviderStatus ? (
+                <p className="mt-2 text-[11px] text-slate-500" aria-live="polite">
+                  SAM.gov: {enrichmentProviderStatus.samGov.replace("_", " ")} · USAspending: {enrichmentProviderStatus.usaSpending.replace("_", " ")}
+                </p>
+              ) : null}
 
               {enrichmentCandidates.length > 0 && (
                 <div className="mt-3 max-h-44 space-y-2 overflow-auto">
                   {enrichmentCandidates.map((candidate) => (
                     <button
                       key={candidate.matchId}
-                      onClick={() => setSelectedCandidate(candidate)}
+                      onClick={() => {
+                        setSelectedCandidate(candidate);
+                        setSelectedEnrichmentFields([]);
+                        setReplaceExistingConfirmed(false);
+                      }}
                       className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-all ${
                         selectedCandidate?.matchId === candidate.matchId
                           ? "border-slate-900 bg-slate-50"
@@ -740,6 +839,7 @@ function ProfileContent() {
                         {(candidate.city || "Unknown city")}, {(candidate.state || "Unknown state")} · Score {candidate.confidenceScore}
                       </p>
                       <p className="text-slate-400">{candidate.matchReason}</p>
+                      <p className="text-slate-400">Sources: {candidate.providers.join(", ")}</p>
                     </button>
                   ))}
                 </div>
@@ -748,6 +848,30 @@ function ProfileContent() {
 
             <div className="rounded-lg border border-slate-200 p-3">
               <h3 className="mb-2 text-sm font-semibold text-slate-800">2) Attestation + link selected match</h3>
+              {selectedCandidate ? (
+                <fieldset className="mb-3 space-y-2 rounded-lg bg-slate-50 p-3">
+                  <legend className="px-1 text-xs font-semibold text-slate-700">
+                    Choose the exact fields to apply
+                  </legend>
+                  {enrichmentPreview.map(([field, current, proposed]) => (
+                    <label key={field} className="flex items-start gap-2 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={selectedEnrichmentFields.includes(field)}
+                        onChange={(event) => setSelectedEnrichmentFields((previous) => event.target.checked
+                          ? [...previous, field]
+                          : previous.filter((candidateField) => candidateField !== field))}
+                      />
+                      <span>
+                        <span className="font-semibold">{ENRICHMENT_FIELD_LABELS[field]}:</span>{" "}
+                        <span className="text-slate-500">{current || "Not set"}</span>{" → "}
+                        <span className="font-medium text-slate-900">{proposed}</span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              ) : null}
               <input
                 type="text"
                 value={attestationText}
@@ -759,6 +883,17 @@ function ProfileContent() {
                 <input type="checkbox" checked={attestationAuthorized} onChange={(e) => setAttestationAuthorized(e.target.checked)} className="mt-0.5" />
                 I certify this information is mine or I am an authorized representative.
               </label>
+              {profile?.enrichmentMatchId && selectedCandidate && profile.enrichmentMatchId !== selectedCandidate.matchId ? (
+                <label className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={replaceExistingConfirmed}
+                    onChange={(event) => setReplaceExistingConfirmed(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  Replace the existing entity link with this reviewed match. This action is audited.
+                </label>
+              ) : null}
               <label className="mt-2 flex items-start gap-2 text-xs text-slate-600">
                 <input type="checkbox" checked={attestationConsequences} onChange={(e) => setAttestationConsequences(e.target.checked)} className="mt-0.5" />
                 I understand false representation may result in permanent suspension.
@@ -771,6 +906,11 @@ function ProfileContent() {
                 {linkingMatch ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                 Link selected company
               </button>
+              {enrichmentLinked ? (
+                <p className="mt-2 text-xs font-semibold text-emerald-700" aria-live="polite">
+                  Enrichment linked. The selected fields and their provenance are saved.
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-lg border border-slate-200 p-3">
@@ -821,6 +961,7 @@ function ProfileContent() {
             </div>
           </div>
         </div>
+        ) : null}
 
         {/* Video intro */}
         <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -889,7 +1030,12 @@ function ProfileContent() {
 
         {/* Error message */}
         {error && (
-          <div className="flex items-center gap-2 p-3 mb-6 rounded-xl bg-red-50 text-red-700 text-sm border border-red-200">
+          <div
+            ref={errorSummaryRef}
+            role="alert"
+            tabIndex={-1}
+            className="flex items-center gap-2 p-3 mb-6 rounded-xl bg-red-50 text-red-700 text-sm border border-red-200 focus:outline-none focus:ring-2 focus:ring-red-600"
+          >
             <AlertCircle className="h-4 w-4 shrink-0" />
             {error}
             <button onClick={() => setError(null)} className="ml-auto">
@@ -967,7 +1113,7 @@ function ProfileContent() {
         </div>
 
         {/* Navigation + Save */}
-        <div className="flex items-center justify-between mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button
             onClick={() => setStep(Math.max(0, step - 1))}
             disabled={step === 0}
@@ -977,7 +1123,7 @@ function ProfileContent() {
             Back
           </button>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             {saved && (
               <span className="inline-flex items-center gap-1 text-sm text-emerald-600 font-medium">
                 <Check className="h-4 w-4" /> Saved
@@ -1085,7 +1231,7 @@ function StepBusiness({
       {/* Business Name */}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-          Business Name *
+          Business Name
         </label>
         <input
           type="text"
@@ -1111,6 +1257,43 @@ function StepBusiness({
         <p className="text-xs text-slate-400 mt-1">
           {form.bio.length}/500 characters
         </p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div>
+          <label htmlFor="profile-city" className="block text-sm font-medium text-slate-700 mb-1.5">City</label>
+          <input
+            id="profile-city"
+            type="text"
+            value={form.city}
+            onChange={(e) => updateField("city", e.target.value)}
+            autoComplete="address-level2"
+            className="w-full rounded-lg px-4 py-3 border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all"
+          />
+        </div>
+        <div>
+          <label htmlFor="profile-state" className="block text-sm font-medium text-slate-700 mb-1.5">State / region</label>
+          <input
+            id="profile-state"
+            type="text"
+            value={form.state}
+            onChange={(e) => updateField("state", e.target.value)}
+            autoComplete="address-level1"
+            className="w-full rounded-lg px-4 py-3 border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all"
+          />
+        </div>
+        <div>
+          <label htmlFor="profile-domain" className="block text-sm font-medium text-slate-700 mb-1.5">Business domain</label>
+          <input
+            id="profile-domain"
+            type="text"
+            value={form.domain}
+            onChange={(e) => updateField("domain", e.target.value)}
+            placeholder="example.com"
+            autoComplete="url"
+            className="w-full rounded-lg px-4 py-3 border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all"
+          />
+        </div>
       </div>
 
       {/* Website + LinkedIn */}

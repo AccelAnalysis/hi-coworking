@@ -394,10 +394,10 @@ export async function getPublicProfileFromFirestore(uid: string): Promise<Profil
 /**
  * Compute profile completeness score (0–100).
  * Field weights:
- *   businessName: 15, bio: 10, website: 5, linkedin: 5,
+ *   businessName: 15, bio: 10, website: 5, linkedin: 5, city/state: 5,
  *   naicsCodes (≥1): 15, certifications (≥1): 10,
  *   uei: 10, duns: 5, cageCode: 5,
- *   capability statement URL/path: 15, photo URL/path: 5
+ *   capability statement URL/path: 10, photo URL/path: 5
  */
 export function computeProfileCompleteness(profile: Partial<ProfileDoc> | null): number {
   if (!profile) return 0;
@@ -406,12 +406,13 @@ export function computeProfileCompleteness(profile: Partial<ProfileDoc> | null):
   if (profile.bio) score += 10;
   if (profile.website) score += 5;
   if (profile.linkedin) score += 5;
+  if (profile.city || profile.state) score += 5;
   if (profile.naicsCodes && profile.naicsCodes.length > 0) score += 15;
   if (profile.certifications && profile.certifications.length > 0) score += 10;
   if (profile.uei) score += 10;
   if (profile.duns) score += 5;
   if (profile.cageCode) score += 5;
-  if (profile.capabilityStatementStoragePath || profile.capabilityStatementUrl) score += 15;
+  if (profile.capabilityStatementStoragePath || profile.capabilityStatementUrl) score += 10;
   if (profile.photoStoragePath || profile.photoUrl) score += 5;
   return score;
 }

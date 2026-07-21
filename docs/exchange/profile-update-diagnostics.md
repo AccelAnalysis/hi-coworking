@@ -1,24 +1,15 @@
 # Profile update diagnostics
 
-## Confirmed code-path finding
+## Root cause and the former `{}`
 
-The client and Functions source both use `profile_update`, and the web SDK targets `us-central1`. The prior UI caught every callable failure and replaced it with the same generic sentence. That masking—not a missing client implementation—was the confirmed code defect.
+The configured browser called `profile_update` in the correct project/region, but the Function did not exist and returned HTTP 404. The former `console.error("Profile update failed", error)` exposed `{}` because Firebase error properties are largely non-enumerable and the page discarded the meaningful SDK code/details. It was a serialization/diagnostic defect, not proof that the error had no information.
 
-The branch now classifies:
+The shared serializer now emits only a bounded structure: Firebase/name code, safe diagnostic code, retryability, request ID, function name, project, region, endpoint classification, and finite HTTP status. It never emits payloads, ID tokens, emails, business identifiers, addresses, file paths, provider responses, or secrets.
 
-- `FUNCTION_NOT_DEPLOYED`
-- `WRONG_FIREBASE_PROJECT`
-- `UNAUTHENTICATED`
-- `STALE_AUTH_TOKEN`
-- `PERMISSION_DENIED`
-- `INVALID_PROFILE_DATA`
-- `LEGACY_PROFILE_REQUIRES_MIGRATION`
-- `STORAGE_REFERENCE_INVALID`
-- `NETWORK_UNAVAILABLE`
-- `UNKNOWN`
+## Classifications
 
-Development displays the safe diagnostic code; production displays only actionable user text. The server attaches structured codes to validation and asset-path failures and migrates legacy profiles in the save transaction. Raw secrets, token contents, private field values, and server stack traces are never returned.
+The profile UI distinguishes service-not-deployed/404, wrong project, wrong region, emulator/remote mismatch, deployment revision mismatch, unauthenticated or stale session, permission denial, invalid input, invalid storage reference, App Check rejection, version conflict, transaction abort, timeout/network/CORS failure, and unknown failure.
 
-## Deployment check
+Expected callable rejections use a structured development warning and an actionable inline message. Unexpected upload/UI failures remain errors. Production shows recovery text without implementation detail. The error summary has `role="alert"`, receives focus, and gives a reload/retry or sign-in action appropriate to the code.
 
-If the configured development environment returns `FUNCTION_NOT_DEPLOYED`, deploy the current `profile_update` export to `us-central1` in the exact project named by `NEXT_PUBLIC_FIREBASE_PROJECT_ID`. If it returns `WRONG_FIREBASE_PROJECT`, correct the local environment and restart Next.js. Browser acceptance covers an ordinary user and a legacy `master` account against emulators.
+Request IDs connect browser evidence to safe Function log entries. Server logs record status/count/correlation metadata only; they do not log queries or profile/provider payloads.

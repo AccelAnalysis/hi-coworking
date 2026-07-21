@@ -23,11 +23,31 @@ export default defineConfig({
   projects: [
     {
       name: "configured-development-chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "configured-development-chromium-large",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "configured-development-firefox",
+      use: { ...devices["Desktop Firefox"], viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "configured-development-safari",
+      use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 } },
     },
     {
       name: "configured-development-mobile-safari",
-      use: { ...devices["iPhone 14"] },
+      use: { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: "configured-development-mobile-safari-393",
+      use: { ...devices["iPhone 14"], viewport: { width: 393, height: 852 } },
+    },
+    {
+      name: "configured-development-mobile-safari-430",
+      use: { ...devices["iPhone 14 Pro Max"], viewport: { width: 430, height: 932 } },
     },
   ],
 });

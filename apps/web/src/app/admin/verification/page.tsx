@@ -265,9 +265,12 @@ function AdminVerificationContent() {
     try {
       const { data } = await enrichmentSearchFn({
         businessName: selectedProfile.businessName,
-        uei: selectedProfile.uei,
-        cage: selectedProfile.cageCode,
-        duns: selectedProfile.duns,
+        ...(selectedProfile.city ? { city: selectedProfile.city } : {}),
+        ...(selectedProfile.state ? { state: selectedProfile.state } : {}),
+        ...(selectedProfile.domain ? { domain: selectedProfile.domain } : {}),
+        ...(selectedProfile.uei ? { uei: selectedProfile.uei } : {}),
+        ...(selectedProfile.cageCode ? { cage: selectedProfile.cageCode } : {}),
+        ...(selectedProfile.duns ? { duns: selectedProfile.duns } : {}),
       });
       setEnrichmentCandidates(data.candidates || []);
     } catch (err) {

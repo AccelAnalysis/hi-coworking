@@ -3,6 +3,16 @@ import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import { parseCallableInput } from "./exchange/contracts";
+import { getAuthorizedActor, writeExchangeAudit } from "./exchange/security";
+import { sanitizePublicProfile } from "./exchange/publicProfiles";
+import {
+  computeProfileCompleteness,
+  computeProfileReadiness,
+  PROFILE_SCHEMA_VERSION,
+  sanitizeCanonicalProfile,
+} from "./profileModel";
 
 const samGovApiKey = defineSecret("SAM_GOV_API_KEY");
 
@@ -17,6 +27,7 @@ type EnrichmentCandidate = {
   confidenceScore: number;
   matchReason: string;
   source: "sam_gov" | "usaspending";
+  providers: Array<"sam_gov" | "usaspending">;
 };
 
 type EnrichmentProviderStatus = "ok" | "not_configured" | "unavailable";
@@ -27,6 +38,36 @@ type EnrichmentProviderResult = {
 };
 
 const ENRICHMENT_REQUEST_TTL_MS = 30 * 60 * 1_000;
+const enrichmentSearchInputSchema = z.object({
+  businessName: z.string().trim().min(1).max(200),
+  city: z.string().trim().max(160).optional(),
+  state: z.string().trim().max(80).optional(),
+  domain: z.string().trim().max(253).optional(),
+  uei: z.string().trim().max(40).optional(),
+  cage: z.string().trim().max(20).optional(),
+  duns: z.string().trim().max(20).optional(),
+}).strict();
+const enrichmentFieldSchema = z.enum([
+  "businessName",
+  "city",
+  "state",
+  "uei",
+  "duns",
+  "cageCode",
+]);
+type EnrichmentField = z.infer<typeof enrichmentFieldSchema>;
+const enrichmentLinkInputSchema = z.object({
+  requestId: z.string().trim().min(1).max(128),
+  matchId: z.string().trim().min(1).max(256),
+  selectedFields: z.array(enrichmentFieldSchema).min(1).max(6),
+  expectedVersion: z.number().int().nonnegative(),
+  replaceExisting: z.boolean().default(false),
+  attestationText: z.string().trim().max(200),
+  acknowledgedConsequences: z.literal(true),
+}).strict().refine(
+  (value) => new Set(value.selectedFields).size === value.selectedFields.length,
+  { path: ["selectedFields"], message: "selectedFields must not contain duplicates" },
+);
 
 function getDb() {
   return admin.firestore();
@@ -43,6 +84,7 @@ function toCacheKey(data: {
   businessName?: string;
   city?: string;
   state?: string;
+  domain?: string;
   uei?: string;
   cage?: string;
   duns?: string;
@@ -51,6 +93,7 @@ function toCacheKey(data: {
     businessName: normalize(data.businessName),
     city: normalize(data.city),
     state: normalize(data.state),
+    domain: normalize(data.domain),
     uei: normalize(data.uei),
     cage: normalize(data.cage),
     duns: normalize(data.duns),
@@ -181,19 +224,22 @@ async function searchSamGov(params: {
       return {
         matchId: `sam_${uei || cage || index}`,
         legalName,
-        city,
-        state,
-        uei,
-        cage,
-        duns,
+        ...(city ? { city } : {}),
+        ...(state ? { state } : {}),
+        ...(uei ? { uei } : {}),
+        ...(cage ? { cage } : {}),
+        ...(duns ? { duns } : {}),
         confidenceScore: score,
         matchReason: reason,
         source: "sam_gov" as const,
+        providers: ["sam_gov" as const],
       };
     });
     return { candidates, status: "ok" };
-  } catch (err) {
-    logger.error("SAM.gov enrichment error", { err });
+  } catch (error) {
+    logger.warn("SAM.gov enrichment unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     return { candidates: [], status: "unavailable" };
   }
 }
@@ -243,20 +289,50 @@ async function searchUsaSpending(params: {
       return {
         matchId: `usaspending_${uei || duns || index}`,
         legalName,
-        city,
-        state,
-        uei,
-        duns,
+        ...(city ? { city } : {}),
+        ...(state ? { state } : {}),
+        ...(uei ? { uei } : {}),
+        ...(duns ? { duns } : {}),
         confidenceScore: score,
         matchReason: reason,
         source: "usaspending" as const,
+        providers: ["usaspending" as const],
       };
     });
     return { candidates, status: "ok" };
-  } catch (err) {
-    logger.error("USAspending enrichment error", { err });
+  } catch (error) {
+    logger.warn("USAspending enrichment unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
     return { candidates: [], status: "unavailable" };
   }
+}
+
+function candidateIdentity(candidate: EnrichmentCandidate): string {
+  if (normalize(candidate.uei)) return `uei:${normalize(candidate.uei)}`;
+  if (normalize(candidate.duns)) return `duns:${normalize(candidate.duns)}`;
+  if (normalize(candidate.cage)) return `cage:${normalize(candidate.cage)}`;
+  return [candidate.legalName, candidate.city, candidate.state].map(normalize).join("|");
+}
+
+function deduplicateCandidates(candidates: EnrichmentCandidate[]): EnrichmentCandidate[] {
+  const unique = new Map<string, EnrichmentCandidate>();
+  for (const candidate of candidates) {
+    const key = candidateIdentity(candidate);
+    const previous = unique.get(key);
+    if (!previous) {
+      unique.set(key, candidate);
+      continue;
+    }
+    const preferred = candidate.confidenceScore > previous.confidenceScore ? candidate : previous;
+    unique.set(key, {
+      ...preferred,
+      providers: Array.from(new Set([...previous.providers, ...candidate.providers])),
+    });
+  }
+  return Array.from(unique.values())
+    .sort((a, b) => b.confidenceScore - a.confidenceScore)
+    .slice(0, 20);
 }
 
 async function recordEnrichmentRequest(input: {
@@ -285,32 +361,33 @@ async function recordEnrichmentRequest(input: {
 export const enrichment_search = onCall(
   { secrets: [samGovApiKey] },
   async (request) => {
-    if (!request.auth) {
-      throw new HttpsError("unauthenticated", "Must be logged in");
+    const actor = getAuthorizedActor(request);
+    const operationRequestId = randomUUID();
+    let input;
+    try {
+      input = parseCallableInput(enrichmentSearchInputSchema, request.data);
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw new HttpsError(error.code, error.message, {
+          ...(error.details && typeof error.details === "object" ? error.details : {}),
+          diagnosticCode: "INVALID_ENRICHMENT_QUERY",
+          requestId: operationRequestId,
+        });
+      }
+      throw error;
     }
 
-    const { businessName, city, state, uei, cage, duns } = request.data as {
-      businessName?: string;
-      city?: string;
-      state?: string;
-      uei?: string;
-      cage?: string;
-      duns?: string;
-    };
-
-    if (!businessName?.trim()) {
-      throw new HttpsError("invalid-argument", "businessName is required");
-    }
-
-    await enforceRateLimit(request.auth.uid);
+    const { businessName, city, state, domain, uei, cage, duns } = input;
+    await enforceRateLimit(actor.uid);
 
     const normalized = {
       businessName: businessName.trim(),
-      city: city?.trim(),
-      state: state?.trim(),
-      uei: uei?.trim(),
-      cage: cage?.trim(),
-      duns: duns?.trim(),
+      ...(city?.trim() ? { city: city.trim() } : {}),
+      ...(state?.trim() ? { state: state.trim() } : {}),
+      ...(domain?.trim() ? { domain: domain.trim() } : {}),
+      ...(uei?.trim() ? { uei: uei.trim() } : {}),
+      ...(cage?.trim() ? { cage: cage.trim() } : {}),
+      ...(duns?.trim() ? { duns: duns.trim() } : {}),
     };
 
     const cacheKey = toCacheKey(normalized);
@@ -335,7 +412,12 @@ export const enrichment_search = onCall(
         };
       } | undefined;
       if (cacheData?.expiresAt && cacheData.expiresAt > now && Array.isArray(cacheData.candidates)) {
-        candidates = cacheData.candidates;
+        candidates = deduplicateCandidates(cacheData.candidates.map((candidate) => ({
+          ...candidate,
+          providers: Array.isArray(candidate.providers) && candidate.providers.length > 0
+            ? candidate.providers
+            : [candidate.source],
+        })));
         providerStatus = {
           samGov: cacheData.providerStatus?.samGov ?? "unavailable",
           usaSpending: cacheData.providerStatus?.usaSpending ?? "unavailable",
@@ -350,9 +432,10 @@ export const enrichment_search = onCall(
         searchUsaSpending(normalized),
       ]);
 
-      candidates = [...samResult.candidates, ...spendingResult.candidates]
-        .sort((a, b) => b.confidenceScore - a.confidenceScore)
-        .slice(0, 20);
+      candidates = deduplicateCandidates([
+        ...samResult.candidates,
+        ...spendingResult.candidates,
+      ]);
       providerStatus = {
         samGov: samResult.status,
         usaSpending: spendingResult.status,
@@ -373,7 +456,7 @@ export const enrichment_search = onCall(
     }
 
     const requestId = await recordEnrichmentRequest({
-      uid: request.auth.uid,
+      uid: actor.uid,
       query: normalized,
       candidates: candidates!,
       providerStatus: providerStatus!,
@@ -386,42 +469,36 @@ export const enrichment_search = onCall(
       candidates: candidates!,
       providerStatus: providerStatus!,
       cached,
+      operationRequestId,
     };
   }
 );
 
 export const enrichment_link = onCall(async (request) => {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Must be logged in");
+  const actor = getAuthorizedActor(request);
+  const operationRequestId = randomUUID();
+  let input;
+  try {
+    input = parseCallableInput(enrichmentLinkInputSchema, request.data);
+  } catch (error) {
+    if (error instanceof HttpsError) {
+      throw new HttpsError(error.code, error.message, {
+        ...(error.details && typeof error.details === "object" ? error.details : {}),
+        diagnosticCode: "INVALID_ENRICHMENT_LINK",
+        requestId: operationRequestId,
+      });
+    }
+    throw error;
   }
 
-  const uid = request.auth.uid;
-  const {
-    requestId,
-    matchId,
-    attestationText,
-    acknowledgedConsequences,
-  } = request.data as {
-    requestId?: string;
-    matchId?: string;
-    attestationText?: string;
-    acknowledgedConsequences?: boolean;
-  };
-
-  if (!requestId) {
-    throw new HttpsError("invalid-argument", "requestId is required");
-  }
-  if (!matchId) {
-    throw new HttpsError("invalid-argument", "matchId is required");
-  }
-
+  const uid = actor.uid;
+  const { requestId, matchId, attestationText, selectedFields, replaceExisting } = input;
   const expectedAttestation = "I confirm I am authorized to represent this company.";
-  if ((attestationText || "").trim() !== expectedAttestation) {
-    throw new HttpsError("invalid-argument", "Attestation text must match required confirmation");
-  }
-
-  if (!acknowledgedConsequences) {
-    throw new HttpsError("invalid-argument", "You must acknowledge consequences of false representation");
+  if (attestationText !== expectedAttestation) {
+    throw new HttpsError("invalid-argument", "Attestation text must match required confirmation", {
+      diagnosticCode: "ATTESTATION_REQUIRED",
+      requestId: operationRequestId,
+    });
   }
 
   const db = getDb();
@@ -429,29 +506,91 @@ export const enrichment_link = onCall(async (request) => {
   const requestRef = db.collection("enrichmentRequests").doc(requestId);
   const now = Date.now();
 
-  let selectedCandidate: EnrichmentCandidate | undefined;
-  await db.runTransaction(async (transaction) => {
+  return db.runTransaction(async (transaction) => {
     const [requestSnapshot, profileSnapshot] = await Promise.all([
       transaction.get(requestRef),
       transaction.get(profileRef),
     ]);
     const enrichmentRequest = requestSnapshot.data();
     if (!requestSnapshot.exists || enrichmentRequest?.uid !== uid) {
-      throw new HttpsError("permission-denied", "Enrichment request is not available to this account");
+      throw new HttpsError("permission-denied", "Enrichment request is not available to this account", {
+        diagnosticCode: "ENRICHMENT_REQUEST_FORBIDDEN",
+        requestId: operationRequestId,
+      });
     }
     if (Number(enrichmentRequest.expiresAt || 0) <= now || enrichmentRequest.status !== "open") {
-      throw new HttpsError("failed-precondition", "Enrichment request has expired or was already used");
+      throw new HttpsError("failed-precondition", "Enrichment request has expired or was already used", {
+        diagnosticCode: "ENRICHMENT_REQUEST_EXPIRED_OR_USED",
+        requestId: operationRequestId,
+      });
     }
     const candidates = Array.isArray(enrichmentRequest.candidates)
       ? enrichmentRequest.candidates as EnrichmentCandidate[]
       : [];
-    selectedCandidate = candidates.find((candidate) => candidate.matchId === matchId);
+    const selectedCandidate = candidates.find((candidate) => candidate.matchId === matchId);
     if (!selectedCandidate) {
-      throw new HttpsError("invalid-argument", "Selected match was not returned by this enrichment request");
+      throw new HttpsError("invalid-argument", "Selected match was not returned by this enrichment request", {
+        diagnosticCode: "ENRICHMENT_MATCH_INVALID",
+        requestId: operationRequestId,
+      });
     }
 
     const previous = profileSnapshot.data() ?? {};
-    transaction.set(profileRef, {
+    const previousVersion = Number.isInteger(previous.profileVersion)
+      ? Number(previous.profileVersion)
+      : 0;
+    if (input.expectedVersion !== previousVersion) {
+      throw new HttpsError("aborted", "The profile changed after enrichment review began", {
+        diagnosticCode: "PROFILE_VERSION_CONFLICT",
+        requestId: operationRequestId,
+        currentVersion: previousVersion,
+      });
+    }
+    if (
+      typeof previous.enrichmentMatchId === "string"
+      && previous.enrichmentMatchId !== matchId
+      && !replaceExisting
+    ) {
+      throw new HttpsError("failed-precondition", "Confirm replacement of the existing enrichment link", {
+        diagnosticCode: "ENRICHMENT_RELINK_CONFIRMATION_REQUIRED",
+        requestId: operationRequestId,
+      });
+    }
+
+    const candidateFieldValues: Record<EnrichmentField, string | undefined> = {
+      businessName: selectedCandidate.legalName,
+      city: selectedCandidate.city,
+      state: selectedCandidate.state,
+      uei: selectedCandidate.uei,
+      duns: selectedCandidate.duns,
+      cageCode: selectedCandidate.cage,
+    };
+    const appliedValues: Record<string, string> = {};
+    const fieldProvenance: Record<string, unknown> = previous.enrichmentFieldProvenance
+      && typeof previous.enrichmentFieldProvenance === "object"
+      ? { ...previous.enrichmentFieldProvenance }
+      : {};
+    for (const field of selectedFields) {
+      const value = candidateFieldValues[field];
+      if (!value) {
+        throw new HttpsError("invalid-argument", `The selected match has no value for ${field}`, {
+          diagnosticCode: "ENRICHMENT_FIELD_UNAVAILABLE",
+          field,
+          requestId: operationRequestId,
+        });
+      }
+      appliedValues[field] = value;
+      fieldProvenance[field] = {
+        provider: selectedCandidate.source,
+        requestId,
+        matchId,
+        linkedAt: now,
+      };
+    }
+
+    const merged: Record<string, unknown> = {
+      ...previous,
+      ...appliedValues,
       uid,
       enrichmentMatchId: matchId,
       enrichmentData: selectedCandidate,
@@ -462,38 +601,74 @@ export const enrichment_link = onCall(async (request) => {
         matchedAt: now,
       },
       enrichmentLinkedAt: now,
+      enrichmentFieldProvenance: fieldProvenance,
       attestationText: expectedAttestation,
       attestationTimestamp: now,
       attestationAcknowledgedConsequences: true,
       updatedAt: now,
       createdAt: previous.createdAt ?? now,
-    }, { merge: true });
+      profileSchemaVersion: PROFILE_SCHEMA_VERSION,
+      profileVersion: previousVersion + 1,
+    };
+    merged.profileCompletenessScore = computeProfileCompleteness(merged);
+    merged.readinessTier = computeProfileReadiness(merged);
+    transaction.set(profileRef, merged);
+    if (merged.published === true) {
+      transaction.set(
+        db.collection("publicProfiles").doc(uid),
+        sanitizePublicProfile(uid, merged),
+      );
+    }
     transaction.update(requestRef, {
       status: "linked",
       linkedMatchId: matchId,
       linkedAt: now,
+      appliedFields: selectedFields,
     });
-  });
+    const auditRef = db.collection("verificationAuditLog").doc();
+    transaction.create(auditRef, {
+      id: auditRef.id,
+      uid,
+      action: "enrichment_linked",
+      performedBy: uid,
+      details: "Approved enrichment fields linked from a server-recorded candidate",
+      createdAt: now,
+    });
+    const attestationAuditRef = db.collection("verificationAuditLog").doc();
+    transaction.create(attestationAuditRef, {
+      id: attestationAuditRef.id,
+      uid,
+      action: "attestation_signed",
+      performedBy: uid,
+      details: "Authorization attestation completed",
+      createdAt: now,
+    });
+    writeExchangeAudit(transaction, db, {
+      actorUid: uid,
+      actorRole: actor.role,
+      action: previous.enrichmentMatchId && previous.enrichmentMatchId !== matchId
+        ? "profile.enrichment_relinked"
+        : "profile.enrichment_linked",
+      entityType: "profile",
+      entityId: uid,
+      metadata: {
+        provider: selectedCandidate.source,
+        selectedFieldCount: selectedFields.length,
+        replacedExisting: Boolean(previous.enrichmentMatchId && previous.enrichmentMatchId !== matchId),
+      },
+      createdAt: now,
+    });
 
-  const auditRef = db.collection("verificationAuditLog").doc();
-  await auditRef.set({
-    id: auditRef.id,
-    uid,
-    action: "enrichment_linked",
-    performedBy: uid,
-    details: `Linked enrichment match ${matchId}`,
-    createdAt: now,
+    return {
+      success: true,
+      requestId,
+      operationRequestId,
+      matchId,
+      appliedFields: selectedFields,
+      profileVersion: merged.profileVersion as number,
+      profileCompletenessScore: merged.profileCompletenessScore as number,
+      readinessTier: merged.readinessTier as string,
+      profile: sanitizeCanonicalProfile(merged),
+    };
   });
-
-  const attestationAuditRef = db.collection("verificationAuditLog").doc();
-  await attestationAuditRef.set({
-    id: attestationAuditRef.id,
-    uid,
-    action: "attestation_signed",
-    performedBy: uid,
-    details: "Authorization attestation completed",
-    createdAt: now,
-  });
-
-  return { success: true, matchId };
 });
