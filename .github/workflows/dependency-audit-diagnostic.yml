@@ -1,0 +1,40 @@
+name: Dependency audit diagnostic
+
+on:
+  pull_request:
+    branches:
+      - codex/exchange-configured-acceptance-and-seed-activation
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dependency-audit-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Capture production audit
+        shell: bash
+        run: |
+          npm audit --omit=dev --json > audit-report.json || true
+          test -s audit-report.json
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dependency-audit
+          path: audit-report.json
+          retention-days: 1
