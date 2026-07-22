@@ -46,10 +46,23 @@ jobs:
         run: npm install --package-lock-only --ignore-scripts
       - name: Verify clean installation
         run: npm ci
+      - name: Capture remediated production audit
+        shell: bash
+        run: npm audit --omit=dev --json > audit-after.json || true
+      - name: Upload remediated dependency files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remediated-production-dependencies
+          path: |
+            package.json
+            package-lock.json
+            apps/functions/package.json
+            audit-after.json
+          retention-days: 1
       - name: Require clean production audit
         shell: bash
         run: |
-          npm audit --omit=dev --json > audit-after.json || true
           node <<'NODE'
           const fs = require('node:fs');
           const report = JSON.parse(fs.readFileSync('audit-after.json', 'utf8'));
@@ -60,13 +73,3 @@ jobs:
             process.exit(1);
           }
           NODE
-      - name: Upload remediated dependency files
-        uses: actions/upload-artifact@v4
-        with:
-          name: remediated-production-dependencies
-          path: |
-            package.json
-            package-lock.json
-            apps/functions/package.json
-            audit-after.json
-          retention-days: 1
