@@ -56,3 +56,4 @@ The worker must use overlapping incremental windows, retry 429/5xx responses wit
 - If SAM.gov requires IP allowlisting, route Functions/Cloud Run egress through a reserved static outbound IP.
 - Run configured-development acceptance after every endpoint/version/query-contract change.
 - Treat `unavailable` as a provider degradation, not as permission to fabricate entity or opportunity data.
+- Preserve the audited dependency constraints for `sharp` 0.35.3 and `fast-xml-parser` 5.10.1 (including the Next and Google Cloud Storage parent overrides) until a later clean production audit supports changing them.
