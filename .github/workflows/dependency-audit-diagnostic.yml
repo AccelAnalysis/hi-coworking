@@ -5,8 +5,6 @@ on:
     branches:
       - codex/exchange-configured-acceptance-and-seed-activation
     paths:
-      - "package.json"
-      - "package-lock.json"
       - ".github/workflows/dependency-audit-diagnostic.yml"
   workflow_dispatch:
 
@@ -14,9 +12,9 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  remediate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,16 +23,50 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-      - name: Install dependencies
-        run: npm ci
-      - name: Capture production audit
+      - name: Apply dependency constraints
         shell: bash
         run: |
-          npm audit --omit=dev --json > audit-report.json || true
-          test -s audit-report.json
-      - name: Upload audit report
+          node <<'NODE'
+          const fs = require('node:fs');
+          const rootPath = 'package.json';
+          const root = JSON.parse(fs.readFileSync(rootPath, 'utf8'));
+          root.overrides = {
+            ...(root.overrides || {}),
+            'fast-xml-parser': '5.10.1',
+            sharp: '0.35.3',
+          };
+          fs.writeFileSync(rootPath, JSON.stringify(root, null, 2) + '\n');
+
+          const functionsPath = 'apps/functions/package.json';
+          const functions = JSON.parse(fs.readFileSync(functionsPath, 'utf8'));
+          functions.dependencies.sharp = '0.35.3';
+          fs.writeFileSync(functionsPath, JSON.stringify(functions, null, 2) + '\n');
+          NODE
+      - name: Regenerate lockfile
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Verify clean installation
+        run: npm ci
+      - name: Require clean production audit
+        shell: bash
+        run: |
+          npm audit --omit=dev --json > audit-after.json || true
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('audit-after.json', 'utf8'));
+          const counts = report.metadata?.vulnerabilities || {};
+          const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+          if (total !== 0) {
+            console.error(JSON.stringify(report, null, 2));
+            process.exit(1);
+          }
+          NODE
+      - name: Upload remediated dependency files
         uses: actions/upload-artifact@v4
         with:
-          name: production-dependency-audit
-          path: audit-report.json
+          name: remediated-production-dependencies
+          path: |
+            package.json
+            package-lock.json
+            apps/functions/package.json
+            audit-after.json
           retention-days: 1
