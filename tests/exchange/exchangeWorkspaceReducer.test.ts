@@ -82,20 +82,161 @@ describe("exchangeWorkspaceReducer", () => {
     }
   });
 
-  it("switches Exchange views and clears incompatible detail state", () => {
-    const selected = reduce(
+  it("preserves global context and restores each mode's selection and filters", () => {
+    const opportunities = reduce(
       createInitialExchangeWorkspaceState(),
+      actions.setValidatedActorOrganization("actor-1"),
+      actions.setSubjectOrganization("subject-1"),
+      actions.setSearch("water systems"),
+      actions.setViewport({ longitude: -76.7, latitude: 36.9, zoom: 10 }),
+      actions.setFilters({ naicsFilters: ["541511"] }),
       actions.selectEntity({ entityType: "rfx", entityId: "rfx-1" }),
       actions.openMobileFilter(),
-      actions.setView("connections"),
+      actions.setModeListScroll(480),
+      actions.setModePanelSubsection("requirements"),
+      actions.setModeDraftRefs({ opportunityResponseDraftId: "response-1" }),
     );
-    expect(selected).toMatchObject({
+    const referrals = reduce(
+      opportunities,
+      actions.setView("connections"),
+      actions.setFilters({ referralStatusFilters: ["accepted"] }),
+      actions.selectEntity({ entityType: "referral", entityId: "referral-1" }),
+      actions.setModeListScroll(120),
+    );
+    expect(referrals).toMatchObject({
       view: "connections",
-      selection: null,
-      rightPanelOpen: false,
-      mobileDetailOpen: false,
-      mobileFilterOpen: false,
+      actorOrganizationId: "actor-1",
+      subjectOrganizationId: "subject-1",
+      organizationDrawerOpen: true,
+      searchQuery: "water systems",
+      viewport: { longitude: -76.7, latitude: 36.9, zoom: 10 },
+      referralStatusFilters: ["accepted"],
+      selection: { entityType: "referral", entityId: "referral-1" },
+      rightPanelOpen: true,
+      mobileFilterOpen: true,
     });
+
+    const restored = exchangeWorkspaceReducer(
+      referrals,
+      actions.setView("opportunities"),
+    );
+    expect(restored).toMatchObject({
+      actorOrganizationId: "actor-1",
+      subjectOrganizationId: "subject-1",
+      organizationDrawerOpen: true,
+      searchQuery: "water systems",
+      viewport: { longitude: -76.7, latitude: 36.9, zoom: 10 },
+      naicsFilters: ["541511"],
+      selection: { entityType: "rfx", entityId: "rfx-1" },
+    });
+    expect(restored.modeStates.opportunities).toMatchObject({
+      listScrollTop: 480,
+      panelSubsection: "requirements",
+      draftRefs: { opportunityResponseDraftId: "response-1" },
+    });
+    expect(restored.modeStates.referrals).toMatchObject({
+      listScrollTop: 120,
+      secondaryContext: { entityType: "referral", entityId: "referral-1" },
+    });
+  });
+
+  it("carries actor, subject, search, and camera through all four mode workspaces", () => {
+    let state = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.setValidatedActorOrganization("actor-1"),
+      actions.setSubjectOrganization("subject-1"),
+      actions.setSearch("coastal engineering"),
+      actions.setViewport({ longitude: -76.7, latitude: 36.9, zoom: 9.5 }),
+      actions.setSecondaryContext({ entityType: "rfx", entityId: "rfx-1" }),
+      actions.setView("referrals"),
+      actions.setSecondaryContext({ entityType: "referral", entityId: "referral-1" }),
+      actions.setView("intelligence"),
+      actions.setSecondaryContext({ entityType: "relationship", entityId: "relationship-1" }),
+      actions.setView("resources"),
+      actions.setSecondaryContext({ entityType: "resource", entityId: "resource-1" }),
+    );
+
+    const expectedByView = {
+      opportunities: { entityType: "rfx", entityId: "rfx-1" },
+      referrals: { entityType: "referral", entityId: "referral-1" },
+      intelligence: { entityType: "relationship", entityId: "relationship-1" },
+      resources: { entityType: "resource", entityId: "resource-1" },
+    } as const;
+    for (const view of [
+      "opportunities",
+      "referrals",
+      "intelligence",
+      "resources",
+    ] as const) {
+      state = exchangeWorkspaceReducer(state, actions.setView(view));
+      expect(state).toMatchObject({
+        view,
+        actorOrganizationId: "actor-1",
+        subjectOrganizationId: "subject-1",
+        organizationDrawerOpen: true,
+        searchQuery: "coastal engineering",
+        viewport: { longitude: -76.7, latitude: 36.9, zoom: 9.5 },
+        secondaryContext: expectedByView[view],
+      });
+    }
+  });
+
+  it("never changes actor authority when an organization marker becomes the subject", () => {
+    const state = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.setRequestedActorOrganization("requested-actor"),
+      actions.setValidatedActorOrganization("validated-actor"),
+      actions.selectEntity({ entityType: "rfx", entityId: "working-opportunity" }),
+      actions.selectEntity({ entityType: "organization", entityId: "external-subject" }),
+    );
+    expect(state).toMatchObject({
+      requestedActorOrganizationId: "requested-actor",
+      actorOrganizationId: "validated-actor",
+      subjectOrganizationId: "external-subject",
+      secondaryContext: { entityType: "rfx", entityId: "working-opportunity" },
+      selection: { entityType: "rfx", entityId: "working-opportunity" },
+      organizationDrawerOpen: true,
+    });
+    const cleared = exchangeWorkspaceReducer(
+      state,
+      actions.clearSubjectOrganization(),
+    );
+    expect(cleared.actorOrganizationId).toBe("validated-actor");
+    expect(cleared.subjectOrganizationId).toBeUndefined();
+  });
+
+  it("owns Resources category, eligibility filters, selection, and list position", () => {
+    const resources = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.setView("resources"),
+      actions.setResourceCategory("capital"),
+      actions.setModeFilters({
+        eligibilityFilters: ["woman-owned", "woman-owned"],
+        providerFilters: ["local"],
+      }),
+      actions.selectEntity({ entityType: "resource", entityId: "resource-1" }),
+      actions.setModeListScroll(300),
+    );
+    expect(resources.modeStates.resources).toMatchObject({
+      resourceCategory: "capital",
+      filters: {
+        eligibilityFilters: ["woman-owned"],
+        providerFilters: ["local"],
+        serviceFilters: [],
+      },
+      secondaryContext: { entityType: "resource", entityId: "resource-1" },
+      listScrollTop: 300,
+    });
+    const restored = reduce(
+      resources,
+      actions.setView("intelligence"),
+      actions.setView("resources"),
+    );
+    expect(restored.secondaryContext).toEqual({
+      entityType: "resource",
+      entityId: "resource-1",
+    });
+    expect(restored.modeStates.resources.resourceCategory).toBe("capital");
   });
 
   it("owns Connections and Intelligence filter state", () => {
@@ -129,6 +270,17 @@ describe("exchangeWorkspaceReducer", () => {
       connectionIndustryFilters: [],
       connectionTerritoryFilters: [],
       relationshipFilter: "all",
+    });
+    const referralsRestored = exchangeWorkspaceReducer(
+      intelligence,
+      actions.setView("referrals"),
+    );
+    expect(referralsRestored).toMatchObject({
+      referralStatusFilters: ["accepted", "converted"],
+      connectionIndustryFilters: ["Engineering services"],
+      connectionTerritoryFilters: ["51093"],
+      compensationFilter: "configured",
+      relationshipFilter: "trusted",
     });
   });
 

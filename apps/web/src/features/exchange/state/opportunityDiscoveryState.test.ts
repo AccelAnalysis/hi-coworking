@@ -102,6 +102,7 @@ test("invalid location and money state is rejected by the reducer", () => {
       latitude: 200,
       longitude: -76,
       radiusMiles: 999,
+      includeRemote: false,
     },
   }));
 

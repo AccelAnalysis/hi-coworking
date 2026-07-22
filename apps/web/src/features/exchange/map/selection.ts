@@ -35,7 +35,10 @@ export function getExchangeSelectionTargets(
   }
 
   if (selection.entityType === "organization") {
-    return [{ source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: selection.entityId }];
+    return [
+      { source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: selection.entityId },
+      { source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations, id: selection.entityId },
+    ];
   }
 
   const releasedTargets = [

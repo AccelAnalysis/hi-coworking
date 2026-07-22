@@ -33,9 +33,10 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_contact = exports.referral_create = exports.referralFinance_adminApproveManualPayout = exports.referralFinance_getPayoutReadiness = exports.referralFinance_initializeLifecycle = exports.referralFinance_getOperatingReserve = exports.referralFinance_quote = exports.stripe_createExchangeBillingPortalSession = exports.stripe_createExchangeCreditPackCheckout = exports.stripe_createExchangeMembershipCheckout = exports.exchange_adminGetLaunchDashboard = exports.exchange_adminUpdateCommercialPolicy = exports.exchange_adminAdjustCredits = exports.exchange_spendCredits = exports.exchange_getOrganizationWallet = exports.exchange_getOrganizationEntitlements = exports.exchange_getPublicCommercialPolicy = exports.exchange_normalizeSensitiveStorageMetadata = exports.exchange_privateStorage = exports.rfx_listManaged = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_prepareResponseDownload = exports.rfx_prepareResponseUploads = exports.rfx_evaluateResponse = exports.rfx_submitResponse = exports.rfx_cancel = exports.rfx_moderate = exports.rfx_update = exports.rfx_publish = exports.access_seamWebhook = exports.access_adminGetDoorStatus = exports.access_adminResendPin = exports.access_adminUnlock = exports.access_adminRevoke = exports.access_getMyGrants = exports.onReferralWritten = exports.exchange_expireCredits = exports.access_noShowRevoke = exports.access_expireGrants = exports.rfx_cleanupResponseUploadGrants = exports.businessReferral_expireSent = exports.team_expire_invites = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
-exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_processSocialPosts = exports.events_generateShareKits = exports.events_processCampaignJobs = exports.events_enqueueCampaignJobs = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.referralIntelligence_getReciprocalPatterns = exports.referralIntelligence_getEconomicImpact = exports.referralIntelligence_getGapAnalysis = exports.referralIntelligence_listRelationships = exports.referralIntelligence_getOverview = exports.referralCommerce_updateConfiguration = exports.referralCommerce_getConfiguration = exports.referralServiceOffer_listDiscoverable = exports.referralServiceOffer_listMine = exports.referralServiceOffer_deactivate = exports.referralServiceOffer_createVersion = exports.referralServiceOffer_publish = exports.referralServiceOffer_create = exports.businessReferral_suggestRecipients = exports.businessReferral_reviewTransaction = exports.businessReferral_reportTransaction = exports.businessReferral_listTimeline = exports.businessReferral_getDetail = exports.businessReferral_listMine = exports.businessReferral_resolveDispute = exports.businessReferral_createDispute = exports.businessReferral_prepareEvidenceAccess = exports.businessReferral_withdrawConsent = exports.businessReferral_confirmConsent = exports.businessReferral_updateConsent = exports.businessReferral_progress = exports.businessReferral_respond = exports.businessReferral_send = exports.businessReferral_create = exports.legacyBusinessReferral_listReceived = exports.platformInvite_listReceived = void 0;
-exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = exports.referral_onStatusChange = exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = exports.team_revoke_invite = exports.team_respond_invite = exports.team_invite = exports.team_create = exports.team_listMine = exports.profile_update = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = void 0;
+exports.exchange_adminGetLaunchDashboard = exports.exchange_adminUpdateCommercialPolicy = exports.exchange_adminAdjustCredits = exports.exchange_spendCredits = exports.exchange_getOrganizationWallet = exports.exchange_getOrganizationEntitlements = exports.exchange_getPublicCommercialPolicy = exports.exchange_getOrganizationResourceStatus = exports.exchange_requestOrganizationIntroduction = exports.exchange_requestOrganizationContact = exports.exchange_saveOrganization = exports.exchange_organizationDirectory = exports.exchange_resolveOrganizationPerspective = exports.exchange_listActorOrganizations = exports.exchange_adminReviewOrganizationClaim = exports.exchange_adminGetOrganizationClaim = exports.exchange_adminListOrganizationClaims = exports.exchange_organizationListMyClaims = exports.exchange_organizationRequestClaim = exports.exchange_organizationCreate = exports.exchange_organizationSearch = exports.exchange_normalizeSensitiveStorageMetadata = exports.exchange_privateStorage = exports.rfx_listManaged = exports.rfx_refreshSuggestions = exports.rfx_backfillGeo = exports.rfx_prepareResponseDownload = exports.rfx_prepareResponseUploads = exports.rfx_evaluateResponse = exports.rfx_submitResponse = exports.rfx_cancel = exports.rfx_moderate = exports.rfx_update = exports.rfx_publish = exports.access_seamWebhook = exports.access_adminGetDoorStatus = exports.access_adminResendPin = exports.access_adminUnlock = exports.access_adminRevoke = exports.access_getMyGrants = exports.rfx_syncDiscoveryProjection = exports.onReferralWritten = exports.exchange_expireCredits = exports.access_noShowRevoke = exports.access_expireGrants = exports.rfx_cleanupResponseUploadGrants = exports.businessReferral_expireSent = exports.team_expire_invites = exports.rfx_refreshSuggestions_scheduled = exports.allocateMonthlyCredits = void 0;
+exports.events_cancelRegistration = exports.events_registerFree = exports.events_createSponsorshipCheckout = exports.events_createTicketCheckout = exports.referralIntelligence_getReciprocalPatterns = exports.referralIntelligence_getEconomicImpact = exports.referralIntelligence_getGapAnalysis = exports.referralIntelligence_listRelationships = exports.referralIntelligence_getOverview = exports.referralCommerce_updateConfiguration = exports.referralCommerce_getConfiguration = exports.referralServiceOffer_listDiscoverable = exports.referralServiceOffer_listMine = exports.referralServiceOffer_deactivate = exports.referralServiceOffer_createVersion = exports.referralServiceOffer_publish = exports.referralServiceOffer_create = exports.businessReferral_suggestRecipients = exports.businessReferral_reviewTransaction = exports.businessReferral_reportTransaction = exports.businessReferral_listTimeline = exports.businessReferral_getDetail = exports.businessReferral_listMine = exports.businessReferral_resolveDispute = exports.businessReferral_createDispute = exports.businessReferral_prepareEvidenceAccess = exports.businessReferral_withdrawConsent = exports.businessReferral_confirmConsent = exports.businessReferral_updateConsent = exports.businessReferral_progress = exports.businessReferral_respond = exports.businessReferral_send = exports.businessReferral_create = exports.legacyBusinessReferral_listReceived = exports.platformInvite_listReceived = exports.referral_createPayoutCheckout = exports.referral_decline = exports.referral_accept = exports.referral_markPaid = exports.referral_convert = exports.referral_contact = exports.referral_create = exports.referralFinance_adminApproveManualPayout = exports.referralFinance_getPayoutReadiness = exports.referralFinance_initializeLifecycle = exports.referralFinance_getOperatingReserve = exports.referralFinance_quote = exports.stripe_createExchangeBillingPortalSession = exports.stripe_createExchangeCreditPackCheckout = exports.stripe_createExchangeMembershipCheckout = void 0;
+exports.admin_backfillQBO = exports.admin_syncPaymentToQBO = exports.qb_paymentsWebhook = exports.qb_refundCharge = exports.qb_chargeCard = exports.payments_pollQBInvoices = exports.payments_createQuickBooksInvoice = exports.intuit_checkConnection = exports.intuit_oauthCallback = exports.intuit_getAuthUrl = exports.admin_markPaymentStatus = exports.qb_createCheckout = exports.stripe_webhook = exports.stripe_createCheckoutSession = exports.leads_submitContact = exports.leads_onNewLead = exports.leads_submitLead = exports.setUserRole = exports.authBeforeCreate = exports.createBooking = exports.createBookingQuote = exports.health = exports.team_manage_member = exports.team_revoke_invite = exports.team_respond_invite = exports.team_invite = exports.team_create = exports.team_listMine = exports.account_initialize = exports.profile_update = exports.verification_flag = exports.verification_review = exports.verification_submit = exports.enrichment_link = exports.enrichment_search = exports.territory_release_scheduled = exports.territory_list_released = exports.territory_update = exports.territory_create = exports.bookstore_getDownloadLink = exports.bookstore_createCheckoutSession = exports.events_onMediaUploaded = exports.events_processSocialPosts = exports.events_generateShareKits = exports.events_processCampaignJobs = exports.events_enqueueCampaignJobs = exports.events_setSeriesOccurrenceOverride = exports.events_extendHorizon = exports.events_upsertSeries = exports.events_joinWaitlist = void 0;
+exports.notify_paymentCreated = exports.notify_eventRegistration = exports.notify_referralUpdate = exports.notify_rfxResponse = exports.notify_rfxCreated = exports.org_purchaseSeats = exports.org_create = exports.referral_onStatusChange = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const identity_1 = require("firebase-functions/v2/identity");
@@ -182,6 +183,24 @@ Object.defineProperty(exports, "verification_review", { enumerable: true, get: f
 Object.defineProperty(exports, "verification_flag", { enumerable: true, get: function () { return verification_1.verification_flag; } });
 const profiles_1 = require("./profiles");
 Object.defineProperty(exports, "profile_update", { enumerable: true, get: function () { return profiles_1.profile_update; } });
+const accounts_1 = require("./accounts");
+Object.defineProperty(exports, "account_initialize", { enumerable: true, get: function () { return accounts_1.account_initialize; } });
+const organizations_1 = require("./exchange/organizations");
+Object.defineProperty(exports, "exchange_organizationSearch", { enumerable: true, get: function () { return organizations_1.exchange_organizationSearch; } });
+Object.defineProperty(exports, "exchange_organizationCreate", { enumerable: true, get: function () { return organizations_1.exchange_organizationCreate; } });
+Object.defineProperty(exports, "exchange_organizationRequestClaim", { enumerable: true, get: function () { return organizations_1.exchange_organizationRequestClaim; } });
+Object.defineProperty(exports, "exchange_organizationListMyClaims", { enumerable: true, get: function () { return organizations_1.exchange_organizationListMyClaims; } });
+Object.defineProperty(exports, "exchange_adminListOrganizationClaims", { enumerable: true, get: function () { return organizations_1.exchange_adminListOrganizationClaims; } });
+Object.defineProperty(exports, "exchange_adminGetOrganizationClaim", { enumerable: true, get: function () { return organizations_1.exchange_adminGetOrganizationClaim; } });
+Object.defineProperty(exports, "exchange_adminReviewOrganizationClaim", { enumerable: true, get: function () { return organizations_1.exchange_adminReviewOrganizationClaim; } });
+const organizationWorkspace_1 = require("./exchange/organizationWorkspace");
+Object.defineProperty(exports, "exchange_listActorOrganizations", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_listActorOrganizations; } });
+Object.defineProperty(exports, "exchange_resolveOrganizationPerspective", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_resolveOrganizationPerspective; } });
+Object.defineProperty(exports, "exchange_organizationDirectory", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_organizationDirectory; } });
+Object.defineProperty(exports, "exchange_saveOrganization", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_saveOrganization; } });
+Object.defineProperty(exports, "exchange_requestOrganizationContact", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_requestOrganizationContact; } });
+Object.defineProperty(exports, "exchange_requestOrganizationIntroduction", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_requestOrganizationIntroduction; } });
+Object.defineProperty(exports, "exchange_getOrganizationResourceStatus", { enumerable: true, get: function () { return organizationWorkspace_1.exchange_getOrganizationResourceStatus; } });
 const teaming_1 = require("./teaming");
 Object.defineProperty(exports, "team_listMine", { enumerable: true, get: function () { return teaming_1.team_listMine; } });
 Object.defineProperty(exports, "team_create", { enumerable: true, get: function () { return teaming_1.team_create; } });
@@ -195,6 +214,8 @@ Object.defineProperty(exports, "rfx_refreshSuggestions", { enumerable: true, get
 Object.defineProperty(exports, "rfx_refreshSuggestions_scheduled", { enumerable: true, get: function () { return rfxSuggestions_1.rfx_refreshSuggestions_scheduled; } });
 const rfxQueries_1 = require("./rfxQueries");
 Object.defineProperty(exports, "rfx_listManaged", { enumerable: true, get: function () { return rfxQueries_1.rfx_listManaged; } });
+const opportunityDiscovery_1 = require("./opportunityDiscovery");
+Object.defineProperty(exports, "rfx_syncDiscoveryProjection", { enumerable: true, get: function () { return opportunityDiscovery_1.rfx_syncDiscoveryProjection; } });
 const exchangeStorage_1 = require("./exchangeStorage");
 Object.defineProperty(exports, "exchange_privateStorage", { enumerable: true, get: function () { return exchangeStorage_1.exchange_privateStorage; } });
 Object.defineProperty(exports, "exchange_normalizeSensitiveStorageMetadata", { enumerable: true, get: function () { return exchangeStorage_1.exchange_normalizeSensitiveStorageMetadata; } });
@@ -377,20 +398,25 @@ exports.createBooking = (0, https_1.onCall)(async (request) => {
 exports.authBeforeCreate = (0, identity_1.beforeUserCreated)(async (event) => {
     const user = event.data;
     if (!user) {
-        logger.error("Auth before-create event did not contain a user record");
+        logger.error("Auth before-create event omitted its user record", {
+            diagnosticCode: "ACCOUNT_TRIGGER_EVENT_MISSING",
+        });
         throw new https_1.HttpsError("internal", "Account provisioning could not be verified");
     }
-    logger.info(`Creating user doc for ${user.uid} (${user.email})`);
-    const now = Date.now();
-    const userDoc = {
+    if (!user.email) {
+        throw new https_1.HttpsError("failed-precondition", "An email address is required for registration");
+    }
+    await (0, accounts_1.provisionAccountDocuments)({
         uid: user.uid,
-        email: user.email || "",
-        displayName: user.displayName || "",
-        role: "member",
-        membershipStatus: "none",
-        createdAt: now,
-    };
-    await db.collection("users").doc(user.uid).set(userDoc);
+        email: user.email,
+        displayName: user.displayName,
+        trustedRole: "member",
+        idempotencyKey: "blocking-trigger-v1",
+        registrationVersion: 1,
+    });
+    logger.info("Authoritative member account initialized by blocking trigger", {
+        diagnosticCode: "ACCOUNT_TRIGGER_INITIALIZED",
+    });
     // Set initial custom claims — role only (entitlements stay in Firestore)
     return {
         customClaims: { role: "member" },
@@ -1225,80 +1251,24 @@ exports.referral_onStatusChange = (0, firestore_1.onDocumentCreated)("referrals/
 });
 // --- Corporate Org (PR-17) ---
 /**
- * Callable: Create a new organization.
- * Creates the org doc and adds the caller as owner.
+ * Retired compatibility endpoint. Canonical creation owns duplicate checks,
+ * projections, membership, commercial state, idempotency, and audit.
  */
 exports.org_create = (0, https_1.onCall)(async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError("unauthenticated", "Must be logged in");
     }
-    const { name, slug, website, address, billingEmail, seats } = request.data;
-    if (!name?.trim() || !slug?.trim()) {
-        throw new https_1.HttpsError("invalid-argument", "name and slug are required");
-    }
-    // Check slug uniqueness
-    const existing = await db.collection("orgs").where("slug", "==", slug.trim()).limit(1).get();
-    if (!existing.empty) {
-        throw new https_1.HttpsError("already-exists", "An org with that slug already exists");
-    }
-    const orgRef = db.collection("orgs").doc();
-    const orgDoc = {
-        id: orgRef.id,
-        name: name.trim(),
-        slug: slug.trim().toLowerCase(),
-        ownerUid: request.auth.uid,
-        website: website?.trim() || "",
-        address: address?.trim() || "",
-        billingEmail: billingEmail?.trim() || "",
-        seatsPurchased: seats || 5,
-        seatsUsed: 1,
-        status: "active",
-        createdAt: Date.now(),
-    };
-    const memberDoc = {
-        id: `${orgRef.id}_${request.auth.uid}`,
-        orgId: orgRef.id,
-        uid: request.auth.uid,
-        role: "owner",
-        joinedAt: Date.now(),
-    };
-    const batch = db.batch();
-    batch.set(orgRef, orgDoc);
-    batch.set(db.collection("orgMembers").doc(memberDoc.id), memberDoc);
-    await batch.commit();
-    logger.info("Organization created", { orgId: orgRef.id, ownerUid: request.auth.uid });
-    return { orgId: orgRef.id };
+    throw new https_1.HttpsError("failed-precondition", "This legacy organization creator is retired. Use exchange_organizationCreate.");
 });
 /**
- * Callable: Purchase additional seats for an organization.
- * In a real implementation this would create a payment via the payment abstraction.
- * For now it increments seatsPurchased directly.
+ * Retired compatibility endpoint. It must not fabricate a paid seat mutation
+ * without an approved billing workflow.
  */
 exports.org_purchaseSeats = (0, https_1.onCall)(async (request) => {
     if (!request.auth) {
         throw new https_1.HttpsError("unauthenticated", "Must be logged in");
     }
-    const { orgId, seats } = request.data;
-    if (!orgId || !seats || seats < 1) {
-        throw new https_1.HttpsError("invalid-argument", "orgId and seats (>= 1) are required");
-    }
-    // Verify caller is org owner or admin
-    const memberSnap = await db.collection("orgMembers")
-        .doc(`${orgId}_${request.auth.uid}`)
-        .get();
-    if (!memberSnap.exists) {
-        throw new https_1.HttpsError("permission-denied", "Not a member of this organization");
-    }
-    const memberRole = memberSnap.data()?.role;
-    if (memberRole !== "owner" && memberRole !== "admin") {
-        throw new https_1.HttpsError("permission-denied", "Only org owners/admins can purchase seats");
-    }
-    await db.collection("orgs").doc(orgId).update({
-        seatsPurchased: firestore_2.FieldValue.increment(seats),
-        updatedAt: Date.now(),
-    });
-    logger.info("Seats purchased", { orgId, seats, purchasedBy: request.auth.uid });
-    return { success: true };
+    throw new https_1.HttpsError("failed-precondition", "Seat purchases require an approved billing workflow and are not available through this legacy endpoint.");
 });
 // --- Notifications (PR-18) ---
 /**

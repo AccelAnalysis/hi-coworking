@@ -578,18 +578,32 @@ describe("Opportunity discovery gateway boundaries", () => {
       ),
     ]);
 
-    for (const [actor, expectedIds] of [
-      [manager, ["issuer-restricted"]],
-      [participant, []],
-      [outsider, []],
+    for (const [actor, actorOrganizationId, expectedIds] of [
+      [manager, "discovery-issuer-org", ["issuer-restricted"]],
+      [participant, "discovery-issuer-org", []],
+      [outsider, undefined, []],
     ] as const) {
       const result = await callFunction<{ records: Array<Record<string, unknown>> }>(
         actor,
         "rfx_listManaged",
-        { operation: "discover", payload: discoveryQuery() },
+        {
+          operation: "discover",
+          payload: discoveryQuery(actorOrganizationId ? { actorOrganizationId } : {}),
+        },
       );
       expect(result.records.map((record) => record.id)).toEqual(expectedIds);
     }
+
+    const individualManagerResult = await callFunction<{ records: Array<Record<string, unknown>> }>(
+      manager,
+      "rfx_listManaged",
+      { operation: "discover", payload: discoveryQuery() },
+    );
+    expect(individualManagerResult.records).toEqual([]);
+    await expectCallableError(callFunction(outsider, "rfx_listManaged", {
+      operation: "discover",
+      payload: discoveryQuery({ actorOrganizationId: "discovery-issuer-org" }),
+    }), "permission-denied");
   });
 
   it("validates geography and cursor paging while keeping pages bounded and stable", async () => {
@@ -986,18 +1000,21 @@ describe("RFx callable authority and transaction boundaries", () => {
         orgId: "managed-org",
         uid: manager.uid,
         role: "owner",
+        status: "active",
         joinedAt: now,
       }),
       db.collection("orgMembers").doc(`managed-org_${formerCreator.uid}`).set({
         orgId: "managed-org",
         uid: formerCreator.uid,
         role: "owner",
+        status: "active",
         joinedAt: now - 1,
       }),
       db.collection("orgMembers").doc(`suspended-org_${manager.uid}`).set({
         orgId: "suspended-org",
         uid: manager.uid,
         role: "admin",
+        status: "active",
         joinedAt: now,
       }),
       // A membership at any non-canonical ID must not restore former access.
@@ -1005,6 +1022,7 @@ describe("RFx callable authority and transaction boundaries", () => {
         orgId: "managed-org",
         uid: formerCreator.uid,
         role: "owner",
+        status: "active",
         joinedAt: now,
       }),
       db.collection("rfx").doc("managed-org-rfx").set({
@@ -1186,6 +1204,7 @@ describe("RFx callable authority and transaction boundaries", () => {
         orgId: "quota-org",
         uid: manager.uid,
         role: "owner",
+        status: "active",
         joinedAt: now,
       }),
       ...["one", "two", "three", "four", "five"].map((suffix, index) => db.collection("rfx").doc(`quota-org-${suffix}`).set({
@@ -1422,21 +1441,25 @@ describe("RFx callable authority and transaction boundaries", () => {
         orgId: "read-respondent-org",
         uid: respondent.uid,
         role: "owner",
+        status: "active",
       }),
       db.collection("orgMembers").doc(`read-respondent-org_${respondentColleague.uid}`).set({
         orgId: "read-respondent-org",
         uid: respondentColleague.uid,
         role: "member",
+        status: "active",
       }),
       db.collection("orgMembers").doc(`read-issuer-org_${issuerManager.uid}`).set({
         orgId: "read-issuer-org",
         uid: issuerManager.uid,
         role: "owner",
+        status: "active",
       }),
       db.collection("orgMembers").doc("noncanonical-read-membership").set({
         orgId: "read-respondent-org",
         uid: malformedMember.uid,
         role: "owner",
+        status: "active",
       }),
       db.collection("rfx").doc(rfxId).set({
         id: rfxId,
@@ -2416,6 +2439,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
           orgId: "evidence-recipient-org",
           uid: recipientColleague.uid,
           role: "member",
+          status: "active",
         }),
       db.collection("businessReferrals").doc(referralId).set({
         id: referralId,
@@ -2725,6 +2749,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     await expectCallableError(
       callFunction(recipient, "businessReferral_respond", {
         referralId: overdue.referralId,
+        actorOrganizationId: "recipient-org",
         response: "accepted",
         expectedVersion: 1,
       }),
@@ -2750,6 +2775,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     );
     await callFunction(recipient, "businessReferral_respond", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       response: "accepted",
       expectedVersion: 1,
       acceptTerms: { acknowledged: true },
@@ -2758,6 +2784,7 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     await expectCallableError(
       callFunction(recipient, "businessReferral_progress", {
         referralId: created.referralId,
+        actorOrganizationId: "recipient-org",
         status: "converted",
         expectedVersion: 2,
         outcome: { type: "converted", summary: "Attempted to skip active work" },
@@ -2774,11 +2801,13 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     );
     await callFunction(recipient, "businessReferral_progress", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       status: "in_progress",
       expectedVersion: 2,
     });
     await callFunction(recipient, "businessReferral_progress", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       status: "converted",
       expectedVersion: 3,
       outcome: { type: "converted", summary: "Recipient converted the referred opportunity" },
@@ -2876,12 +2905,14 @@ describe("business referral purpose, authority, consent, and outcomes", () => {
     });
     await callFunction(recipient, "businessReferral_respond", {
       referralId: closeable.referralId,
+      actorOrganizationId: "recipient-org",
       response: "accepted",
       expectedVersion: 1,
       acceptTerms: { acknowledged: true },
     });
     await callFunction(recipient, "businessReferral_progress", {
       referralId: closeable.referralId,
+      actorOrganizationId: "recipient-org",
       status: "closed",
       expectedVersion: 2,
       outcome: { type: "not_a_fit", summary: "The requested service is outside the recipient's scope." },

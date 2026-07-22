@@ -264,18 +264,27 @@ async function requireReferrerAuthority(
   transaction: FirebaseFirestore.Transaction,
   referral: BusinessReferralDocData,
   actor: AuthorizedActor,
+  actorOrganizationId?: string,
 ): Promise<void> {
-  const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
-    ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor, true)
-    : isIndividualReferrer(referral, actor.uid);
-  if (referrerAuthorized) return;
-  if (
-    isIndividualRecipient(referral, actor.uid)
-    || (hasOrganizationScope(referral, "recipientOrgId")
-      && await hasOrgAuthority(transaction, referral.recipientOrgId, actor))
-  ) {
-    throw new HttpsError("permission-denied", "Recipient authority cannot act for the referrer");
+  if (actorOrganizationId) {
+    if (referral.referrerOrgId !== actorOrganizationId) {
+      throw new HttpsError(
+        "permission-denied",
+        "The selected organization is not the referral referrer",
+      );
+    }
+    await loadOrgAuthority(transaction, getDb(), actorOrganizationId, actor.uid, {
+      managementRequired: true,
+    });
+    return;
   }
+  if (hasOrganizationScope(referral, "referrerOrgId")) {
+    throw new HttpsError(
+      "permission-denied",
+      "Select the referral's referrer organization before acting",
+    );
+  }
+  if (isIndividualReferrer(referral, actor.uid)) return;
   throw new HttpsError("permission-denied", "Referrer authority is required");
 }
 
@@ -284,17 +293,27 @@ async function requireRecipientAuthority(
   referral: BusinessReferralDocData,
   actor: AuthorizedActor,
   managementRequired = false,
+  actorOrganizationId?: string,
 ): Promise<void> {
-  const referrerAuthorized = hasOrganizationScope(referral, "referrerOrgId")
-    ? await hasOrgAuthority(transaction, referral.referrerOrgId, actor)
-    : isIndividualReferrer(referral, actor.uid);
-  if (referrerAuthorized) {
-    throw new HttpsError("permission-denied", "Referrer authority cannot act for the recipient");
+  if (actorOrganizationId) {
+    if (referral.recipientOrgId !== actorOrganizationId) {
+      throw new HttpsError(
+        "permission-denied",
+        "The selected organization is not the referral recipient",
+      );
+    }
+    await loadOrgAuthority(transaction, getDb(), actorOrganizationId, actor.uid, {
+      managementRequired,
+    });
+    return;
   }
-  const recipientAuthorized = hasOrganizationScope(referral, "recipientOrgId")
-    ? await hasOrgAuthority(transaction, referral.recipientOrgId, actor, managementRequired)
-    : isIndividualRecipient(referral, actor.uid);
-  if (recipientAuthorized) return;
+  if (hasOrganizationScope(referral, "recipientOrgId")) {
+    throw new HttpsError(
+      "permission-denied",
+      "Select the referral's recipient organization before acting",
+    );
+  }
+  if (isIndividualRecipient(referral, actor.uid)) return;
   throw new HttpsError("permission-denied", "Recipient authority is required");
 }
 
@@ -584,6 +603,11 @@ export const businessReferral_create = onCall(async (request) => {
 
   return db.runTransaction(async (transaction) => {
     const dedupeSnapshot = await transaction.get(dedupeRef);
+    if (input.actorOrganizationId) {
+      await loadOrgAuthority(transaction, db, input.actorOrganizationId, actor.uid, {
+        managementRequired: true,
+      });
+    }
     const priorResult = completedIdempotentResult(
       dedupeSnapshot,
       actor.uid,
@@ -591,12 +615,6 @@ export const businessReferral_create = onCall(async (request) => {
       requestFingerprint,
     );
     if (priorResult) return { ...priorResult, idempotent: true };
-
-    if (input.referrerOrgId) {
-      await loadOrgAuthority(transaction, db, input.referrerOrgId, actor.uid, {
-        managementRequired: true,
-      });
-    }
 
     const recipientUserRef = input.recipientUid ? db.collection("users").doc(input.recipientUid) : undefined;
     const recipientOrgRef = input.recipientOrgId ? db.collection("orgs").doc(input.recipientOrgId) : undefined;
@@ -830,7 +848,12 @@ export const businessReferral_send = onCall(async (request) => {
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(referralRef);
     const referral = requireReferralSnapshot(snapshot);
-    await requireReferrerAuthority(transaction, referral, actor);
+    await requireReferrerAuthority(
+      transaction,
+      referral,
+      actor,
+      input.actorOrganizationId,
+    );
     if (referral.status === "sent") return { success: true, idempotent: true, version: getVersion(referral) };
     requireExpectedVersion(referral, input.expectedVersion);
     if (referral.status !== "draft") {
@@ -884,7 +907,13 @@ export const businessReferral_respond = onCall(async (request) => {
     const referral = requireReferralSnapshot(snapshot);
     const financialAcceptance = input.response === "accepted"
       && (referral.compensationPolicy.type !== "none" || Boolean(referral.serviceOfferId));
-    await requireRecipientAuthority(transaction, referral, actor, financialAcceptance);
+    await requireRecipientAuthority(
+      transaction,
+      referral,
+      actor,
+      financialAcceptance,
+      input.actorOrganizationId,
+    );
     if (referral.status === input.response) {
       return { success: true, idempotent: true, version: getVersion(referral) };
     }
@@ -1023,9 +1052,20 @@ export const businessReferral_progress = onCall(async (request) => {
     const snapshot = await transaction.get(referralRef);
     const referral = requireReferralSnapshot(snapshot);
     if (input.status === "withdrawn") {
-      await requireReferrerAuthority(transaction, referral, actor);
+      await requireReferrerAuthority(
+        transaction,
+        referral,
+        actor,
+        input.actorOrganizationId,
+      );
     } else {
-      await requireRecipientAuthority(transaction, referral, actor);
+      await requireRecipientAuthority(
+        transaction,
+        referral,
+        actor,
+        false,
+        input.actorOrganizationId,
+      );
     }
     if (referral.status === input.status) {
       return { success: true, idempotent: true, version: getVersion(referral) };

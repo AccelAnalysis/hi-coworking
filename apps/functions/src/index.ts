@@ -172,6 +172,15 @@ import {
   exchange_adminGetOrganizationClaim,
   exchange_adminReviewOrganizationClaim,
 } from "./exchange/organizations";
+import {
+  exchange_listActorOrganizations,
+  exchange_resolveOrganizationPerspective,
+  exchange_organizationDirectory,
+  exchange_saveOrganization,
+  exchange_requestOrganizationContact,
+  exchange_requestOrganizationIntroduction,
+  exchange_getOrganizationResourceStatus,
+} from "./exchange/organizationWorkspace";
 
 import {
   team_listMine,
@@ -276,6 +285,13 @@ export {
   exchange_adminListOrganizationClaims,
   exchange_adminGetOrganizationClaim,
   exchange_adminReviewOrganizationClaim,
+  exchange_listActorOrganizations,
+  exchange_resolveOrganizationPerspective,
+  exchange_organizationDirectory,
+  exchange_saveOrganization,
+  exchange_requestOrganizationContact,
+  exchange_requestOrganizationIntroduction,
+  exchange_getOrganizationResourceStatus,
 };
 
 // Exchange commercial foundation (organization scoped; physical membership remains separate)
@@ -1692,104 +1708,31 @@ export const referral_onStatusChange = onDocumentCreated(
 // --- Corporate Org (PR-17) ---
 
 /**
- * Callable: Create a new organization.
- * Creates the org doc and adds the caller as owner.
+ * Retired compatibility endpoint. Canonical creation owns duplicate checks,
+ * projections, membership, commercial state, idempotency, and audit.
  */
 export const org_create = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in");
   }
-
-  const { name, slug, website, address, billingEmail, seats } = request.data as {
-    name: string;
-    slug: string;
-    website?: string;
-    address?: string;
-    billingEmail?: string;
-    seats?: number;
-  };
-
-  if (!name?.trim() || !slug?.trim()) {
-    throw new HttpsError("invalid-argument", "name and slug are required");
-  }
-
-  // Check slug uniqueness
-  const existing = await db.collection("orgs").where("slug", "==", slug.trim()).limit(1).get();
-  if (!existing.empty) {
-    throw new HttpsError("already-exists", "An org with that slug already exists");
-  }
-
-  const orgRef = db.collection("orgs").doc();
-  const orgDoc = {
-    id: orgRef.id,
-    name: name.trim(),
-    slug: slug.trim().toLowerCase(),
-    ownerUid: request.auth.uid,
-    website: website?.trim() || "",
-    address: address?.trim() || "",
-    billingEmail: billingEmail?.trim() || "",
-    seatsPurchased: seats || 5,
-    seatsUsed: 1,
-    status: "active",
-    createdAt: Date.now(),
-  };
-
-  const memberDoc = {
-    id: `${orgRef.id}_${request.auth.uid}`,
-    orgId: orgRef.id,
-    uid: request.auth.uid,
-    role: "owner",
-    joinedAt: Date.now(),
-  };
-
-  const batch = db.batch();
-  batch.set(orgRef, orgDoc);
-  batch.set(db.collection("orgMembers").doc(memberDoc.id), memberDoc);
-  await batch.commit();
-
-  logger.info("Organization created", { orgId: orgRef.id, ownerUid: request.auth.uid });
-
-  return { orgId: orgRef.id };
+  throw new HttpsError(
+    "failed-precondition",
+    "This legacy organization creator is retired. Use exchange_organizationCreate.",
+  );
 });
 
 /**
- * Callable: Purchase additional seats for an organization.
- * In a real implementation this would create a payment via the payment abstraction.
- * For now it increments seatsPurchased directly.
+ * Retired compatibility endpoint. It must not fabricate a paid seat mutation
+ * without an approved billing workflow.
  */
 export const org_purchaseSeats = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in");
   }
-
-  const { orgId, seats } = request.data as { orgId: string; seats: number };
-
-  if (!orgId || !seats || seats < 1) {
-    throw new HttpsError("invalid-argument", "orgId and seats (>= 1) are required");
-  }
-
-  // Verify caller is org owner or admin
-  const memberSnap = await db.collection("orgMembers")
-    .doc(`${orgId}_${request.auth.uid}`)
-    .get();
-
-  if (!memberSnap.exists) {
-    throw new HttpsError("permission-denied", "Not a member of this organization");
-  }
-
-  const memberRole = memberSnap.data()?.role;
-  if (memberRole !== "owner" && memberRole !== "admin") {
-    throw new HttpsError("permission-denied", "Only org owners/admins can purchase seats");
-  }
-
-  await db.collection("orgs").doc(orgId).update({
-    seatsPurchased: FieldValue.increment(seats),
-    updatedAt: Date.now(),
-  });
-
-  logger.info("Seats purchased", { orgId, seats, purchasedBy: request.auth.uid });
-
-  return { success: true };
+  throw new HttpsError(
+    "failed-precondition",
+    "Seat purchases require an approved billing workflow and are not available through this legacy endpoint.",
+  );
 });
 
 // --- Notifications (PR-18) ---

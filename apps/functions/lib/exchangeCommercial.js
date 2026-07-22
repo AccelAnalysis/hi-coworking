@@ -46,7 +46,8 @@ function permissionsForMember(member) {
     return explicit.length ? new Set(explicit) : LEGACY_MEMBER_PERMISSIONS;
 }
 function verificationStatus(org) {
-    const status = org.exchangeVerificationStatus ?? org.verificationStatus;
+    // Organization claim authority is not independent business verification.
+    const status = org.verificationStatus;
     return [
         "unverified", "claim_pending", "claimed", "verification_pending",
         "verified", "suspended", "disputed",
@@ -63,7 +64,8 @@ async function resolveExchangeEntitlements(input) {
     const org = asRecord(orgSnapshot.data());
     const member = asRecord(memberSnapshot.data());
     if (!orgSnapshot.exists || org.status !== "active" || !memberSnapshot.exists
-        || member.orgId !== input.organizationId || member.uid !== input.actor.uid) {
+        || member.orgId !== input.organizationId || member.uid !== input.actor.uid
+        || member.status !== "active") {
         throw new https_1.HttpsError("permission-denied", "Active organization membership is required");
     }
     const permissions = permissionsForMember(member);

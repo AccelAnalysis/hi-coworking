@@ -5,6 +5,7 @@ exports.sanitizeManagedRfx = sanitizeManagedRfx;
 const https_1 = require("firebase-functions/v2/https");
 const zod_1 = require("zod");
 const security_1 = require("./exchange/security");
+const opportunityDiscoveryGateway_1 = require("./opportunityDiscoveryGateway");
 const listManagedRfxInputSchema = zod_1.z
     .object({
     maxResults: zod_1.z.number().int().min(1).max(200).default(100),
@@ -176,7 +177,7 @@ async function loadOrganizationAuthority(db, actorUid) {
             || member.uid !== actorUid
             || !role
             || !["owner", "admin", "member"].includes(role)
-            || (status !== undefined && status !== "active")) {
+            || status !== "active") {
             return [];
         }
         return [{ orgId, role: role }];
@@ -254,8 +255,14 @@ async function countReceivedResponses(db, managedRfxIds) {
  * Server-filtered discovery for RFx management. Organization scope always
  * wins over creator identity: a former creator receives no organization RFx
  * after their exact active owner/admin membership is removed.
+ *
+ * Versioned discovery operations share this existing callable. Requests
+ * without an `operation` property stay on the management path unchanged.
  */
 exports.rfx_listManaged = (0, https_1.onCall)(async (request) => {
+    if ((0, opportunityDiscoveryGateway_1.isOpportunityDiscoveryGatewayRequest)(request.data)) {
+        return (0, opportunityDiscoveryGateway_1.handleOpportunityDiscoveryGateway)(request);
+    }
     const actor = (0, security_1.getAuthorizedActor)(request);
     const parsed = listManagedRfxInputSchema.safeParse(request.data ?? {});
     if (!parsed.success) {

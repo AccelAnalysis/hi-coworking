@@ -37,9 +37,11 @@ export interface PublicOrganizationMapRecord {
   longitude?: number;
   homeBased?: boolean;
   privacySuppressed?: boolean;
+  coordinatePublicationApproved?: boolean;
   coordinateConfidence?: "authoritative" | "verified" | "approximate";
   naicsCodes?: string[];
   capabilityKeywords?: string[];
+  contextType?: "actor" | "subject" | "actor_subject";
 }
 
 export interface OrganizationMapProperties {
@@ -52,6 +54,7 @@ export interface OrganizationMapProperties {
   claimStatus: string;
   verificationStatus: string;
   coordinateConfidence: "authoritative" | "verified" | "approximate";
+  contextType: "result" | "actor" | "subject" | "actor_subject";
 }
 
 export type RfxFeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Point, RfxMapProperties>;
@@ -72,6 +75,7 @@ export type TerritoryBoundaryFeatureCollection = GeoJSON.FeatureCollection<
 export interface ExchangeMapGeoJson {
   rfx: RfxFeatureCollection;
   organizations: OrganizationFeatureCollection;
+  contextOrganizations: OrganizationFeatureCollection;
   releasedTerritoryPoints: TerritoryPointFeatureCollection;
   releasedTerritoryBoundaries: TerritoryBoundaryFeatureCollection;
   scheduledTerritoryPoints: TerritoryPointFeatureCollection;
@@ -224,6 +228,7 @@ export function toRfxFeatureCollection(rfxList: readonly RfxDoc[]): RfxFeatureCo
  */
 export function toOrganizationFeatureCollection(
   organizations: readonly PublicOrganizationMapRecord[],
+  defaultContextType: OrganizationMapProperties["contextType"] = "result",
 ): OrganizationFeatureCollection {
   const features: Array<GeoJSON.Feature<GeoJSON.Point, OrganizationMapProperties>> = [];
 
@@ -238,6 +243,7 @@ export function toOrganizationFeatureCollection(
       || organization.status !== "active"
       || organization.homeBased === true
       || organization.privacySuppressed === true
+      || organization.coordinatePublicationApproved !== true
       || !isValidLongitude(longitude)
       || !isValidLatitude(latitude)
     ) continue;
@@ -259,6 +265,7 @@ export function toOrganizationFeatureCollection(
           ? organization.verificationStatus
           : "unverified",
         coordinateConfidence: organization.coordinateConfidence ?? "approximate",
+        contextType: organization.contextType ?? defaultContextType,
       },
       geometry: { type: "Point", coordinates: [longitude, latitude] },
     });
@@ -318,10 +325,12 @@ export function buildExchangeMapGeoJson(
   scheduledTerritories: readonly TerritoryDoc[],
   unreleasedTerritories: readonly TerritoryDoc[] = [],
   organizations: readonly PublicOrganizationMapRecord[] = [],
+  contextOrganizations: readonly PublicOrganizationMapRecord[] = [],
 ): ExchangeMapGeoJson {
   return {
     rfx: toRfxFeatureCollection(rfxList),
     organizations: toOrganizationFeatureCollection(organizations),
+    contextOrganizations: toOrganizationFeatureCollection(contextOrganizations, "subject"),
     releasedTerritoryPoints: toTerritoryPointFeatureCollection(releasedTerritories, "released"),
     releasedTerritoryBoundaries: toTerritoryBoundaryFeatureCollection(releasedTerritories, "released"),
     scheduledTerritoryPoints: toTerritoryPointFeatureCollection(scheduledTerritories, "scheduled"),
@@ -353,6 +362,7 @@ export function getExchangeMapDataBounds(data: ExchangeMapGeoJson): ExchangeMapD
   const pointCollections = [
     data.rfx,
     data.organizations,
+    data.contextOrganizations,
     data.releasedTerritoryPoints,
     data.scheduledTerritoryPoints,
   ];

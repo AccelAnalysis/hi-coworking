@@ -337,11 +337,104 @@ emulatorDescribe("Run 3 transaction replay authority", () => {
     await Promise.all(functionsAdmin.apps.map((existing) => existing.delete()));
   });
 
+  it("binds referral detail and timeline reads to the exact selected actor", async () => {
+    await Promise.all([
+      db.doc("orgs/referrer-org").set({ id: "referrer-org", status: "active" }),
+      db.doc("orgs/unrelated-org").set({ id: "unrelated-org", status: "active" }),
+      db.doc("orgMembers/referrer-org_multi-manager").set({
+        id: "referrer-org_multi-manager",
+        orgId: "referrer-org",
+        uid: "multi-manager",
+        role: "owner",
+        status: "active",
+      }),
+      db.doc("orgMembers/unrelated-org_multi-manager").set({
+        id: "unrelated-org_multi-manager",
+        orgId: "unrelated-org",
+        uid: "multi-manager",
+        role: "owner",
+        status: "active",
+      }),
+      db.doc("businessReferrals/actor-scoped-detail").set({
+        id: "actor-scoped-detail",
+        schemaVersion: 2,
+        referrerUid: "multi-manager",
+        referrerOrgId: "referrer-org",
+        recipientOrgId: "recipient-org",
+        referralType: "service_need",
+        title: "Actor scoped detail",
+        needSummary: "Only the selected referral-side organization may read this record.",
+        consentStatus: "not_required",
+        status: "sent",
+        compensationPolicy: { type: "none", status: "none" },
+        version: 1,
+        createdAt: 10,
+        updatedAt: 20,
+      }),
+      db.doc("businessReferralTimeline/actor-scoped-detail_1_sent").set({
+        id: "actor-scoped-detail_1_sent",
+        referralId: "actor-scoped-detail",
+        eventType: "referral_sent",
+        occurredAt: 20,
+      }),
+    ]);
+    const run3 = await import("../../apps/functions/src/referralRun3");
+
+    const unrelatedList = await run3.businessReferral_listMine.run(request("multi-manager", {
+      direction: "all",
+      scope: "organization",
+      actorOrganizationId: "unrelated-org",
+      statuses: [],
+      limit: 10,
+    })) as { referrals: unknown[] };
+    expect(unrelatedList.referrals).toEqual([]);
+    const referrerList = await run3.businessReferral_listMine.run(request("multi-manager", {
+      direction: "all",
+      scope: "organization",
+      actorOrganizationId: "referrer-org",
+      statuses: [],
+      limit: 10,
+    })) as { referrals: Array<{ id: string }> };
+    expect(referrerList.referrals.map(({ id }) => id)).toEqual(["actor-scoped-detail"]);
+
+    await expectCode(run3.businessReferral_getDetail.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+    })), "permission-denied");
+    await expectCode(run3.businessReferral_getDetail.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+      actorOrganizationId: "unrelated-org",
+    })), "permission-denied");
+    const detail = await run3.businessReferral_getDetail.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+      actorOrganizationId: "referrer-org",
+    })) as { referral: { id: string } };
+    expect(detail.referral.id).toBe("actor-scoped-detail");
+
+    await expectCode(run3.businessReferral_listTimeline.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+      actorOrganizationId: "unrelated-org",
+      limit: 10,
+    })), "permission-denied");
+    const timeline = await run3.businessReferral_listTimeline.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+      actorOrganizationId: "referrer-org",
+      limit: 10,
+    })) as { events: Array<{ id: string }> };
+    expect(timeline.events.map(({ id }) => id)).toEqual(["actor-scoped-detail_1_sent"]);
+
+    await db.doc("orgMembers/referrer-org_multi-manager").update({ status: "invited" });
+    await expectCode(run3.businessReferral_getDetail.run(request("multi-manager", {
+      referralId: "actor-scoped-detail",
+      actorOrganizationId: "referrer-org",
+    })), "permission-denied");
+  });
+
   it("denies exact report and review replays after organization authority is revoked", async () => {
     const now = Date.now();
     await Promise.all([
       db.collection("orgs").doc("referrer-org").set({ id: "referrer-org", status: "active" }),
       db.collection("orgs").doc("recipient-org").set({ id: "recipient-org", status: "active" }),
+      db.collection("orgs").doc("unrelated-org").set({ id: "unrelated-org", status: "active" }),
       db.collection("orgMembers").doc("referrer-org_referrer-manager").set({
         id: "referrer-org_referrer-manager",
         orgId: "referrer-org",
@@ -354,6 +447,20 @@ emulatorDescribe("Run 3 transaction replay authority", () => {
         orgId: "recipient-org",
         uid: "recipient-manager",
         role: "admin",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc("unrelated-org_recipient-manager").set({
+        id: "unrelated-org_recipient-manager",
+        orgId: "unrelated-org",
+        uid: "recipient-manager",
+        role: "owner",
+        status: "active",
+      }),
+      db.collection("orgMembers").doc("unrelated-org_referrer-manager").set({
+        id: "unrelated-org_referrer-manager",
+        orgId: "unrelated-org",
+        uid: "referrer-manager",
+        role: "owner",
         status: "active",
       }),
       db.collection("businessReferrals").doc("referral-replay").set({
@@ -390,6 +497,7 @@ emulatorDescribe("Run 3 transaction replay authority", () => {
 
     const reportInput = {
       referralId: "referral-replay",
+      actorOrganizationId: "recipient-org",
       idempotencyKey: "report-replay-0001",
       expectedReferralVersion: 0,
       qualifyingTransactionCents: 100_000,
@@ -398,6 +506,24 @@ emulatorDescribe("Run 3 transaction replay authority", () => {
       currency: "USD",
       evidenceStoragePaths: [],
     };
+    await expectCode(
+      (await import("../../apps/functions/src/referralRun3"))
+        .businessReferral_reportTransaction.run(request("recipient-manager", {
+          ...reportInput,
+          actorOrganizationId: "unrelated-org",
+          idempotencyKey: "report-wrong-actor-0001",
+        })),
+      "permission-denied",
+    );
+    await expectCode(
+      (await import("../../apps/functions/src/referralRun3"))
+        .businessReferral_reportTransaction.run(request("recipient-manager", {
+          ...reportInput,
+          actorOrganizationId: undefined,
+          idempotencyKey: "report-missing-actor-0001",
+        })),
+      "permission-denied",
+    );
     const reported = await (await import("../../apps/functions/src/referralRun3"))
       .businessReferral_reportTransaction.run(request("recipient-manager", reportInput)) as {
         reportId: string;
@@ -414,10 +540,29 @@ emulatorDescribe("Run 3 transaction replay authority", () => {
 
     const reviewInput = {
       reportId: reported.reportId,
+      actorOrganizationId: "referrer-org",
       action: "confirm" as const,
       idempotencyKey: "review-replay-0001",
       expectedVersion: 0,
     };
+    await expectCode(
+      (await import("../../apps/functions/src/referralRun3"))
+        .businessReferral_reviewTransaction.run(request("referrer-manager", {
+          ...reviewInput,
+          actorOrganizationId: "unrelated-org",
+          idempotencyKey: "review-wrong-actor-0001",
+        })),
+      "permission-denied",
+    );
+    await expectCode(
+      (await import("../../apps/functions/src/referralRun3"))
+        .businessReferral_reviewTransaction.run(request("referrer-manager", {
+          ...reviewInput,
+          actorOrganizationId: undefined,
+          idempotencyKey: "review-missing-actor-0001",
+        })),
+      "permission-denied",
+    );
     const reviewed = await (await import("../../apps/functions/src/referralRun3"))
       .businessReferral_reviewTransaction.run(request("referrer-manager", reviewInput)) as {
         status: string;

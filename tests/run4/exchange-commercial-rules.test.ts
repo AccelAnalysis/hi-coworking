@@ -25,9 +25,9 @@ emulatorDescribe("Run 4 Exchange commercial Firestore rules", () => {
     await env.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await Promise.all([
-        setDoc(doc(db, "orgs/acme"), { id: "acme", name: "Acme", status: "active", exchangeVerificationStatus: "verified" }),
+        setDoc(doc(db, "orgs/acme"), { id: "acme", name: "Acme", status: "active", verificationStatus: "verified" }),
         setDoc(doc(db, "orgs/other"), { id: "other", name: "Other", status: "active" }),
-        setDoc(doc(db, "orgMembers/acme_alice"), { id: "acme_alice", orgId: "acme", uid: "alice", role: "member" }),
+        setDoc(doc(db, "orgMembers/acme_alice"), { id: "acme_alice", orgId: "acme", uid: "alice", role: "member", status: "active" }),
         setDoc(doc(db, "exchangePublicConfiguration/current"), { policyVersion: "v1", featureFlags: { exchangeEnabled: true } }),
         setDoc(doc(db, "exchangeMemberships/acme"), { organizationId: "acme", tier: "free", status: "active", stripeCustomerId: "cus_private" }),
         setDoc(doc(db, "exchangeCreditAccounts/acme"), { organizationId: "acme", usableCredits: 25 }),

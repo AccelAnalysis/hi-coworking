@@ -6,6 +6,15 @@ import json
 from pathlib import Path
 
 
+IOW_FIPS = "51093"
+IOW_COORDINATE_ENVELOPE = {
+    "minimumLatitude": 36.64,
+    "maximumLatitude": 37.22,
+    "minimumLongitude": -77.02,
+    "maximumLongitude": -76.43,
+}
+
+
 def load_rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
@@ -41,6 +50,15 @@ def main(path: Path, targeting_path: Path | None = None) -> None:
         if not isinstance(longitude, (int, float)) or not -180 <= longitude <= 180:
             coordinate_violations.append(row.get("id"))
             continue
+        if latitude == 0 and longitude == 0:
+            coordinate_violations.append(row.get("id"))
+            continue
+        if row.get("territoryFips") == IOW_FIPS and not (
+            IOW_COORDINATE_ENVELOPE["minimumLatitude"] <= latitude <= IOW_COORDINATE_ENVELOPE["maximumLatitude"]
+            and IOW_COORDINATE_ENVELOPE["minimumLongitude"] <= longitude <= IOW_COORDINATE_ENVELOPE["maximumLongitude"]
+        ):
+            coordinate_violations.append(row.get("id"))
+            continue
         if row.get("coordinateConfidence") not in {"authoritative", "verified", "approximate"}:
             coordinate_violations.append(row.get("id"))
     if coordinate_violations:
@@ -51,7 +69,7 @@ def main(path: Path, targeting_path: Path | None = None) -> None:
     if len(targeting_ids) != len(set(targeting_ids)):
         raise SystemExit("duplicate targeting IDs found")
     forbidden_restricted_fields = {
-        "email", "phone", "publicPhone", "address", "addressLine1", "street",
+        "email", "phone", "publicPhone", "address", "addressLine1", "street", "postalCode",
         "birthDate", "age", "militaryStatus", "contactName", "race", "gender",
         "otherRace", "otherGender", "latitude", "longitude", "geohash",
     }

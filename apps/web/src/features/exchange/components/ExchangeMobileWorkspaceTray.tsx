@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { ChevronUp, List, Map, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,17 @@ function canonicalView(view: ExchangeView): CanonicalView {
   return view as CanonicalView;
 }
 
+export function preserveExchangeContextInHref(
+  currentQuery: string,
+  href: string,
+): string {
+  if (!href.startsWith("/exchange?")) return href;
+  const next = new URLSearchParams(currentQuery);
+  const requested = new URLSearchParams(href.slice(href.indexOf("?") + 1));
+  requested.forEach((value, key) => next.set(key, value));
+  return `/exchange?${next.toString()}`;
+}
+
 export function ExchangeMobileWorkspaceTray({
   view,
   surfaceMode,
@@ -65,6 +77,7 @@ export function ExchangeMobileWorkspaceTray({
   children?: ReactNode;
   onSurfaceModeChange: (mode: ExchangeSurfaceMode) => void;
 }) {
+  const searchParams = useSearchParams();
   const currentView = canonicalView(view);
   const listVisible = surfaceMode === "list";
 
@@ -77,13 +90,13 @@ export function ExchangeMobileWorkspaceTray({
           : "h-[10.75rem]",
       )}
       aria-label={`${currentView} results and workspace controls`}
-      aria-expanded={listVisible}
     >
       <button
         type="button"
         onClick={() => onSurfaceModeChange(listVisible ? "map" : "list")}
         className="flex h-7 w-full shrink-0 items-center justify-center rounded-t-[1.75rem] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600"
         aria-label={listVisible ? "Collapse the result drawer" : "Expand the result drawer"}
+        aria-expanded={listVisible}
       >
         <span className="h-1.5 w-16 rounded-full bg-slate-400/90" />
       </button>
@@ -130,7 +143,11 @@ export function ExchangeMobileWorkspaceTray({
           );
           if (action.href) {
             return (
-              <Link key={action.label} href={action.href} className={className}>
+              <Link
+                key={action.label}
+                href={preserveExchangeContextInHref(searchParams.toString(), action.href)}
+                className={className}
+              >
                 {label}
               </Link>
             );

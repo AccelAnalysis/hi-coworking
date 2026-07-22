@@ -5,17 +5,22 @@ import type {
 import type {
   ExchangeCompensationFilter,
   ExchangeConnectionMode,
+  ExchangeCanonicalMode,
+  ExchangeDraftRefs,
   ExchangeIntelligenceMetric,
+  ExchangeModeFilterState,
   ExchangePersonalizedFilter,
   ExchangeReferralStatus,
   ExchangeRelationshipFilter,
   ExchangeRfxStatus,
   ExchangeSelection,
+  ExchangeSecondaryContext,
   ExchangeSurfaceMode,
   ExchangeTerritoryStatus,
   ExchangeView,
   ExchangeViewport,
   ExchangeWorkspaceHydration,
+  ExchangeWorkspaceSessionHydration,
 } from "./exchangeWorkspaceTypes";
 
 export interface ExchangeFilterUpdate {
@@ -52,6 +57,18 @@ export interface ExchangeFilterUpdate {
 
 export type ExchangeWorkspaceAction =
   | { type: "SET_VIEW"; view: ExchangeView }
+  | { type: "SET_REQUESTED_ACTOR_ORGANIZATION"; id?: string }
+  | { type: "SET_VALIDATED_ACTOR_ORGANIZATION"; id?: string }
+  | { type: "SET_SUBJECT_ORGANIZATION"; id?: string }
+  | { type: "CLEAR_SUBJECT_ORGANIZATION" }
+  | { type: "SET_SECONDARY_CONTEXT"; context: ExchangeSecondaryContext }
+  | { type: "CLEAR_SECONDARY_CONTEXT" }
+  | { type: "SET_ORGANIZATION_DRAWER_OPEN"; open: boolean }
+  | { type: "SET_MODE_LIST_SCROLL"; scrollTop: number; mode?: ExchangeCanonicalMode }
+  | { type: "SET_MODE_FILTERS"; filters: Partial<ExchangeModeFilterState>; mode?: ExchangeCanonicalMode }
+  | { type: "SET_MODE_PANEL_SUBSECTION"; subsection?: string; mode?: ExchangeCanonicalMode }
+  | { type: "SET_RESOURCE_CATEGORY"; category?: string }
+  | { type: "SET_MODE_DRAFT_REFS"; refs: Partial<ExchangeDraftRefs>; mode?: ExchangeCanonicalMode }
   | { type: "SET_SEARCH"; query: string }
   | { type: "SET_FILTERS"; filters: ExchangeFilterUpdate }
   | { type: "CLEAR_FILTERS" }
@@ -72,11 +89,60 @@ export type ExchangeWorkspaceAction =
   | { type: "OPEN_MOBILE_DETAIL" }
   | { type: "CLOSE_MOBILE_DETAIL" }
   | { type: "SET_VIEWPORT"; viewport?: ExchangeViewport }
-  | { type: "HYDRATE_FROM_URL"; state: ExchangeWorkspaceHydration };
+  | { type: "HYDRATE_FROM_URL"; state: ExchangeWorkspaceHydration }
+  | { type: "HYDRATE_FROM_SESSION"; state: ExchangeWorkspaceSessionHydration };
 
 export const exchangeWorkspaceActions = {
   setView(view: ExchangeView): ExchangeWorkspaceAction {
     return { type: "SET_VIEW", view };
+  },
+  setRequestedActorOrganization(id?: string): ExchangeWorkspaceAction {
+    return { type: "SET_REQUESTED_ACTOR_ORGANIZATION", id };
+  },
+  setValidatedActorOrganization(id?: string): ExchangeWorkspaceAction {
+    return { type: "SET_VALIDATED_ACTOR_ORGANIZATION", id };
+  },
+  setSubjectOrganization(id?: string): ExchangeWorkspaceAction {
+    return { type: "SET_SUBJECT_ORGANIZATION", id };
+  },
+  clearSubjectOrganization(): ExchangeWorkspaceAction {
+    return { type: "CLEAR_SUBJECT_ORGANIZATION" };
+  },
+  setSecondaryContext(context: ExchangeSecondaryContext): ExchangeWorkspaceAction {
+    return { type: "SET_SECONDARY_CONTEXT", context };
+  },
+  clearSecondaryContext(): ExchangeWorkspaceAction {
+    return { type: "CLEAR_SECONDARY_CONTEXT" };
+  },
+  setOrganizationDrawerOpen(open: boolean): ExchangeWorkspaceAction {
+    return { type: "SET_ORGANIZATION_DRAWER_OPEN", open };
+  },
+  setModeListScroll(
+    scrollTop: number,
+    mode?: ExchangeCanonicalMode,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_MODE_LIST_SCROLL", scrollTop, mode };
+  },
+  setModeFilters(
+    filters: Partial<ExchangeModeFilterState>,
+    mode?: ExchangeCanonicalMode,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_MODE_FILTERS", filters, mode };
+  },
+  setModePanelSubsection(
+    subsection?: string,
+    mode?: ExchangeCanonicalMode,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_MODE_PANEL_SUBSECTION", subsection, mode };
+  },
+  setResourceCategory(category?: string): ExchangeWorkspaceAction {
+    return { type: "SET_RESOURCE_CATEGORY", category };
+  },
+  setModeDraftRefs(
+    refs: Partial<ExchangeDraftRefs>,
+    mode?: ExchangeCanonicalMode,
+  ): ExchangeWorkspaceAction {
+    return { type: "SET_MODE_DRAFT_REFS", refs, mode };
   },
   setSearch(query: string): ExchangeWorkspaceAction {
     return { type: "SET_SEARCH", query };
@@ -146,5 +212,10 @@ export const exchangeWorkspaceActions = {
   },
   hydrateFromUrl(state: ExchangeWorkspaceHydration): ExchangeWorkspaceAction {
     return { type: "HYDRATE_FROM_URL", state };
+  },
+  hydrateFromSession(
+    state: ExchangeWorkspaceSessionHydration,
+  ): ExchangeWorkspaceAction {
+    return { type: "HYDRATE_FROM_SESSION", state };
   },
 };

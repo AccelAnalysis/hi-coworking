@@ -84,33 +84,38 @@ async function enforceSearchRateLimit(uid: string): Promise<void> {
 async function searchLocalOrganizations(input: { name: string; city?: string; state?: string; website?: string }): Promise<OrganizationCandidate[]> {
   const tokens = createSearchTokens(input.name);
   if (!tokens.length) return [];
-  const [orgSnap, restrictedSnap] = await Promise.all([
-    getDb().collection("orgs").where("searchTokens", "array-contains", tokens[0]).limit(40).get(),
-    getDb().collection("organizationSourceCandidates").where("searchTokens", "array-contains", tokens[0]).limit(20).get(),
-  ]);
+  // Search only the approved public projection. Restricted source candidates
+  // are matching evidence, not a directory or claim surface.
+  const orgSnap = await getDb().collection("publicOrganizations")
+    .where("searchTokens", "array-contains", tokens[0])
+    .limit(40)
+    .get();
 
-  const mapDocument = (doc: admin.firestore.QueryDocumentSnapshot, restricted = false) => {
+  const mapDocument = (doc: admin.firestore.QueryDocumentSnapshot) => {
     const data = doc.data();
     const match = scoreOrganizationMatch(input, data as { name: string; city?: string; state?: string; website?: string; websiteDomain?: string });
     return {
-      id: restricted ? `source:${doc.id}` : doc.id,
+      id: doc.id,
       name: String(data.name || "Organization"),
       city: cleanString(data.city),
       state: cleanString(data.state),
       website: cleanString(data.website),
       claimStatus: data.claimStatus === "claimed" || data.claimStatus === "claim_pending" ? data.claimStatus : "unclaimed",
       verificationStatus: String(data.verificationStatus || "unverified"),
-      sources: Array.isArray(data.sources) ? data.sources.map(String) : ["manual"],
+      // Source provenance is intentionally excluded from public search results.
+      sources: [],
       confidenceScore: match.score,
       matchReason: match.reasons.join(" + ") || "name similarity",
-      canRequestClaim: data.claimStatus !== "claimed",
-      external: restricted,
+      canRequestClaim: data.status === "active"
+        && data.publicationApproved === true
+        && data.claimStatus !== "claimed",
+      external: false,
     } satisfies OrganizationCandidate;
   };
-  return [
-    ...orgSnap.docs.map((doc) => mapDocument(doc)),
-    ...restrictedSnap.docs.map((doc) => mapDocument(doc, true)),
-  ].filter((candidate) => candidate.confidenceScore >= 30);
+  return orgSnap.docs
+    .filter((doc) => doc.get("status") === "active" && doc.get("publicationApproved") === true)
+    .map((doc) => mapDocument(doc))
+    .filter((candidate) => candidate.confidenceScore >= 30);
 }
 
 async function searchUsaSpending(name: string): Promise<OrganizationCandidate[]> {
@@ -218,27 +223,33 @@ export const exchange_organizationCreate = onCall(async (request) => {
   const suppliedKey = cleanString(request.data?.idempotencyKey, 160);
   if (!name) throw new HttpsError("invalid-argument", "Organization name is required.");
 
-  const possibleMatches = await searchLocalOrganizations({ name, city, state, website });
-  const strongMatches = possibleMatches.filter((candidate) => candidate.confidenceScore >= 65);
-  if (strongMatches.length && !forceCreate) {
-    return { created: false, possibleMatches: strongMatches.slice(0, 5) };
-  }
-
   const db = getDb();
   const normalizedName = normalizeOrganizationName(name);
   const websiteDomain = normalizeWebsiteDomain(website) || "";
   const idempotencyFingerprint = createHash("sha256")
-    .update(suppliedKey || [request.auth.uid, normalizedName, city || "", state || "", websiteDomain].join("|"))
+    .update(JSON.stringify({ normalizedName, city: city || "", state: state || "", websiteDomain, forceCreate }))
+    .digest("hex");
+  const idempotencyLookup = createHash("sha256")
+    .update(suppliedKey || idempotencyFingerprint)
     .digest("hex");
   const idempotencyRef = db.collection("exchangeIdempotency")
-    .doc(`${request.auth.uid}:organization_create:${idempotencyFingerprint.slice(0, 32)}`);
+    .doc(`${request.auth.uid}:organization_create:${idempotencyLookup.slice(0, 32)}`);
   const prior = await idempotencyRef.get();
   if (prior.exists) {
+    if (prior.data()?.requestFingerprint !== idempotencyFingerprint) {
+      throw new HttpsError("already-exists", "The idempotency key belongs to a different organization request.");
+    }
     return {
       created: true,
       organizationId: String(prior.data()?.entityId || ""),
       idempotent: true,
     };
+  }
+
+  const possibleMatches = await searchLocalOrganizations({ name, city, state, website });
+  const strongMatches = possibleMatches.filter((candidate) => candidate.confidenceScore >= 65);
+  if (strongMatches.length && !forceCreate) {
+    return { created: false, possibleMatches: strongMatches.slice(0, 5) };
   }
 
   const now = Date.now();
@@ -247,6 +258,10 @@ export const exchange_organizationCreate = onCall(async (request) => {
   const membershipRef = db.collection("exchangeMemberships").doc(orgRef.id);
   const accountRef = db.collection("exchangeCreditAccounts").doc(orgRef.id);
   const publicRef = db.collection("publicOrganizations").doc(orgRef.id);
+  const identityFingerprint = createHash("sha256")
+    .update([normalizedName, city || "", state || "", websiteDomain].join("\u001f"))
+    .digest("hex");
+  const identityRef = db.collection("organizationIdentityReservations").doc(identityFingerprint);
   const org: Record<string, unknown> = {
     id: orgRef.id,
     schemaVersion: ORGANIZATION_SCHEMA_VERSION,
@@ -268,14 +283,19 @@ export const exchange_organizationCreate = onCall(async (request) => {
     geohash: "",
     homeBased: false,
     privacySuppressed: false,
+    publicationApproved: true,
+    addressPublicationApproved: false,
+    coordinatePublicationApproved: false,
     naicsCodes: [],
     capabilityKeywords: [],
     certifications: [],
     ownerUid: request.auth.uid,
     status: "active",
     claimStatus: "claimed",
-    verificationStatus: "pending",
+    verificationStatus: "unverified",
     exchangeVerificationStatus: "claimed",
+    resourceProviderStatus: "none",
+    issuerStatus: "none",
     sources: ["manual"],
     sourceIds: {},
     sourceProvenance: [{ source: "manual", importedAt: now }],
@@ -283,9 +303,30 @@ export const exchange_organizationCreate = onCall(async (request) => {
     updatedAt: now,
   };
 
-  await db.runTransaction(async (tx) => {
-    const retry = await tx.get(idempotencyRef);
-    if (retry.exists) return;
+  const result = await db.runTransaction(async (tx) => {
+    const [retry, identity] = await Promise.all([
+      tx.get(idempotencyRef),
+      forceCreate ? Promise.resolve(null) : tx.get(identityRef),
+    ]);
+    if (retry.exists) {
+      if (retry.data()?.requestFingerprint !== idempotencyFingerprint) {
+        throw new HttpsError("already-exists", "The idempotency key belongs to a different organization request.");
+      }
+      return {
+        created: true,
+        organizationId: String(retry.data()?.entityId || ""),
+        idempotent: true,
+      };
+    }
+    if (identity?.exists) {
+      const sameCreator = identity.data()?.createdByUid === request.auth.uid;
+      return {
+        created: sameCreator,
+        organizationId: String(identity.data()?.organizationId || ""),
+        idempotent: true,
+        duplicatePrevented: true,
+      };
+    }
     tx.create(orgRef, org);
     tx.create(memberRef, {
       id: memberRef.id,
@@ -303,6 +344,9 @@ export const exchange_organizationCreate = onCall(async (request) => {
       status: "active",
       isFoundingMember: false,
       foundingRecognitionRetained: false,
+      startedAt: now,
+      pricingVersion: "free-v1",
+      entitlementVersion: "free-entitlements-v1",
       createdAt: now,
       updatedAt: now,
     });
@@ -321,7 +365,23 @@ export const exchange_organizationCreate = onCall(async (request) => {
       status: "completed",
       requestFingerprint: idempotencyFingerprint,
       createdAt: now,
+      expiresAt: now + 7 * 24 * 60 * 60 * 1_000,
     });
+    tx.set(db.collection("exchangeWorkspacePreferences").doc(request.auth.uid), {
+      uid: request.auth.uid,
+      actorOrganizationId: orgRef.id,
+      updatedAt: now,
+    }, { merge: true });
+    if (!forceCreate) {
+      tx.create(identityRef, {
+        id: identityRef.id,
+        organizationId: orgRef.id,
+        normalizedName,
+        websiteDomain,
+        createdByUid: request.auth.uid,
+        createdAt: now,
+      });
+    }
     writeExchangeAudit(tx, db, {
       actorUid: request.auth.uid,
       actorRole: String(request.auth.token?.role || "member"),
@@ -329,19 +389,22 @@ export const exchange_organizationCreate = onCall(async (request) => {
       entityType: "organization",
       entityId: orgRef.id,
       orgId: orgRef.id,
+      actorOrganizationId: orgRef.id,
+      subjectOrganizationId: orgRef.id,
       newStatus: "claimed",
       metadata: { source: "manual" },
       createdAt: now,
     });
+    return { created: true, organizationId: orgRef.id, idempotent: false };
   });
-  return { created: true, organizationId: orgRef.id, idempotent: false };
+  return result;
 });
 
 export const exchange_organizationRequestClaim = onCall(async (request) => {
   assertAuthenticated(request);
   const requestedId = cleanString(request.data?.organizationId, 200);
   const reason = cleanString(request.data?.reason, 1000);
-  if (!requestedId || requestedId.startsWith("usaspending:")) {
+  if (!requestedId || requestedId.startsWith("usaspending:") || requestedId.startsWith("source:")) {
     throw new HttpsError("failed-precondition", "External matches must be imported through a governed source workflow before they can be claimed.");
   }
   if (!reason || reason.length < 10) {
@@ -349,44 +412,23 @@ export const exchange_organizationRequestClaim = onCall(async (request) => {
   }
 
   const db = getDb();
-  let organizationId = requestedId;
-  let importedSource: Record<string, unknown> | null = null;
-  if (requestedId.startsWith("source:")) {
-    const sourceId = requestedId.slice("source:".length);
-    const sourceSnap = await db.collection("organizationSourceCandidates").doc(sourceId).get();
-    if (!sourceSnap.exists) throw new HttpsError("not-found", "Source organization not found.");
-    importedSource = sourceSnap.data() || {};
-    organizationId = `target_${sourceId}`;
-  }
+  const organizationId = requestedId;
 
   const orgRef = db.collection("orgs").doc(organizationId);
   const publicRef = db.collection("publicOrganizations").doc(organizationId);
   const claimRef = db.collection("organizationClaims").doc(`${organizationId}_${request.auth.uid}`);
   await db.runTransaction(async (tx) => {
-    const [orgSnap, claimSnap] = await Promise.all([tx.get(orgRef), tx.get(claimRef)]);
+    const [orgSnap, publicSnap, claimSnap] = await Promise.all([
+      tx.get(orgRef),
+      tx.get(publicRef),
+      tx.get(claimRef),
+    ]);
     let org = orgSnap.data();
     const now = Date.now();
     if (!orgSnap.exists) {
-      if (!importedSource) throw new HttpsError("not-found", "Organization not found.");
-      org = {
-        ...importedSource,
-        id: organizationId,
-        schemaVersion: ORGANIZATION_SCHEMA_VERSION,
-        canonicalName: String(importedSource.name || "Organization"),
-        slug: createOrganizationSlug(String(importedSource.name || "Organization"), organizationId),
-        ownerUid: "",
-        status: "active",
-        claimStatus: "unclaimed",
-        verificationStatus: "unverified",
-        exchangeVerificationStatus: "unverified",
-        homeBased: importedSource.homeBased === true,
-        privacySuppressed: importedSource.homeBased === true || importedSource.privacySuppressed === true,
-        createdAt: now,
-        updatedAt: now,
-      };
-      tx.create(orgRef, org);
-      tx.create(publicRef, sanitizePublicOrganization(organizationId, org));
+      throw new HttpsError("not-found", "Organization not found.");
     }
+    if (org?.status !== "active") throw new HttpsError("failed-precondition", "Organization is unavailable.");
     if (org?.claimStatus === "claimed") {
       if (org.ownerUid === request.auth.uid && claimSnap.data()?.status === "approved") return;
       throw new HttpsError("already-exists", "This organization is already claimed.");
@@ -412,7 +454,9 @@ export const exchange_organizationRequestClaim = onCall(async (request) => {
     }, { merge: true });
     const updatedOrg = { ...org, claimStatus: "claim_pending", exchangeVerificationStatus: "claim_pending", updatedAt: now };
     tx.set(orgRef, updatedOrg, { merge: true });
-    tx.set(publicRef, sanitizePublicOrganization(organizationId, updatedOrg), { merge: true });
+    if (publicSnap.exists && publicSnap.get("publicationApproved") === true) {
+      tx.set(publicRef, sanitizePublicOrganization(organizationId, updatedOrg), { merge: true });
+    }
     const notificationRef = db.collection("notifications").doc(`organization_claim_requested_${claimRef.id}`);
     tx.set(notificationRef, claimNotification({
       id: notificationRef.id,
@@ -429,6 +473,7 @@ export const exchange_organizationRequestClaim = onCall(async (request) => {
       entityType: "organizationClaim",
       entityId: claimRef.id,
       orgId: organizationId,
+      subjectOrganizationId: organizationId,
       previousStatus: String(org?.claimStatus || "unclaimed"),
       newStatus: "pending",
       createdAt: now,
@@ -510,8 +555,8 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
     const competingQuery = db.collection("organizationClaims")
       .where("organizationId", "==", organizationId)
       .where("status", "==", "pending");
-    const [orgSnap, competing, membershipSnap, accountSnap] = await Promise.all([
-      tx.get(orgRef), tx.get(competingQuery), tx.get(membershipRef), tx.get(accountRef),
+    const [orgSnap, publicSnap, competing, membershipSnap, accountSnap] = await Promise.all([
+      tx.get(orgRef), tx.get(publicRef), tx.get(competingQuery), tx.get(membershipRef), tx.get(accountRef),
     ]);
     if (!orgSnap.exists) throw new HttpsError("not-found", "Organization not found.");
     const org = orgSnap.data() || {};
@@ -541,6 +586,9 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
         status: "active",
         isFoundingMember: false,
         foundingRecognitionRetained: false,
+        startedAt: now,
+        pricingVersion: "free-v1",
+        entitlementVersion: "free-entitlements-v1",
         createdAt: now,
         updatedAt: now,
       });
@@ -562,6 +610,11 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
         updatedAt: now,
       };
       tx.set(orgRef, updatedOrg, { merge: true });
+      tx.set(db.collection("exchangeWorkspacePreferences").doc(requestedBy), {
+        uid: requestedBy,
+        actorOrganizationId: organizationId,
+        updatedAt: now,
+      }, { merge: true });
       for (const other of competing.docs) {
         if (other.id !== claimId) {
           tx.update(other.ref, {
@@ -596,7 +649,11 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
       };
       tx.set(orgRef, updatedOrg, { merge: true });
     }
-    tx.set(publicRef, sanitizePublicOrganization(organizationId, updatedOrg), { merge: true });
+    if (publicSnap.exists) {
+      tx.set(publicRef, sanitizePublicOrganization(organizationId, updatedOrg), { merge: true });
+    } else if (updatedOrg.publicationApproved === true) {
+      tx.create(publicRef, sanitizePublicOrganization(organizationId, updatedOrg));
+    }
     const notificationRef = db.collection("notifications").doc(`organization_claim_reviewed_${claimId}`);
     tx.set(notificationRef, claimNotification({
       id: notificationRef.id,
@@ -615,6 +672,7 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
       entityType: "organizationClaim",
       entityId: claimId,
       orgId: organizationId,
+      subjectOrganizationId: organizationId,
       previousStatus: "pending",
       newStatus: nextStatus,
       metadata: { subjectUid: requestedBy },
@@ -623,4 +681,3 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
     return { success: true, idempotent: false, status: nextStatus, organizationId };
   });
 });
-

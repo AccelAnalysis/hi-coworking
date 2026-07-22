@@ -39,6 +39,8 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
+const MAX_BOUNDARY_POSITIONS = 25000;
+const MAX_BOUNDARY_JSON_LENGTH = 700000;
 function isValidCentroid(value) {
     if (!value || typeof value !== "object")
         return false;
@@ -51,6 +53,78 @@ function isValidCentroid(value) {
         && Number.isFinite(candidate.lng)
         && candidate.lng >= -180
         && candidate.lng <= 180;
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isPosition(value) {
+    return Array.isArray(value)
+        && value.length >= 2
+        && value.every((coordinate) => typeof coordinate === "number" && Number.isFinite(coordinate))
+        && value[0] >= -180
+        && value[0] <= 180
+        && value[1] >= -90
+        && value[1] <= 90;
+}
+function positionsEqual(left, right) {
+    return left[0] === right[0] && left[1] === right[1];
+}
+function isLinearRing(value) {
+    return Array.isArray(value)
+        && value.length >= 4
+        && value.every(isPosition)
+        && positionsEqual(value[0], value[value.length - 1]);
+}
+function isPolygonCoordinates(value) {
+    return Array.isArray(value) && value.length > 0 && value.every(isLinearRing);
+}
+function isMultiPolygonCoordinates(value) {
+    return Array.isArray(value) && value.length > 0 && value.every(isPolygonCoordinates);
+}
+function countBoundaryPositions(value) {
+    if (isPosition(value))
+        return 1;
+    if (!Array.isArray(value))
+        return 0;
+    return value.reduce((total, item) => total + countBoundaryPositions(item), 0);
+}
+function parseBoundaryGeometry(value) {
+    if (typeof value === "string") {
+        try {
+            return parseBoundaryGeometry(JSON.parse(value));
+        }
+        catch {
+            return null;
+        }
+    }
+    if (!isRecord(value) || !("coordinates" in value))
+        return null;
+    if (value.type === "Polygon" && isPolygonCoordinates(value.coordinates)) {
+        return { type: "Polygon", coordinates: value.coordinates };
+    }
+    if (value.type === "MultiPolygon" && isMultiPolygonCoordinates(value.coordinates)) {
+        return { type: "MultiPolygon", coordinates: value.coordinates };
+    }
+    return null;
+}
+function validateBoundaryGeometry(value) {
+    const geometry = parseBoundaryGeometry(value);
+    if (!geometry) {
+        throw new https_1.HttpsError("invalid-argument", "boundaryGeoJSON must be a Polygon or MultiPolygon with finite, closed rings");
+    }
+    if (countBoundaryPositions(geometry.coordinates) > MAX_BOUNDARY_POSITIONS
+        || JSON.stringify(geometry).length > MAX_BOUNDARY_JSON_LENGTH) {
+        throw new https_1.HttpsError("invalid-argument", "boundaryGeoJSON is too large for a territory record");
+    }
+    return geometry;
+}
+function isTerritoryStatus(value) {
+    return typeof value === "string"
+        && ["scheduled", "released", "paused", "archived"].includes(value);
+}
+function isTerritoryType(value) {
+    return typeof value === "string"
+        && ["county", "city", "custom_polygon"].includes(value);
 }
 function getDb() {
     return admin.firestore();
@@ -71,13 +145,19 @@ exports.territory_create = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError("unauthenticated", "Must be logged in");
     }
     requireAdminRole(request);
-    const { fips, name, state, status, releaseDate, notes, centroid, type, timezone, autoReleaseEnabled, autoPauseEnabled, regionTag, needsReview, fipsStateCode, } = request.data;
+    const { fips, name, state, status, releaseDate, notes, centroid, type, timezone, autoReleaseEnabled, autoPauseEnabled, regionTag, needsReview, fipsStateCode, boundaryGeoJSON, } = request.data;
     if (!fips || !name || !state) {
         throw new https_1.HttpsError("invalid-argument", "fips, name, and state are required");
     }
     validateFips(fips);
     if (centroid !== undefined && !isValidCentroid(centroid)) {
         throw new https_1.HttpsError("invalid-argument", "centroid must contain valid latitude and longitude");
+    }
+    if (status !== undefined && !isTerritoryStatus(status)) {
+        throw new https_1.HttpsError("invalid-argument", "status is not a supported territory status");
+    }
+    if (type !== undefined && !isTerritoryType(type)) {
+        throw new https_1.HttpsError("invalid-argument", "type is not a supported territory type");
     }
     const finalStatus = status ?? "scheduled";
     const db = getDb();
@@ -106,12 +186,15 @@ exports.territory_create = (0, https_1.onCall)(async (request) => {
         needsReview: Boolean(needsReview),
         fipsStateCode: typeof fipsStateCode === "string" ? fipsStateCode.trim() : fips.slice(0, 2),
         status: finalStatus,
-        releaseDate: typeof releaseDate === "number" ? releaseDate : undefined,
-        pausedAt: finalStatus === "paused" ? now : undefined,
+        ...(typeof releaseDate === "number" ? { releaseDate } : {}),
+        ...(finalStatus === "paused" ? { pausedAt: now } : {}),
         notes: notes?.trim() || "",
-        centroid: centroid && isValidCentroid(centroid)
-            ? { lat: centroid.lat, lng: centroid.lng }
-            : undefined,
+        ...(centroid && isValidCentroid(centroid)
+            ? { centroid: { lat: centroid.lat, lng: centroid.lng } }
+            : {}),
+        ...(boundaryGeoJSON === undefined
+            ? {}
+            : { boundaryGeoJSON: JSON.stringify(validateBoundaryGeometry(boundaryGeoJSON)) }),
         createdAt: now,
         updatedAt: now,
         updatedBy: createdBy,
@@ -126,11 +209,17 @@ exports.territory_update = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError("unauthenticated", "Must be logged in");
     }
     requireAdminRole(request);
-    const { fips, status, releaseDate, notes, centroid, name, state, type, timezone, autoReleaseEnabled, autoPauseEnabled, regionTag, needsReview, fipsStateCode, } = request.data;
+    const { fips, status, releaseDate, notes, centroid, name, state, type, timezone, autoReleaseEnabled, autoPauseEnabled, regionTag, needsReview, fipsStateCode, boundaryGeoJSON, } = request.data;
     if (!fips) {
         throw new https_1.HttpsError("invalid-argument", "fips is required");
     }
     validateFips(fips);
+    if (status !== undefined && !isTerritoryStatus(status)) {
+        throw new https_1.HttpsError("invalid-argument", "status is not a supported territory status");
+    }
+    if (type !== undefined && !isTerritoryType(type)) {
+        throw new https_1.HttpsError("invalid-argument", "type is not a supported territory type");
+    }
     const db = getDb();
     const ref = db.collection("territories").doc(fips);
     const snap = await ref.get();
@@ -200,6 +289,12 @@ exports.territory_update = (0, https_1.onCall)(async (request) => {
     else if (centroid && isValidCentroid(centroid)) {
         updates.centroid = { lat: centroid.lat, lng: centroid.lng };
     }
+    if (boundaryGeoJSON === null) {
+        updates.boundaryGeoJSON = firestore_1.FieldValue.delete();
+    }
+    else if (boundaryGeoJSON !== undefined) {
+        updates.boundaryGeoJSON = JSON.stringify(validateBoundaryGeometry(boundaryGeoJSON));
+    }
     if (statusHistoryEntry) {
         updates.statusHistory = firestore_1.FieldValue.arrayUnion(statusHistoryEntry);
     }
@@ -212,19 +307,37 @@ exports.territory_list_released = (0, https_1.onCall)(async (request) => {
         throw new https_1.HttpsError("unauthenticated", "Must be logged in");
     }
     const db = getDb();
-    const releasedSnap = await db
+    const [releasedSnap, scheduledSnap, pausedSnap, archivedSnap] = await Promise.all(["released", "scheduled", "paused", "archived"].map((status) => db
         .collection("territories")
-        .where("status", "==", "released")
-        .orderBy("name", "asc")
-        .get();
-    const scheduledSnap = await db
-        .collection("territories")
-        .where("status", "==", "scheduled")
-        .orderBy("releaseDate", "asc")
-        .get();
+        .where("status", "==", status)
+        .limit(250)
+        .get()));
+    const projectForMap = (doc) => {
+        const source = doc.data();
+        const centroid = isValidCentroid(source.centroid)
+            ? { lat: source.centroid.lat, lng: source.centroid.lng }
+            : undefined;
+        const boundaryGeoJSON = parseBoundaryGeometry(source.boundaryGeoJSON) ?? undefined;
+        return {
+            fips: typeof source.fips === "string" ? source.fips : doc.id,
+            name: typeof source.name === "string" ? source.name : "Territory",
+            state: typeof source.state === "string" ? source.state : "",
+            status: source.status,
+            type: isTerritoryType(source.type) ? source.type : "county",
+            ...(typeof source.releaseDate === "number" ? { releaseDate: source.releaseDate } : {}),
+            ...(centroid ? { centroid } : {}),
+            ...(boundaryGeoJSON ? { boundaryGeoJSON } : {}),
+            createdAt: typeof source.createdAt === "number" ? source.createdAt : 0,
+            ...(typeof source.updatedAt === "number" ? { updatedAt: source.updatedAt } : {}),
+        };
+    };
+    const byName = (left, right) => left.name.localeCompare(right.name) || left.fips.localeCompare(right.fips);
+    const byReleaseDate = (left, right) => (left.releaseDate ?? Number.MAX_SAFE_INTEGER) - (right.releaseDate ?? Number.MAX_SAFE_INTEGER)
+        || byName(left, right);
     return {
-        released: releasedSnap.docs.map((d) => d.data()),
-        scheduled: scheduledSnap.docs.map((d) => d.data()),
+        released: releasedSnap.docs.map(projectForMap).sort(byName),
+        scheduled: scheduledSnap.docs.map(projectForMap).sort(byReleaseDate),
+        unreleased: [...pausedSnap.docs, ...archivedSnap.docs].map(projectForMap).sort(byName),
     };
 });
 exports.territory_release_scheduled = (0, scheduler_1.onSchedule)({

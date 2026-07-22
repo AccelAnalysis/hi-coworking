@@ -12,6 +12,8 @@ import {
   DEFAULT_EXCHANGE_LOCAL_FIRST,
   DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
   DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+  canonicalExchangeMode,
+  createInitialExchangeModeStates,
   createInitialExchangeWorkspaceState,
   isExchangeCompensationFilter,
   isExchangeConnectionMode,
@@ -25,8 +27,13 @@ import {
   isExchangeTerritoryStatus,
   isExchangeView,
   type ExchangeSelection,
+  type ExchangeCanonicalMode,
+  type ExchangeDraftRefs,
+  type ExchangeModeState,
+  type ExchangeModeStates,
   type ExchangeViewport,
   type ExchangeWorkspaceHydration,
+  type ExchangeWorkspaceSessionHydration,
   type ExchangeWorkspaceState,
 } from "./exchangeWorkspaceTypes";
 
@@ -34,6 +41,8 @@ const MAX_SEARCH_LENGTH = 240;
 const MAX_FILTER_COUNT = 60;
 const MAX_FILTER_LENGTH = 160;
 const MAX_ENTITY_ID_LENGTH = 160;
+const MAX_SESSION_LABEL_LENGTH = 160;
+const MAX_SCROLL_TOP = 10_000_000;
 
 function own(value: object, key: PropertyKey): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
@@ -41,6 +50,26 @@ function own(value: object, key: PropertyKey): boolean {
 
 function normalizeSearch(value: unknown): string {
   return typeof value === "string" ? value.slice(0, MAX_SEARCH_LENGTH) : "";
+}
+
+export function normalizeExchangeEntityId(value: unknown): string | undefined {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > MAX_ENTITY_ID_LENGTH
+    || /[\u0000-\u001f\u007f]/.test(value)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeOptionalLabel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const candidate = value.trim().slice(0, MAX_SESSION_LABEL_LENGTH);
+  return candidate && !/[\u0000-\u001f\u007f]/.test(candidate)
+    ? candidate
+    : undefined;
 }
 
 function normalizeStringList(value: unknown, maxLength = MAX_FILTER_LENGTH): string[] {
@@ -67,33 +96,32 @@ function normalizeOptionalMoney(value: unknown): number | undefined {
     : undefined;
 }
 
-function normalizeSelection(value: unknown): ExchangeSelection | undefined {
+export function normalizeExchangeSelection(
+  value: unknown,
+): ExchangeSelection | undefined {
   if (value === null) return null;
   if (!value || typeof value !== "object") return undefined;
 
   const candidate = value as { entityType?: unknown; entityId?: unknown };
   if (
     candidate.entityType !== "rfx"
+    && candidate.entityType !== "opportunity"
     && candidate.entityType !== "territory"
     && candidate.entityType !== "organization"
     && candidate.entityType !== "referral"
+    && candidate.entityType !== "resource"
+    && candidate.entityType !== "team"
     && candidate.entityType !== "relationship"
     && candidate.entityType !== "industry"
   ) {
     return undefined;
   }
-  if (
-    typeof candidate.entityId !== "string"
-    || candidate.entityId.length === 0
-    || candidate.entityId.length > MAX_ENTITY_ID_LENGTH
-    || /[\u0000-\u001f\u007f]/.test(candidate.entityId)
-  ) {
-    return undefined;
-  }
+  const entityId = normalizeExchangeEntityId(candidate.entityId);
+  if (!entityId) return undefined;
 
   return {
     entityType: candidate.entityType,
-    entityId: candidate.entityId,
+    entityId,
   };
 }
 
@@ -227,6 +255,234 @@ function applyFilterUpdate(
   return next;
 }
 
+const DRAFT_REF_KEYS = [
+  "referralDraftId",
+  "contactRequestDraftId",
+  "teamingInvitationDraftId",
+  "organizationClaimDraftId",
+  "opportunityResponseDraftId",
+  "savedSearchDraftId",
+  "resourceContactDraftId",
+] as const satisfies readonly (keyof ExchangeDraftRefs)[];
+
+function normalizeDraftRefs(
+  value: unknown,
+  fallback: ExchangeDraftRefs = {},
+): ExchangeDraftRefs {
+  if (!value || typeof value !== "object") return { ...fallback };
+  const next: ExchangeDraftRefs = {};
+  for (const key of DRAFT_REF_KEYS) {
+    if (!own(value, key)) {
+      if (fallback[key]) next[key] = fallback[key];
+      continue;
+    }
+    const id = normalizeExchangeEntityId(
+      (value as Partial<Record<keyof ExchangeDraftRefs, unknown>>)[key],
+    );
+    if (id) next[key] = id;
+  }
+  return next;
+}
+
+function modeFilterSnapshot(
+  state: ExchangeWorkspaceState,
+  mode: ExchangeCanonicalMode,
+): ExchangeModeState["filters"] {
+  if (mode === "opportunities") {
+    return {
+      naicsFilters: [...state.naicsFilters],
+      industryFilters: [...state.industryFilters],
+      capabilityFilters: [...state.capabilityFilters],
+      territoryFilters: [...state.territoryFilters],
+      rfxStatusFilters: [...state.rfxStatusFilters],
+      territoryStatusFilters: [...state.territoryStatusFilters],
+      opportunityTypeFilters: [...state.opportunityTypeFilters],
+      rfxTypeFilters: [...state.rfxTypeFilters],
+      buyerTypeFilters: [...state.buyerTypeFilters],
+      workArrangementFilters: [...state.workArrangementFilters],
+      visibilityFilters: [...state.visibilityFilters],
+      certificationFilters: [...state.certificationFilters],
+      setAsideFilters: [...state.setAsideFilters],
+      primeClassificationFilters: [...state.primeClassificationFilters],
+      awardClassificationFilters: [...state.awardClassificationFilters],
+      personalizedFilters: [...state.personalizedFilters],
+      localFirst: state.localFirst,
+      closingSoon: state.closingSoon,
+      teamingSuitable: state.teamingSuitable,
+      budgetMin: state.budgetMin,
+      budgetMax: state.budgetMax,
+      opportunitySort: state.opportunitySort,
+      activeSavedSearchId: state.activeSavedSearchId,
+    };
+  }
+  if (mode === "referrals") {
+    return {
+      connectionMode: state.connectionMode,
+      referralStatusFilters: [...state.referralStatusFilters],
+      connectionIndustryFilters: [...state.connectionIndustryFilters],
+      connectionTerritoryFilters: [...state.connectionTerritoryFilters],
+      compensationFilter: state.compensationFilter,
+      relationshipFilter: state.relationshipFilter,
+    };
+  }
+  if (mode === "intelligence") {
+    return {
+      connectionIndustryFilters: [...state.connectionIndustryFilters],
+      connectionTerritoryFilters: [...state.connectionTerritoryFilters],
+      relationshipFilter: state.relationshipFilter,
+      intelligenceMetric: state.intelligenceMetric,
+    };
+  }
+  return {};
+}
+
+function snapshotMode(
+  state: ExchangeWorkspaceState,
+  mode: ExchangeCanonicalMode = canonicalExchangeMode(state.view),
+): ExchangeWorkspaceState {
+  const existing = state.modeStates[mode];
+  return {
+    ...state,
+    modeStates: {
+      ...state.modeStates,
+      [mode]: {
+        ...existing,
+        filters: mode === "resources"
+          ? existing.filters
+          : modeFilterSnapshot(state, mode),
+        secondaryContext: state.secondaryContext,
+      },
+    },
+  };
+}
+
+function restoreMode(
+  state: ExchangeWorkspaceState,
+  mode: ExchangeCanonicalMode,
+): ExchangeWorkspaceState {
+  const initial = createInitialExchangeWorkspaceState();
+  const stored = state.modeStates[mode];
+  const filters = stored.filters;
+  let next: ExchangeWorkspaceState = {
+    ...state,
+    secondaryContext: stored.secondaryContext,
+    selection: stored.secondaryContext
+      ?? (state.subjectOrganizationId
+        ? { entityType: "organization", entityId: state.subjectOrganizationId }
+        : null),
+  };
+
+  if (mode === "opportunities") {
+    next = {
+      ...next,
+      naicsFilters: filters.naicsFilters ?? initial.naicsFilters,
+      industryFilters: filters.industryFilters ?? initial.industryFilters,
+      capabilityFilters: filters.capabilityFilters ?? initial.capabilityFilters,
+      territoryFilters: filters.territoryFilters ?? initial.territoryFilters,
+      rfxStatusFilters: filters.rfxStatusFilters ?? initial.rfxStatusFilters,
+      territoryStatusFilters: filters.territoryStatusFilters ?? initial.territoryStatusFilters,
+      opportunityTypeFilters: filters.opportunityTypeFilters ?? initial.opportunityTypeFilters,
+      rfxTypeFilters: filters.rfxTypeFilters ?? initial.rfxTypeFilters,
+      buyerTypeFilters: filters.buyerTypeFilters ?? initial.buyerTypeFilters,
+      workArrangementFilters: filters.workArrangementFilters ?? initial.workArrangementFilters,
+      visibilityFilters: filters.visibilityFilters ?? initial.visibilityFilters,
+      certificationFilters: filters.certificationFilters ?? initial.certificationFilters,
+      setAsideFilters: filters.setAsideFilters ?? initial.setAsideFilters,
+      primeClassificationFilters: filters.primeClassificationFilters ?? initial.primeClassificationFilters,
+      awardClassificationFilters: filters.awardClassificationFilters ?? initial.awardClassificationFilters,
+      personalizedFilters: filters.personalizedFilters ?? initial.personalizedFilters,
+      localFirst: filters.localFirst ?? initial.localFirst,
+      closingSoon: filters.closingSoon ?? initial.closingSoon,
+      teamingSuitable: filters.teamingSuitable ?? initial.teamingSuitable,
+      budgetMin: filters.budgetMin,
+      budgetMax: filters.budgetMax,
+      opportunitySort: filters.opportunitySort ?? initial.opportunitySort,
+      activeSavedSearchId: filters.activeSavedSearchId,
+    };
+  } else if (mode === "referrals") {
+    next = {
+      ...next,
+      connectionMode: filters.connectionMode ?? initial.connectionMode,
+      referralStatusFilters: filters.referralStatusFilters ?? initial.referralStatusFilters,
+      connectionIndustryFilters: filters.connectionIndustryFilters ?? initial.connectionIndustryFilters,
+      connectionTerritoryFilters: filters.connectionTerritoryFilters ?? initial.connectionTerritoryFilters,
+      compensationFilter: filters.compensationFilter ?? initial.compensationFilter,
+      relationshipFilter: filters.relationshipFilter ?? initial.relationshipFilter,
+    };
+  } else if (mode === "intelligence") {
+    next = {
+      ...next,
+      connectionIndustryFilters: filters.connectionIndustryFilters ?? initial.connectionIndustryFilters,
+      connectionTerritoryFilters: filters.connectionTerritoryFilters ?? initial.connectionTerritoryFilters,
+      relationshipFilter: filters.relationshipFilter ?? initial.relationshipFilter,
+      intelligenceMetric: filters.intelligenceMetric ?? initial.intelligenceMetric,
+    };
+  }
+  return next;
+}
+
+function normalizeModeState(
+  mode: ExchangeCanonicalMode,
+  value: unknown,
+  fallback: ExchangeModeState,
+): ExchangeModeState {
+  if (!value || typeof value !== "object") return fallback;
+  const candidate = value as Record<string, unknown>;
+  const rawFilters = candidate.filters && typeof candidate.filters === "object"
+    ? candidate.filters as Record<string, unknown>
+    : {};
+  let filterState = createInitialExchangeWorkspaceState();
+  filterState = applyFilterUpdate(filterState, rawFilters as ExchangeFilterUpdate);
+  if (isExchangeConnectionMode(rawFilters.connectionMode)) {
+    filterState.connectionMode = rawFilters.connectionMode;
+  }
+  if (isExchangeIntelligenceMetric(rawFilters.intelligenceMetric)) {
+    filterState.intelligenceMetric = rawFilters.intelligenceMetric;
+  }
+  const savedSearchId = normalizeExchangeEntityId(rawFilters.activeSavedSearchId);
+  if (savedSearchId) filterState.activeSavedSearchId = savedSearchId;
+
+  const secondary = normalizeExchangeSelection(candidate.secondaryContext);
+  const scrollTop = candidate.listScrollTop;
+  const filters = mode === "resources"
+    ? {
+        eligibilityFilters: normalizeStringList(rawFilters.eligibilityFilters),
+        providerFilters: normalizeStringList(rawFilters.providerFilters),
+        serviceFilters: normalizeStringList(rawFilters.serviceFilters),
+      }
+    : modeFilterSnapshot(filterState, mode);
+  return {
+    filters,
+    secondaryContext: secondary === undefined ? fallback.secondaryContext : secondary,
+    listScrollTop: typeof scrollTop === "number"
+      && Number.isFinite(scrollTop)
+      && scrollTop >= 0
+      && scrollTop <= MAX_SCROLL_TOP
+      ? scrollTop
+      : fallback.listScrollTop,
+    panelSubsection: normalizeOptionalLabel(candidate.panelSubsection),
+    resourceCategory: mode === "resources"
+      ? normalizeOptionalLabel(candidate.resourceCategory)
+      : undefined,
+    draftRefs: normalizeDraftRefs(candidate.draftRefs),
+  };
+}
+
+export function normalizeExchangeModeStates(
+  value: unknown,
+  fallback: ExchangeModeStates = createInitialExchangeModeStates(),
+): ExchangeModeStates {
+  const candidate = value && typeof value === "object"
+    ? value as Partial<Record<ExchangeCanonicalMode, unknown>>
+    : {};
+  return {
+    opportunities: normalizeModeState("opportunities", candidate.opportunities, fallback.opportunities),
+    referrals: normalizeModeState("referrals", candidate.referrals, fallback.referrals),
+    intelligence: normalizeModeState("intelligence", candidate.intelligence, fallback.intelligence),
+    resources: normalizeModeState("resources", candidate.resources, fallback.resources),
+  };
+}
+
 function hydrationFilterUpdate(
   hydration: ExchangeWorkspaceHydration,
 ): ExchangeFilterUpdate {
@@ -276,7 +532,7 @@ function hydrateWorkspace(
   state: ExchangeWorkspaceState,
   hydration: ExchangeWorkspaceHydration,
 ): ExchangeWorkspaceState {
-  let next = { ...state };
+  let next = snapshotMode(state);
 
   if (own(hydration, "view") && isExchangeView(hydration.view)) {
     next.view = hydration.view;
@@ -302,6 +558,16 @@ function hydrateWorkspace(
   if (own(hydration, "searchQuery")) {
     next.searchQuery = normalizeSearch(hydration.searchQuery);
   }
+  if (own(hydration, "requestedActorOrganizationId")) {
+    next.requestedActorOrganizationId = normalizeExchangeEntityId(
+      hydration.requestedActorOrganizationId,
+    );
+  }
+  if (own(hydration, "subjectOrganizationId")) {
+    next.subjectOrganizationId = normalizeExchangeEntityId(
+      hydration.subjectOrganizationId,
+    );
+  }
   if (own(hydration, "activeSavedSearchId")) {
     const id = hydration.activeSavedSearchId;
     next.activeSavedSearchId = typeof id === "string"
@@ -314,13 +580,32 @@ function hydrateWorkspace(
 
   next = applyFilterUpdate(next, hydrationFilterUpdate(hydration));
 
-  if (own(hydration, "selection")) {
-    const selection = normalizeSelection(hydration.selection);
-    if (selection !== undefined) {
-      next.selection = selection;
-      next.rightPanelOpen = selection !== null;
-      next.mobileDetailOpen = selection !== null;
+  if (own(hydration, "secondaryContext")) {
+    const secondary = normalizeExchangeSelection(hydration.secondaryContext);
+    if (secondary !== undefined) next.secondaryContext = secondary;
+  } else if (own(hydration, "selection")) {
+    const selection = normalizeExchangeSelection(hydration.selection);
+    if (selection?.entityType === "organization") {
+      next.subjectOrganizationId = selection.entityId;
+      next.secondaryContext = null;
+    } else if (selection !== undefined) {
+      next.secondaryContext = selection;
     }
+  }
+  if (own(hydration, "organizationDrawerOpen")) {
+    next.organizationDrawerOpen = hydration.organizationDrawerOpen === true
+      && Boolean(next.subjectOrganizationId);
+  }
+  if (own(hydration, "rightPanelOpen")) {
+    next.rightPanelOpen = hydration.rightPanelOpen === true
+      && next.secondaryContext !== null;
+  }
+  if (own(hydration, "selection") || own(hydration, "secondaryContext") || own(hydration, "subjectOrganizationId")) {
+    next.selection = next.secondaryContext
+      ?? (next.subjectOrganizationId
+        ? { entityType: "organization", entityId: next.subjectOrganizationId }
+        : null);
+    next.mobileDetailOpen = next.rightPanelOpen || next.organizationDrawerOpen;
   }
 
   if (own(hydration, "viewport")) {
@@ -329,7 +614,64 @@ function hydrateWorkspace(
       : normalizeExchangeViewport(hydration.viewport);
   }
 
-  return next;
+  return snapshotMode(next);
+}
+
+function hydrateSessionWorkspace(
+  state: ExchangeWorkspaceState,
+  hydration: ExchangeWorkspaceSessionHydration,
+): ExchangeWorkspaceState {
+  let next = snapshotMode(state);
+  if (isExchangeView(hydration.view)) next.view = hydration.view;
+  if (isExchangeSurfaceMode(hydration.surfaceMode)) {
+    next.surfaceMode = hydration.surfaceMode;
+  }
+  if (own(hydration, "modeStates")) {
+    next.modeStates = normalizeExchangeModeStates(hydration.modeStates, next.modeStates);
+  }
+  next = restoreMode(next, canonicalExchangeMode(next.view));
+
+  if (own(hydration, "subjectOrganizationId")) {
+    next.subjectOrganizationId = normalizeExchangeEntityId(
+      hydration.subjectOrganizationId,
+    );
+  }
+  if (own(hydration, "secondaryContext")) {
+    const secondary = normalizeExchangeSelection(hydration.secondaryContext);
+    if (secondary !== undefined) next.secondaryContext = secondary;
+  }
+  if (own(hydration, "searchQuery")) {
+    next.searchQuery = normalizeSearch(hydration.searchQuery);
+  }
+  if (own(hydration, "opportunityLocation")) {
+    next.opportunityLocation = normalizeOpportunityLocation(
+      hydration.opportunityLocation,
+    );
+  }
+  if (own(hydration, "viewport")) {
+    next.viewport = normalizeExchangeViewport(hydration.viewport);
+  }
+  if (typeof hydration.leftPanelCollapsed === "boolean") {
+    next.leftPanelCollapsed = hydration.leftPanelCollapsed;
+  }
+  if (typeof hydration.rightPanelOpen === "boolean") {
+    next.rightPanelOpen = hydration.rightPanelOpen && next.secondaryContext !== null;
+  }
+  if (typeof hydration.mobileFilterOpen === "boolean") {
+    next.mobileFilterOpen = hydration.mobileFilterOpen;
+  }
+  if (typeof hydration.mobileDetailOpen === "boolean") {
+    next.mobileDetailOpen = hydration.mobileDetailOpen;
+  }
+  if (typeof hydration.organizationDrawerOpen === "boolean") {
+    next.organizationDrawerOpen = hydration.organizationDrawerOpen
+      && Boolean(next.subjectOrganizationId);
+  }
+  next.selection = next.secondaryContext
+    ?? (next.subjectOrganizationId
+      ? { entityType: "organization", entityId: next.subjectOrganizationId }
+      : null);
+  return snapshotMode(next);
 }
 
 export function exchangeWorkspaceReducer(
@@ -338,23 +680,162 @@ export function exchangeWorkspaceReducer(
 ): ExchangeWorkspaceState {
   switch (action.type) {
     case "SET_VIEW":
-      return isExchangeView(action.view)
-        ? {
-            ...state,
-            view: action.view,
-            selection: null,
-            rightPanelOpen: false,
-            mobileDetailOpen: false,
-            mobileFilterOpen: false,
-          }
-        : state;
+      if (!isExchangeView(action.view)) return state;
+      return restoreMode(
+        { ...snapshotMode(state), view: action.view },
+        canonicalExchangeMode(action.view),
+      );
+    case "SET_REQUESTED_ACTOR_ORGANIZATION":
+      return {
+        ...state,
+        requestedActorOrganizationId: normalizeExchangeEntityId(action.id),
+      };
+    case "SET_VALIDATED_ACTOR_ORGANIZATION":
+      return {
+        ...state,
+        actorOrganizationId: normalizeExchangeEntityId(action.id),
+      };
+    case "SET_SUBJECT_ORGANIZATION": {
+      const subjectOrganizationId = normalizeExchangeEntityId(action.id);
+      return {
+        ...state,
+        subjectOrganizationId,
+        organizationDrawerOpen: Boolean(subjectOrganizationId),
+        selection: state.secondaryContext
+          ?? (subjectOrganizationId
+            ? { entityType: "organization", entityId: subjectOrganizationId }
+            : null),
+        mobileDetailOpen: subjectOrganizationId ? true : state.rightPanelOpen,
+      };
+    }
+    case "CLEAR_SUBJECT_ORGANIZATION":
+      return {
+        ...state,
+        subjectOrganizationId: undefined,
+        organizationDrawerOpen: false,
+        selection: state.secondaryContext,
+        mobileDetailOpen: state.rightPanelOpen,
+      };
+    case "SET_SECONDARY_CONTEXT": {
+      const secondaryContext = normalizeExchangeSelection(action.context);
+      if (secondaryContext === undefined) return state;
+      return snapshotMode({
+        ...state,
+        secondaryContext,
+        selection: secondaryContext
+          ?? (state.subjectOrganizationId
+            ? { entityType: "organization", entityId: state.subjectOrganizationId }
+            : null),
+        rightPanelOpen: secondaryContext !== null,
+        mobileDetailOpen: secondaryContext !== null || state.organizationDrawerOpen,
+      });
+    }
+    case "CLEAR_SECONDARY_CONTEXT":
+      return snapshotMode({
+        ...state,
+        secondaryContext: null,
+        selection: state.subjectOrganizationId
+          ? { entityType: "organization", entityId: state.subjectOrganizationId }
+          : null,
+        rightPanelOpen: false,
+        mobileDetailOpen: state.organizationDrawerOpen,
+      });
+    case "SET_ORGANIZATION_DRAWER_OPEN": {
+      const open = action.open === true && Boolean(state.subjectOrganizationId);
+      return {
+        ...state,
+        organizationDrawerOpen: open,
+        mobileDetailOpen: open || state.rightPanelOpen,
+      };
+    }
+    case "SET_MODE_LIST_SCROLL": {
+      const mode = action.mode ?? canonicalExchangeMode(state.view);
+      if (!state.modeStates[mode]
+        || !Number.isFinite(action.scrollTop)
+        || action.scrollTop < 0
+        || action.scrollTop > MAX_SCROLL_TOP) return state;
+      return {
+        ...state,
+        modeStates: {
+          ...state.modeStates,
+          [mode]: { ...state.modeStates[mode], listScrollTop: action.scrollTop },
+        },
+      };
+    }
+    case "SET_MODE_FILTERS": {
+      const mode = action.mode ?? canonicalExchangeMode(state.view);
+      const existing = state.modeStates[mode];
+      if (!existing) return state;
+      const modeState = normalizeModeState(mode, {
+        ...existing,
+        filters: { ...existing.filters, ...action.filters },
+      }, existing);
+      const next = {
+        ...state,
+        modeStates: { ...state.modeStates, [mode]: modeState },
+      };
+      return canonicalExchangeMode(state.view) === mode
+        ? restoreMode(next, mode)
+        : next;
+    }
+    case "SET_MODE_PANEL_SUBSECTION": {
+      const mode = action.mode ?? canonicalExchangeMode(state.view);
+      if (!state.modeStates[mode]) return state;
+      return {
+        ...state,
+        modeStates: {
+          ...state.modeStates,
+          [mode]: {
+            ...state.modeStates[mode],
+            panelSubsection: normalizeOptionalLabel(action.subsection),
+          },
+        },
+      };
+    }
+    case "SET_RESOURCE_CATEGORY":
+      return {
+        ...state,
+        modeStates: {
+          ...state.modeStates,
+          resources: {
+            ...state.modeStates.resources,
+            resourceCategory: normalizeOptionalLabel(action.category),
+          },
+        },
+      };
+    case "SET_MODE_DRAFT_REFS": {
+      const mode = action.mode ?? canonicalExchangeMode(state.view);
+      if (!state.modeStates[mode]) return state;
+      return {
+        ...state,
+        modeStates: {
+          ...state.modeStates,
+          [mode]: {
+            ...state.modeStates[mode],
+            draftRefs: normalizeDraftRefs(
+              action.refs,
+              state.modeStates[mode].draftRefs,
+            ),
+          },
+        },
+      };
+    }
     case "SET_SEARCH":
-      return { ...state, searchQuery: normalizeSearch(action.query), activeSavedSearchId: undefined };
+      return canonicalExchangeMode(state.view) === "opportunities"
+        ? snapshotMode({
+            ...state,
+            searchQuery: normalizeSearch(action.query),
+            activeSavedSearchId: undefined,
+          })
+        : { ...state, searchQuery: normalizeSearch(action.query) };
     case "SET_FILTERS":
-      return { ...applyFilterUpdate(state, action.filters), activeSavedSearchId: undefined };
+      return snapshotMode({
+        ...applyFilterUpdate(state, action.filters),
+        activeSavedSearchId: undefined,
+      });
     case "CLEAR_FILTERS":
       if (state.view === "connections" || state.view === "referrals") {
-        return {
+        return snapshotMode({
           ...state,
           searchQuery: "",
           referralStatusFilters: [],
@@ -362,19 +843,19 @@ export function exchangeWorkspaceReducer(
           connectionTerritoryFilters: [],
           compensationFilter: DEFAULT_EXCHANGE_COMPENSATION_FILTER,
           relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
-        };
+        });
       }
       if (state.view === "intelligence") {
-        return {
+        return snapshotMode({
           ...state,
           searchQuery: "",
           connectionIndustryFilters: [],
           connectionTerritoryFilters: [],
           relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
           intelligenceMetric: DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
-        };
+        });
       }
-      return {
+      return snapshotMode({
         ...state,
         searchQuery: "",
         naicsFilters: [],
@@ -401,10 +882,10 @@ export function exchangeWorkspaceReducer(
         opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
         opportunityLocation: undefined,
         activeSavedSearchId: undefined,
-      };
+      });
     case "SET_OPPORTUNITY_SORT":
       return isExchangeOpportunitySort(action.sort)
-        ? { ...state, opportunitySort: action.sort, activeSavedSearchId: undefined }
+        ? snapshotMode({ ...state, opportunitySort: action.sort, activeSavedSearchId: undefined })
         : state;
     case "SET_OPPORTUNITY_LOCATION":
       return {
@@ -420,7 +901,7 @@ export function exchangeWorkspaceReducer(
           && action.id.length > 0
           && action.id.length <= MAX_ENTITY_ID_LENGTH
           && !/[\u0000-\u001f\u007f]/.test(action.id))
-        ? { ...state, activeSavedSearchId: action.id }
+        ? snapshotMode({ ...state, activeSavedSearchId: action.id })
         : state;
     case "SET_SURFACE_MODE":
       return isExchangeSurfaceMode(action.mode)
@@ -428,29 +909,42 @@ export function exchangeWorkspaceReducer(
         : state;
     case "SET_CONNECTION_MODE":
       return isExchangeConnectionMode(action.mode)
-        ? { ...state, connectionMode: action.mode }
+        ? snapshotMode({ ...state, connectionMode: action.mode })
         : state;
     case "SET_INTELLIGENCE_METRIC":
       return isExchangeIntelligenceMetric(action.metric)
-        ? { ...state, intelligenceMetric: action.metric }
+        ? snapshotMode({ ...state, intelligenceMetric: action.metric })
         : state;
     case "SELECT_ENTITY": {
-      const selection = normalizeSelection(action.selection);
+      const selection = normalizeExchangeSelection(action.selection);
       if (!selection) return state;
-      return {
+      if (selection.entityType === "organization") {
+        return {
+          ...state,
+          subjectOrganizationId: selection.entityId,
+          selection: state.secondaryContext ?? selection,
+          organizationDrawerOpen: true,
+          mobileDetailOpen: true,
+        };
+      }
+      return snapshotMode({
         ...state,
         selection,
+        secondaryContext: selection,
         rightPanelOpen: true,
         mobileDetailOpen: true,
-      };
+      });
     }
     case "CLEAR_SELECTION":
-      return {
+      return snapshotMode({
         ...state,
-        selection: null,
+        selection: state.subjectOrganizationId
+          ? { entityType: "organization", entityId: state.subjectOrganizationId }
+          : null,
+        secondaryContext: null,
         rightPanelOpen: false,
-        mobileDetailOpen: false,
-      };
+        mobileDetailOpen: state.organizationDrawerOpen,
+      });
     case "TOGGLE_LEFT_PANEL":
       return { ...state, leftPanelCollapsed: !state.leftPanelCollapsed };
     case "SET_LEFT_PANEL_COLLAPSED":
@@ -478,6 +972,8 @@ export function exchangeWorkspaceReducer(
     }
     case "HYDRATE_FROM_URL":
       return hydrateWorkspace(state, action.state);
+    case "HYDRATE_FROM_SESSION":
+      return hydrateSessionWorkspace(state, action.state);
     default:
       return state;
   }

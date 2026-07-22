@@ -49,6 +49,49 @@ describe("Exchange URL state", () => {
     ).toEqual({ entityType: "territory", entityId: "51093" });
   });
 
+  it("round-trips an actor request, subject, secondary context, and open surfaces", () => {
+    const state = {
+      ...createInitialExchangeWorkspaceState(),
+      actorOrganizationId: "actor-validated-1",
+      subjectOrganizationId: "subject-2",
+      secondaryContext: { entityType: "rfx" as const, entityId: "rfx-101" },
+      selection: { entityType: "rfx" as const, entityId: "rfx-101" },
+      organizationDrawerOpen: true,
+      rightPanelOpen: true,
+    };
+    const encoded = exchangeUrlStateToString(state);
+    expect(encoded).toContain("actorOrg=actor-validated-1");
+    expect(encoded).toContain("subjectOrg=subject-2");
+    expect(encoded).toContain("entity=rfx&selected=rfx-101&panel=detail");
+    expect(encoded).toContain("drawer=organization");
+
+    const parsed = parseExchangeUrlState(encoded);
+    expect(parsed).toMatchObject({
+      requestedActorOrganizationId: "actor-validated-1",
+      subjectOrganizationId: "subject-2",
+      secondaryContext: { entityType: "rfx", entityId: "rfx-101" },
+      organizationDrawerOpen: true,
+      rightPanelOpen: true,
+    });
+    expect((parsed as { actorOrganizationId?: string }).actorOrganizationId).toBeUndefined();
+  });
+
+  it("treats a URL actor as a bounded request and never as validated authority", () => {
+    const parsed = parseExchangeUrlState(
+      "actor=unauthorized-org&subject=public-org&drawer=organization",
+    );
+    expect(parsed.requestedActorOrganizationId).toBe("unauthorized-org");
+    expect(parsed.subjectOrganizationId).toBe("public-org");
+    expect((parsed as Record<string, unknown>).actorOrganizationId).toBeUndefined();
+    expect(parseExchangeUrlState(
+      "actorOrg=%3Cscript%3E&subjectOrg=org%2Fchild&entity=rfx&selected=bad%2Fpath",
+    )).toMatchObject({
+      requestedActorOrganizationId: undefined,
+      subjectOrganizationId: undefined,
+      secondaryContext: null,
+    });
+  });
+
   it("round-trips a bounded map viewport", () => {
     const state = {
       ...createInitialExchangeWorkspaceState(),
@@ -156,7 +199,9 @@ describe("Exchange URL state", () => {
   it("uses complete defaults so browser history can clear previous state", () => {
     const selected = exchangeWorkspaceReducer(
       createInitialExchangeWorkspaceState(),
-      actions.hydrateFromUrl(parseExchangeUrlState("mode=list&entity=rfx&selected=1")),
+      actions.hydrateFromUrl(parseExchangeUrlState(
+        "mode=list&actorOrg=actor-request&subjectOrg=subject-1&drawer=organization&entity=rfx&selected=1&panel=detail",
+      )),
     );
     const restored = exchangeWorkspaceReducer(
       selected,
@@ -164,6 +209,10 @@ describe("Exchange URL state", () => {
     );
     expect(restored.surfaceMode).toBe("split");
     expect(restored.selection).toBeNull();
+    expect(restored.requestedActorOrganizationId).toBeUndefined();
+    expect(restored.subjectOrganizationId).toBeUndefined();
+    expect(restored.secondaryContext).toBeNull();
+    expect(restored.organizationDrawerOpen).toBe(false);
     expect(restored.rightPanelOpen).toBe(false);
   });
 

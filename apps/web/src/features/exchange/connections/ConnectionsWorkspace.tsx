@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import {
   ArrowRight,
   BriefcaseBusiness,
@@ -48,9 +48,13 @@ export function ConnectionsWorkspace({
   scheduleUrlReplace,
   onViewChange,
   gateway,
-}: ExchangeViewProps & { gateway: ExchangeRun3Gateway }) {
+  actorOrganizationName,
+}: ExchangeViewProps & { gateway: ExchangeRun3Gateway; actorOrganizationName?: string }) {
   const [creationOpen, setCreationOpen] = useState(false);
+  const desktopListRef = useRef<HTMLDivElement>(null);
+  const mobileListRef = useRef<HTMLDivElement>(null);
   const query = useMemo(() => ({
+    actorOrganizationId: state.actorOrganizationId,
     mode: state.connectionMode,
     searchQuery: state.searchQuery,
     statuses: state.referralStatusFilters,
@@ -59,6 +63,7 @@ export function ConnectionsWorkspace({
     compensation: state.compensationFilter,
     relationship: state.relationshipFilter,
   }), [
+    state.actorOrganizationId,
     state.compensationFilter,
     state.connectionIndustryFilters,
     state.connectionMode,
@@ -99,6 +104,19 @@ export function ConnectionsWorkspace({
     + (state.compensationFilter === "all" ? 0 : 1)
     + (state.relationshipFilter === "all" ? 0 : 1);
 
+  useEffect(() => {
+    const scrollTop = state.modeStates.referrals.listScrollTop;
+    if (desktopListRef.current) desktopListRef.current.scrollTop = scrollTop;
+    if (mobileListRef.current) mobileListRef.current.scrollTop = scrollTop;
+  }, [state.modeStates.referrals.listScrollTop]);
+
+  const saveListScroll = (event: UIEvent<HTMLDivElement>) => {
+    applyAction(exchangeWorkspaceActions.setModeListScroll(
+      event.currentTarget.scrollTop,
+      "referrals",
+    ));
+  };
+
   const setMode = (mode: ExchangeConnectionMode) => {
     applyAction(exchangeWorkspaceActions.setConnectionMode(mode), "push");
   };
@@ -116,7 +134,9 @@ export function ConnectionsWorkspace({
     applyAction(exchangeWorkspaceActions.closeMobileDetail());
     applyAction(exchangeWorkspaceActions.clearSelection(), "push");
   };
-  const perform = async (operation: () => Promise<ReferralWorkspaceRecord>) => {
+  const perform = async (
+    operation: (actorOrganizationId?: string) => Promise<ReferralWorkspaceRecord>,
+  ) => {
     try {
       await runMutation(operation);
     } catch {
@@ -128,8 +148,12 @@ export function ConnectionsWorkspace({
     <ReferralDetail
       record={detail}
       mutating={mutating}
-      onSend={() => void perform(() => gateway.sendReferral(detail.id, detail.version))}
-      onRespond={(response) => void perform(() => gateway.respondReferral(
+      onSend={() => void perform((actorOrganizationId) => gateway.sendReferral(
+        detail.id,
+        detail.version,
+        actorOrganizationId,
+      ))}
+      onRespond={(response) => void perform((actorOrganizationId) => gateway.respondReferral(
         detail.id,
         response,
         detail.version,
@@ -138,12 +162,30 @@ export function ConnectionsWorkspace({
           serviceOfferId: detail.serviceOfferId,
           serviceOfferVersion: detail.serviceOfferVersion,
         } : undefined,
+        actorOrganizationId,
       ))}
-      onProgress={(status) => void perform(() => gateway.progressReferral(detail.id, status, detail.version))}
-      onReportTransaction={(amount) => void perform(() => gateway.reportTransaction(detail.id, detail.version, amount, detail.compensation.currency, detail.termsSnapshot?.serviceOfferId))}
+      onProgress={(status) => void perform((actorOrganizationId) => gateway.progressReferral(
+        detail.id,
+        status,
+        detail.version,
+        actorOrganizationId,
+      ))}
+      onReportTransaction={(amount) => void perform((actorOrganizationId) => gateway.reportTransaction(
+        detail.id,
+        detail.version,
+        amount,
+        detail.compensation.currency,
+        detail.termsSnapshot?.serviceOfferId,
+        actorOrganizationId,
+      ))}
       onConfirmTransaction={() => {
         if (!detail.latestTransactionReportId || detail.latestTransactionReportVersion === undefined) return;
-        void perform(() => gateway.confirmTransaction(detail.id, detail.latestTransactionReportId as string, detail.latestTransactionReportVersion as number));
+        void perform((actorOrganizationId) => gateway.confirmTransaction(
+          detail.id,
+          detail.latestTransactionReportId as string,
+          detail.latestTransactionReportVersion as number,
+          actorOrganizationId,
+        ));
       }}
     />
   ) : detailLoading ? (
@@ -197,7 +239,7 @@ export function ConnectionsWorkspace({
           <div className="shrink-0 border-b border-white/70 bg-white/45">
             <ConnectionModeTabs mode={state.connectionMode} counts={snapshot?.counts ?? EMPTY_COUNTS} onChange={setMode} />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div ref={desktopListRef} onScroll={saveListScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <details className="border-b border-white/60 bg-white/32" open={activeFilterCount > 0}>
               <summary className="min-h-11 cursor-pointer px-4 py-3 text-xs font-bold text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500">Filters {activeFilterCount ? `· ${activeFilterCount} active` : ""}</summary>
               <ConnectionsFilters state={state} industries={industries} territories={territories} onChange={(filters) => applyAction(exchangeWorkspaceActions.setFilters(filters), "push")} onClear={clearFilters} />
@@ -230,7 +272,7 @@ export function ConnectionsWorkspace({
         loading={loading}
         onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
       >
-        <div className="h-full overflow-y-auto overscroll-contain">
+        <div ref={mobileListRef} onScroll={saveListScroll} className="h-full overflow-y-auto overscroll-contain">
           <ReferralList records={snapshot?.records ?? []} selectedId={selectedReferralId} loading={loading} onSelect={selectReferral} />
         </div>
       </ExchangeMobileWorkspaceTray>
@@ -254,13 +296,28 @@ export function ConnectionsWorkspace({
 
       <ReferralCreationWorkflow
         open={creationOpen}
+        actorOrganizationId={state.actorOrganizationId}
+        actorOrganizationName={actorOrganizationName}
         suggestions={snapshot?.suggestions ?? []}
         offers={snapshot?.serviceOffers ?? []}
         gatewayMode={gateway.mode}
         onClose={() => setCreationOpen(false)}
-        onSuggest={(input) => gateway.suggestRecipients(input)}
+        onSuggest={(input) => gateway.suggestRecipients({
+          ...input,
+          actorOrganizationId: state.actorOrganizationId,
+          referrerOrgId: state.actorOrganizationId,
+        })}
         onCreate={async (input) => {
-          const record = await runMutation(() => gateway.createReferralDraft(input));
+          const record = await runMutation((actorOrganizationId) => {
+            if (!actorOrganizationId && gateway.mode !== "demo") {
+              throw new Error("Choose an active organization before creating a referral draft.");
+            }
+            return gateway.createReferralDraft({
+              ...input,
+              actorOrganizationId,
+              referrerOrgId: actorOrganizationId,
+            });
+          });
           applyAction(exchangeWorkspaceActions.setConnectionMode("draft"), "push");
           applyAction(exchangeWorkspaceActions.selectEntity({ entityType: "referral", entityId: record.id }), "push");
           applyAction(exchangeWorkspaceActions.openMobileDetail());

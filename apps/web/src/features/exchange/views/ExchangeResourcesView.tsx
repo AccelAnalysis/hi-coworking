@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import {
   BadgeDollarSign,
   BookOpenText,
@@ -51,9 +51,21 @@ export function ExchangeResourcesView({
   scheduleUrlReplace,
   onViewChange,
   demoMode,
-}: ExchangeViewProps & { demoMode: boolean }) {
-  const [selectedCategory, setSelectedCategory] = useState<ResourceCategoryId | "all">("all");
+  workspaceMap = false,
+}: ExchangeViewProps & { demoMode: boolean; workspaceMap?: boolean }) {
+  const storedCategory = state.modeStates.resources.resourceCategory;
+  const selectedCategory: ResourceCategoryId | "all" = RESOURCE_CATEGORIES.some(
+    (record) => record.id === storedCategory,
+  ) ? storedCategory as ResourceCategoryId : "all";
+  const setSelectedCategory = (category: ResourceCategoryId | "all") => {
+    applyAction(exchangeWorkspaceActions.setResourceCategory(
+      category === "all" ? undefined : category,
+    ));
+    scheduleUrlReplace(150);
+  };
   const [refreshing, setRefreshing] = useState(false);
+  const desktopScrollRef = useRef<HTMLElement>(null);
+  const mobileScrollRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = state.searchQuery.trim().toLocaleLowerCase();
   const filtered = useMemo(
     () => RESOURCE_CATEGORIES.filter((record) => (
@@ -65,6 +77,19 @@ export function ExchangeResourcesView({
     [normalizedQuery, selectedCategory],
   );
   const activeFilterCount = selectedCategory === "all" ? 0 : 1;
+
+  useEffect(() => {
+    const scrollTop = state.modeStates.resources.listScrollTop;
+    if (desktopScrollRef.current) desktopScrollRef.current.scrollTop = scrollTop;
+    if (mobileScrollRef.current) mobileScrollRef.current.scrollTop = scrollTop;
+  }, [state.modeStates.resources.listScrollTop]);
+
+  const saveScroll = (event: UIEvent<HTMLElement>) => {
+    applyAction(exchangeWorkspaceActions.setModeListScroll(
+      event.currentTarget.scrollTop,
+      "resources",
+    ));
+  };
 
   const clearFilters = () => {
     setSelectedCategory("all");
@@ -109,7 +134,7 @@ export function ExchangeResourcesView({
   );
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
       <ExchangeCommandBar
         view="resources"
         searchQuery={state.searchQuery}
@@ -131,9 +156,11 @@ export function ExchangeResourcesView({
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <ExchangeContextMap view="resources" demoMode={demoMode} className="absolute inset-0 h-full min-h-0 w-full border-0" />
+        {!workspaceMap ? (
+          <ExchangeContextMap view="resources" demoMode={demoMode} className="absolute inset-0 h-full min-h-0 w-full border-0" />
+        ) : null}
 
-        <aside className={cn(
+        <aside ref={desktopScrollRef} onScroll={saveScroll} className={cn(
           "absolute bottom-3 left-3 top-3 z-30 hidden min-h-0 overflow-y-auto rounded-2xl border border-white/60 bg-white/72 shadow-[0_20px_55px_rgba(15,23,42,0.24)] backdrop-blur-2xl lg:block",
           state.surfaceMode === "list" ? "w-[min(44rem,48vw)]" : "w-[22rem]",
         )} aria-label="Resource categories">
@@ -171,7 +198,7 @@ export function ExchangeResourcesView({
         resultCount={filtered.length}
         onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
       >
-        <div className="h-full overflow-y-auto overscroll-contain">{resourceTiles(true)}</div>
+        <div ref={mobileScrollRef} onScroll={saveScroll} className="h-full overflow-y-auto overscroll-contain">{resourceTiles(true)}</div>
       </ExchangeMobileWorkspaceTray>
 
       <ExchangeMobileDrawer

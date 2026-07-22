@@ -165,6 +165,7 @@ export function registerExchangeMapInteractionEvents(
 
     if (
       layerId === EXCHANGE_MAP_LAYER_IDS.organizationPoints
+      || layerId === EXCHANGE_MAP_LAYER_IDS.contextOrganizationPoint
       || layerId === EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint
     ) {
       selectOrganization(callbacksRef, id);

@@ -34,6 +34,11 @@ export function createExchangeMapSourceSpecifications(
       promoteId: "id",
       ...EXCHANGE_ORGANIZATION_CLUSTER_OPTIONS,
     },
+    [EXCHANGE_MAP_SOURCE_IDS.contextOrganizations]: {
+      type: "geojson",
+      data: data.contextOrganizations,
+      promoteId: "id",
+    },
     [EXCHANGE_MAP_SOURCE_IDS.selectedOrganization]: {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
@@ -95,6 +100,11 @@ export function updateExchangeMapSources(map: MapboxMap, data: ExchangeMapGeoJso
   setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.organizations, data.organizations);
   setGeoJsonSourceData(
     map,
+    EXCHANGE_MAP_SOURCE_IDS.contextOrganizations,
+    data.contextOrganizations,
+  );
+  setGeoJsonSourceData(
+    map,
     EXCHANGE_MAP_SOURCE_IDS.releasedTerritoryPoints,
     data.releasedTerritoryPoints,
   );
@@ -142,7 +152,8 @@ export function updateExchangeSelectedOrganizationSource(
   selection: ExchangeMapSelection,
 ): void {
   const selectedFeature = selection?.entityType === "organization"
-    ? data.organizations.features.find((feature) => feature.properties.id === selection.entityId)
+    ? data.contextOrganizations.features.find((feature) => feature.properties.id === selection.entityId)
+      ?? data.organizations.features.find((feature) => feature.properties.id === selection.entityId)
     : undefined;
   setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.selectedOrganization, {
     type: "FeatureCollection",

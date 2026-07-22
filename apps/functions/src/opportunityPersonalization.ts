@@ -1,12 +1,15 @@
 import type { CallableRequest } from "firebase-functions/v2/https";
 import { HttpsError } from "firebase-functions/v2/https";
 import type { OpportunityPersonalizationContext } from "@hi/shared/opportunity-discovery";
-import { getAuthorizedActor, getDb } from "./exchange/security";
+import {
+  getAuthorizedActor,
+  getDb,
+  requireActiveOrgAuthority,
+} from "./exchange/security";
 
 type RecordData = Record<string, unknown>;
 
 const FIRESTORE_IN_LIMIT = 30;
-const MAX_MEMBERSHIPS = 100;
 
 function asRecord(value: unknown): RecordData {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -75,42 +78,24 @@ function hasTextMatch(left: readonly string[], right: readonly string[]): boolea
 
 type PersonalizationContext = OpportunityPersonalizationContext;
 
-async function loadPersonalizationContext(uid: string): Promise<PersonalizationContext> {
+async function loadPersonalizationContext(
+  uid: string,
+  actorOrganizationId?: string,
+): Promise<PersonalizationContext> {
   const db = getDb();
-  const [profileSnapshot, membershipSnapshot] = await Promise.all([
-    db.collection("profiles").doc(uid).get(),
-    db.collection("orgMembers").where("uid", "==", uid).limit(MAX_MEMBERSHIPS + 1).get(),
-  ]);
-  if (membershipSnapshot.size > MAX_MEMBERSHIPS) {
-    throw new HttpsError(
-      "resource-exhausted",
-      "Organization membership count exceeds the discovery personalization limit",
-    );
-  }
-
+  const profileSnapshot = await db.collection("profiles").doc(uid).get();
   const profile = asRecord(profileSnapshot.data());
-  const memberships = membershipSnapshot.docs.flatMap((document) => {
-    const member = asRecord(document.data());
-    const orgId = stringValue(member.orgId);
-    const status = stringValue(member.status);
-    const role = stringValue(member.role);
-    if (
-      !orgId
-      || document.id !== `${orgId}_${uid}`
-      || member.uid !== uid
-      || (status && status !== "active")
-    ) return [];
-    return [{ orgId, role }];
-  });
-  const organizationSnapshots = memberships.length
-    ? await db.getAll(...memberships.map(({ orgId }) => db.collection("orgs").doc(orgId)))
+  const activeMemberships = actorOrganizationId
+    ? [await requireActiveOrgAuthority(db, actorOrganizationId, uid)].map(
+        ({ org, member }) => ({
+          orgId: actorOrganizationId,
+          role: stringValue(member.role),
+          organization: asRecord(org),
+        }),
+      )
     : [];
-  const activeMemberships = organizationSnapshots.flatMap((snapshot, index) => (
-    snapshot.exists && snapshot.data()?.status === "active"
-      ? [{ ...memberships[index], organization: asRecord(snapshot.data()) }]
-      : []
-  ));
   const organizations = activeMemberships.map(({ organization }) => organization);
+  const personalizationSources = actorOrganizationId ? organizations : [profile];
 
   return {
     uid,
@@ -118,27 +103,22 @@ async function loadPersonalizationContext(uid: string): Promise<PersonalizationC
     managerOrgIds: activeMemberships
       .filter(({ role }) => role === "owner" || role === "admin")
       .map(({ orgId }) => orgId),
-    naicsCodes: [...new Set([
-      ...stringArray(profile.naicsCodes),
-      ...organizations.flatMap((organization) => stringArray(organization.naicsCodes)),
-    ])],
-    capabilities: [...new Set([
-      ...stringArray(profile.capabilityKeywords),
-      ...stringArray(profile.capabilities),
-      ...organizations.flatMap((organization) => [
+    naicsCodes: [...new Set(
+      personalizationSources.flatMap((source) => stringArray(source.naicsCodes)),
+    )],
+    capabilities: [...new Set(
+      personalizationSources.flatMap((organization) => [
         ...stringArray(organization.capabilityKeywords),
         ...stringArray(organization.capabilities),
       ]),
-    ])],
-    territoryFips: [...new Set([
-      ...stringArray(profile.serviceTerritoryFips),
-      ...stringArray(profile.territoryFips),
-      ...organizations.flatMap((organization) => [
+    )],
+    territoryFips: [...new Set(
+      personalizationSources.flatMap((organization) => [
         ...stringArray(organization.serviceTerritoryFips),
         ...stringArray(organization.territoryFips),
       ]),
-    ])],
-    verificationStatus: stringValue(profile.verificationStatus),
+    )],
+    verificationStatus: stringValue(personalizationSources[0]?.verificationStatus),
   };
 }
 
@@ -285,10 +265,13 @@ export async function applyOpportunityPersonalization(
     }
     return page;
   }
-  if (!records.length) return page;
-
   const actor = getAuthorizedActor(request);
-  const context = await loadPersonalizationContext(request.auth.uid);
+  const actorOrganizationId = stringValue(input.actorOrganizationId);
+  const context = await loadPersonalizationContext(
+    request.auth.uid,
+    actorOrganizationId,
+  );
+  if (!records.length) return page;
   const responded = await loadRespondedOpportunityIds(
     context,
     records.map((record) => stringValue(record.id)).filter((id): id is string => Boolean(id)),
@@ -342,7 +325,9 @@ export async function applyOpportunityPersonalization(
           countAccuracy: "qualified",
           warnings: [
             ...stringArray(page.warnings, 10),
-            "Personalized results are derived from the authenticated profile and active organization memberships.",
+            actorOrganizationId
+              ? "Personalized results are derived from the authenticated profile and the selected active organization only."
+              : "Personalized results are derived from the authenticated individual profile.",
           ].slice(0, 10),
         }
       : {}),

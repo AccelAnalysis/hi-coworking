@@ -365,6 +365,7 @@ exports.businessReferralContactInputSchema = zod_1.z
 exports.businessReferralCreateInputSchema = zod_1.z
     .object({
     idempotencyKey: exports.idempotencyKeySchema,
+    actorOrganizationId: orgId,
     referrerOrgId: orgId,
     recipientUid: trimmedId.optional(),
     recipientOrgId: orgId,
@@ -384,6 +385,13 @@ exports.businessReferralCreateInputSchema = zod_1.z
 })
     .strict()
     .superRefine((value, ctx) => {
+    if (value.actorOrganizationId !== value.referrerOrgId) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["actorOrganizationId"],
+            message: "The selected actor organization must match the referral referrer",
+        });
+    }
     if (!value.recipientUid && !value.recipientOrgId) {
         ctx.addIssue({ code: "custom", message: "A recipient user or organization is required" });
     }
@@ -409,6 +417,7 @@ exports.businessReferralCreateInputSchema = zod_1.z
 exports.businessReferralSendInputSchema = zod_1.z
     .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     expectedVersion: zod_1.z.number().int().nonnegative(),
     idempotencyKey: exports.idempotencyKeySchema.optional(),
 })
@@ -416,6 +425,7 @@ exports.businessReferralSendInputSchema = zod_1.z
 exports.businessReferralRespondInputSchema = zod_1.z
     .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     response: zod_1.z.enum(["accepted", "declined"]),
     expectedVersion: zod_1.z.number().int().nonnegative(),
     note: zod_1.z.string().trim().max(2000).optional(),
@@ -433,6 +443,7 @@ exports.businessReferralRespondInputSchema = zod_1.z
 exports.businessReferralProgressInputSchema = zod_1.z
     .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     status: zod_1.z.enum(["in_progress", "converted", "closed", "withdrawn"]),
     expectedVersion: zod_1.z.number().int().nonnegative(),
     idempotencyKey: exports.idempotencyKeySchema.optional(),

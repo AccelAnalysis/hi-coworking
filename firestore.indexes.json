@@ -446,6 +446,24 @@
         { "fieldPath": "name", "order": "ASCENDING" }
       ]
     },
+    {
+      "collectionGroup": "publicOrganizations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "publicationApproved", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "exchangeSavedOrganizations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorOrganizationId", "order": "ASCENDING" },
+        { "fieldPath": "updatedAt", "order": "DESCENDING" }
+      ]
+    },
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "recommendedRank", "order": "DESCENDING" }, { "fieldPath": "__name__", "order": "DESCENDING" }] },
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "postedAt", "order": "DESCENDING" }, { "fieldPath": "__name__", "order": "DESCENDING" }] },
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }, { "fieldPath": "__name__", "order": "DESCENDING" }] },
@@ -467,8 +485,8 @@
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "territoryFips", "order": "ASCENDING" }, { "fieldPath": "responseDeadline", "order": "DESCENDING" }, { "fieldPath": "__name__", "order": "DESCENDING" }] },
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "territoryFips", "order": "ASCENDING" }, { "fieldPath": "budgetMax", "order": "DESCENDING" }, { "fieldPath": "__name__", "order": "DESCENDING" }] },
     { "collectionGroup": "opportunityDiscovery", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "projectionVersion", "order": "ASCENDING" }, { "fieldPath": "discoverable", "order": "ASCENDING" }, { "fieldPath": "territoryFips", "order": "ASCENDING" }, { "fieldPath": "budgetMin", "order": "ASCENDING" }, { "fieldPath": "__name__", "order": "ASCENDING" }] },
-    { "collectionGroup": "opportunitySavedSearches", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }] },
-    { "collectionGroup": "opportunityRecentSearches", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "lastUsedAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "opportunitySavedSearches", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "actorOrganizationId", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }] },
+    { "collectionGroup": "opportunityRecentSearches", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "actorOrganizationId", "order": "ASCENDING" }, { "fieldPath": "lastUsedAt", "order": "DESCENDING" }] },
     { "collectionGroup": "rfxAddenda", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "rfxId", "order": "ASCENDING" }, { "fieldPath": "version", "order": "ASCENDING" }] },
     { "collectionGroup": "rfxQuestions", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "rfxId", "order": "ASCENDING" }, { "fieldPath": "submittedAt", "order": "ASCENDING" }] },
     { "collectionGroup": "rfx", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "adminApprovalStatus", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }] },

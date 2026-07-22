@@ -29,6 +29,7 @@ const MAPBOX_LOAD_TIMEOUT_MS = 12_000;
 export interface ExchangeMapProps extends ExchangeMapCallbacks {
   rfxList: readonly RfxDoc[];
   organizations?: readonly PublicOrganizationMapRecord[];
+  contextOrganizations?: readonly PublicOrganizationMapRecord[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
   unreleasedTerritories?: readonly TerritoryDoc[];
@@ -248,6 +249,7 @@ function MapboxConfigurationFailure({
 function ExchangeMapboxCanvas({
   rfxList,
   organizations = [],
+  contextOrganizations = [],
   releasedTerritories,
   scheduledTerritories,
   unreleasedTerritories = [],
@@ -276,6 +278,7 @@ function ExchangeMapboxCanvas({
     accessToken,
     rfxList,
     organizations,
+    contextOrganizations,
     releasedTerritories,
     scheduledTerritories,
     unreleasedTerritories,
@@ -363,10 +366,13 @@ function ExchangeMapboxCanvas({
       data-map-style={EXCHANGE_MAP_STYLE}
     >
       <div ref={containerRef} className="absolute inset-0 z-0 min-h-full min-w-full" />
-      {(organizations.length > 0 || releasedTerritories.length > 0 || scheduledTerritories.length > 0 || unreleasedTerritories.length > 0) ? (
+      {(organizations.length > 0 || contextOrganizations.length > 0 || releasedTerritories.length > 0 || scheduledTerritories.length > 0 || unreleasedTerritories.length > 0) ? (
         <div className="pointer-events-none absolute left-3 top-3 z-30 flex max-w-[calc(100%-8rem)] flex-wrap gap-1.5 rounded-xl border border-white/60 bg-white/76 px-2.5 py-2 text-[10px] font-bold text-slate-700 shadow-lg backdrop-blur-xl" aria-label="Exchange map legend">
           {organizations.length > 0 ? (
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-violet-600" /> Organization</span>
+          ) : null}
+          {contextOrganizations.length > 0 ? (
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full border-2 border-white bg-indigo-950 shadow" /> Active context</span>
           ) : null}
           <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-emerald-500/80" /> Released</span>
           <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400/80" /> Scheduled</span>

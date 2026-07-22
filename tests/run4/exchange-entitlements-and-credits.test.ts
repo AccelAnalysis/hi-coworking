@@ -41,10 +41,10 @@ emulatorDescribe("Run 4 organization entitlements and credit concurrency", () =>
     policy.quotas.founding.opportunity_response = 10;
     await Promise.all([
       db.collection("exchangeCommercialPolicies").doc("current").set(policy),
-      db.collection("orgs").doc("acme").set({ id: "acme", name: "Acme", status: "active", exchangeVerificationStatus: "verified" }),
-      db.collection("orgMembers").doc("acme_owner").set({ id: "acme_owner", orgId: "acme", uid: "owner", role: "owner" }),
-      db.collection("orgMembers").doc("acme_member").set({ id: "acme_member", orgId: "acme", uid: "member", role: "member", permissions: ["view_exchange", "spend_credits"] }),
-      db.collection("orgMembers").doc("acme_viewer").set({ id: "acme_viewer", orgId: "acme", uid: "viewer", role: "member", permissions: ["view_exchange"] }),
+      db.collection("orgs").doc("acme").set({ id: "acme", name: "Acme", status: "active", verificationStatus: "verified" }),
+      db.collection("orgMembers").doc("acme_owner").set({ id: "acme_owner", orgId: "acme", uid: "owner", role: "owner", status: "active" }),
+      db.collection("orgMembers").doc("acme_member").set({ id: "acme_member", orgId: "acme", uid: "member", role: "member", status: "active", permissions: ["view_exchange", "spend_credits"] }),
+      db.collection("orgMembers").doc("acme_viewer").set({ id: "acme_viewer", orgId: "acme", uid: "viewer", role: "member", status: "active", permissions: ["view_exchange"] }),
       db.collection("exchangeMemberships").doc("acme").set({ organizationId: "acme", tier: "founding", status: "active", isFoundingMember: true, foundingRecognitionRetained: true, pricingVersion: "p1", entitlementVersion: "e1" }),
     ]);
   });
@@ -64,7 +64,7 @@ emulatorDescribe("Run 4 organization entitlements and credit concurrency", () =>
 
   it("enforces explicit organization permissions and verification", async () => {
     await expect(resolveExchangeEntitlements({ organizationId: "acme", actor: actor("viewer"), requiredPermission: "spend_credits" })).rejects.toMatchObject({ code: "permission-denied" });
-    await db.collection("orgs").doc("acme").update({ exchangeVerificationStatus: "verification_pending" });
+    await db.collection("orgs").doc("acme").update({ verificationStatus: "verification_pending" });
     await expect(resolveExchangeEntitlements({ organizationId: "acme", actor: actor("member"), requiredPermission: "spend_credits", requireVerified: true })).rejects.toMatchObject({ code: "failed-precondition" });
     await expect(resolveExchangeEntitlements({ organizationId: "missing", actor: actor("member") })).rejects.toMatchObject({ code: "permission-denied" });
   });
@@ -79,7 +79,14 @@ emulatorDescribe("Run 4 organization entitlements and credit concurrency", () =>
       exchange_spendCredits.run(callable("member", { organizationId: "acme", actionKey: "opportunity_response", referenceId: "rfx-one", idempotencyKey: "spend-concurrent-one" })),
       exchange_spendCredits.run(callable("member", { organizationId: "acme", actionKey: "opportunity_response", referenceId: "rfx-two", idempotencyKey: "spend-concurrent-two" })),
     ]);
-    expect(outcomes.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const outcomeSummary = outcomes.map((result) => result.status === "fulfilled"
+      ? { status: result.status }
+      : {
+          status: result.status,
+          code: (result.reason as { code?: unknown })?.code,
+          message: (result.reason as { message?: unknown })?.message,
+        });
+    expect(outcomes.filter((result) => result.status === "fulfilled"), JSON.stringify(outcomeSummary)).toHaveLength(1);
     expect(outcomes.filter((result) => result.status === "rejected")).toHaveLength(1);
     expect((await db.collection("exchangeCreditAccounts").doc("acme").get()).data()?.usableCredits).toBe(1);
   });

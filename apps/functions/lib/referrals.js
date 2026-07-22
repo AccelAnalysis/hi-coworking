@@ -193,7 +193,7 @@ async function activeActorOrgIds(db, actorUid) {
         && typeof membership.orgId === "string"
         && membership.orgId.length > 0
         && membership.documentId === `${membership.orgId}_${actorUid}`))
-        .filter((membership) => membership.status === undefined || membership.status === "active")
+        .filter((membership) => membership.status === "active")
         .map((membership) => membership.orgId)
         .filter((orgId, index, all) => all.indexOf(orgId) === index);
     if (candidates.length === 0)

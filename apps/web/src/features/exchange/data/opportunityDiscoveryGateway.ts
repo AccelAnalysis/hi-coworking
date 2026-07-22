@@ -48,6 +48,7 @@ export function workspaceToOpportunityQuery(
 ): OpportunityDiscoveryQuery {
   return {
     contractVersion: 1,
+    ...(state.actorOrganizationId ? { actorOrganizationId: state.actorOrganizationId } : {}),
     query: state.searchQuery,
     filters: {
       naics: state.naicsFilters,
@@ -123,30 +124,45 @@ export async function discoverOpportunities(
 export async function setOpportunitySaved(
   rfxId: string,
   saved: boolean,
+  actorOrganizationId?: string,
 ): Promise<{ rfxId: string; saved: boolean }> {
   const response = await gateway({
     operation: "setSaved",
-    payload: { rfxId, saved },
+    payload: {
+      rfxId,
+      saved,
+      ...(actorOrganizationId ? { actorOrganizationId } : {}),
+    },
   });
   return response.data as { rfxId: string; saved: boolean };
 }
 
-export async function markOpportunityViewed(rfxId: string): Promise<void> {
-  await gateway({ operation: "markViewed", payload: { rfxId } });
+export async function markOpportunityViewed(
+  rfxId: string,
+  actorOrganizationId?: string,
+): Promise<void> {
+  await gateway({
+    operation: "markViewed",
+    payload: { rfxId, ...(actorOrganizationId ? { actorOrganizationId } : {}) },
+  });
 }
 
-export async function listSavedOpportunitySearches(): Promise<SavedOpportunitySearch[]> {
+export async function listSavedOpportunitySearches(
+  actorOrganizationId?: string,
+): Promise<SavedOpportunitySearch[]> {
   const response = await gateway({
     operation: "savedSearchList",
-    payload: { maxResults: 50 },
+    payload: { maxResults: 50, ...(actorOrganizationId ? { actorOrganizationId } : {}) },
   });
   return (response.data as { searches?: SavedOpportunitySearch[] }).searches ?? [];
 }
 
-export async function listRecentOpportunitySearches(): Promise<RecentOpportunitySearch[]> {
+export async function listRecentOpportunitySearches(
+  actorOrganizationId?: string,
+): Promise<RecentOpportunitySearch[]> {
   const response = await gateway({
     operation: "recentSearchList",
-    payload: { maxResults: 10 },
+    payload: { maxResults: 10, ...(actorOrganizationId ? { actorOrganizationId } : {}) },
   });
   return (response.data as { searches?: RecentOpportunitySearch[] }).searches ?? [];
 }
@@ -161,8 +177,14 @@ export async function upsertSavedOpportunitySearch(input: {
   return response.data as SavedOpportunitySearch;
 }
 
-export async function deleteSavedOpportunitySearch(id: string): Promise<void> {
-  await gateway({ operation: "savedSearchDelete", payload: { id } });
+export async function deleteSavedOpportunitySearch(
+  id: string,
+  actorOrganizationId?: string,
+): Promise<void> {
+  await gateway({
+    operation: "savedSearchDelete",
+    payload: { id, ...(actorOrganizationId ? { actorOrganizationId } : {}) },
+  });
 }
 
 function idempotencyKey(prefix: string): string {

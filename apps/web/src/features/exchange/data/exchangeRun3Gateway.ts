@@ -251,6 +251,7 @@ export interface ReferralIntelligenceSnapshot {
 }
 
 export interface ConnectionQuery {
+  actorOrganizationId?: string;
   mode: ExchangeConnectionMode;
   searchQuery: string;
   statuses: ExchangeReferralStatus[];
@@ -262,6 +263,7 @@ export interface ConnectionQuery {
 
 export interface CreateReferralDraftInput {
   idempotencyKey: string;
+  actorOrganizationId?: string;
   referrerOrgId?: string;
   recipientUid?: string;
   recipientOrgId?: string;
@@ -295,14 +297,22 @@ export interface ExchangeRun3Gateway {
   readonly mode: "live" | "demo";
   listConnections(query: ConnectionQuery): Promise<ReferralWorkspaceSnapshot>;
   suggestRecipients(input: {
+    actorOrganizationId?: string;
     referrerOrgId?: string;
     serviceCategory?: string;
     naicsCodes: string[];
     territoryFips?: string;
   }): Promise<RecipientSuggestion[]>;
-  getReferralDetail(referralId: string): Promise<ReferralWorkspaceRecord>;
+  getReferralDetail(
+    referralId: string,
+    actorOrganizationId?: string,
+  ): Promise<ReferralWorkspaceRecord>;
   createReferralDraft(input: CreateReferralDraftInput): Promise<ReferralWorkspaceRecord>;
-  sendReferral(referralId: string, expectedVersion: number): Promise<ReferralWorkspaceRecord>;
+  sendReferral(
+    referralId: string,
+    expectedVersion: number,
+    actorOrganizationId?: string,
+  ): Promise<ReferralWorkspaceRecord>;
   respondReferral(
     referralId: string,
     response: "accepted" | "declined",
@@ -312,11 +322,13 @@ export interface ExchangeRun3Gateway {
       serviceOfferId?: string;
       serviceOfferVersion?: number;
     },
+    actorOrganizationId?: string,
   ): Promise<ReferralWorkspaceRecord>;
   progressReferral(
     referralId: string,
     status: "in_progress" | "converted" | "closed" | "withdrawn",
     expectedVersion: number,
+    actorOrganizationId?: string,
   ): Promise<ReferralWorkspaceRecord>;
   reportTransaction(
     referralId: string,
@@ -324,13 +336,15 @@ export interface ExchangeRun3Gateway {
     collectedTransactionCents: number,
     currency: string,
     serviceOfferId?: string,
+    actorOrganizationId?: string,
   ): Promise<ReferralWorkspaceRecord>;
   confirmTransaction(
     referralId: string,
     reportId: string,
     expectedReportVersion: number,
+    actorOrganizationId?: string,
   ): Promise<ReferralWorkspaceRecord>;
-  getIntelligence(): Promise<ReferralIntelligenceSnapshot>;
+  getIntelligence(actorOrganizationId?: string): Promise<ReferralIntelligenceSnapshot>;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -756,16 +770,34 @@ function adaptIntelligence(parts: {
 }
 
 export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
-  let organizations = new Map<string, string>();
-  let cachedOffers: ReferralServiceOfferSummary[] = [];
+  interface ActorCache {
+    organizations: Map<string, string>;
+    offers: ReferralServiceOfferSummary[];
+  }
+  const actorCaches = new Map<string, ActorCache>();
+  const latestListRequestByActor = new Map<string, number>();
+  let listRequestSequence = 0;
+  const actorCacheKey = (actorOrganizationId?: string) => (
+    actorOrganizationId ? `organization:${actorOrganizationId}` : "individual"
+  );
+  const cacheForActor = (actorOrganizationId?: string): ActorCache => (
+    actorCaches.get(actorCacheKey(actorOrganizationId)) ?? {
+      organizations: new Map<string, string>(),
+      offers: [],
+    }
+  );
 
   const gateway: ExchangeRun3Gateway = {
     mode: "live",
     async listConnections(query) {
+      const cacheKey = actorCacheKey(query.actorOrganizationId);
+      const requestSequence = ++listRequestSequence;
+      latestListRequestByActor.set(cacheKey, requestSequence);
       const [listResult, offersResult] = await Promise.all([
         listBusinessReferralsFn({
           direction: "all",
-          scope: "all",
+          scope: query.actorOrganizationId ? "organization" : "individual",
+          actorOrganizationId: query.actorOrganizationId,
           statuses: query.statuses,
           industry: query.industries[0],
           territoryFips: /^\d{5}$/.test(query.territories[0] ?? "")
@@ -779,14 +811,19 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
         }),
         listDiscoverableReferralServiceOffersFn({ limit: 40 }),
       ]);
-      organizations = new Map(listResult.data.scope.organizations.map((organization) => [
-        organization.id,
-        organization.name ?? "Authorized organization",
-      ]));
-      cachedOffers = offersResult.data.offers.flatMap((value) => {
+      const organizations = new Map(listResult.data.scope.organizations
+        .filter((organization) => organization.id === query.actorOrganizationId)
+        .map((organization) => [
+          organization.id,
+          organization.name ?? "Authorized organization",
+        ]));
+      const offers = offersResult.data.offers.flatMap((value) => {
         const offer = adaptOffer(value);
         return offer ? [offer] : [];
       });
+      if (latestListRequestByActor.get(cacheKey) === requestSequence) {
+        actorCaches.set(cacheKey, { organizations, offers });
+      }
       const allRecords = listResult.data.referrals.map((referral) => adaptReferral(referral, {
         actorUid: auth.currentUser?.uid,
         organizations,
@@ -794,14 +831,16 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
       return {
         records: allRecords.filter((record) => modeMatches(record, query.mode)),
         suggestions: [],
-        serviceOffers: cachedOffers,
+        serviceOffers: offers,
         counts: connectionCounts(allRecords),
         generatedAt: Date.now(),
         truncated: listResult.data.truncated || offersResult.data.truncated,
       };
     },
     async suggestRecipients(input) {
+      const cachedOffers = cacheForActor(input.actorOrganizationId).offers;
       const result = await suggestBusinessReferralRecipientsFn({
+        actorOrganizationId: input.actorOrganizationId,
         referrerOrgId: input.referrerOrgId,
         serviceCategory: input.serviceCategory,
         naicsCodes: input.naicsCodes,
@@ -813,10 +852,11 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
         return suggestion ? [suggestion] : [];
       });
     },
-    async getReferralDetail(referralId) {
+    async getReferralDetail(referralId, actorOrganizationId) {
+      const { organizations } = cacheForActor(actorOrganizationId);
       const [detail, timeline] = await Promise.all([
-        getBusinessReferralDetailFn({ referralId }),
-        listBusinessReferralTimelineFn({ referralId, limit: 100 }),
+        getBusinessReferralDetailFn({ referralId, actorOrganizationId }),
+        listBusinessReferralTimelineFn({ referralId, actorOrganizationId, limit: 100 }),
       ]);
       return adaptReferral(detail.data.referral, {
         actorUid: auth.currentUser?.uid,
@@ -830,6 +870,7 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
     async createReferralDraft(input) {
       const result = await createBusinessReferralFn({
         idempotencyKey: input.idempotencyKey,
+        actorOrganizationId: input.actorOrganizationId,
         referrerOrgId: input.referrerOrgId,
         recipientUid: input.recipientUid,
         recipientOrgId: input.recipientOrgId,
@@ -873,29 +914,32 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
         relatedRfxId: input.relatedRfxId,
         relatedTeamId: input.relatedTeamId,
       });
-      return this.getReferralDetail(result.data.referralId);
+      return this.getReferralDetail(result.data.referralId, input.actorOrganizationId);
     },
-    async sendReferral(referralId, expectedVersion) {
+    async sendReferral(referralId, expectedVersion, actorOrganizationId) {
       await sendBusinessReferralFn({
         referralId,
+        actorOrganizationId,
         expectedVersion,
         idempotencyKey: crypto.randomUUID(),
       });
-      return this.getReferralDetail(referralId);
+      return this.getReferralDetail(referralId, actorOrganizationId);
     },
-    async respondReferral(referralId, response, expectedVersion, acceptTerms) {
+    async respondReferral(referralId, response, expectedVersion, acceptTerms, actorOrganizationId) {
       await respondBusinessReferralFn({
         referralId,
+        actorOrganizationId,
         response,
         expectedVersion,
         idempotencyKey: crypto.randomUUID(),
         ...(response === "accepted" ? { acceptTerms } : {}),
       });
-      return this.getReferralDetail(referralId);
+      return this.getReferralDetail(referralId, actorOrganizationId);
     },
-    async progressReferral(referralId, status, expectedVersion) {
+    async progressReferral(referralId, status, expectedVersion, actorOrganizationId) {
       await progressBusinessReferralFn({
         referralId,
+        actorOrganizationId,
         status,
         expectedVersion,
         idempotencyKey: crypto.randomUUID(),
@@ -905,7 +949,7 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
             ? { outcome: { type: "other" as const } }
             : {}),
       });
-      return this.getReferralDetail(referralId);
+      return this.getReferralDetail(referralId, actorOrganizationId);
     },
     async reportTransaction(
       referralId,
@@ -913,9 +957,11 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
       collectedTransactionCents,
       currency,
       serviceOfferId,
+      actorOrganizationId,
     ) {
       await reportBusinessReferralTransactionFn({
         referralId,
+        actorOrganizationId,
         expectedReferralVersion: expectedVersion,
         serviceOfferId,
         qualifyingTransactionCents: collectedTransactionCents,
@@ -925,19 +971,22 @@ export function createLiveExchangeRun3Gateway(): ExchangeRun3Gateway {
         idempotencyKey: crypto.randomUUID(),
         evidenceStoragePaths: [],
       });
-      return this.getReferralDetail(referralId);
+      return this.getReferralDetail(referralId, actorOrganizationId);
     },
-    async confirmTransaction(referralId, reportId, expectedReportVersion) {
+    async confirmTransaction(referralId, reportId, expectedReportVersion, actorOrganizationId) {
       await reviewBusinessReferralTransactionFn({
         reportId,
+        actorOrganizationId,
         expectedVersion: expectedReportVersion,
         action: "confirm",
         idempotencyKey: crypto.randomUUID(),
       });
-      return this.getReferralDetail(referralId);
+      return this.getReferralDetail(referralId, actorOrganizationId);
     },
-    async getIntelligence() {
-      const scope = { scope: "individual" as const, windowDays: 365 as const };
+    async getIntelligence(actorOrganizationId) {
+      const scope = actorOrganizationId
+        ? { scope: "organization" as const, orgId: actorOrganizationId, windowDays: 365 as const }
+        : { scope: "individual" as const, windowDays: 365 as const };
       const [overview, relationships, gaps, reciprocal, impact] = await Promise.all([
         getReferralOverviewFn(scope),
         listReferralRelationshipsFn({ ...scope, limit: 25 }),

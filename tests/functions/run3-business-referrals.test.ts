@@ -48,10 +48,10 @@ async function seedAuthority(): Promise<void> {
     db.doc("orgs/referrer-org").set({ id: "referrer-org", status: "active" }),
     db.doc("orgs/recipient-org").set({ id: "recipient-org", status: "active" }),
     db.doc("orgMembers/referrer-org_referrer").set({
-      id: "referrer-org_referrer", orgId: "referrer-org", uid: "referrer", role: "owner",
+      id: "referrer-org_referrer", orgId: "referrer-org", uid: "referrer", role: "owner", status: "active",
     }),
     db.doc("orgMembers/recipient-org_recipient").set({
-      id: "recipient-org_recipient", orgId: "recipient-org", uid: "recipient", role: "owner",
+      id: "recipient-org_recipient", orgId: "recipient-org", uid: "recipient", role: "owner", status: "active",
     }),
     db.doc("rfx/linked-rfx").set({
       id: "linked-rfx",
@@ -134,6 +134,7 @@ describe("Run 3 accepted referral terms and guarded links", () => {
   it("locks exact offer/config terms and makes conversion await a transaction without asserting payment due", async () => {
     const created = await referrals.businessReferral_create.run(request("referrer", {
       idempotencyKey: "run3-referral-create-0001",
+      actorOrganizationId: "referrer-org",
       referrerOrgId: "referrer-org",
       recipientUid: "recipient",
       recipientOrgId: "recipient-org",
@@ -152,16 +153,19 @@ describe("Run 3 accepted referral terms and guarded links", () => {
 
     await referrals.businessReferral_send.run(request("referrer", {
       referralId: created.referralId,
+      actorOrganizationId: "referrer-org",
       expectedVersion: 0,
       idempotencyKey: "run3-referral-send-0001",
     }));
     await expectCode(referrals.businessReferral_respond.run(request("recipient", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       response: "accepted",
       expectedVersion: 1,
     })), "failed-precondition");
     await referrals.businessReferral_respond.run(request("recipient", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       response: "accepted",
       expectedVersion: 1,
       idempotencyKey: "run3-referral-accept-0001",
@@ -205,12 +209,14 @@ describe("Run 3 accepted referral terms and guarded links", () => {
     });
     await referrals.businessReferral_progress.run(request("recipient", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       status: "in_progress",
       expectedVersion: 2,
       idempotencyKey: "run3-referral-progress-0001",
     }));
     await referrals.businessReferral_progress.run(request("recipient", {
       referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
       status: "converted",
       expectedVersion: 3,
       idempotencyKey: "run3-referral-convert-0001",
@@ -242,12 +248,100 @@ describe("Run 3 accepted referral terms and guarded links", () => {
     }
   });
 
+  it("requires the explicitly selected active organization on each referral side", async () => {
+    await Promise.all([
+      db.doc("orgs/unrelated-org").set({ id: "unrelated-org", status: "active" }),
+      db.doc("orgMembers/unrelated-org_referrer").set({
+        id: "unrelated-org_referrer",
+        orgId: "unrelated-org",
+        uid: "referrer",
+        role: "owner",
+        status: "active",
+      }),
+      db.doc("orgMembers/unrelated-org_recipient").set({
+        id: "unrelated-org_recipient",
+        orgId: "unrelated-org",
+        uid: "recipient",
+        role: "owner",
+        status: "active",
+      }),
+    ]);
+
+    await expectCode(referrals.businessReferral_create.run(request("referrer", {
+      idempotencyKey: "run3-referral-actor-mismatch",
+      actorOrganizationId: "unrelated-org",
+      referrerOrgId: "referrer-org",
+      recipientUid: "recipient",
+      recipientOrgId: "recipient-org",
+      referralType: "service_need",
+      title: "Actor-scoped referral",
+      needSummary: "This request carries a mismatched selected actor.",
+      consentStatus: "not_required",
+    })), "invalid-argument");
+
+    const created = await referrals.businessReferral_create.run(request("referrer", {
+      idempotencyKey: "run3-referral-actor-correct",
+      actorOrganizationId: "referrer-org",
+      referrerOrgId: "referrer-org",
+      recipientUid: "recipient",
+      recipientOrgId: "recipient-org",
+      referralType: "service_need",
+      title: "Actor-scoped referral",
+      needSummary: "Only the selected referral-side organization may act.",
+      consentStatus: "not_required",
+    })) as { referralId: string; version: number };
+
+    await expectCode(referrals.businessReferral_send.run(request("referrer", {
+      referralId: created.referralId,
+      expectedVersion: 0,
+    })), "permission-denied");
+    await expectCode(referrals.businessReferral_send.run(request("referrer", {
+      referralId: created.referralId,
+      actorOrganizationId: "unrelated-org",
+      expectedVersion: 0,
+    })), "permission-denied");
+    await referrals.businessReferral_send.run(request("referrer", {
+      referralId: created.referralId,
+      actorOrganizationId: "referrer-org",
+      expectedVersion: 0,
+    }));
+
+    await expectCode(referrals.businessReferral_respond.run(request("recipient", {
+      referralId: created.referralId,
+      actorOrganizationId: "unrelated-org",
+      response: "accepted",
+      expectedVersion: 1,
+      acceptTerms: { acknowledged: true },
+    })), "permission-denied");
+    await expectCode(referrals.businessReferral_respond.run(request("recipient", {
+      referralId: created.referralId,
+      response: "accepted",
+      expectedVersion: 1,
+      acceptTerms: { acknowledged: true },
+    })), "permission-denied");
+    await referrals.businessReferral_respond.run(request("recipient", {
+      referralId: created.referralId,
+      actorOrganizationId: "recipient-org",
+      response: "accepted",
+      expectedVersion: 1,
+      acceptTerms: { acknowledged: true },
+    }));
+
+    await expectCode(referrals.businessReferral_progress.run(request("recipient", {
+      referralId: created.referralId,
+      actorOrganizationId: "unrelated-org",
+      status: "in_progress",
+      expectedVersion: 2,
+    })), "permission-denied");
+  });
+
   it("rejects inferred same-organization, non-visible RFx, and stale team-array links", async () => {
     await db.doc("orgMembers/recipient-org_referrer").set({
       id: "recipient-org_referrer",
       orgId: "recipient-org",
       uid: "referrer",
       role: "member",
+      status: "active",
     });
     await expectCode(referrals.businessReferral_create.run(request("referrer", {
       idempotencyKey: "run3-referral-same-org-0001",

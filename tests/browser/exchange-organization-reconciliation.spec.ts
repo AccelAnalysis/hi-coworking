@@ -96,6 +96,33 @@ test("seeded claim is nonblocking, admin approval is audited, and a legacy admin
     createdAt: now,
     updatedAt: now,
   });
+  await db.collection("publicOrganizations").doc("browser-seeded-org").set({
+    id: "browser-seeded-org",
+    schemaVersion: 2,
+    name: "Browser Seeded Services LLC",
+    normalizedName: "browser seeded services",
+    searchTokens: ["browser", "seeded", "services"],
+    slug: "browser-seeded-services-llc",
+    city: "Smithfield",
+    county: "Isle of Wight",
+    state: "VA",
+    status: "active",
+    claimStatus: "unclaimed",
+    verificationStatus: "unverified",
+    resourceProviderStatus: "not_provider",
+    resourceCategories: [],
+    issuerStatus: "not_issuer",
+    acceptsReferrals: false,
+    publicContactAvailable: false,
+    publicationApproved: true,
+    addressPublicationApproved: false,
+    coordinatePublicationApproved: false,
+    naicsCodes: [],
+    capabilityKeywords: [],
+    certifications: [],
+    createdAt: now,
+    updatedAt: now,
+  });
 
   await register(page, "claimant");
   await page.goto("/exchange/onboarding");

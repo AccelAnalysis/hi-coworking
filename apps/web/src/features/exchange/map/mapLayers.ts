@@ -163,6 +163,43 @@ export function createExchangeMapLayerSpecifications(): LayerSpecification[] {
       },
     },
     {
+      id: EXCHANGE_MAP_LAYER_IDS.contextOrganizationPoint,
+      type: "circle",
+      source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations,
+      paint: {
+        "circle-color": [
+          "match",
+          ["get", "contextType"],
+          "actor_subject",
+          "#0f766e",
+          "actor",
+          "#0369a1",
+          "#312e81",
+        ],
+        "circle-radius": 10,
+        "circle-stroke-width": 4,
+        "circle-stroke-color": "#ffffff",
+      },
+    },
+    {
+      id: EXCHANGE_MAP_LAYER_IDS.contextOrganizationLabel,
+      type: "symbol",
+      source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations,
+      minzoom: 8,
+      layout: {
+        "text-field": ["concat", ["get", "name"], " · context"],
+        "text-size": 11,
+        "text-offset": [0, 1.3],
+        "text-anchor": "top",
+        "text-max-width": 14,
+      },
+      paint: {
+        "text-color": "#1e1b4b",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5,
+      },
+    },
+    {
       id: EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint,
       type: "circle",
       source: EXCHANGE_MAP_SOURCE_IDS.selectedOrganization,

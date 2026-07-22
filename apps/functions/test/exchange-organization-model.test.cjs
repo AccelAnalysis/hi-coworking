@@ -24,9 +24,12 @@ test("public organization projection suppresses private home-business location",
   const result = sanitizePublicOrganization("org_home", {
     name: "Home Office",
     normalizedName: "home office",
+    status: "active",
     ownerUid: "private",
     sourceIds: { duns: "private" },
     homeBased: true,
+    publicationApproved: true,
+    coordinatePublicationApproved: true,
     addressLine1: "Private",
     postalCode: "23430",
     latitude: 36.9,
@@ -50,6 +53,9 @@ test("public organization projection preserves approved coordinate confidence", 
   const result = sanitizePublicOrganization("org_public", {
     name: "Public Office",
     normalizedName: "public office",
+    status: "active",
+    publicationApproved: true,
+    coordinatePublicationApproved: true,
     latitude: 36.9,
     longitude: -76.7,
     coordinateConfidence: "verified",
@@ -59,4 +65,33 @@ test("public organization projection preserves approved coordinate confidence", 
   assert.equal(result.longitude, -76.7);
   assert.equal(result.coordinateConfidence, "verified");
   assert.equal(result.territoryFips, "51093");
+});
+
+test("public organization projection requires explicit coordinate publication approval", () => {
+  const result = sanitizePublicOrganization("org_not_approved", {
+    name: "Public Office",
+    normalizedName: "public office",
+    status: "active",
+    publicationApproved: true,
+    latitude: 36.9,
+    longitude: -76.7,
+    coordinateConfidence: "verified",
+  });
+  assert.equal(result.latitude, undefined);
+  assert.equal(result.longitude, undefined);
+  assert.equal(result.coordinatePublicationApproved, undefined);
+});
+
+test("public organization projection separates claim and verification status", () => {
+  const result = sanitizePublicOrganization("org_claimed", {
+    name: "Claimed Office",
+    normalizedName: "claimed office",
+    status: "active",
+    publicationApproved: true,
+    claimStatus: "claimed",
+    verificationStatus: "pending",
+    exchangeVerificationStatus: "claimed",
+  });
+  assert.equal(result.claimStatus, "claimed");
+  assert.equal(result.verificationStatus, "pending");
 });

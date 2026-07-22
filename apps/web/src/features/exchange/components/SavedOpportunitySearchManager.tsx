@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   OpportunityDiscoveryQuery,
   SavedOpportunitySearch,
@@ -44,26 +44,35 @@ export function SavedOpportunitySearchManager({
   const [saving, setSaving] = useState(false);
   const [savedConfirmation, setSavedConfirmation] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const generation = ++requestGenerationRef.current;
     setLoading(true);
     setError(null);
     try {
       const [savedSearches, recentSearches] = await Promise.all([
-        listSavedOpportunitySearches(),
-        listRecentOpportunitySearches(),
+        listSavedOpportunitySearches(state.actorOrganizationId),
+        listRecentOpportunitySearches(state.actorOrganizationId),
       ]);
+      if (generation !== requestGenerationRef.current) return;
       setSaved(savedSearches);
       setRecent(recentSearches);
     } catch (caught) {
+      if (generation !== requestGenerationRef.current) return;
       setError(normalizeExchangeDataError(caught).message);
     } finally {
-      setLoading(false);
+      if (generation === requestGenerationRef.current) setLoading(false);
     }
-  }, []);
+  }, [state.actorOrganizationId]);
 
   useEffect(() => {
+    setSaved([]);
+    setRecent([]);
     void refresh();
+    return () => {
+      requestGenerationRef.current += 1;
+    };
   }, [refresh]);
 
   const saveCurrent = async () => {
@@ -200,7 +209,7 @@ export function SavedOpportunitySearchManager({
                       <button
                         type="button"
                         onClick={async () => {
-                          await deleteSavedOpportunitySearch(search.id);
+                          await deleteSavedOpportunitySearch(search.id, state.actorOrganizationId);
                           await refresh();
                         }}
                         className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 outline-none hover:bg-rose-50 hover:text-rose-700 focus-visible:ring-2 focus-visible:ring-rose-500"

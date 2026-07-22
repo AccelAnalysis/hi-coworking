@@ -46,6 +46,7 @@ export interface UseExchangeMapOptions extends ExchangeMapCallbacks {
   accessToken?: string;
   rfxList: readonly RfxDoc[];
   organizations: readonly PublicOrganizationMapRecord[];
+  contextOrganizations: readonly PublicOrganizationMapRecord[];
   releasedTerritories: readonly TerritoryDoc[];
   scheduledTerritories: readonly TerritoryDoc[];
   unreleasedTerritories: readonly TerritoryDoc[];
@@ -74,6 +75,7 @@ export function useExchangeMap({
   accessToken,
   rfxList,
   organizations,
+  contextOrganizations,
   releasedTerritories,
   scheduledTerritories,
   unreleasedTerritories,
@@ -116,8 +118,9 @@ export function useExchangeMap({
       scheduledTerritories,
       unreleasedTerritories,
       organizations,
+      contextOrganizations,
     ),
-    [organizations, rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories],
+    [contextOrganizations, organizations, rfxList, releasedTerritories, scheduledTerritories, unreleasedTerritories],
   );
   const dataRef = useRef(data);
   const externalCallbacksRef = useRef<ExchangeMapCallbacks>({});

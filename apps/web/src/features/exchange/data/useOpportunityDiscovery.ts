@@ -14,6 +14,7 @@ import {
   workspaceToOpportunityQuery,
   type ExchangeDiscoveryRfx,
 } from "./opportunityDiscoveryGateway";
+import { exchangeActorScopeKey } from "./exchangeActorScope";
 import { normalizeExchangeDataError, type ExchangeDataError } from "./exchangeRepository";
 
 export interface OpportunityDiscoveryState {
@@ -61,8 +62,12 @@ export function useOpportunityDiscovery(
 ) {
   const enabled = options.enabled !== false;
   const [result, setResult] = useState<OpportunityDiscoveryState>(INITIAL_STATE);
+  const [resultScopeKey, setResultScopeKey] = useState<string | null>(null);
   const requestVersion = useRef(0);
   const loadMoreVersion = useRef(0);
+  const currentActorScopeKey = exchangeActorScopeKey(state.actorOrganizationId);
+  const actorScopeRef = useRef(currentActorScopeKey);
+  actorScopeRef.current = currentActorScopeKey;
   const queryKey = JSON.stringify(workspaceToOpportunityQuery(state));
   const query = useMemo(
     () => JSON.parse(queryKey) as OpportunityDiscoveryQuery,
@@ -71,9 +76,14 @@ export function useOpportunityDiscovery(
 
   const execute = useCallback(async (version: number) => {
     if (!enabled) return;
+    const requestScopeKey = exchangeActorScopeKey(query.actorOrganizationId);
     try {
       const page = await discoverOpportunities(query);
-      if (version !== requestVersion.current) return;
+      if (
+        version !== requestVersion.current
+        || actorScopeRef.current !== requestScopeKey
+      ) return;
+      setResultScopeKey(requestScopeKey);
       setResult({
         rfx: page.records.map(discoveryRecordToRfx),
         loading: false,
@@ -89,7 +99,11 @@ export function useOpportunityDiscovery(
         queryDurationMs: page.queryDurationMs,
       });
     } catch (error) {
-      if (version !== requestVersion.current) return;
+      if (
+        version !== requestVersion.current
+        || actorScopeRef.current !== requestScopeKey
+      ) return;
+      setResultScopeKey(requestScopeKey);
       setResult((current) => ({
         ...current,
         loading: false,
@@ -104,12 +118,15 @@ export function useOpportunityDiscovery(
       requestVersion.current += 1;
       loadMoreVersion.current += 1;
       setResult(INITIAL_STATE);
+      setResultScopeKey(null);
       return;
     }
     const version = ++requestVersion.current;
     loadMoreVersion.current += 1;
+    const actorChanged = resultScopeKey !== currentActorScopeKey;
+    setResultScopeKey(currentActorScopeKey);
     setResult((current) => ({
-      ...current,
+      ...(actorChanged ? INITIAL_STATE : current),
       loading: true,
       loadingMore: false,
       error: null,
@@ -121,23 +138,33 @@ export function useOpportunityDiscovery(
       requestVersion.current += 1;
       loadMoreVersion.current += 1;
     };
-  }, [enabled, execute, queryKey]);
+  }, [currentActorScopeKey, enabled, execute, queryKey, resultScopeKey]);
+
+  const scopeIsCurrent = resultScopeKey === currentActorScopeKey;
+  const scopedResult: OpportunityDiscoveryState = scopeIsCurrent
+    ? result
+    : { ...INITIAL_STATE, loading: enabled };
 
   const retry = useCallback(() => {
     if (!enabled) return;
     const version = ++requestVersion.current;
+    setResultScopeKey(currentActorScopeKey);
     setResult((current) => ({ ...current, loading: true, error: null }));
     void execute(version);
-  }, [enabled, execute]);
+  }, [currentActorScopeKey, enabled, execute]);
 
   const loadMore = useCallback(async () => {
-    const cursor = result.nextCursor;
-    if (!enabled || !cursor || result.loadingMore) return;
+    const cursor = scopedResult.nextCursor;
+    if (!enabled || !cursor || scopedResult.loadingMore) return;
     const version = ++loadMoreVersion.current;
+    const requestScopeKey = currentActorScopeKey;
     setResult((current) => ({ ...current, loadingMore: true }));
     try {
       const page = await discoverOpportunities({ ...query, cursor });
-      if (version !== loadMoreVersion.current) return;
+      if (
+        version !== loadMoreVersion.current
+        || actorScopeRef.current !== requestScopeKey
+      ) return;
       setResult((current) => ({
         ...current,
         rfx: deduplicate(current.rfx, page.records.map(discoveryRecordToRfx)),
@@ -153,17 +180,22 @@ export function useOpportunityDiscovery(
         queryDurationMs: page.queryDurationMs,
       }));
     } catch (error) {
-      if (version !== loadMoreVersion.current) return;
+      if (
+        version !== loadMoreVersion.current
+        || actorScopeRef.current !== requestScopeKey
+      ) return;
       setResult((current) => ({
         ...current,
         loadingMore: false,
         error: normalizeExchangeDataError(error),
       }));
     }
-  }, [enabled, query, result.loadingMore, result.nextCursor]);
+  }, [currentActorScopeKey, enabled, query, scopedResult.loadingMore, scopedResult.nextCursor]);
 
   const setSaved = useCallback(async (rfxId: string, saved: boolean) => {
-    const previous = result.rfx;
+    const actorAtStart = state.actorOrganizationId;
+    const actorScopeAtStart = exchangeActorScopeKey(actorAtStart);
+    const previous = scopedResult.rfx;
     setResult((current) => ({
       ...current,
       rfx: current.rfx.map((record) => record.id === rfxId && record.discovery
@@ -177,8 +209,9 @@ export function useOpportunityDiscovery(
         : record),
     }));
     try {
-      await setOpportunitySaved(rfxId, saved);
+      await setOpportunitySaved(rfxId, saved, actorAtStart);
     } catch (error) {
+      if (actorScopeRef.current !== actorScopeAtStart) return;
       setResult((current) => ({
         ...current,
         rfx: previous,
@@ -186,9 +219,12 @@ export function useOpportunityDiscovery(
       }));
       throw error;
     }
-  }, [result.rfx]);
+  }, [scopedResult.rfx, state.actorOrganizationId]);
 
   const markViewed = useCallback((rfxId: string) => {
+    const actorAtStart = state.actorOrganizationId;
+    const actorScopeAtStart = exchangeActorScopeKey(actorAtStart);
+    if (actorScopeRef.current !== actorScopeAtStart) return;
     setResult((current) => ({
       ...current,
       rfx: current.rfx.map((record) => record.id === rfxId && record.discovery
@@ -207,14 +243,14 @@ export function useOpportunityDiscovery(
         : record),
     }));
     if (enabled) {
-      void markOpportunityViewed(rfxId).catch(() => {
+      void markOpportunityViewed(rfxId, actorAtStart).catch(() => {
         // Viewing remains usable when the relationship write is unavailable.
       });
     }
-  }, [enabled]);
+  }, [enabled, state.actorOrganizationId]);
 
   return {
-    ...result,
+    ...scopedResult,
     retry,
     loadMore,
     setSaved,

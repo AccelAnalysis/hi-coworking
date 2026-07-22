@@ -103,7 +103,14 @@ export async function loadOrgAuthority(
 
   const org = orgSnap.data();
   const member = memberSnap.data();
-  if (!orgSnap.exists || !org || org.status !== "active" || !memberSnap.exists || !member) {
+  if (
+    !orgSnap.exists
+    || !org
+    || org.status !== "active"
+    || !memberSnap.exists
+    || !member
+    || member.status !== "active"
+  ) {
     throw new HttpsError("permission-denied", "Active organization membership is required");
   }
   if (member.orgId !== orgId || member.uid !== uid) {
@@ -113,6 +120,22 @@ export async function loadOrgAuthority(
     throw new HttpsError("permission-denied", "Organization owner or administrator access is required");
   }
   return { org, member };
+}
+
+/**
+ * Reusable exact-active authority check for read-oriented callables that do not
+ * otherwise need a transaction. The transaction prevents authority and
+ * organization status from being observed at different revisions.
+ */
+export async function requireActiveOrgAuthority(
+  db: FirebaseFirestore.Firestore,
+  orgId: string,
+  uid: string,
+  options: { managementRequired?: boolean } = {},
+): Promise<{ org: FirebaseFirestore.DocumentData; member: FirebaseFirestore.DocumentData }> {
+  return db.runTransaction((transaction) => (
+    loadOrgAuthority(transaction, db, orgId, uid, options)
+  ));
 }
 
 export async function evaluateTransactionEligibility(params: {
@@ -313,6 +336,9 @@ export interface ExchangeAuditInput {
   entityType: string;
   entityId: string;
   orgId?: string;
+  actorOrganizationId?: string;
+  subjectOrganizationId?: string;
+  mode?: "intelligence" | "referrals" | "opportunities" | "resources";
   previousStatus?: string;
   newStatus?: string;
   metadata?: Record<string, string | number | boolean | null>;
@@ -335,6 +361,9 @@ export function writeExchangeAudit(
   };
   if (input.actorRole) event.actorRole = input.actorRole;
   if (input.orgId) event.orgId = input.orgId;
+  if (input.actorOrganizationId) event.actorOrganizationId = input.actorOrganizationId;
+  if (input.subjectOrganizationId) event.subjectOrganizationId = input.subjectOrganizationId;
+  if (input.mode) event.mode = input.mode;
   if (input.previousStatus) event.previousStatus = input.previousStatus;
   if (input.newStatus) event.newStatus = input.newStatus;
   if (input.metadata && Object.keys(input.metadata).length > 0) event.metadata = input.metadata;

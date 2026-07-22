@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, type UIEvent } from "react";
 import {
   Activity,
   BadgeCheck,
@@ -103,7 +103,12 @@ export function IntelligenceWorkspace({
   onViewChange,
   gateway,
 }: ExchangeViewProps & { gateway: ExchangeRun3Gateway }) {
-  const { snapshot, loading, refreshing, error, refresh } = useIntelligenceData(gateway);
+  const desktopContentRef = useRef<HTMLElement>(null);
+  const mobileContentRef = useRef<HTMLDivElement>(null);
+  const { snapshot, loading, refreshing, error, refresh } = useIntelligenceData(
+    gateway,
+    state.actorOrganizationId,
+  );
   const filtered = useMemo(
     () => snapshot ? filterIntelligence(snapshot, state) : null,
     [snapshot, state],
@@ -125,6 +130,19 @@ export function IntelligenceWorkspace({
         : state.intelligenceMetric === "gaps"
           ? filtered.industryGaps.length + filtered.territoryGaps.length
           : snapshot?.economicImpact.currencies.length ?? 0;
+
+  useEffect(() => {
+    const scrollTop = state.modeStates.intelligence.listScrollTop;
+    if (desktopContentRef.current) desktopContentRef.current.scrollTop = scrollTop;
+    if (mobileContentRef.current) mobileContentRef.current.scrollTop = scrollTop;
+  }, [state.modeStates.intelligence.listScrollTop]);
+
+  const saveContentScroll = (event: UIEvent<HTMLElement>) => {
+    applyAction(exchangeWorkspaceActions.setModeListScroll(
+      event.currentTarget.scrollTop,
+      "intelligence",
+    ));
+  };
   const clearFilters = () => applyAction(exchangeWorkspaceActions.clearFilters(), "push");
   const closeRelationship = () => {
     applyAction(exchangeWorkspaceActions.closeMobileDetail());
@@ -220,7 +238,7 @@ export function IntelligenceWorkspace({
           <IntelligenceFilters snapshot={snapshot} state={state} onRelationship={(relationship) => applyAction(exchangeWorkspaceActions.setFilters({ relationshipFilter: relationship }), "push")} onIndustry={(industry) => applyAction(exchangeWorkspaceActions.setFilters({ connectionIndustryFilters: industry ? [industry] : [] }), "push")} onTerritory={(territory) => applyAction(exchangeWorkspaceActions.setFilters({ connectionTerritoryFilters: territory ? [territory] : [] }), "push")} onClear={clearFilters} />
         </aside>
 
-        <main className="relative z-20 hidden min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-[18rem] py-3 lg:block xl:px-[22rem]" aria-label="Referral intelligence">
+        <main ref={desktopContentRef} onScroll={saveContentScroll} className="relative z-20 hidden min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-[18rem] py-3 lg:block xl:px-[22rem]" aria-label="Referral intelligence">
           <div className="mx-auto max-w-7xl rounded-3xl border border-white/60 bg-white/58 p-5 shadow-2xl backdrop-blur-2xl">
             {loading && !snapshot ? <ExchangeStateView kind="loading" message="Loading privacy-scoped referral intelligence…" /> : null}
             {!loading ? intelligenceSurface : null}
@@ -242,7 +260,7 @@ export function IntelligenceWorkspace({
         loading={loading}
         onSurfaceModeChange={(mode) => applyAction(exchangeWorkspaceActions.setSurfaceMode(mode), "push")}
       >
-        <div className="h-full overflow-y-auto overscroll-contain p-3">
+        <div ref={mobileContentRef} onScroll={saveContentScroll} className="h-full overflow-y-auto overscroll-contain p-3">
           {loading && !snapshot ? <ExchangeStateView kind="loading" compact message="Loading intelligence…" /> : intelligenceSurface}
         </div>
       </ExchangeMobileWorkspaceTray>

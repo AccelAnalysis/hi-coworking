@@ -304,6 +304,8 @@ export const opportunityDiscoveryQuerySchema = z.object({
     OPPORTUNITY_DISCOVERY_PROJECTION_VERSION,
   ),
   query: z.string().max(240).default(""),
+  /** Untrusted request; the server must resolve exact-active authority. */
+  actorOrganizationId: z.string().trim().min(1).max(160).optional(),
   exactPhrase: z.string().max(240).optional(),
   filters: opportunityDiscoveryFiltersSchema.default(defaultOpportunityDiscoveryFilters),
   location: opportunityLocationFilterSchema.optional(),
