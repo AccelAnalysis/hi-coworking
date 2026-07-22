@@ -1,121 +1,149 @@
 # Organization activation and continuity configured acceptance
 
-This document distinguishes local source/emulator evidence from configured
-development evidence. The only authorized configured target is Firebase project
-`hi-coworking-plat` in `us-central1`. No production action is authorized.
+## Scope and result
 
-## Evidence snapshot
+Configured acceptance ran only against Firebase project `hi-coworking-plat`,
+Functions region `us-central1`, and canonical Hosting
+`https://hi-coworking-plat.web.app` on 2026-07-22. The final deployed web code is
+commit `f3c55f9`; backend code is `c54c0cd443b1800af7de602a9e7091b6c06613e3`.
+No production, seed-import, Stripe, mail, social, or merge action occurred.
 
-As of 2026-07-22, the audited configured project had no canonical organization,
-membership, claim, seed, or territory records. None of the canonical
-organization lifecycle/context callables was deployed, source rules and indexes
-differed from live releases, and Hosting was an older March 2026 revision.
+Applicable organization lifecycle, actor/subject authorization, external
+projection privacy, cross-mode map/search/drawer continuity, history/refresh,
+mobile layout, automated accessibility, and cleanup gates passed. Organization
+seed browsing remains inapplicable and blocked because human-approved count is
+zero. Populated long-list scroll, configured draft submission, and native
+Safari/VoiceOver remain explicit depth/manual follow-ups rather than claimed
+evidence.
 
-Current branch evidence is therefore:
+## Configured lifecycle journey
 
-| Area | Local/source evidence | Configured evidence | Status |
-| --- | --- | --- | --- |
-| Context contracts and projections | Shared, pure projection, and focused callable tests; builds pass | None for new endpoints | Source/emulator ready; configured pending |
-| Cross-mode state and one map host | Exchange suite passed 118 tests | No deployed Hosting/browser run | Source ready; configured pending |
-| Organization lifecycle | Search/create/claim/review source and focused callable coverage | Endpoints absent at audit | Deployment and synthetic acceptance pending |
-| Directory and markers | Bounded callable/client, privacy transform, cluster and scale fixtures | Zero configured organizations | Real data/render acceptance pending |
-| Seed lifecycle | 5,128 candidates, 3,545 restricted candidates, review/export/import/rollback tests | Zero human approvals and zero imports | Blocked at human-review gate |
-| Locality | Runtime Polygon/MultiPolygon validation exists | Zero configured territories | Authoritative preparation/deploy/render pending |
-| Security | Exact-active source invariant, final projection allowlists, rules/callable tests | New rules/callables not live | Configured denial/network proof pending |
-| Accessibility | Semantic labels, focus styles, touch targets, reduced-motion branches | No configured axe/AT/cross-browser run | Manual and automated acceptance pending |
+Reproducible guarded command:
 
-Local results must not be rewritten as configured acceptance. The final run must
-record exact command output, deployment revisions, Function inventory, ruleset
-and index state, Hosting version, browser artifacts, synthetic IDs, and cleanup.
+```bash
+GCLOUD_PROJECT=hi-coworking-plat \
+EXCHANGE_DEV_ORGANIZATION_LIFECYCLE=true \
+PATH=/opt/homebrew/opt/node@20/bin:$PATH \
+node --test tests/functions/exchange-organization-lifecycle.configured.cjs
+```
 
-## Required preflight
+Result: **1/1 passed** in 32.4 seconds. The test created four uniquely named
+`@example.test` users carrying `developmentTestPurpose`, two explicit unclaimed
+claim fixtures, one canonical created organization, and one restricted direct-
+access fixture. It verified:
 
-Before any deployment or mutation:
+- canonical creation as an ordinary user;
+- idempotent create retry;
+- private `orgs` and approved public projection split;
+- exact active owner membership;
+- free Exchange membership and zero-credit account, with no adjacent grant;
+- public search discovery without source provenance;
+- claim submission and caller-only list;
+- admin pending list and detail;
+- rejection and idempotent rejection retry;
+- two competing claims, one approval, and automatic rejection of the other;
+- independent `verificationStatus: unverified` after claim approval;
+- no publication of address, postal code, or coordinates;
+- self `private_owner` perspective after approval;
+- direct external reads: private org 403, restricted candidate 403, claim
+  review 403, approved public projection 200;
+- membership status transition to `removed`;
+- immediate actor-list fallback to individual;
+- post-revocation perspective downgraded to `public_claimed`; and
+- post-revocation actor-scoped mutation returned `PERMISSION_DENIED`.
 
-- confirm branch and commit under test;
-- confirm `firebase use` and every explicit `--project` value are exactly
-  `hi-coworking-plat`;
-- confirm emulator variables are off for configured testing;
-- inventory current Functions and review any deletion prompt;
-- diff source and live Firestore rules, indexes, Storage rules, and Hosting;
-- confirm no production alias/project is being targeted;
-- confirm Stripe, Microsoft email, SendGrid, and social integrations are not
-  required or invoked; and
-- record rollback sources and commands.
+The test deletes Auth users first, validates exact fixture identity before every
+cleanup, then removes only enumerated synthetic documents and actor/audit rows.
+An independent audit returned:
 
-Run the full validation commands from the workstream before deployment. A
-focused test pass does not replace `npm ci`, audit, builds, lint, security/run3/
-run4 suites, browser suites, secret scan, generated-export check, and
-`git diff --check`.
+```json
+{"orgs":0,"publicOrganizations":0,"orgMembers":0,"organizationSourceCandidates":0,"fixtureAuthUsers":0}
+```
 
-## Configured lifecycle scenarios
+## Configured cross-mode browser journey
 
-Use uniquely marked synthetic users and organizations. Never use a seed or real
-organization for destructive claim testing.
+Reproducible guarded command:
 
-1. Create an organization as an ordinary authenticated user. Verify duplicate
-   search, idempotent retry, private/public records, exact owner membership,
-   free commercial state, audit, actor preference, and zero adjacent grants.
-2. Discover a dedicated unclaimed synthetic organization and submit a claim
-   with a non-sensitive reason. Verify pending state, caller-only claim list,
-   public `claim_pending`, audit, and notification.
-3. Reject one claim and verify no membership, retained history, notification,
-   and correct organization state when no competitor remains.
-4. Submit two claims for a second disposable organization. Approve one and
-   verify exact owner authority, automatic competing rejection, idempotent
-   repeated approval, former claimant denial, and independent verification
-   status.
-5. Remove or mark the approved membership former, refresh token/context, and
-   verify actor removal and immediate denial of private calls.
-6. Inspect public and private callable responses for forbidden fields and
-   compare them with direct Firestore denials.
+```bash
+EXCHANGE_DEV_BASE_URL=https://hi-coworking-plat.web.app \
+EXCHANGE_DEV_ORGANIZATION_CONTINUITY=true \
+PATH=/opt/homebrew/opt/node@20/bin:$PATH \
+npx playwright test \
+  --config=playwright.config.development.ts \
+  tests/browser/exchange-organization-continuity-configured.spec.ts \
+  --workers=1 --reporter=line
+```
 
-## Cross-mode browser scenarios
+Final result: **7/7 passed** in 2.2 minutes.
 
-Run on deployed canonical Hosting with the configured backend:
+| Project | Viewport/device | Result |
+| --- | --- | --- |
+| configured-development-chromium | Chromium 1280×800 | Passed |
+| configured-development-chromium-large | Chromium 1440×900 | Passed |
+| configured-development-firefox | Firefox 1280×800 | Passed |
+| configured-development-safari | desktop WebKit/Safari 1440×900 | Passed |
+| configured-development-mobile-safari | iPhone/WebKit 390×844 | Passed |
+| configured-development-mobile-safari-393 | iPhone/WebKit 393×852 | Passed |
+| configured-development-mobile-safari-430 | iPhone Pro Max/WebKit 430×932 | Passed |
 
-- owner self subject through all four modes;
-- actor A viewing external claimed organization B through all modes;
-- external non-resource subject in Resources;
-- approved unclaimed seed subject, only after human-approved import;
-- authority loss while subject remains selected;
-- referral draft continuity and actor-change freeze;
-- map camera, search, locality, radius/bounds, drawer, per-mode filters, list
-  position, Back, Forward, and refresh restoration;
-- company-based Opportunity Discovery remaining personalized for actor A while
-  subject B is selected; and
-- unauthorized actor deep link degrading to a safe validated fallback.
+Every project created two marked synthetic users, an actor/self organization,
+an external claimed non-resource organization, active memberships, public and
+private records, and an actor preference. It verified:
 
-For each external-subject scenario, capture callable responses or network
-artifacts that demonstrate forbidden private fields were never returned.
+- owner self projection is `self` / `private_owner`;
+- actor A remains selected while external subject B is viewed;
+- external subject B is `external_claimed` / `public_claimed`;
+- private external billing, internal-note, owner, and capability-gap sentinels
+  never appear in DOM or captured callable responses;
+- the same single persistent map host stays connected through Opportunities,
+  Referrals, Intelligence, Resources, and return to Opportunities;
+- Resources keeps the non-provider external organization as context rather
+  than a resource result;
+- all four mounted mode search controls retain the workspace query;
+- actor, subject, query, drawer, camera coordinates, and zoom remain in URL;
+- hard refresh, Back, and Forward restore actor and subject;
+- no horizontal document overflow at each viewport;
+- axe reports no critical or serious WCAG 2 A/AA/2.1 AA violations;
+- removing the actor membership causes safe individual fallback after refresh;
+  and
+- the external subject remains selected/public after actor authority loss.
 
-## Browser and accessibility matrix
+The first configured browser attempt found that Hosting rewrote `/login` to the
+root export. `cleanUrls: true` fixed that route. The next attempt exposed a
+strict-payload bug: an absent secondary subject was serialized as `null`; the
+client now omits absent optional fields and keeps the server schema strict. The
+matrix also found and corrected one serious low-contrast “Active” label. The
+final seven-project run used the corrected deployed bytes.
 
-Minimum configured coverage is current Chromium, Firefox, WebKit/mobile Safari
-where available, narrow mobile and desktop sizes, keyboard-only operation,
-reduced motion, screen-reader labels, focus order, no horizontal overflow, and
-an automated accessibility scan. Native Safari/VoiceOver should remain a
-manual release gate when CI emulation cannot substitute for it.
+Each browser fixture ran `finally` cleanup with exact marker checks and Auth-
+first deletion. The independent post-suite audit returned:
 
-## Seed and locality stop conditions
+```json
+{"orgs":0,"publicOrganizations":0,"orgMembers":0,"users":0,"exchangeWorkspacePreferences":0,"fixtureAuthUsers":0}
+```
 
-There are currently zero human-approved seed records. Do not import a sample,
-claim replay/rollback evidence, or run seed-marker acceptance until an approved-
-only export exists. The importer must remain capped at 100 for the first sample
-and create a rollback artifact before writes.
+## Additional live evidence
 
-Authoritative locality geometry must identify its source, vintage, FIPS, and
-centroid; pass Polygon/MultiPolygon validation; and have rollback evidence.
-Until it is prepared and deployed, locality rendering acceptance is pending.
+- All 43 selected workstream callables inventory as `ACTIVE`.
+- Auth-required representative endpoints return 401 rather than ingress 403.
+- Anonymous empty directory query returns 200 after its index became ready.
+- All 88 composite indexes inventory as `READY`.
+- Firestore and Storage rule deployments compiled and released.
+- The in-app browser smoke opened live `/exchange` and observed the correct
+  guarded sign-in surface (`Welcome back` and the Exchange sign-in copy).
+- Authoritative territory `51093` is released; its replay was a no-op and its
+  rollback rehearsal reported ready without applying a rollback.
 
-## Cleanup and result standard
+## Remaining non-claims
 
-Inventory synthetic Auth users and every purpose-marked document before the
-run. Cleanup must be exact and recoverable: remove only enumerated synthetic
-records, then prove zero matching artifacts remain. Do not delete legacy or
-unexpected Functions.
-
-The configured workstream is not accepted until all required scenarios pass on
-`hi-coworking-plat`. At this snapshot, configured deployment, configured
-browser acceptance, locality evidence, seed import/replay/rollback, and
-cross-browser accessibility remain open gates.
+- No approved seed organization exists, so no sample or expanded organization
+  seed import, organization seed replay, organization seed rollback, or seeded
+  marker browser scenario is claimed.
+- No populated configured long-list fixture was used to measure scroll
+  restoration.
+- No configured referral draft was submitted; draft preservation has strong
+  reducer/session/source evidence only.
+- Automated WebKit is not a substitute for a native Safari/VoiceOver manual
+  release pass.
+- The branch is stacked and unmerged; this is development acceptance, not
+  production readiness.

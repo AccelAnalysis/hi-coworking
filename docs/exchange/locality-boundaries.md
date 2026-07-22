@@ -21,6 +21,17 @@ records both the official Census `CENTLAT`/`CENTLON` centroid and
 and the returned geometry bounds, and stores independent SHA-256 hashes for the
 geometry and full authoritative source input.
 
+Recorded configured-development evidence on 2026-07-22:
+
+- authoritative input size: 77,923 bytes;
+- authoritative source SHA-256:
+  `4c936a72a4228fa037286b89630de2ecca9c2ef14105808f1c00d9e1d5f80b57`;
+- normalized geometry SHA-256:
+  `08bb1381c304468a5b41acc0114fd8e406b67d866b471cd4ed70d4aa15bbaf5f`;
+- official Census centroid: `36.9066329, -76.7093003`;
+- official internal point: `36.9014184, -76.7075688`; and
+- live document: `territories/51093`, status `released`.
+
 No rectangle, hand-drawn polygon, geocoder approximation, or organization
 coordinate is created. Organizations without independently reviewed and
 publication-approved coordinates remain list-only. A county centroid is never
@@ -61,6 +72,10 @@ Verify replay explicitly:
 npm run territory:isle-of-wight:replay
 ```
 
+The configured apply completed after protected rollback creation. The explicit
+replay returned `noOp: true` and `writes: 0`; the live territory remained
+released.
+
 ## Rollback
 
 The rollback manifest records whether the territory existed, the full prior
@@ -86,10 +101,17 @@ Rollback refuses if the live territory no longer matches the protected
 post-import hash. This prevents a stale package from erasing a subsequent
 administrative or source update.
 
+The configured read-only rehearsal returned `ready: true`, planned action
+`delete` (because the territory did not exist before this workstream), and
+`applied: false`. No rollback was executed, so the authoritative territory
+remains live. The protected ignored rollback artifact is
+`data/seed/prepared/territory/rollback-51093.json`.
+
 ## Validation
 
 `apps/functions/test/authoritative-territory-import.test.cjs` covers source
 identity and vintage pinning, exact FIPS/name validation, Polygon ring and
 coordinate checks, configured-project guards, no-op replay, existing-record
 protection, rollback rehearsal, rollback restoration, and changed-record
-refusal.
+refusal. Six focused importer tests passed, followed by the configured apply,
+no-op replay, and read-only rollback rehearsal above.

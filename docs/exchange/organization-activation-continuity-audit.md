@@ -13,6 +13,52 @@
 
 The worktree was clean before inventory and the existing user stashes were left untouched.
 
+## Completion addendum — reconciled and configured 2026-07-22
+
+This document's remaining sections intentionally preserve the pre-implementation
+audit. The workstream was subsequently reconciled onto the current PR #19 head
+`e0b305039c6674f5b394303b2d3bb107d0e1eb58` (which includes PR #20) without
+reverting the SAM.gov/dependency corrections. Implementation commits are:
+
+- `c54c0cd443b1800af7de602a9e7091b6c06613e3` — organization activation,
+  exact-active authority, actor/subject contracts, viewer-relative projections,
+  persistent map/workspace continuity, guarded packages, seed governance, and
+  locality tooling;
+- `e74784995836b3762205397e0aa556bb2f55e99e` — clean Hosting routes; and
+- `f3c55f9` — strict optional callable payloads, configured lifecycle/browser
+  evidence, and the accessibility contrast repair.
+
+The configured baseline described below is no longer the live release state:
+
+- 14 organization/context and 29 supplemental actor-scoped workstream
+  callables are deployed and `ACTIVE` in `us-central1`;
+- 88 composite indexes are live and `READY`;
+- reviewed Firestore and Storage rules are deployed;
+- Hosting is current at `https://hi-coworking-plat.web.app` from committed web
+  code `f3c55f9`;
+- authoritative Census territory `territories/51093` is released, with no-op
+  replay and read-only rollback-rehearsal evidence;
+- configured synthetic organization creation, search, claim rejection,
+  competing approval, exact-active revocation, and direct-access denial passed;
+- configured self/external cross-mode continuity passed 7/7 desktop/mobile
+  projects with axe and overflow checks; and
+- independent post-run audits found zero synthetic organization-lifecycle and
+  browser fixtures.
+
+Post-cleanup canonical organization data remains intentionally empty:
+`orgs`, `publicOrganizations`, `orgMembers`, `organizationClaims`, and
+`organizationSeedImports` contain no workstream fixture or imported seed
+records. The single intended persistent geography record is
+`territories/51093`. Seed review produced 5,128 candidates, 1,324 suppressed
+home/private-location candidates, 3,736 coordinate-eligible candidates, 1,392
+list-only candidates, 70 zero/out-of-market coordinates suppressed, and 3,545
+restricted matching candidates. Human-approved and imported counts are both
+zero, so no organization seed mutation was authorized.
+
+See `organization-deployment.md`, `organization-configured-acceptance.md`,
+`locality-boundaries.md`, and the 43-row completion matrix for final evidence
+and honest remaining gates.
+
 ## GitHub and stacking decision
 
 Live GitHub state, checked after `git fetch --all --prune`:

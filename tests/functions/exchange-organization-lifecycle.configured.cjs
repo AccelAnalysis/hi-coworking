@@ -6,6 +6,8 @@ const { initializeApp } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const { getFirestore } = require("firebase-admin/firestore");
 
+// This guarded Node runner intentionally does not use Vitest's *.test.* convention.
+
 const PROJECT_ID = "hi-coworking-plat";
 const REGION = "us-central1";
 const PURPOSE = "configured-organization-lifecycle-acceptance";

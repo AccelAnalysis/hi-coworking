@@ -1,114 +1,118 @@
 # Organization and context deployment
 
-Deployment is development-only and must target exactly `hi-coworking-plat` in
-`us-central1`. The source package is prepared for deployment, but no deployment
-record is claimed by this document.
+## Recorded configured-development release
 
-## Narrow Function package
+The workstream was deployed only to Firebase project `hi-coworking-plat` in
+`us-central1` on 2026-07-22. Production was not targeted. Every Firebase command
+named the project explicitly, and every Function deployment used explicit
+selectors; no broad `functions` deployment, `--force`, deletion acceptance, or
+legacy Function replacement occurred.
 
-`apps/functions/src/coreFirebaseEntry.ts` and
-`scripts/core-functions-package.mjs` define the reviewed narrow package. It
-contains the four existing account/profile/enrichment endpoints plus these 14
-organization/context endpoints:
+The backend packages were built from `c54c0cd443b1800af7de602a9e7091b6c06613e3`.
+The final web artifact, including clean-route handling, strict optional callable
+payloads, and the accessibility contrast correction, was built and deployed
+from committed code at `f3c55f9`.
 
-- `exchange_organizationSearch`;
-- `exchange_organizationCreate`;
-- `exchange_organizationRequestClaim`;
-- `exchange_organizationListMyClaims`;
-- `exchange_adminListOrganizationClaims`;
-- `exchange_adminGetOrganizationClaim`;
-- `exchange_adminReviewOrganizationClaim`;
-- `exchange_listActorOrganizations`;
-- `exchange_resolveOrganizationPerspective`;
-- `exchange_organizationDirectory`;
-- `exchange_saveOrganization`;
-- `exchange_requestOrganizationContact`;
-- `exchange_requestOrganizationIntroduction`; and
-- `exchange_getOrganizationResourceStatus`.
+## Exact Function packages
 
-The generated manifest and marker must contain exactly all 18 approved
-endpoints. The staging package excludes unrelated payment, event, scheduled,
-social, optional Microsoft marketing, and legacy full-entry modules. The old
-deployed `org_create` is not acceptance evidence and must not be unexpectedly
-deleted by this deployment.
+`scripts/core-functions-package.mjs` produced an exact package containing four
+existing reviewed core endpoints and 14 new organization/context endpoints.
+Only the 14 new endpoints were selected for deployment:
 
-## Pre-deployment review
+- `exchange_organizationSearch`
+- `exchange_organizationCreate`
+- `exchange_organizationRequestClaim`
+- `exchange_organizationListMyClaims`
+- `exchange_adminListOrganizationClaims`
+- `exchange_adminGetOrganizationClaim`
+- `exchange_adminReviewOrganizationClaim`
+- `exchange_listActorOrganizations`
+- `exchange_resolveOrganizationPerspective`
+- `exchange_organizationDirectory`
+- `exchange_saveOrganization`
+- `exchange_requestOrganizationContact`
+- `exchange_requestOrganizationIntroduction`
+- `exchange_getOrganizationResourceStatus`
 
-Use Node 20. Record branch, commit, CLI versions, active project, Function
-inventory/revisions, live/source rules hashes, index diff, Storage-rules diff,
-Hosting version, and rollback inputs. Confirm no Firebase emulator environment
-variables are active.
+`scripts/exchange-workstream-functions-package.mjs` discovered and hashed the
+complete compiled dependency closure before staging. Its exact 29-callable
+supplemental selector set was:
 
-Run the complete validation matrix before staging. At minimum include all
-required builds, lint, Exchange, security, run3, run4, production build, audit,
-secret scan, and `git diff --check`; focused suites alone are insufficient.
+- 16 `businessReferral_*` callables
+- 5 `referralIntelligence_*` callables
+- 6 `referralServiceOffer_*` callables
+- `rfx_listManaged`
+- `territory_list_released`
 
-Generate and validate the narrow package:
+Both packages used exact manifests, production dependency manifests, staged
+file inventories, and per-file hashes. Each compiled closure contained 15
+files. Payment, Stripe, events, marketing, scheduled, trigger, social, and mail
+surfaces were absent. Dry-run review preceded each deployment.
 
-```bash
-node scripts/core-functions-package.mjs generate
-```
+## Live inventory
 
-Inspect `.firebase-deploy/account-profile-functions/functions.yaml`, its marker,
-runtime dependencies, and `firebase.core-functions.json`. Refuse a package with
-an unexpected endpoint or dependency.
+Post-deployment inventory found all 43 selected callables `ACTIVE`, Gen 2, and
+Node 20. The 14 organization/context revisions are:
 
-## Deployment order
+| Function | Revision |
+| --- | --- |
+| `exchange_organizationSearch` | `exchange-organizationsearch-00001-fub` |
+| `exchange_organizationCreate` | `exchange-organizationcreate-00001-vez` |
+| `exchange_organizationRequestClaim` | `exchange-organizationrequestclaim-00001-tip` |
+| `exchange_organizationListMyClaims` | `exchange-organizationlistmyclaims-00001-riy` |
+| `exchange_adminListOrganizationClaims` | `exchange-adminlistorganizationclaims-00001-jax` |
+| `exchange_adminGetOrganizationClaim` | `exchange-admingetorganizationclaim-00001-koh` |
+| `exchange_adminReviewOrganizationClaim` | `exchange-adminrevieworganizationclaim-00001-xoq` |
+| `exchange_listActorOrganizations` | `exchange-listactororganizations-00001-xip` |
+| `exchange_resolveOrganizationPerspective` | `exchange-resolveorganizationperspective-00001-lix` |
+| `exchange_organizationDirectory` | `exchange-organizationdirectory-00001-cuz` |
+| `exchange_saveOrganization` | `exchange-saveorganization-00001-hip` |
+| `exchange_requestOrganizationContact` | `exchange-requestorganizationcontact-00001-wus` |
+| `exchange_requestOrganizationIntroduction` | `exchange-requestorganizationintroduction-00001-veb` |
+| `exchange_getOrganizationResourceStatus` | `exchange-getorganizationresourcestatus-00001-hoq` |
 
-1. Deploy only the explicitly named organization/context Functions from the
-   narrow package. Include the existing four core endpoints only when their
-   unchanged/reviewed revisions are intentionally part of the package.
-2. Deploy required reviewed Firestore indexes and wait until every relevant
-   index is ready.
-3. Deploy reviewed Firestore rules.
-4. Deploy reviewed Storage rules.
-5. Run backend and direct-access acceptance.
-6. Build and deploy development Hosting only after backend acceptance.
+Representative unauthenticated HTTP probes reached the callable handlers and
+returned 401 rather than Cloud Run ingress 403. After index readiness,
+`exchange_organizationDirectory` returned HTTP 200 for an anonymous empty
+query. No existing Function was deleted or unexpectedly redeployed.
 
-Every Firebase command must include `--project hi-coworking-plat`. Use explicit
-`--only functions:<name>` selectors for the approved endpoints. Do not accept a
-prompt to delete an unexpected Function. Do not use the monorepo full Function
-entry for this workstream.
+## Rules, indexes, Storage, and Hosting
 
-Rules, index, Storage, and Hosting deployments use the canonical `firebase.json`
-only after their diffs are reviewed. Hosting must be the static artifact built
-from the exact tested commit.
+- Firestore index deployment completed without `--force`. The source set plus
+  six preserved live-only composites produced 88 live indexes, all `READY`.
+- Firestore rules dry-run/compile and release completed. The compiler reported
+  unused-helper warnings and two invalid names inside unused helpers; these did
+  not prevent release and remain a cleanup follow-up.
+- Storage rules dry-run/compile and release completed.
+- Hosting built 59 static routes / 605 exported files and released to
+  `https://hi-coworking-plat.web.app`.
+- `cleanUrls: true` was required because the initial SPA rewrite served the
+  root export for `/login`; the corrected route now serves the login artifact.
+- The final Hosting deployment was rebuilt from committed code `f3c55f9`.
 
-## Post-deployment verification
+## Configured acceptance and data effects
 
-- List deployed Functions and compare names, region, runtime, generation, and
-  revision with the approved plan.
-- Verify no unexpected Function was deleted or redeployed.
-- Probe callable CORS and unauthenticated denial, then run authenticated
-  lifecycle/context acceptance.
-- Confirm required composite indexes are ready before directory/claim/saved
-  state testing.
-- Verify direct private Firestore and Storage access fails, while approved
-  public projection reads succeed.
-- Record ruleset, index, and Hosting release IDs.
-- Run configured browser, privacy, accessibility, and synthetic cleanup checks.
-- Validate the generated export inventory and remove the staging package only
-  with its guarded cleanup operation.
+The guarded lifecycle test exercised the live lifecycle endpoints and removed
+all synthetic Auth/Firestore fixtures. The guarded seven-project browser suite
+exercised the live perspective, actor-list, directory, map, URL/history, and
+revocation paths, then also removed all fixtures. Independent post-run audits
+returned zero matching records/users.
 
-## Rollback
+The official Isle of Wight County territory was the only persistent data write:
+`territories/51093` remains released. Its protected rollback artifact was
+created before apply, replay was a no-op, and rollback rehearsal was read-only.
+No organization seed record was imported because human-approved count is zero.
 
-Before deployment, retain the prior commit/artifact, Function revisions,
-rules/index definitions, Storage rules, and Hosting version. A rollback should:
+## Rollback and follow-up
 
-1. redeploy the prior reviewed narrow Function package with the same explicit
-   project and endpoint selectors;
-2. redeploy the prior Firestore and Storage rules files;
-3. restore the prior Hosting version or redeploy its recorded artifact;
-4. avoid deleting indexes until a separate impact review proves removal safe;
-5. remove only explicitly inventoried synthetic data; and
-6. rerun inventory, callable denial, and public/private smoke tests.
+Rollback inputs are the prior reviewed commit/artifacts, prior rules and
+Storage definitions, preserved Hosting history, explicit Function selectors,
+and the protected territory rollback manifest. Index deletion remains excluded
+from automatic rollback.
 
-Seed data uses the separate guarded rollback executor. It must not be treated as
-part of a code deployment rollback.
-
-## Current status
-
-The narrow source package and endpoint inventory are implemented. Configured
-Function, index, rules, Storage, and Hosting deployment for this workstream is
-pending. No production, Stripe, Microsoft external send, or seed import is
-authorized or recorded here.
+Node 20 is scheduled for deprecation on 2026-04-30 and decommission on
+2026-10-30 according to the deployment warning, and the repository's
+`firebase-functions` dependency is behind the current release. Runtime/dependency
+upgrade and Firestore helper-warning cleanup should be handled in a separate,
+reviewed workstream. No production, Stripe, mail, social, seed, or merge action
+is recorded here.
