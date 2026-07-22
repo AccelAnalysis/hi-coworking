@@ -23,6 +23,13 @@ from xml.etree import ElementTree as ET
 NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 REL_NS = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
 DOC_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+IOW_FIPS = "51093"
+IOW_COORDINATE_ENVELOPE = {
+    "minimumLatitude": 36.64,
+    "maximumLatitude": 37.22,
+    "minimumLongitude": -77.02,
+    "maximumLongitude": -76.43,
+}
 
 
 def normalize_name(value: str) -> str:
@@ -107,6 +114,17 @@ def bounded_coordinate(value: object, minimum: float, maximum: float) -> float |
     return coordinate if minimum <= coordinate <= maximum else None
 
 
+def coordinate_in_market(latitude: float, longitude: float, territory_fips: str) -> bool:
+    if latitude == 0 and longitude == 0:
+        return False
+    if territory_fips != IOW_FIPS:
+        return True
+    return (
+        IOW_COORDINATE_ENVELOPE["minimumLatitude"] <= latitude <= IOW_COORDINATE_ENVELOPE["maximumLatitude"]
+        and IOW_COORDINATE_ENVELOPE["minimumLongitude"] <= longitude <= IOW_COORDINATE_ENVELOPE["maximumLongitude"]
+    )
+
+
 def prepare(args):
     home_rows = list(read_xlsx_rows(args.home, "Company Details"))
     home_ids = {source_id(row) for row in home_rows}
@@ -116,6 +134,7 @@ def prepare(args):
         source_id(row) for row in company_rows if text(row.get("Company Name"))
     )
     invalid_coordinate_rows = 0
+    out_of_market_coordinate_rows = 0
 
     for row in company_rows:
         name = text(row.get("Company Name"))
@@ -130,6 +149,10 @@ def prepare(args):
         city = text(row.get("Physical City"))
         state = text(row.get("Physical State"))
         county = text(row.get("Physical County"))
+        territory_fips = IOW_FIPS if (
+            normalize_name(county) == "isle of wight"
+            and normalize_name(state) in {"va", "virginia"}
+        ) else ""
         latitude = bounded_coordinate(row.get("Latitude"), -90, 90)
         longitude = bounded_coordinate(row.get("Longtitude"), -180, 180)
         has_any_coordinate = bool(text(row.get("Latitude")) or text(row.get("Longtitude")))
@@ -137,10 +160,13 @@ def prepare(args):
             invalid_coordinate_rows += 1
             latitude = None
             longitude = None
-        territory_fips = "51093" if (
-            normalize_name(county) == "isle of wight"
-            and normalize_name(state) in {"va", "virginia"}
-        ) else ""
+        elif latitude is not None and longitude is not None and not coordinate_in_market(
+            latitude, longitude, territory_fips
+        ):
+            invalid_coordinate_rows += 1
+            out_of_market_coordinate_rows += 1
+            latitude = None
+            longitude = None
         record = {
             "id": stable_id("org", identity),
             "schemaVersion": 2,
@@ -225,6 +251,7 @@ def prepare(args):
         "coordinateMarkersEligible": prepared_coordinate_count,
         "listOnlyOrganizations": len(organizations) - prepared_coordinate_count,
         "invalidCoordinateRows": invalid_coordinate_rows,
+        "outOfMarketCoordinateRowsSuppressed": out_of_market_coordinate_rows,
         "duplicateOrganizationIdentityGroups": sum(
             1 for count in company_identity_counts.values() if count > 1
         ),
@@ -244,6 +271,7 @@ def prepare(args):
             "targetingCandidatesRestrictedMatchOnly": True,
             "targetingContactDemographicAndBirthFieldsExcluded": True,
             "fabricatedCoordinates": False,
+            "outOfMarketCoordinatesSuppressed": True,
         },
         "outputDirectory": str(args.output_dir),
     }

@@ -220,7 +220,7 @@ async function loadOrganizationAuthority(
       || member.uid !== actorUid
       || !role
       || !["owner", "admin", "member"].includes(role)
-      || (status !== undefined && status !== "active")
+      || status !== "active"
     ) {
       return [];
     }

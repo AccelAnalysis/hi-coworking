@@ -73,6 +73,7 @@ describe("Run 1 Firestore authorization matrix", () => {
     const expanded: Record<string, DocumentData> = { ...entries };
     for (const [path, data] of Object.entries(entries)) {
       if (path.startsWith("orgMembers/") && typeof data.orgId === "string") {
+        expanded[path] = { status: "active", ...data };
         const orgPath = `orgs/${data.orgId}`;
         expanded[orgPath] ??= { id: data.orgId, status: "active" };
       }
@@ -125,6 +126,66 @@ describe("Run 1 Firestore authorization matrix", () => {
         email: "new-user@example.test",
       }),
     );
+  });
+
+  test("organization authority is exact-active and private workspace state is callable-only", async () => {
+    await seed({
+      "orgs/active-org": { id: "active-org", status: "active" },
+      "orgMembers/active-org_active-user": {
+        orgId: "active-org", uid: "active-user", role: "owner", status: "active",
+      },
+      "orgMembers/active-org_former-user": {
+        orgId: "active-org", uid: "former-user", role: "admin", status: "former",
+      },
+      "orgMembers/active-org_legacy-user": {
+        orgId: "active-org", uid: "legacy-user", role: "member", status: null,
+      },
+      "exchangeMemberships/active-org": {
+        organizationId: "active-org", tier: "free", status: "active",
+      },
+      "publicOrganizations/approved-org": {
+        id: "approved-org", status: "active", publicationApproved: true,
+      },
+      "publicOrganizations/unapproved-org": {
+        id: "unapproved-org", status: "active", publicationApproved: false,
+      },
+      "exchangeWorkspacePreferences/active-user": {
+        uid: "active-user", actorOrganizationId: "active-org",
+      },
+      "exchangeSavedOrganizations/saved-one": {
+        actorOrganizationId: "active-org", organizationId: "approved-org",
+      },
+      "organizationContactRequests/contact-one": {
+        actorOrganizationId: "active-org", subjectOrganizationId: "approved-org",
+      },
+      "organizationIntroductionRequests/intro-one": {
+        actorOrganizationId: "active-org", subjectOrganizationId: "approved-org",
+      },
+    });
+
+    const active = authenticated("active-user").firestore();
+    const former = authenticated("former-user").firestore();
+    const legacy = authenticated("legacy-user").firestore();
+    const staff = authenticated("staff", { role: "staff" }).firestore();
+    const anonymous = testEnv.unauthenticatedContext().firestore();
+
+    await assertFails(getDoc(doc(active, "orgs/active-org")));
+    await assertSucceeds(getDoc(doc(staff, "orgs/active-org")));
+    await assertSucceeds(getDoc(doc(active, "exchangeMemberships/active-org")));
+    await assertFails(getDoc(doc(former, "exchangeMemberships/active-org")));
+    await assertFails(getDoc(doc(legacy, "exchangeMemberships/active-org")));
+    await assertSucceeds(getDoc(doc(anonymous, "publicOrganizations/approved-org")));
+    await assertFails(getDoc(doc(anonymous, "publicOrganizations/unapproved-org")));
+
+    for (const path of [
+      "exchangeWorkspacePreferences/active-user",
+      "exchangeSavedOrganizations/saved-one",
+      "organizationContactRequests/contact-one",
+      "organizationIntroductionRequests/intro-one",
+    ]) {
+      await assertFails(getDoc(doc(active, path)));
+      await assertFails(updateDoc(doc(active, path), { forged: true }));
+    }
   });
 
   test("private profiles stay private and only published projections are discoverable", async () => {

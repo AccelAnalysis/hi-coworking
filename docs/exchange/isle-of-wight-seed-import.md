@@ -1,97 +1,86 @@
-# Isle of Wight organization seed import
+# Isle of Wight organization seed lifecycle
 
-No production import is performed by this branch.
+No Firebase import or production seed workflow is authorized by preparation. The
+configured-development gate remains closed until a human has reviewed and
+explicitly approved a bounded sample.
 
-## Prepare and verify
+## Verified preparation state
 
-1. Keep the supplied high-resolution workbooks outside the public application.
-2. Run `prepare-organization-seeds.py` to produce:
-   - `data/seed/prepared/isle-of-wight-organizations.jsonl`
-   - `data/seed/prepared/exchange-targeting-restricted.jsonl`
-3. Run `npm run seed:organizations:verify` on the public organization output.
-4. Review all home-based suppression, source provenance, organization counts, and invalid rows before any write.
+The 2026-07-22 local preparation and verification run produced:
 
-Configured preparation command:
+- 5,128 organization candidates, including 1,324 privacy-suppressed home businesses;
+- 3,736 coordinate-eligible organizations and 1,392 list-only organizations;
+- 70 source coordinate rows suppressed as zero sentinels or outside the configured
+  FIPS 51093 validation envelope;
+- 3,545 restricted matching candidates;
+- zero duplicate organization IDs, home privacy violations, coordinate violations,
+  or restricted-targeting privacy violations in the prepared outputs;
+- 5,128 organization and 3,545 restricted candidates pending human review;
+- zero human approvals, approved exports, imports, or Firebase writes.
 
-```bash
-python3 apps/functions/scripts/prepare-organization-seeds.py \
-  --companies data/seed/source-private/isle-of-wight-companies.xlsx \
-  --home data/seed/source-private/isle-of-wight_home-businesses.xlsx \
-  --targeting "data/seed/source-private/Targeting List 1 - Cleaned.xlsx" \
-  --output-dir data/seed/prepared
+The envelope (`36.64..37.22`, `-77.02..-76.43`) is deliberately conservative
+input validation, not an authoritative county boundary. A rejected coordinate
+makes the organization list-only; the preparation code never fabricates a point.
+
+## Lifecycle
+
+```text
+private workbooks
+  -> prepared candidates
+  -> protected pending review packets
+  -> human review
+  -> approved-only sample exports (maximum 100 combined import records)
+  -> strict configured-development dry run
+  -> pre-write rollback snapshot
+  -> explicitly confirmed sample apply
+  -> no-op replay + browser/privacy acceptance + rollback rehearsal
+  -> separately approved expansion
 ```
 
-The private source directory and generated prepared directory are gitignored.
-The preparation report is written to
-`data/seed/prepared/seed-preparation-report.json`. It records only counts and
-privacy decisions, never source row values. Company financial and executive
-sheets are not ingested. Source-provided coordinates are range-checked and
-labeled `approximate`; no coordinate is generated from a street, ZIP, or
-territory centroid.
-
-## Dry run first
-
-The importer is now dry-run by default. Omitting `--apply` never writes records.
+Run preparation and structural verification:
 
 ```bash
+npm run seed:organizations:prepare
+npm run seed:organizations:verify
+```
+
+Generate protected review packets once:
+
+```bash
+npm run seed:organizations:review-packet
+```
+
+The generated `data/seed/prepared` tree is gitignored. Review packets and their
+manifest are created with mode `0600`, and the generator refuses to overwrite
+them. See [seed-review.md](./seed-review.md) for the human gate.
+
+Only after review may an operator create the two approved sample exports:
+
+```bash
+npm run seed:organizations:export-organizations
+npm run seed:organizations:export-targeting
 npm run seed:organizations:dev:dry
 ```
 
-Or run the equivalent explicit command:
+The dry run reads the exact configured development project and plans changes,
+but does not write. Raw prepared candidates are never valid importer input.
+See [seed-development-import.md](./seed-development-import.md) for the apply and
+expansion gates and [seed-rollback.md](./seed-rollback.md) for recovery.
 
-```bash
-node apps/functions/scripts/import-organizations.cjs \
-  --project hi-coworking-plat \
-  --environment development \
-  --organizations data/seed/prepared/isle-of-wight-organizations.jsonl \
-  --targeting data/seed/prepared/exchange-targeting-restricted.jsonl
-```
+## Privacy contract
 
-Review the created, updated, skipped, duplicate, and invalid counts. Repeat the dry run; unchanged records should become skipped after an applied import.
-
-## Apply to the configured development environment
-
-Because `.firebaserc` currently points both `default` and `prod` at `hi-coworking-plat`, never rely on an implicit Firebase alias. A development write requires all of the following:
-
-- explicit `--project hi-coworking-plat`;
-- explicit `--environment development`;
-- explicit `--apply`;
-- exact `--confirm-development hi-coworking-plat`;
-- reviewed dry-run and rollback reports.
-
-```bash
-node apps/functions/scripts/import-organizations.cjs \
-  --project hi-coworking-plat \
-  --environment development \
-  --organizations data/seed/prepared/isle-of-wight-organizations.jsonl \
-  --targeting data/seed/prepared/exchange-targeting-restricted.jsonl \
-  --batch-id exchange_dev_iow_YYYYMMDD \
-  --apply \
-  --confirm-development hi-coworking-plat
-```
-
-This development confirmation is intentionally separate from production release approval. It prevents misleading instructions that describe every non-emulator write as production while still requiring an exact project confirmation.
+- Home-business street, postal, phone, and precise coordinate fields are removed
+  during preparation.
+- Restricted matching rows exclude personal, demographic, contact, address, and
+  precise-location fields and never receive a public projection.
+- Public projection is allowlisted. Review identity, source IDs, ownership data,
+  and restricted matching fields are never copied into `publicOrganizations`.
+- An approved organization is publishable, but street/postal and coordinates are
+  independently included only when the corresponding human-reviewed flag is true.
+- Existing claimed or owned organization records cannot be changed by this importer.
 
 ## Production boundary
 
-A production write requires:
-
-```text
---environment production --apply --confirm-production <exact-project-id>
-```
-
-Do not use the production form until the release checklist, backup, migration rehearsal, and rollback approval are complete.
-
-## Data and rollback contract
-
-The importer writes deterministic IDs, source hashes, batch IDs, provenance timestamps, protected `orgs` records, sanitized `publicOrganizations` projections, server-only candidates, and an `organizationSeedImports` rollback manifest. It never fabricates coordinates.
-
-Privacy-suppressed rows fail validation if they contain street, ZIP, phone, coordinate, or geohash fields.
-
-Rollback uses the recorded `importBatchId` across:
-
-- `orgs`
-- `publicOrganizations`
-- `organizationSourceCandidates`
-
-Review claimed or subsequently modified records before removing any imported record. Do not delete an organization merely because it originated in a seed batch after a user has claimed or enriched it.
+The scripts in this lifecycle reject `--environment production`; there is no
+production confirmation escape hatch. Production migration requires a separate,
+explicitly reviewed release workflow that is not part of this workstream.

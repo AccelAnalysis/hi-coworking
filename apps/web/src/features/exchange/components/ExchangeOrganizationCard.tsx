@@ -18,6 +18,7 @@ export function ExchangeOrganizationCard({
   const publicLocation = [organization.city, organization.state].filter(Boolean).join(", ");
   const markerAvailable = !organization.homeBased
     && !organization.privacySuppressed
+    && organization.coordinatePublicationApproved === true
     && isValidLatitude(organization.latitude)
     && isValidLongitude(organization.longitude);
 

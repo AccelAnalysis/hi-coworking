@@ -4,7 +4,7 @@ const baseURL = process.env.EXCHANGE_DEV_BASE_URL || "http://127.0.0.1:3000";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: /exchange-configured-development\.spec\.ts/,
+  testMatch: /exchange-(configured-development|organization-continuity-configured)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

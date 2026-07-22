@@ -416,7 +416,10 @@ export const orgMemberDocSchema = z.object({
   orgId: z.string(),
   uid: z.string(),
   role: z.enum(["owner", "admin", "member"]),
+  status: z.enum(["active", "inactive", "former"]),
+  permissions: z.array(z.string()).default([]),
   joinedAt: z.number(),
+  updatedAt: z.number().optional(),
 });
 
 export type OrgMemberDoc = z.infer<typeof orgMemberDocSchema>;
@@ -1806,6 +1809,9 @@ export const exchangeAuditEventSchema = z.object({
   entityType: z.string(),
   entityId: z.string(),
   orgId: z.string().optional(),
+  actorOrganizationId: z.string().optional(),
+  subjectOrganizationId: z.string().optional(),
+  mode: z.enum(["intelligence", "referrals", "opportunities", "resources"]).optional(),
   previousStatus: z.string().optional(),
   newStatus: z.string().optional(),
   metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
@@ -2272,3 +2278,6 @@ export * from "./exchangeCommercial";
 
 // Versioned, privacy-minimized Opportunity Discovery contracts.
 export * from "./opportunityDiscovery";
+
+// Versioned viewer/actor/subject organization workspace contracts.
+export * from "./exchangeOrganizationContext";

@@ -31,6 +31,7 @@ import {
 const MAX_SEARCH_LENGTH = 200;
 const MAX_ENTITY_ID_LENGTH = 160;
 const MAX_FILTER_COUNT = 60;
+const SAFE_ENTITY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,159}$/;
 const NAICS_PATTERN = /^\d{2,6}$/;
 const TERRITORY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
 const INDUSTRY_PATTERN = /^[A-Za-z0-9_(),.&/ -]{1,64}$/;
@@ -79,6 +80,14 @@ function parseNumber(value: string | null): number | undefined {
   if (value === null || value.trim() === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseEntityId(value: string | null): string | undefined {
+  return value
+    && value.length <= MAX_ENTITY_ID_LENGTH
+    && SAFE_ENTITY_ID_PATTERN.test(value)
+    ? value
+    : undefined;
 }
 
 function parseViewport(params: URLSearchParams): ExchangeViewport | undefined {
@@ -132,24 +141,31 @@ function parseSelection(
   params: URLSearchParams,
   view: ExchangeUrlState["view"],
 ): ExchangeSelection {
-  const entityType = params.get("entity");
-  const entityId = params.get("selected") ?? "";
+  const entityType = params.get("secondaryEntity") ?? params.get("entity");
+  const entityId = params.get("secondarySelected")
+    ?? params.get("selected")
+    ?? "";
   if (
-    !["rfx", "territory", "organization", "referral", "relationship", "industry"].includes(
+    !["rfx", "opportunity", "territory", "organization", "referral", "resource", "team", "relationship", "industry"].includes(
       entityType ?? "",
     )
     || entityId.length === 0
     || entityId.length > MAX_ENTITY_ID_LENGTH
-    || /[\u0000-\u001f\u007f]/.test(entityId)
+    || !SAFE_ENTITY_ID_PATTERN.test(entityId)
   ) {
     return null;
   }
   const allowedForView = entityType === "organization"
     ? true
-    : view === "opportunities"
-      ? entityType === "rfx" || entityType === "territory"
+    : view === "opportunities" || view === "businesses" || view === "teaming"
+      ? entityType === "rfx"
+        || entityType === "opportunity"
+        || entityType === "territory"
+        || entityType === "team"
       : view === "connections" || view === "referrals"
         ? entityType === "referral"
+        : view === "resources"
+          ? entityType === "resource" || entityType === "territory"
         : entityType === "relationship"
           || entityType === "territory"
           || entityType === "industry";
@@ -165,6 +181,11 @@ export function createDefaultExchangeUrlState(): ExchangeUrlState {
     view: DEFAULT_EXCHANGE_VIEW,
     surfaceMode: DEFAULT_EXCHANGE_SURFACE_MODE,
     selection: null,
+    requestedActorOrganizationId: undefined,
+    subjectOrganizationId: undefined,
+    secondaryContext: null,
+    organizationDrawerOpen: false,
+    rightPanelOpen: false,
     searchQuery: "",
     naicsFilters: [],
     industryFilters: [],
@@ -218,6 +239,13 @@ export function parseExchangeUrlState(
   if (query !== null && query.length <= MAX_SEARCH_LENGTH) {
     state.searchQuery = query;
   }
+
+  state.requestedActorOrganizationId = parseEntityId(
+    params.get("actorOrg") ?? params.get("actor"),
+  );
+  state.subjectOrganizationId = parseEntityId(
+    params.get("subjectOrg") ?? params.get("subject"),
+  );
 
   state.territoryFilters = parseCsv(
     params.get("territory"),
@@ -298,7 +326,22 @@ export function parseExchangeUrlState(
     state.intelligenceMetric = metric;
   }
 
-  state.selection = parseSelection(params, state.view);
+  const parsedSelection = parseSelection(params, state.view);
+  if (parsedSelection?.entityType === "organization") {
+    state.subjectOrganizationId ??= parsedSelection.entityId;
+  } else {
+    state.secondaryContext = parsedSelection;
+  }
+  state.organizationDrawerOpen = Boolean(state.subjectOrganizationId)
+    && (params.get("drawer") === "organization"
+      || parsedSelection?.entityType === "organization");
+  const panel = params.get("panel");
+  state.rightPanelOpen = state.secondaryContext !== null
+    && (panel === "detail" || panel === null);
+  state.selection = state.secondaryContext
+    ?? (state.subjectOrganizationId
+      ? { entityType: "organization", entityId: state.subjectOrganizationId }
+      : null);
   state.viewport = parseViewport(params);
   return state;
 }
@@ -327,8 +370,8 @@ function serializeNumber(
 
 /**
  * Serializes only the explicit public interaction-state allowlist above.
- * Fetched documents, user identity, auth state, panel state, and arbitrary
- * object properties can never enter the URL through this codec.
+ * Fetched documents, user identity, auth claims, panel dimensions, and
+ * arbitrary object properties can never enter the URL through this codec.
  */
 export function serializeExchangeUrlState(
   state: ExchangeWorkspaceState | ExchangeUrlState,
@@ -340,6 +383,12 @@ export function serializeExchangeUrlState(
     params.set("mode", state.surfaceMode);
   }
   if (state.searchQuery) params.set("q", state.searchQuery.slice(0, MAX_SEARCH_LENGTH));
+  const actorRequest = state.requestedActorOrganizationId
+    ?? ("actorOrganizationId" in state ? state.actorOrganizationId : undefined);
+  const safeActorRequest = parseEntityId(actorRequest ?? null);
+  const safeSubject = parseEntityId(state.subjectOrganizationId ?? null);
+  if (safeActorRequest) params.set("actorOrg", safeActorRequest);
+  if (safeSubject) params.set("subjectOrg", safeSubject);
   serializeCsv(params, "territory", state.territoryFilters);
   serializeCsv(params, "naics", state.naicsFilters);
   serializeCsv(params, "industryFilter", state.industryFilters);
@@ -404,9 +453,15 @@ export function serializeExchangeUrlState(
     params.set("metric", state.intelligenceMetric);
   }
 
-  if (state.selection) {
-    params.set("entity", state.selection.entityType);
-    params.set("selected", state.selection.entityId);
+  const secondary = state.secondaryContext
+    ?? (state.selection?.entityType !== "organization" ? state.selection : null);
+  if (secondary) {
+    params.set("entity", secondary.entityType);
+    params.set("selected", secondary.entityId);
+    params.set("panel", state.rightPanelOpen ? "detail" : "closed");
+  }
+  if (safeSubject && state.organizationDrawerOpen) {
+    params.set("drawer", "organization");
   }
 
   const viewport = normalizeExchangeViewport(state.viewport);

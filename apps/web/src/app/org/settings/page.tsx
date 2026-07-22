@@ -124,6 +124,8 @@ function OrgSettingsContent() {
         orgId: org.id,
         uid: inviteUid.trim(),
         role: inviteRole,
+        status: "active",
+        permissions: [],
         joinedAt: Date.now(),
       });
       setInviteUid("");

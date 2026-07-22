@@ -21,9 +21,11 @@ export function ExchangeResultsList({
   compact = false,
   hasMore = false,
   loadingMore = false,
+  initialScrollTop = 0,
   onSelect,
   onSave,
   onLoadMore,
+  onScrollTopChange,
 }: {
   rfx: ExchangeDiscoveryRfx[];
   territories: TerritoryDoc[];
@@ -33,14 +35,17 @@ export function ExchangeResultsList({
   compact?: boolean;
   hasMore?: boolean;
   loadingMore?: boolean;
+  initialScrollTop?: number;
   onSelect: (selection: Exclude<ExchangeSelection, null>) => void;
   onSave?: (rfxId: string, saved: boolean) => Promise<void> | void;
   onLoadMore?: () => Promise<void> | void;
+  onScrollTopChange?: (scrollTop: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const batchSize = compact ? COMPACT_BATCH : STANDARD_BATCH;
   const [visibleLimit, setVisibleLimit] = useState(batchSize);
+  const scrollFrameRef = useRef<number | null>(null);
   const selectedRfxIndex = selection?.entityType === "rfx"
     ? rfx.findIndex((record) => record.id === selection.entityId)
     : -1;
@@ -67,6 +72,15 @@ export function ExchangeResultsList({
   useEffect(() => {
     setVisibleLimit(batchSize);
   }, [batchSize, organizations.length, rfx.length, territories.length]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    containerRef.current.scrollTop = Math.max(0, initialScrollTop);
+  }, [initialScrollTop]);
+
+  useEffect(() => () => {
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
+  }, []);
 
   useEffect(() => {
     if (!selection || !containerRef.current) return;
@@ -103,7 +117,21 @@ export function ExchangeResultsList({
   }, [canLoad, loadMore, loadingMore]);
 
   return (
-    <div ref={containerRef} className="h-full overflow-y-auto overscroll-contain px-3 py-3" aria-label="Exchange results" aria-busy={loadingMore}>
+    <div
+      ref={containerRef}
+      className="h-full overflow-y-auto overscroll-contain px-3 py-3"
+      aria-label="Exchange results"
+      aria-busy={loadingMore}
+      onScroll={(event) => {
+        if (!onScrollTopChange) return;
+        const scrollTop = event.currentTarget.scrollTop;
+        if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = requestAnimationFrame(() => {
+          scrollFrameRef.current = null;
+          onScrollTopChange(scrollTop);
+        });
+      }}
+    >
       {visibleRfx.length ? (
         <section aria-labelledby={compact ? undefined : "exchange-rfx-results-heading"}>
           {!compact ? (

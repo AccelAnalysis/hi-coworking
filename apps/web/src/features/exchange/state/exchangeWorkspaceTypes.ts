@@ -18,6 +18,18 @@ export const EXCHANGE_VIEWS = [
 ] as const;
 export type ExchangeView = (typeof EXCHANGE_VIEWS)[number];
 
+/**
+ * The four product workspaces that own independent filters, selections, and
+ * draft/list state. Legacy routes are mapped onto one of these workspaces.
+ */
+export const EXCHANGE_CANONICAL_MODES = [
+  "opportunities",
+  "referrals",
+  "intelligence",
+  "resources",
+] as const;
+export type ExchangeCanonicalMode = (typeof EXCHANGE_CANONICAL_MODES)[number];
+
 export const EXCHANGE_CONNECTION_MODES = [
   "sent",
   "received",
@@ -113,12 +125,78 @@ export type ExchangePersonalizedFilter =
 
 export type ExchangeSelection =
   | { entityType: "rfx"; entityId: string }
+  | { entityType: "opportunity"; entityId: string }
   | { entityType: "territory"; entityId: string }
   | { entityType: "organization"; entityId: string }
   | { entityType: "referral"; entityId: string }
+  | { entityType: "resource"; entityId: string }
+  | { entityType: "team"; entityId: string }
   | { entityType: "relationship"; entityId: string }
   | { entityType: "industry"; entityId: string }
   | null;
+
+export type ExchangeSecondaryContext = ExchangeSelection;
+
+export interface ExchangeDraftRefs {
+  referralDraftId?: string;
+  contactRequestDraftId?: string;
+  teamingInvitationDraftId?: string;
+  organizationClaimDraftId?: string;
+  opportunityResponseDraftId?: string;
+  savedSearchDraftId?: string;
+  resourceContactDraftId?: string;
+}
+
+/**
+ * A bounded snapshot of mode-owned filters. Fields are optional so each
+ * canonical mode stores only the filter family it understands.
+ */
+export interface ExchangeModeFilterState {
+  naicsFilters?: string[];
+  industryFilters?: string[];
+  capabilityFilters?: string[];
+  territoryFilters?: string[];
+  rfxStatusFilters?: ExchangeRfxStatus[];
+  territoryStatusFilters?: ExchangeTerritoryStatus[];
+  opportunityTypeFilters?: string[];
+  rfxTypeFilters?: string[];
+  buyerTypeFilters?: string[];
+  workArrangementFilters?: string[];
+  visibilityFilters?: string[];
+  certificationFilters?: string[];
+  setAsideFilters?: string[];
+  primeClassificationFilters?: string[];
+  awardClassificationFilters?: string[];
+  personalizedFilters?: ExchangePersonalizedFilter[];
+  localFirst?: boolean;
+  closingSoon?: boolean;
+  teamingSuitable?: boolean;
+  budgetMin?: number;
+  budgetMax?: number;
+  opportunitySort?: OpportunitySort;
+  activeSavedSearchId?: string;
+  connectionMode?: ExchangeConnectionMode;
+  referralStatusFilters?: ExchangeReferralStatus[];
+  connectionIndustryFilters?: string[];
+  connectionTerritoryFilters?: string[];
+  compensationFilter?: ExchangeCompensationFilter;
+  relationshipFilter?: ExchangeRelationshipFilter;
+  intelligenceMetric?: ExchangeIntelligenceMetric;
+  eligibilityFilters?: string[];
+  providerFilters?: string[];
+  serviceFilters?: string[];
+}
+
+export interface ExchangeModeState {
+  filters: ExchangeModeFilterState;
+  secondaryContext: ExchangeSecondaryContext;
+  listScrollTop: number;
+  panelSubsection?: string;
+  resourceCategory?: string;
+  draftRefs: ExchangeDraftRefs;
+}
+
+export type ExchangeModeStates = Record<ExchangeCanonicalMode, ExchangeModeState>;
 
 export interface ExchangeViewport {
   longitude: number;
@@ -132,6 +210,15 @@ export interface ExchangeWorkspaceState {
   view: ExchangeView;
   surfaceMode: ExchangeSurfaceMode;
   selection: ExchangeSelection;
+
+  /** A URL/browser request only. It never proves authority. */
+  requestedActorOrganizationId?: string;
+  /** A server-validated actor organization for the current viewer. */
+  actorOrganizationId?: string;
+  subjectOrganizationId?: string;
+  secondaryContext: ExchangeSecondaryContext;
+  modeStates: ExchangeModeStates;
+  organizationDrawerOpen: boolean;
 
   searchQuery: string;
   naicsFilters: string[];
@@ -178,13 +265,19 @@ export interface ExchangeWorkspaceState {
 
 /**
  * The subset of interaction state that is meaningful in a shareable URL.
- * Drawer and panel animation state intentionally does not cross this boundary.
+ * Meaningful open detail/drawer state is included; animation and dimensions
+ * remain session-only concerns.
  */
 export type ExchangeUrlState = Pick<
   ExchangeWorkspaceState,
   | "view"
   | "surfaceMode"
   | "selection"
+  | "requestedActorOrganizationId"
+  | "subjectOrganizationId"
+  | "secondaryContext"
+  | "organizationDrawerOpen"
+  | "rightPanelOpen"
   | "searchQuery"
   | "naicsFilters"
   | "industryFilters"
@@ -222,6 +315,24 @@ export type ExchangeUrlState = Pick<
 
 export type ExchangeWorkspaceHydration = Partial<ExchangeUrlState>;
 
+/** Safe, authority-free state returned by the session persistence codec. */
+export type ExchangeWorkspaceSessionHydration = Partial<Pick<
+  ExchangeWorkspaceState,
+  | "view"
+  | "surfaceMode"
+  | "subjectOrganizationId"
+  | "secondaryContext"
+  | "modeStates"
+  | "organizationDrawerOpen"
+  | "searchQuery"
+  | "opportunityLocation"
+  | "leftPanelCollapsed"
+  | "rightPanelOpen"
+  | "mobileFilterOpen"
+  | "mobileDetailOpen"
+  | "viewport"
+>>;
+
 export const DEFAULT_EXCHANGE_VIEW: ExchangeView = "opportunities";
 export const DEFAULT_EXCHANGE_SURFACE_MODE: ExchangeSurfaceMode = "split";
 export const DEFAULT_EXCHANGE_LOCAL_FIRST = true;
@@ -231,11 +342,90 @@ export const DEFAULT_EXCHANGE_COMPENSATION_FILTER: ExchangeCompensationFilter = 
 export const DEFAULT_EXCHANGE_RELATIONSHIP_FILTER: ExchangeRelationshipFilter = "all";
 export const DEFAULT_EXCHANGE_INTELLIGENCE_METRIC: ExchangeIntelligenceMetric = "overview";
 
+export function canonicalExchangeMode(view: ExchangeView): ExchangeCanonicalMode {
+  if (view === "connections" || view === "referrals") return "referrals";
+  if (view === "intelligence") return "intelligence";
+  if (view === "resources") return "resources";
+  return "opportunities";
+}
+
+export function createInitialExchangeModeStates(): ExchangeModeStates {
+  return {
+    opportunities: {
+      filters: {
+        naicsFilters: [],
+        industryFilters: [],
+        capabilityFilters: [],
+        territoryFilters: [],
+        rfxStatusFilters: [],
+        territoryStatusFilters: [],
+        opportunityTypeFilters: [],
+        rfxTypeFilters: [],
+        buyerTypeFilters: [],
+        workArrangementFilters: [],
+        visibilityFilters: [],
+        certificationFilters: [],
+        setAsideFilters: [],
+        primeClassificationFilters: [],
+        awardClassificationFilters: [],
+        personalizedFilters: [],
+        localFirst: DEFAULT_EXCHANGE_LOCAL_FIRST,
+        closingSoon: false,
+        teamingSuitable: false,
+        opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
+      },
+      secondaryContext: null,
+      listScrollTop: 0,
+      draftRefs: {},
+    },
+    referrals: {
+      filters: {
+        connectionMode: DEFAULT_EXCHANGE_CONNECTION_MODE,
+        referralStatusFilters: [],
+        connectionIndustryFilters: [],
+        connectionTerritoryFilters: [],
+        compensationFilter: DEFAULT_EXCHANGE_COMPENSATION_FILTER,
+        relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+      },
+      secondaryContext: null,
+      listScrollTop: 0,
+      draftRefs: {},
+    },
+    intelligence: {
+      filters: {
+        connectionIndustryFilters: [],
+        connectionTerritoryFilters: [],
+        relationshipFilter: DEFAULT_EXCHANGE_RELATIONSHIP_FILTER,
+        intelligenceMetric: DEFAULT_EXCHANGE_INTELLIGENCE_METRIC,
+      },
+      secondaryContext: null,
+      listScrollTop: 0,
+      draftRefs: {},
+    },
+    resources: {
+      filters: {
+        eligibilityFilters: [],
+        providerFilters: [],
+        serviceFilters: [],
+      },
+      secondaryContext: null,
+      listScrollTop: 0,
+      draftRefs: {},
+    },
+  };
+}
+
 export function createInitialExchangeWorkspaceState(): ExchangeWorkspaceState {
   return {
     view: DEFAULT_EXCHANGE_VIEW,
     surfaceMode: DEFAULT_EXCHANGE_SURFACE_MODE,
     selection: null,
+    requestedActorOrganizationId: undefined,
+    actorOrganizationId: undefined,
+    subjectOrganizationId: undefined,
+    secondaryContext: null,
+    modeStates: createInitialExchangeModeStates(),
+    organizationDrawerOpen: false,
     searchQuery: "",
     naicsFilters: [],
     industryFilters: [],

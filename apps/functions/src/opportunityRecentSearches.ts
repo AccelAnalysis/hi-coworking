@@ -1,7 +1,12 @@
 import type { CallableRequest } from "firebase-functions/v2/https";
 import { HttpsError } from "firebase-functions/v2/https";
 import { z } from "zod";
-import { fingerprintRequest, getAuthorizedActor, getDb } from "./exchange/security";
+import {
+  fingerprintRequest,
+  getAuthorizedActor,
+  getDb,
+  requireActiveOrgAuthority,
+} from "./exchange/security";
 
 type RecordData = Record<string, unknown>;
 const MAX_RECENT_SEARCHES = 20;
@@ -37,6 +42,9 @@ function compactQuery(value: unknown): RecordData | null {
   if (!query && !hasFilters && !location) return null;
   return {
     contractVersion: 1,
+    ...(typeof source.actorOrganizationId === "string" && source.actorOrganizationId.trim()
+      ? { actorOrganizationId: source.actorOrganizationId.trim().slice(0, 160) }
+      : {}),
     query,
     filters,
     ...(location ? { location } : {}),
@@ -54,11 +62,15 @@ export async function recordRecentOpportunitySearch(
   if (!query) return;
   const db = getDb();
   const fingerprint = fingerprintRequest(query);
+  const actorOrganizationId = typeof query.actorOrganizationId === "string"
+    ? query.actorOrganizationId
+    : undefined;
   const reference = db.collection("opportunityRecentSearches")
     .doc(`${request.auth.uid}_${fingerprint.slice(0, 32)}`);
   await reference.set({
     id: reference.id,
     ownerUid: request.auth.uid,
+    actorOrganizationId: actorOrganizationId ?? null,
     query,
     label: typeof query.query === "string" && query.query
       ? query.query
@@ -69,6 +81,7 @@ export async function recordRecentOpportunitySearch(
 
   const recent = await db.collection("opportunityRecentSearches")
     .where("ownerUid", "==", request.auth.uid)
+    .where("actorOrganizationId", "==", actorOrganizationId ?? null)
     .orderBy("lastUsedAt", "desc")
     .limit(MAX_RECENT_SEARCHES + 10)
     .get();
@@ -86,10 +99,16 @@ export async function listRecentOpportunitySearches(
   const actor = getAuthorizedActor(request);
   const parsed = z.object({
     maxResults: z.number().int().min(1).max(MAX_RECENT_SEARCHES).default(10),
+    actorOrganizationId: z.string().min(1).max(160).optional(),
   }).strict().safeParse(payload ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid recent-search request");
-  const snapshot = await getDb().collection("opportunityRecentSearches")
+  const db = getDb();
+  if (parsed.data.actorOrganizationId) {
+    await requireActiveOrgAuthority(db, parsed.data.actorOrganizationId, actor.uid);
+  }
+  const snapshot = await db.collection("opportunityRecentSearches")
     .where("ownerUid", "==", actor.uid)
+    .where("actorOrganizationId", "==", parsed.data.actorOrganizationId ?? null)
     .orderBy("lastUsedAt", "desc")
     .limit(parsed.data.maxResults)
     .get();

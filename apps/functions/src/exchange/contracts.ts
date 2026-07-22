@@ -397,6 +397,7 @@ export const businessReferralContactInputSchema = z
 export const businessReferralCreateInputSchema = z
   .object({
     idempotencyKey: idempotencyKeySchema,
+    actorOrganizationId: orgId,
     referrerOrgId: orgId,
     recipientUid: trimmedId.optional(),
     recipientOrgId: orgId,
@@ -416,6 +417,13 @@ export const businessReferralCreateInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.actorOrganizationId !== value.referrerOrgId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["actorOrganizationId"],
+        message: "The selected actor organization must match the referral referrer",
+      });
+    }
     if (!value.recipientUid && !value.recipientOrgId) {
       ctx.addIssue({ code: "custom", message: "A recipient user or organization is required" });
     }
@@ -444,6 +452,7 @@ export const businessReferralCreateInputSchema = z
 export const businessReferralSendInputSchema = z
   .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     expectedVersion: z.number().int().nonnegative(),
     idempotencyKey: idempotencyKeySchema.optional(),
   })
@@ -452,6 +461,7 @@ export const businessReferralSendInputSchema = z
 export const businessReferralRespondInputSchema = z
   .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     response: z.enum(["accepted", "declined"]),
     expectedVersion: z.number().int().nonnegative(),
     note: z.string().trim().max(2_000).optional(),
@@ -470,6 +480,7 @@ export const businessReferralRespondInputSchema = z
 export const businessReferralProgressInputSchema = z
   .object({
     referralId: trimmedId,
+    actorOrganizationId: orgId,
     status: z.enum(["in_progress", "converted", "closed", "withdrawn"]),
     expectedVersion: z.number().int().nonnegative(),
     idempotencyKey: idempotencyKeySchema.optional(),

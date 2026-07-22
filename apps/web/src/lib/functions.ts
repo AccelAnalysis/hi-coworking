@@ -687,6 +687,7 @@ export type BusinessReferralType =
 export const createBusinessReferralFn = httpsCallable<
   {
     idempotencyKey: string;
+    actorOrganizationId?: string;
     referrerOrgId?: string;
     recipientUid?: string;
     recipientOrgId?: string;
@@ -721,13 +722,14 @@ export const createBusinessReferralFn = httpsCallable<
 >(functions, "businessReferral_create");
 
 export const sendBusinessReferralFn = httpsCallable<
-  { referralId: string; expectedVersion: number; idempotencyKey?: string },
+  { referralId: string; actorOrganizationId?: string; expectedVersion: number; idempotencyKey?: string },
   { success: boolean; version: number; idempotent?: boolean }
 >(functions, "businessReferral_send");
 
 export const respondBusinessReferralFn = httpsCallable<
   {
     referralId: string;
+    actorOrganizationId?: string;
     response: "accepted" | "declined";
     expectedVersion: number;
     note?: string;
@@ -744,6 +746,7 @@ export const respondBusinessReferralFn = httpsCallable<
 export const progressBusinessReferralFn = httpsCallable<
   {
     referralId: string;
+    actorOrganizationId?: string;
     status: "in_progress" | "converted" | "closed" | "withdrawn";
     expectedVersion: number;
     idempotencyKey?: string;
@@ -778,7 +781,7 @@ export const prepareBusinessReferralEvidenceAccessFn = httpsCallable<
 export interface BusinessReferralListMineInput {
   direction: "all" | "sent" | "received";
   scope: "all" | "individual" | "organization";
-  orgId?: string;
+  actorOrganizationId?: string;
   statuses: string[];
   industry?: string;
   territoryFips?: string;
@@ -799,7 +802,7 @@ export const listBusinessReferralsFn = httpsCallable<
 >(functions, "businessReferral_listMine");
 
 export const getBusinessReferralDetailFn = httpsCallable<
-  { referralId: string },
+  { referralId: string; actorOrganizationId?: string },
   {
     referral: unknown;
     contact: unknown | null;
@@ -809,12 +812,13 @@ export const getBusinessReferralDetailFn = httpsCallable<
 >(functions, "businessReferral_getDetail");
 
 export const listBusinessReferralTimelineFn = httpsCallable<
-  { referralId: string; limit: number; before?: number },
+  { referralId: string; actorOrganizationId?: string; limit: number; before?: number },
   { events: unknown[]; truncated: boolean; nextBefore?: number }
 >(functions, "businessReferral_listTimeline");
 
 export interface BusinessReferralSuggestionInput {
   referralId?: string;
+  actorOrganizationId?: string;
   referrerOrgId?: string;
   serviceCategory?: string;
   naicsCodes: string[];
@@ -840,6 +844,7 @@ export const listDiscoverableReferralServiceOffersFn = httpsCallable<
 
 export interface BusinessReferralReportTransactionInput {
   referralId: string;
+  actorOrganizationId?: string;
   idempotencyKey: string;
   expectedReferralVersion: number;
   serviceOfferId?: string;
@@ -858,6 +863,7 @@ export const reportBusinessReferralTransactionFn = httpsCallable<
 
 export interface BusinessReferralReviewTransactionInput {
   reportId: string;
+  actorOrganizationId?: string;
   action: "confirm" | "dispute" | "clarify";
   idempotencyKey: string;
   expectedVersion: number;

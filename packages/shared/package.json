@@ -12,6 +12,10 @@
     "./opportunity-discovery": {
       "types": "./src/opportunityDiscovery.ts",
       "default": "./src/opportunityDiscovery.ts"
+    },
+    "./exchange-organization-context": {
+      "types": "./src/exchangeOrganizationContext.ts",
+      "default": "./src/exchangeOrganizationContext.ts"
     }
   },
   "scripts": {

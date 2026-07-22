@@ -100,12 +100,14 @@ describe("Run 3 referral service-offer authority and immutability", () => {
         orgId: "provider-org",
         uid: "manager",
         role: "owner",
+        status: "active",
       }),
       db.collection("orgMembers").doc("provider-org_member").set({
         id: "provider-org_member",
         orgId: "provider-org",
         uid: "member",
         role: "member",
+        status: "active",
       }),
     ]);
 

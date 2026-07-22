@@ -68,9 +68,13 @@ describe("uniform Exchange workspace contract", () => {
     expect(toolbar).not.toContain("justify-between");
   });
 
-  it("keeps the Opportunity map mounted while list results expand in the mobile drawer", () => {
+  it("keeps list results as overlays while the root workspace owns the map", () => {
+    const workspace = read("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");
     const opportunities = read("apps/web/src/features/exchange/views/ExchangeOpportunitiesView.tsx");
-    expect(opportunities).toContain('className="absolute inset-0 h-full min-h-0 w-full border-0"');
+    expect(workspace).toContain("<ExchangeWorkspaceMap");
+    expect(workspace.match(/<ExchangeWorkspaceMap\b/g)).toHaveLength(1);
+    expect(workspace).toMatch(/<ExchangeOpportunitiesView[\s\S]*?workspaceMap[\s\S]*?\/>/);
+    expect(opportunities).toContain("!workspaceMap && initialMapViewport ? <ExchangeMap");
     expect(opportunities).toContain("ExchangeMobileWorkspaceTray");
     expect(opportunities).toContain("{resultsContent(true)}");
     expect(opportunities).not.toContain('effectiveMode === "list" && "pointer-events-none invisible');
@@ -83,12 +87,47 @@ describe("uniform Exchange workspace contract", () => {
     expect(results).toContain("loadMore");
   });
 
-  it("renders context maps on desktop and uses glass overlay surfaces", () => {
+  it("uses one persistent map host across all four canonical modes", () => {
     const workspace = read("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");
+    const workspaceMap = read("apps/web/src/features/exchange/components/ExchangeWorkspaceMap.tsx");
+    const opportunities = read("apps/web/src/features/exchange/views/ExchangeOpportunitiesView.tsx");
     const resources = read("apps/web/src/features/exchange/views/ExchangeResourcesView.tsx");
-    expect(workspace).toContain('className="absolute inset-0 z-0 hidden lg:block"');
+
+    expect(workspace.match(/<ExchangeWorkspaceMap\b/g)).toHaveLength(1);
+    expect(workspaceMap.match(/<ExchangeMap\b/g)).toHaveLength(1);
+    expect(workspaceMap).toContain('data-exchange-map-host="persistent"');
+    expect(workspace).toContain('activeView === "opportunities"');
+    expect(workspace).toContain('activeView === "referrals"');
+    expect(workspace).toContain('activeView === "intelligence"');
+    expect(workspace).toContain('activeView === "resources"');
+    expect(workspace).toMatch(/<ExchangeResourcesView[\s\S]*?workspaceMap[\s\S]*?\/>/);
+    expect(workspace.indexOf("<ExchangeWorkspaceMap")).toBeLessThan(
+      workspace.indexOf("<ExchangeOpportunitiesView"),
+    );
+    expect(workspace.match(/<ExchangeOpportunitiesView\b/g)).toHaveLength(1);
+    expect(workspace.match(/<ConnectionsWorkspace\b/g)).toHaveLength(1);
+    expect(workspace.match(/<IntelligenceWorkspace\b/g)).toHaveLength(1);
+    expect(workspace.match(/<ExchangeResourcesView\b/g)).toHaveLength(1);
+    expect(opportunities).toContain("!workspaceMap && initialMapViewport");
+    expect(resources).toContain("!workspaceMap ? (");
+    expect(workspaceMap).toContain('activeView === "opportunities" ? rfx : []');
+    expect(workspaceMap).toContain("contextOrganizations={activeContextOrganizations}");
     expect(workspace).toContain("backdrop-blur-2xl");
-    expect(resources).toContain('className="absolute inset-0 h-full min-h-0 w-full border-0"');
     expect(resources).toContain("bg-white/72");
+  });
+
+  it("binds the persistent map and workspace lifecycle to the authenticated viewer", () => {
+    const workspace = read("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");
+    const workspaceMap = read("apps/web/src/features/exchange/components/ExchangeWorkspaceMap.tsx");
+    const opportunities = read("apps/web/src/features/exchange/views/ExchangeOpportunitiesView.tsx");
+
+    expect(workspace).toContain("getExchangeWorkspaceIdentityKey");
+    expect(workspace).toContain("key={identityKey}");
+    expect(workspace).toContain("viewerUid={authenticatedUid}");
+    expect(workspaceMap).toContain("resolveInitialExchangeMapViewport");
+    expect(workspaceMap).toContain("loadPrimaryBusinessAnchor(viewerUid)");
+    expect(workspaceMap).toContain("updateViewport(bounds)");
+    expect(opportunities).toContain("if (workspaceMap) return;");
+    expect(opportunities).not.toMatch(/receiveBounds[\s\S]{0,240}updateViewport\(bounds\)/);
   });
 });

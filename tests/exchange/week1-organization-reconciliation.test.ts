@@ -88,9 +88,14 @@ describe("Week 1 organization reconciliation contract", () => {
 
   it("keeps seed imports guarded, idempotent, and privacy-reporting", () => {
     const importer = read("apps/functions/scripts/import-organizations.cjs");
-    expect(importer).toContain("--confirm-production");
+    const lifecycle = read("apps/functions/scripts/organization-seed-lifecycle.cjs");
+    expect(lifecycle).toContain('CONFIGURED_DEVELOPMENT_PROJECT = "hi-coworking-plat"');
+    expect(importer).toContain("CONFIGURED_DEVELOPMENT_PROJECT");
+    expect(importer).toContain("Refusing development write");
+    expect(importer).not.toContain("--confirm-production");
     expect(importer).toContain("sourceContentHash");
     expect(importer).toContain("publicOrganizations");
     expect(importer).toContain("fabricatedCoordinates: false");
+    expect(importer).toContain("coordinateApprovalRequiredForPublication: true");
   });
 });

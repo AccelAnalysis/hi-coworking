@@ -80,6 +80,7 @@ function organization(
     status: "active",
     claimStatus: "unclaimed",
     verificationStatus: "verified",
+    coordinatePublicationApproved: true,
     coordinateConfidence: "authoritative",
     latitude: 36.92,
     longitude: -76.7,
@@ -127,6 +128,8 @@ describe("Exchange map GeoJSON", () => {
   it("creates privacy-minimized organization markers and keeps suppressed records list-only", () => {
     const collection = toOrganizationFeatureCollection([
       organization({ id: "visible" }),
+      organization({ id: "not-approved", coordinatePublicationApproved: false }),
+      organization({ id: "approval-missing", coordinatePublicationApproved: undefined }),
       organization({ id: "home", homeBased: true }),
       organization({ id: "suppressed", privacySuppressed: true }),
       organization({ id: "no-coordinate", latitude: undefined, longitude: undefined }),
@@ -253,6 +256,7 @@ describe("Exchange map source, layer, and selection contracts", () => {
       rfx: "exchange-rfx-points",
       selectedRfx: "exchange-rfx-selected",
       organizations: "exchange-organization-points",
+      contextOrganizations: "exchange-organization-context",
       selectedOrganization: "exchange-organization-selected",
       releasedTerritoryPoints: "exchange-territory-released-points",
       releasedTerritoryBoundaries: "exchange-territory-released-boundaries",
@@ -334,6 +338,39 @@ describe("Exchange map source, layer, and selection contracts", () => {
       .toBe(EXCHANGE_MAP_SOURCE_IDS.selectedOrganization);
   });
 
+  it("keeps actor and subject organizations in a separate unclustered context source", () => {
+    const result = organization({ id: "result-org" });
+    const actor = organization({ id: "actor-org", contextType: "actor" });
+    const subject = organization({ id: "subject-org", contextType: "subject" });
+    const data = buildExchangeMapGeoJson([], [], [], [], [result], [actor, subject]);
+    const sources = createExchangeMapSourceSpecifications(data);
+    const layers = createExchangeMapLayerSpecifications();
+
+    expect(data.organizations.features.map((feature) => feature.id)).toEqual(["result-org"]);
+    expect(data.contextOrganizations.features).toMatchObject([
+      { id: "actor-org", properties: { contextType: "actor" } },
+      { id: "subject-org", properties: { contextType: "subject" } },
+    ]);
+    expect(sources[EXCHANGE_MAP_SOURCE_IDS.contextOrganizations]).toMatchObject({
+      type: "geojson",
+      promoteId: "id",
+      data: { features: [{ id: "actor-org" }, { id: "subject-org" }] },
+    });
+    expect(sources[EXCHANGE_MAP_SOURCE_IDS.contextOrganizations]).not.toHaveProperty("cluster");
+    expect(layers.find(
+      (layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.contextOrganizationPoint,
+    )).toMatchObject({
+      source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations,
+      type: "circle",
+    });
+    expect(layers.find(
+      (layer) => layer.id === EXCHANGE_MAP_LAYER_IDS.contextOrganizationLabel,
+    )).toMatchObject({
+      source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations,
+      type: "symbol",
+    });
+  });
+
   it("renders scheduled and inactive admin territory boundaries as non-discoverable gray context", () => {
     const paused = territory({ fips: "51800", status: "paused" });
     const data = buildExchangeMapGeoJson([], [], [], [paused]);
@@ -367,7 +404,10 @@ describe("Exchange map source, layer, and selection contracts", () => {
     ]);
     expect(
       getExchangeSelectionTargets({ entityType: "organization", entityId: "org-1" }),
-    ).toEqual([{ source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: "org-1" }]);
+    ).toEqual([
+      { source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: "org-1" },
+      { source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations, id: "org-1" },
+    ]);
 
     const selectedExpressions = JSON.stringify(createExchangeMapLayerSpecifications());
     expect(selectedExpressions).toContain('["feature-state","selected"]');
@@ -417,6 +457,33 @@ describe("Exchange map source, layer, and selection contracts", () => {
     expect(selectedData).toMatchObject({
       type: "FeatureCollection",
       features: [{ id: "selected-org" }],
+    });
+  });
+
+  it("projects a selected context organization even when it is absent from mode results", () => {
+    const data = buildExchangeMapGeoJson(
+      [],
+      [],
+      [],
+      [],
+      [],
+      [organization({ id: "subject-org", contextType: "subject" })],
+    );
+    let selectedData: GeoJSON.GeoJSON | undefined;
+    const map = {
+      getSource: (sourceId: string) => sourceId === EXCHANGE_MAP_SOURCE_IDS.selectedOrganization
+        ? { type: "geojson", setData: (next: GeoJSON.GeoJSON) => { selectedData = next; } }
+        : undefined,
+    };
+
+    updateExchangeSelectedOrganizationSource(
+      map as never,
+      data,
+      { entityType: "organization", entityId: "subject-org" },
+    );
+    expect(selectedData).toMatchObject({
+      type: "FeatureCollection",
+      features: [{ id: "subject-org", properties: { contextType: "subject" } }],
     });
   });
 

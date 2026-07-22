@@ -163,7 +163,7 @@ async function activeOrganizationManagerIds(uid: string): Promise<Set<string>> {
       !orgId
       || document.id !== `${orgId}_${uid}`
       || member.uid !== uid
-      || (status && status !== "active")
+      || status !== "active"
       || (role !== "owner" && role !== "admin")
     ) return [];
     return [orgId];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -111,6 +111,8 @@ export function ReferralCreationWorkflow({
   suggestions,
   offers,
   gatewayMode,
+  actorOrganizationId,
+  actorOrganizationName,
   onClose,
   onSuggest,
   onCreate,
@@ -119,6 +121,8 @@ export function ReferralCreationWorkflow({
   suggestions: RecipientSuggestion[];
   offers: ReferralServiceOfferSummary[];
   gatewayMode: "live" | "demo";
+  actorOrganizationId?: string;
+  actorOrganizationName?: string;
   onClose: () => void;
   onSuggest: (input: {
     serviceCategory?: string;
@@ -135,7 +139,18 @@ export function ReferralCreationWorkflow({
   const [loadedSuggestions, setLoadedSuggestions] = useState<RecipientSuggestion[] | null>(null);
   const [suggestionError, setSuggestionError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const draftActorRef = useRef<string | undefined>(undefined);
+  const actorKey = actorOrganizationId ?? (gatewayMode === "demo" ? "demo-actor" : undefined);
+  const authorityChanged = Boolean(
+    draftActorRef.current && draftActorRef.current !== actorKey,
+  );
   useDialogFocus(open, dialogRef, onClose);
+
+  useEffect(() => {
+    if (open && !draftActorRef.current && actorKey) {
+      draftActorRef.current = actorKey;
+    }
+  }, [actorKey, open]);
 
   const availableSuggestions = loadedSuggestions ?? suggestions;
   const selectedSuggestion = useMemo(
@@ -195,7 +210,7 @@ export function ReferralCreationWorkflow({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!selectedSuggestion || !stepReady || submitting) return;
+    if (!selectedSuggestion || !stepReady || submitting || !actorKey || authorityChanged) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -237,6 +252,7 @@ export function ReferralCreationWorkflow({
       setForm(initialForm());
       setStep(0);
       setLoadedSuggestions(null);
+      draftActorRef.current = actorKey;
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "The draft could not be created.");
     } finally {
@@ -261,7 +277,11 @@ export function ReferralCreationWorkflow({
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-indigo-700">Business referral</p>
               <h2 id="new-referral-title" className="text-lg font-bold text-slate-950 sm:text-xl">Create a protected referral draft</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Acting as Tidewater Manufacturing Alliance · actor identity is recorded separately</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {actorOrganizationId
+                  ? `Working as ${actorOrganizationName ?? "the selected organization"} · authority is verified server-side`
+                  : "Choose an active organization in the Exchange context bar before creating this draft."}
+              </p>
             </div>
             <button type="button" onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="Close referral creation">
               <X className="h-5 w-5" aria-hidden="true" />
@@ -289,6 +309,12 @@ export function ReferralCreationWorkflow({
         </header>
 
         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          {authorityChanged ? (
+            <p className="shrink-0 border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950" role="alert">
+              This draft belongs to a different actor organization. It is frozen to prevent cross-organization disclosure. Switch back to the original actor to continue.
+            </p>
+          ) : null}
+          <fieldset disabled={authorityChanged} className="contents">
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 lg:px-10">
             <div className="mx-auto max-w-4xl">
               {gatewayMode === "demo" ? (
@@ -480,9 +506,10 @@ export function ReferralCreationWorkflow({
                 setStep((current) => current + 1);
               }} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-slate-950 px-5 text-sm font-bold text-white outline-none hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{loadingSuggestions ? "Matching…" : "Continue"} <ArrowRight className="h-4 w-4" aria-hidden="true" /></button>
             ) : (
-              <button type="submit" disabled={!stepReady || submitting} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white outline-none hover:bg-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-50"><Check className="h-4 w-4" aria-hidden="true" />{submitting ? "Creating draft…" : "Create draft"}</button>
+              <button type="submit" disabled={!stepReady || submitting || !actorKey || authorityChanged} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white outline-none hover:bg-emerald-700 focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-50"><Check className="h-4 w-4" aria-hidden="true" />{submitting ? "Creating draft…" : "Create draft"}</button>
             )}
           </footer>
+          </fieldset>
         </form>
       </section>
     </div>

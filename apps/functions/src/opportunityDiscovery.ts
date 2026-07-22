@@ -9,8 +9,10 @@ import type {
   OpportunitySort,
 } from "@hi/shared/opportunity-discovery";
 import {
+  fingerprintRequest,
   getAuthorizedActor,
   getDb,
+  requireActiveOrgAuthority,
   type AuthorizedActor,
 } from "./exchange/security";
 
@@ -58,6 +60,7 @@ const stringList = (maxItems: number, maxLength: number) => z
 const discoveryInputSchema = z.object({
   contractVersion: z.literal(PROJECTION_VERSION).default(PROJECTION_VERSION),
   query: z.string().max(240).default(""),
+  actorOrganizationId: z.string().trim().min(1).max(160).optional(),
   exactPhrase: z.string().max(240).optional(),
   filters: z.object({
     naics: z.array(z.string().regex(/^\d{2,6}$/)).max(40).default([]),
@@ -774,9 +777,21 @@ function matchesFilters(record: RecordData, input: DiscoveryInput, now: number):
   return true;
 }
 
+function opportunityRelationshipDocumentId(
+  uid: string,
+  rfxId: string,
+  actorOrganizationId?: string,
+): string {
+  const scope = actorOrganizationId
+    ? fingerprintRequest({ uid, actorOrganizationId }).slice(0, 32)
+    : uid;
+  return `${scope}_${rfxId}`;
+}
+
 async function applyRelationships(
   actorUid: string | undefined,
   records: RecordData[],
+  actorOrganizationId?: string,
 ): Promise<RecordData[]> {
   if (!actorUid || records.length === 0) {
     return records.map((record) => ({
@@ -792,8 +807,12 @@ async function applyRelationships(
     }));
   }
   const db = getDb();
-  const savedRefs = records.map((record) => db.collection("opportunitySavedItems").doc(`${actorUid}_${record.id}`));
-  const viewedRefs = records.map((record) => db.collection("opportunityRecentViews").doc(`${actorUid}_${record.id}`));
+  const savedRefs = records.map((record) => db.collection("opportunitySavedItems").doc(
+    opportunityRelationshipDocumentId(actorUid, String(record.id), actorOrganizationId),
+  ));
+  const viewedRefs = records.map((record) => db.collection("opportunityRecentViews").doc(
+    opportunityRelationshipDocumentId(actorUid, String(record.id), actorOrganizationId),
+  ));
   const [savedSnapshots, viewedSnapshots] = await Promise.all([
     db.getAll(...savedRefs),
     db.getAll(...viewedRefs),
@@ -818,7 +837,7 @@ async function applyRelationships(
 
 interface OpportunitySearchProvider {
   readonly name: string;
-  search(input: DiscoveryInput, actorUid?: string): Promise<{
+  search(input: DiscoveryInput, actorUid?: string, actorOrganizationId?: string): Promise<{
     records: RecordData[];
     nextCursor?: string;
     totalCount?: number;
@@ -832,7 +851,7 @@ interface OpportunitySearchProvider {
 class FirestoreProjectionSearchProvider implements OpportunitySearchProvider {
   readonly name = "firestore-projection-v1";
 
-  async search(input: DiscoveryInput, actorUid?: string) {
+  async search(input: DiscoveryInput, actorUid?: string, actorOrganizationId?: string) {
     const db = getDb();
     const collection = db.collection("opportunityDiscovery");
     const tokens = tokenize(input.query);
@@ -936,7 +955,7 @@ class FirestoreProjectionSearchProvider implements OpportunitySearchProvider {
 
     const hasMore = snapshot.size > input.pageSize;
     const pageRecords = records;
-    const related = await applyRelationships(actorUid, pageRecords);
+    const related = await applyRelationships(actorUid, pageRecords, actorOrganizationId);
     const lastSnapshot = candidateDocuments[candidateDocuments.length - 1];
     const lastValue = lastSnapshot ? numberValue(lastSnapshot.get(field)) : undefined;
     const nextCursor = hasMore && lastSnapshot && lastValue !== undefined
@@ -996,7 +1015,7 @@ async function canReadStoredProjection(
     && member.orgId === orgId
     && member.uid === actor.uid
     && (member.role === "owner" || member.role === "admin")
-    && (member.status === undefined || member.status === "active");
+    && member.status === "active";
 }
 
 export const rfx_discover = onCall(async (request) => {
@@ -1011,7 +1030,16 @@ export const rfx_discover = onCall(async (request) => {
     });
   }
   const actorUid = request.auth?.uid;
-  const result = await searchProvider.search(parsed.data as DiscoveryInput, actorUid);
+  const actorOrganizationId = parsed.data.actorOrganizationId;
+  if (actorOrganizationId) {
+    if (!actorUid) throw new HttpsError("unauthenticated", "Sign in to use an organization actor");
+    await requireActiveOrgAuthority(getDb(), actorOrganizationId, actorUid);
+  }
+  const result = await searchProvider.search(
+    parsed.data as DiscoveryInput,
+    actorUid,
+    actorOrganizationId,
+  );
   return {
     contractVersion: PROJECTION_VERSION,
     ...result,
@@ -1025,18 +1053,27 @@ export const rfx_setSaved = onCall(async (request) => {
   const parsed = z.object({
     rfxId: z.string().min(1).max(160),
     saved: z.boolean(),
+    actorOrganizationId: z.string().min(1).max(160).optional(),
   }).strict().safeParse(request.data ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid saved-opportunity request");
   const db = getDb();
+  if (parsed.data.actorOrganizationId) {
+    await requireActiveOrgAuthority(db, parsed.data.actorOrganizationId, actor.uid);
+  }
   const projection = await db.collection("opportunityDiscovery").doc(parsed.data.rfxId).get();
   if (!projection.exists) throw new HttpsError("not-found", "Opportunity not found");
   if (!await canReadStoredProjection(asRecord(projection.data()), actor)) {
     throw new HttpsError("permission-denied", "Opportunity access is required");
   }
-  const reference = db.collection("opportunitySavedItems").doc(`${actor.uid}_${parsed.data.rfxId}`);
+  const reference = db.collection("opportunitySavedItems").doc(opportunityRelationshipDocumentId(
+    actor.uid,
+    parsed.data.rfxId,
+    parsed.data.actorOrganizationId,
+  ));
   if (parsed.data.saved) {
     await reference.set({
       ownerUid: actor.uid,
+      actorOrganizationId: parsed.data.actorOrganizationId ?? null,
       rfxId: parsed.data.rfxId,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -1049,16 +1086,27 @@ export const rfx_setSaved = onCall(async (request) => {
 
 export const rfx_markViewed = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
-  const parsed = z.object({ rfxId: z.string().min(1).max(160) }).strict().safeParse(request.data ?? {});
+  const parsed = z.object({
+    rfxId: z.string().min(1).max(160),
+    actorOrganizationId: z.string().min(1).max(160).optional(),
+  }).strict().safeParse(request.data ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid recently-viewed request");
   const db = getDb();
+  if (parsed.data.actorOrganizationId) {
+    await requireActiveOrgAuthority(db, parsed.data.actorOrganizationId, actor.uid);
+  }
   const projection = await db.collection("opportunityDiscovery").doc(parsed.data.rfxId).get();
   if (!projection.exists) throw new HttpsError("not-found", "Opportunity not found");
   if (!await canReadStoredProjection(asRecord(projection.data()), actor)) {
     throw new HttpsError("permission-denied", "Opportunity access is required");
   }
-  await db.collection("opportunityRecentViews").doc(`${actor.uid}_${parsed.data.rfxId}`).set({
+  await db.collection("opportunityRecentViews").doc(opportunityRelationshipDocumentId(
+    actor.uid,
+    parsed.data.rfxId,
+    parsed.data.actorOrganizationId,
+  )).set({
     ownerUid: actor.uid,
+    actorOrganizationId: parsed.data.actorOrganizationId ?? null,
     rfxId: parsed.data.rfxId,
     viewedAt: Date.now(),
     opportunityUpdatedAt: numberValue(projection.data()?.updatedAt) ?? 0,
@@ -1071,18 +1119,26 @@ export const rfx_savedSearch_upsert = onCall(async (request) => {
   const parsed = savedSearchInputSchema.safeParse(request.data ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid saved search");
   const db = getDb();
+  const actorOrganizationId = parsed.data.query.actorOrganizationId;
+  if (actorOrganizationId) {
+    await requireActiveOrgAuthority(db, actorOrganizationId, actor.uid);
+  }
   const reference = parsed.data.id
     ? db.collection("opportunitySavedSearches").doc(parsed.data.id)
     : db.collection("opportunitySavedSearches").doc();
   const now = Date.now();
   await db.runTransaction(async (transaction) => {
     const current = await transaction.get(reference);
-    if (current.exists && current.data()?.ownerUid !== actor.uid) {
+    if (current.exists && (
+      current.data()?.ownerUid !== actor.uid
+      || (current.data()?.actorOrganizationId ?? null) !== (actorOrganizationId ?? null)
+    )) {
       throw new HttpsError("permission-denied", "Saved search ownership is required");
     }
     transaction.set(reference, {
       id: reference.id,
       ownerUid: actor.uid,
+      actorOrganizationId: actorOrganizationId ?? null,
       name: parsed.data.name,
       query: parsed.data.query,
       alertFrequency: parsed.data.alertFrequency,
@@ -1107,12 +1163,21 @@ export const rfx_savedSearch_upsert = onCall(async (request) => {
 
 export const rfx_savedSearch_delete = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
-  const parsed = z.object({ id: z.string().min(1).max(160) }).strict().safeParse(request.data ?? {});
+  const parsed = z.object({
+    id: z.string().min(1).max(160),
+    actorOrganizationId: z.string().min(1).max(160).optional(),
+  }).strict().safeParse(request.data ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid saved search id");
   const reference = getDb().collection("opportunitySavedSearches").doc(parsed.data.id);
   const snapshot = await reference.get();
   if (!snapshot.exists) return { success: true };
-  if (snapshot.data()?.ownerUid !== actor.uid) {
+  if (parsed.data.actorOrganizationId) {
+    await requireActiveOrgAuthority(getDb(), parsed.data.actorOrganizationId, actor.uid);
+  }
+  if (
+    snapshot.data()?.ownerUid !== actor.uid
+    || (snapshot.data()?.actorOrganizationId ?? null) !== (parsed.data.actorOrganizationId ?? null)
+  ) {
     throw new HttpsError("permission-denied", "Saved search ownership is required");
   }
   await reference.delete();
@@ -1121,11 +1186,18 @@ export const rfx_savedSearch_delete = onCall(async (request) => {
 
 export const rfx_savedSearch_list = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
-  const parsed = z.object({ maxResults: z.number().int().min(1).max(100).default(50) }).strict().safeParse(request.data ?? {});
+  const parsed = z.object({
+    maxResults: z.number().int().min(1).max(100).default(50),
+    actorOrganizationId: z.string().min(1).max(160).optional(),
+  }).strict().safeParse(request.data ?? {});
   if (!parsed.success) throw new HttpsError("invalid-argument", "Invalid saved search request");
+  if (parsed.data.actorOrganizationId) {
+    await requireActiveOrgAuthority(getDb(), parsed.data.actorOrganizationId, actor.uid);
+  }
   const snapshot = await getDb()
     .collection("opportunitySavedSearches")
     .where("ownerUid", "==", actor.uid)
+    .where("actorOrganizationId", "==", parsed.data.actorOrganizationId ?? null)
     .orderBy("updatedAt", "desc")
     .limit(parsed.data.maxResults)
     .get();

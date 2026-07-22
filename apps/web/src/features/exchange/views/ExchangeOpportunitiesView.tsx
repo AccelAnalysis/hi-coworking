@@ -4,11 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LocateFixed, MapPinned, TriangleAlert, WifiOff, X } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
-import {
-  getOrg,
-  getUserOrgs,
-  type PublicOrganizationProjection,
-} from "@/lib/firestore";
+import type { PublicOrganizationProjection } from "@/lib/firestore";
 import {
   ExchangeActiveFilters,
   getActiveExchangeFilters,
@@ -23,11 +19,11 @@ import { ExchangeMobileDrawer } from "../components/ExchangeMobileDrawer";
 import { ExchangeMobileToolbar } from "../components/ExchangeMobileToolbar";
 import { ExchangeMobileWorkspaceTray } from "../components/ExchangeMobileWorkspaceTray";
 import { ExchangeResultsList } from "../components/ExchangeResultsList";
-import { ExchangeOrganizationDetail } from "../components/ExchangeOrganizationDetail";
 import { ExchangeRightPanel } from "../components/ExchangeRightPanel";
 import { SavedOpportunitySearchManager } from "../components/SavedOpportunitySearchManager";
 import { ExchangeStateView, type ExchangeStateKind } from "../components/ExchangeStateView";
 import { resolveExchangeBlockingState } from "../data/exchangePresentationState";
+import { loadPrimaryBusinessAnchor } from "../data/exchangeMapAnchor";
 import { selectExchangeResults } from "../data/exchangeSelectors";
 import { liveExchangeOpportunityRepository } from "../data/exchangeRepository";
 import { useExchangeData } from "../data/useExchangeData";
@@ -35,7 +31,10 @@ import { useOpportunityDiscovery } from "../data/useOpportunityDiscovery";
 import type { ExchangeDiscoveryRfx } from "../data/opportunityDiscoveryGateway";
 import { opportunityQueryToWorkspaceHydration } from "../data/opportunityDiscoveryState";
 import { filterPublicOrganizations } from "../data/organizationDiscovery";
-import { loadPublicOrganizationsForExchange } from "../data/publicOrganizationRepository";
+import {
+  loadPublicOrganizationsForExchange,
+  subscribePublicOrganizationsForExchange,
+} from "../data/publicOrganizationRepository";
 import { exchangeDemoOpportunityRepository } from "../demo/exchangeDemoGateway";
 import { isValidLatitude, isValidLongitude } from "../map/geojson";
 import {
@@ -47,7 +46,6 @@ import {
   readExchangeMapSession,
   resolveInitialExchangeMapViewport,
   writeExchangeMapSession,
-  type BusinessMapAnchor,
 } from "../map/mapSession";
 import type { ExchangeMapStatus } from "../map/useExchangeMap";
 import {
@@ -88,51 +86,14 @@ function removeFrom(values: readonly string[], value: string): string[] {
   return values.filter((candidate) => candidate !== value);
 }
 
-async function loadPrimaryBusinessAnchor(
-  uid: string,
-  preferredOrganizationId?: string,
-): Promise<BusinessMapAnchor | null> {
-  try {
-    const memberships = await getUserOrgs(uid);
-    const roleRank = { owner: 0, admin: 1, member: 2 } as const;
-    const orderedMemberships = [...memberships].sort((left, right) =>
-      roleRank[left.role] - roleRank[right.role]
-      || right.joinedAt - left.joinedAt);
-    const organizationIds = [...new Set([
-      preferredOrganizationId,
-      ...orderedMemberships.map((membership) => membership.orgId),
-    ].filter((value): value is string => Boolean(value)))].slice(0, 8);
-    const organizations = await Promise.all(organizationIds.map(async (organizationId) => {
-      try {
-        return await getOrg(organizationId);
-      } catch {
-        return null;
-      }
-    }));
-    const organization = organizations.find((candidate) =>
-      typeof candidate?.latitude === "number"
-      && Number.isFinite(candidate.latitude)
-      && candidate.latitude >= -85.051129
-      && candidate.latitude <= 85.051129
-      && typeof candidate.longitude === "number"
-      && Number.isFinite(candidate.longitude)
-      && candidate.longitude >= -180
-      && candidate.longitude <= 180);
-    return organization && typeof organization.latitude === "number" && typeof organization.longitude === "number"
-      ? { latitude: organization.latitude, longitude: organization.longitude }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 export function ExchangeOpportunitiesView({
   state,
   applyAction,
   scheduleUrlReplace,
   onViewChange,
   demoMode,
-}: ExchangeViewProps & { demoMode: boolean }) {
+  workspaceMap = false,
+}: ExchangeViewProps & { demoMode: boolean; workspaceMap?: boolean }) {
   const stateRef = useRef(state);
   const mapMoveCount = useRef(0);
   const { user, userDoc, loading: authLoading } = useAuth();
@@ -177,20 +138,27 @@ export function ExchangeOpportunitiesView({
   } = baseData;
 
   const refreshOrganizations = useCallback(async (force = false) => {
+    const cacheScope = user?.uid;
+    if (!cacheScope) {
+      setPublicOrganizations([]);
+      return;
+    }
     const generation = organizationRequestGeneration.current + 1;
     organizationRequestGeneration.current = generation;
     setOrganizationLoadError(null);
     try {
-      const organizations = await loadPublicOrganizationsForExchange({ force });
+      const organizations = await loadPublicOrganizationsForExchange({
+        cacheScope,
+        force,
+      });
       if (organizationRequestGeneration.current === generation) {
         setPublicOrganizations(organizations);
       }
     } catch {
       if (organizationRequestGeneration.current !== generation) return;
-      setPublicOrganizations([]);
       setOrganizationLoadError("Public organizations could not be loaded. Opportunity and territory results remain available.");
     }
-  }, []);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (demoMode) {
@@ -198,13 +166,29 @@ export function ExchangeOpportunitiesView({
       setOrganizationLoadError(null);
       return;
     }
+    const cacheScope = user?.uid;
+    if (authLoading || !cacheScope) {
+      organizationRequestGeneration.current += 1;
+      setPublicOrganizations([]);
+      return;
+    }
+    let active = true;
+    const unsubscribe = subscribePublicOrganizationsForExchange(
+      cacheScope,
+      (organizations) => {
+        if (active) setPublicOrganizations(organizations);
+      },
+    );
     void refreshOrganizations();
     return () => {
+      active = false;
+      unsubscribe();
       organizationRequestGeneration.current += 1;
     };
-  }, [demoMode, refreshOrganizations]);
+  }, [authLoading, demoMode, refreshOrganizations, user?.uid]);
 
   useEffect(() => {
+    if (workspaceMap) return;
     if (initialViewportResolvedRef.current) return;
     if (state.viewport) {
       initialViewportResolvedRef.current = true;
@@ -236,14 +220,17 @@ export function ExchangeOpportunitiesView({
     return () => {
       active = false;
     };
-  }, [authLoading, demoMode, repositoryLoading, releasedTerritories, state.viewport, user, userDoc?.primaryOrganizationId]);
+  }, [authLoading, demoMode, repositoryLoading, releasedTerritories, state.viewport, user, userDoc?.primaryOrganizationId, workspaceMap]);
 
-  const opportunitySelection: ExchangeMapSelection = state.selection
-    && (state.selection.entityType === "rfx"
-      || state.selection.entityType === "territory"
-      || state.selection.entityType === "organization")
-    ? state.selection
+  const opportunitySelection: ExchangeMapSelection = state.secondaryContext
+    && (state.secondaryContext.entityType === "rfx"
+      || state.secondaryContext.entityType === "territory")
+    ? state.secondaryContext
     : null;
+  const resultSelection: ExchangeMapSelection = opportunitySelection
+    ?? (state.subjectOrganizationId
+      ? { entityType: "organization", entityId: state.subjectOrganizationId }
+      : null);
   const selectedRfxId = opportunitySelection?.entityType === "rfx"
     ? opportunitySelection.entityId
     : null;
@@ -331,6 +318,27 @@ export function ExchangeOpportunitiesView({
     if (mapMoveCount.current > 1) setMapAreaDirty(true);
   }, [applyAction, demoMode, scheduleUrlReplace, updateViewport, user]);
 
+  useEffect(() => {
+    if (!workspaceMap) return;
+    const receiveBounds = (event: Event) => {
+      const bounds = (event as CustomEvent<ExchangeMapBounds>).detail;
+      if (!bounds) return;
+      setPendingMapBounds(bounds);
+      mapMoveCount.current += 1;
+      if (mapMoveCount.current > 1) setMapAreaDirty(true);
+    };
+    window.addEventListener("hi-exchange-map-bounds", receiveBounds);
+    return () => window.removeEventListener("hi-exchange-map-bounds", receiveBounds);
+  }, [workspaceMap]);
+
+  const fitMapResults = useCallback(() => {
+    if (workspaceMap) {
+      window.dispatchEvent(new Event("hi-exchange-fit-map"));
+      return;
+    }
+    setFitRequest((value) => value + 1);
+  }, [workspaceMap]);
+
   const handleSearchChange = useCallback((query: string) => {
     applyAction(exchangeWorkspaceActions.setSearch(query));
     scheduleUrlReplace(250);
@@ -342,12 +350,17 @@ export function ExchangeOpportunitiesView({
   }, []);
 
   const selectEntity = useCallback((selection: Exclude<ExchangeSelection, null>) => {
+    if (selection.entityType === "organization") {
+      applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
+      applyAction(exchangeWorkspaceActions.setSubjectOrganization(selection.entityId), "push");
+      return;
+    }
     if (selection.entityType === "rfx") discovery.markViewed(selection.entityId);
-    applyAction(exchangeWorkspaceActions.selectEntity(selection), "push");
+    applyAction(exchangeWorkspaceActions.setSecondaryContext(selection), "push");
   }, [applyAction, discovery]);
 
   const clearSelection = useCallback(() => {
-    applyAction(exchangeWorkspaceActions.clearSelection(), "push");
+    applyAction(exchangeWorkspaceActions.clearSecondaryContext(), "push");
   }, [applyAction]);
 
   const setFilters = useCallback((
@@ -417,12 +430,8 @@ export function ExchangeOpportunitiesView({
   const selectedTerritory = opportunitySelection?.entityType === "territory"
     ? allTerritories.find((record) => record.fips === opportunitySelection.entityId)
     : undefined;
-  const selectedOrganization = opportunitySelection?.entityType === "organization"
-    ? publicOrganizations.find((record) => record.id === opportunitySelection.entityId)
-    : undefined;
   const detailTitle = selectedRfx?.title
     || selectedTerritory?.name
-    || selectedOrganization?.name
     || "Selected Exchange record";
   const effectiveMode: ExchangeSurfaceMode = splitSupported !== true && state.surfaceMode === "split"
     ? "map"
@@ -432,6 +441,7 @@ export function ExchangeOpportunitiesView({
   const hasGeocodedOrganization = visibleOrganizations.some((organization) =>
     !organization.homeBased
     && !organization.privacySuppressed
+    && organization.coordinatePublicationApproved === true
     && isValidLatitude(organization.latitude)
     && isValidLongitude(organization.longitude));
 
@@ -470,14 +480,18 @@ export function ExchangeOpportunitiesView({
       rfx={opportunityRfx}
       territories={visibleTerritories.territories}
       organizations={visibleOrganizations}
-      selection={opportunitySelection}
+      selection={resultSelection}
       manageableRfxIds={manageableSet}
       compact={compact}
       hasMore={!demoMode && Boolean(discovery.nextCursor)}
       loadingMore={!demoMode && discovery.loadingMore}
+      initialScrollTop={state.modeStates.opportunities.listScrollTop}
       onSelect={selectEntity}
       onSave={!demoMode ? discovery.setSaved : undefined}
       onLoadMore={!demoMode ? discovery.loadMore : undefined}
+      onScrollTopChange={(scrollTop) => applyAction(
+        exchangeWorkspaceActions.setModeListScroll(scrollTop, "opportunities"),
+      )}
     />
   );
 
@@ -490,10 +504,8 @@ export function ExchangeOpportunitiesView({
   });
 
   let detailContent;
-  if (!opportunitySelection || selectedRfx || selectedTerritory || selectedOrganization) {
-    detailContent = selectedOrganization ? (
-      <ExchangeOrganizationDetail organization={selectedOrganization} />
-    ) : (
+  if (!opportunitySelection || selectedRfx || selectedTerritory) {
+    detailContent = (
       <ExchangeEntityDetail
         rfx={selectedRfx}
         territory={selectedTerritory}
@@ -529,7 +541,7 @@ export function ExchangeOpportunitiesView({
     : degradedError?.message ?? organizationLoadError;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-slate-100">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
       <ExchangeCommandBar
         view="opportunities"
         searchQuery={state.searchQuery}
@@ -578,7 +590,7 @@ export function ExchangeOpportunitiesView({
       ) : null}
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {initialMapViewport ? <ExchangeMap
+        {!workspaceMap && initialMapViewport ? <ExchangeMap
           key={mapRetryKey}
           rfxList={opportunityRfx}
           organizations={visibleOrganizations}
@@ -598,16 +610,16 @@ export function ExchangeOpportunitiesView({
           onViewportChange={handleViewportChange}
           onStatusChange={setMapStatus}
           onRetry={retryMap}
-        /> : (
+        /> : !workspaceMap ? (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-100 text-sm font-semibold text-slate-600" role="status">
             Preparing your map…
           </div>
-        )}
+        ) : null}
 
         <div className="absolute left-3 top-16 z-20 hidden max-w-[calc(100%-7rem)] flex-wrap gap-2 lg:left-[22rem] lg:flex">
           <button
             type="button"
-            onClick={() => setFitRequest((value) => value + 1)}
+            onClick={fitMapResults}
             className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/60 bg-white/78 px-3 text-xs font-black text-slate-700 shadow-lg backdrop-blur-2xl outline-none hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-indigo-500"
           >
             <LocateFixed className="h-4 w-4" aria-hidden="true" /> Fit results
@@ -662,7 +674,7 @@ export function ExchangeOpportunitiesView({
         <ExchangeMobileToolbar
           resultCount={resultCount}
           mapVisible
-          onFitResults={() => setFitRequest((value) => value + 1)}
+          onFitResults={fitMapResults}
         />
 
         <ExchangeLeftPanel

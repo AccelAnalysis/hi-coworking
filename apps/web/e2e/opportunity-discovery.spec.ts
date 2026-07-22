@@ -146,7 +146,7 @@ test.describe("Opportunity and RFx discovery", () => {
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog", { name: /filters/i })).toHaveCount(0);
     const navigation = page.getByRole("navigation").last();
-    await expect(navigation).toContainText(/Intelligence.*Referrals.*Opportunities.*Resources.*Menu/s);
+    await expect(navigation).toContainText(/Intelligence[\s\S]*Referrals[\s\S]*Opportunities[\s\S]*Resources[\s\S]*Menu/);
   });
 
   test("keeps map dimension and fit controls unobstructed", async ({ page }) => {

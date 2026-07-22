@@ -2,57 +2,49 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.profile_update = void 0;
 const https_1 = require("firebase-functions/v2/https");
+const node_crypto_1 = require("node:crypto");
 const security_1 = require("./exchange/security");
 const contracts_1 = require("./exchange/contracts");
 const publicProfiles_1 = require("./exchange/publicProfiles");
+const profileModel_1 = require("./profileModel");
 const PROFILE_ASSET_FIELD_PAIRS = [
     ["capabilityStatementStoragePath", "capabilityStatementUrl"],
     ["photoStoragePath", "photoUrl"],
     ["videoIntroStoragePath", "videoIntroUrl"],
     ["videoIntroPosterStoragePath", "videoIntroPosterUrl"],
 ];
-function computeCompleteness(profile) {
-    let score = 0;
-    if (profile.businessName)
-        score += 15;
-    if (profile.bio)
-        score += 10;
-    if (profile.website)
-        score += 5;
-    if (profile.linkedin)
-        score += 5;
-    if (Array.isArray(profile.naicsCodes) && profile.naicsCodes.length > 0)
-        score += 15;
-    if (Array.isArray(profile.certifications) && profile.certifications.length > 0)
-        score += 10;
-    if (profile.uei)
-        score += 10;
-    if (profile.duns)
-        score += 5;
-    if (profile.cageCode)
-        score += 5;
-    if (profile.capabilityStatementStoragePath || profile.capabilityStatementUrl)
-        score += 15;
-    if (profile.photoStoragePath || profile.photoUrl)
-        score += 5;
-    return Math.min(100, score);
-}
-function computeReadiness(profile) {
-    const bidReady = profile.verificationStatus === "verified"
-        && Boolean(profile.capabilityStatementStoragePath || profile.capabilityStatementUrl);
-    if (!bidReady)
-        return "seat_ready";
-    const procurementReady = Boolean(profile.enrichmentMatchId)
-        && Number(profile.profileCompletenessScore ?? 0) >= 70
-        && Boolean(profile.trustStats);
-    return procurementReady ? "procurement_ready" : "bid_ready";
-}
+const CLEARABLE_SCALAR_FIELDS = [
+    "businessName",
+    "bio",
+    "city",
+    "state",
+    "domain",
+    "uei",
+    "duns",
+    "cageCode",
+    "website",
+    "linkedin",
+];
 exports.profile_update = (0, https_1.onCall)(async (request) => {
+    const requestId = (0, node_crypto_1.randomUUID)();
     const actor = (0, security_1.getAuthorizedActor)(request);
-    const input = (0, contracts_1.parseCallableInput)(publicProfiles_1.profileUpdateInputSchema, request.data);
+    let input;
+    try {
+        input = (0, contracts_1.parseCallableInput)(publicProfiles_1.profileUpdateInputSchema, request.data);
+    }
+    catch (error) {
+        if (error instanceof https_1.HttpsError && error.code === "invalid-argument") {
+            throw new https_1.HttpsError("invalid-argument", error.message, {
+                ...(error.details && typeof error.details === "object" ? error.details : {}),
+                diagnosticCode: "INVALID_PROFILE_DATA",
+                requestId,
+            });
+        }
+        throw error;
+    }
     const invalidAssetPaths = (0, publicProfiles_1.getInvalidProfileAssetStoragePathFields)(actor.uid, input);
     if (invalidAssetPaths.length > 0) {
-        throw new https_1.HttpsError("invalid-argument", "Profile asset paths must belong to the authenticated profile", { fields: invalidAssetPaths });
+        throw new https_1.HttpsError("invalid-argument", "Profile asset paths must belong to the authenticated profile", { fields: invalidAssetPaths, diagnosticCode: "STORAGE_REFERENCE_INVALID", requestId });
     }
     const db = (0, security_1.getDb)();
     const now = Date.now();
@@ -61,14 +53,32 @@ exports.profile_update = (0, https_1.onCall)(async (request) => {
         const publicRef = db.collection("publicProfiles").doc(actor.uid);
         const snapshot = await transaction.get(profileRef);
         const previous = snapshot.data() ?? {};
+        const previousVersion = Number.isInteger(previous.profileVersion)
+            ? Number(previous.profileVersion)
+            : 0;
+        if (input.expectedVersion !== previousVersion) {
+            throw new https_1.HttpsError("aborted", "The profile changed after it was loaded", {
+                diagnosticCode: "PROFILE_VERSION_CONFLICT",
+                requestId,
+                currentVersion: previousVersion,
+            });
+        }
         const merged = {
             ...previous,
             ...input,
             uid: actor.uid,
             createdAt: previous.createdAt ?? now,
             updatedAt: now,
+            profileSchemaVersion: profileModel_1.PROFILE_SCHEMA_VERSION,
+            profileVersion: previousVersion + 1,
+            ...(previous.profileSchemaVersion === profileModel_1.PROFILE_SCHEMA_VERSION ? {} : { legacyMigratedAt: now }),
         };
+        delete merged.expectedVersion;
         const inputRecord = input;
+        for (const field of CLEARABLE_SCALAR_FIELDS) {
+            if (inputRecord[field] === null)
+                delete merged[field];
+        }
         for (const [pathField, legacyUrlField] of PROFILE_ASSET_FIELD_PAIRS) {
             if (inputRecord[pathField] === null)
                 delete merged[pathField];
@@ -79,8 +89,8 @@ exports.profile_update = (0, https_1.onCall)(async (request) => {
             if (typeof inputRecord[pathField] === "string")
                 delete merged[legacyUrlField];
         }
-        merged.profileCompletenessScore = computeCompleteness(merged);
-        merged.readinessTier = computeReadiness(merged);
+        merged.profileCompletenessScore = (0, profileModel_1.computeProfileCompleteness)(merged);
+        merged.readinessTier = (0, profileModel_1.computeProfileReadiness)(merged);
         transaction.set(profileRef, merged);
         if (input.published) {
             transaction.set(publicRef, (0, publicProfiles_1.sanitizePublicProfile)(actor.uid, merged));
@@ -102,9 +112,15 @@ exports.profile_update = (0, https_1.onCall)(async (request) => {
         }
         return {
             success: true,
+            requestId,
+            profileVersion: merged.profileVersion,
             profileCompletenessScore: merged.profileCompletenessScore,
             readinessTier: merged.readinessTier,
             published: input.published,
+            profileSchemaVersion: profileModel_1.PROFILE_SCHEMA_VERSION,
+            updatedAt: now,
+            publicProjectionUpdated: true,
+            profile: (0, profileModel_1.sanitizeCanonicalProfile)(merged),
         };
     });
 });

@@ -590,6 +590,7 @@ async function currentManagedOrgIds(actor) {
         return member.uid === actor.uid
             && isNonEmptyString(member.orgId)
             && document.id === `${member.orgId}_${actor.uid}`
+            && member.status === "active"
             && ["owner", "admin"].includes(member.role);
     });
     const candidates = managerMemberships.slice(0, MAX_MANAGED_ORGS);

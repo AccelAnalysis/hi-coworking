@@ -293,7 +293,7 @@ async function activeActorOrgIds(
       && membership.orgId.length > 0
       && membership.documentId === `${membership.orgId}_${actorUid}`
     ))
-    .filter((membership) => membership.status === undefined || membership.status === "active")
+    .filter((membership) => membership.status === "active")
     .map((membership) => membership.orgId as string)
     .filter((orgId, index, all) => all.indexOf(orgId) === index);
   if (candidates.length === 0) return [];

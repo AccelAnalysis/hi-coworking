@@ -35,7 +35,8 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/orgs/$(orgId)).data.status == "active"
         && exists(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid))
         && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.orgId == orgId
-        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.uid == request.auth.uid;
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.uid == request.auth.uid
+        && get(/databases/$(database)/documents/orgMembers/$(orgId + "_" + request.auth.uid)).data.status == "active";
     }
 
     function isOrgManager(orgId) {
@@ -237,9 +238,10 @@ service cloud.firestore {
     }
 
     // --- orgs/{orgId} ---
-    // Admins can manage orgs. Members can read orgs they belong to.
+    // Private organization records are server-projected through role-bounded
+    // callables. Direct member reads would expose one undifferentiated record.
     match /orgs/{orgId} {
-      allow read: if isStaff() || isOrgMember(orgId);
+      allow read: if isStaff();
       allow create, update, delete: if isAdmin();
     }
 
@@ -256,7 +258,8 @@ service cloud.firestore {
     // Canonical privacy-minimized organization discovery projection.
     // Full organization records remain member/staff scoped above.
     match /publicOrganizations/{organizationId} {
-      allow read: if resource.data.status == "active";
+      allow read: if resource.data.status == "active"
+                  && resource.data.publicationApproved == true;
       allow create, update, delete: if false;
     }
 
@@ -271,6 +274,29 @@ service cloud.firestore {
     }
 
     match /organizationSearchRateLimits/{limitId} {
+      allow read, create, update, delete: if false;
+    }
+
+    // Actor selection is only a server-validated preference. Organization
+    // saves and routed contact/introduction requests are actor scoped and are
+    // never directly writable or readable by browser state.
+    match /exchangeWorkspacePreferences/{uid} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /exchangeSavedOrganizations/{savedOrganizationId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationContactRequests/{requestId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationIntroductionRequests/{requestId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationIdentityReservations/{reservationId} {
       allow read, create, update, delete: if false;
     }
 

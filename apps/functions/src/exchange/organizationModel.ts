@@ -105,6 +105,17 @@ export function sanitizePublicOrganization(
 ): Record<string, unknown> {
   const homeBased = source.homeBased === true;
   const privacySuppressed = homeBased || source.privacySuppressed === true;
+  const publicationApproved = source.publicationApproved === true;
+  const addressPublicationApproved = publicationApproved
+    && !privacySuppressed
+    && source.addressPublicationApproved === true;
+  const coordinatePublicationApproved = publicationApproved
+    && !privacySuppressed
+    && source.coordinatePublicationApproved === true;
+  const resourceProviderStatus = source.resourceProviderStatus === "approved"
+    ? "approved"
+    : "not_provider";
+  const issuerStatus = source.issuerStatus === "approved" ? "approved" : "not_issuer";
   const result: Record<string, unknown> = {
     id: organizationId,
     schemaVersion: ORGANIZATION_SCHEMA_VERSION,
@@ -117,29 +128,51 @@ export function sanitizePublicOrganization(
     territoryFips: cleanPublicString(source.territoryFips, 12) ?? "",
     claimStatus: ["unclaimed", "claim_pending", "claimed"].includes(String(source.claimStatus))
       ? source.claimStatus : "unclaimed",
-    verificationStatus: cleanPublicString(source.exchangeVerificationStatus ?? source.verificationStatus, 40) ?? "unverified",
+    // Claim authority and independent verification are intentionally separate.
+    verificationStatus: cleanPublicString(source.verificationStatus, 40) ?? "unverified",
     organizationType: cleanPublicString(source.organizationType, 100) ?? "",
+    industries: stringList(source.industries ?? source.industryLabels),
     description: cleanPublicString(source.description, 2_000) ?? "",
     website: cleanPublicString(source.website, 500) ?? "",
     naicsCodes: stringList(source.naicsCodes),
     capabilityKeywords: stringList(source.capabilityKeywords),
     certifications: stringList(source.certifications),
-    sources: stringList(source.sources, 20),
+    searchTokens: stringList(source.searchTokens, 50),
+    resourceProviderStatus,
+    resourceCategories: resourceProviderStatus === "approved"
+      ? stringList(source.resourceCategories, 50)
+      : [],
+    issuerStatus,
+    acceptsReferrals: source.acceptsReferrals === true,
+    publicContactAvailable: source.publicContactAvailable === true
+      || Boolean(cleanPublicString(source.website, 500)),
     homeBased,
     privacySuppressed,
-    status: source.status === "inactive" ? "inactive" : "active",
+    publicationApproved,
+    status: publicationApproved && source.status === "active" ? "active" : "inactive",
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
   };
-  if (!privacySuppressed) {
+  if (addressPublicationApproved) {
     const addressLine1 = cleanPublicString(source.addressLine1 ?? source.address, 300);
     const postalCode = cleanPublicString(source.postalCode, 20);
     if (addressLine1) result.addressLine1 = addressLine1;
     if (postalCode) result.postalCode = postalCode;
+    if (addressLine1 || postalCode) result.addressPublicationApproved = true;
+  }
+  if (coordinatePublicationApproved) {
     if (typeof source.latitude === "number" && Number.isFinite(source.latitude)) result.latitude = source.latitude;
     if (typeof source.longitude === "number" && Number.isFinite(source.longitude)) result.longitude = source.longitude;
     if (typeof source.geohash === "string" && source.geohash.trim()) result.geohash = source.geohash.trim();
     if (["authoritative", "verified", "approximate"].includes(String(source.coordinateConfidence))) {
       result.coordinateConfidence = source.coordinateConfidence;
+    }
+    if (result.latitude !== undefined && result.longitude !== undefined) {
+      result.coordinatePublicationApproved = true;
+    } else {
+      delete result.latitude;
+      delete result.longitude;
+      delete result.geohash;
+      delete result.coordinateConfidence;
     }
   }
   return result;

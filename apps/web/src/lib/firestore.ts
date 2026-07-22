@@ -1325,11 +1325,16 @@ export interface PublicOrganizationProjection {
   homeBased?: boolean;
   privacySuppressed?: boolean;
   coordinateConfidence?: "authoritative" | "verified" | "approximate";
+  coordinatePublicationApproved?: boolean;
   naicsCodes?: string[];
+  industries?: string[];
   capabilityKeywords?: string[];
   certifications?: string[];
   description?: string;
   website?: string;
+  resourceProviderStatus?: "approved" | "not_provider" | "pending" | "suspended" | "rejected" | "none";
+  resourceCategories?: string[];
+  acceptsReferrals?: boolean;
 }
 
 /**

@@ -38,6 +38,7 @@ exports.requireStaffOrAdmin = requireStaffOrAdmin;
 exports.requireAdmin = requireAdmin;
 exports.isOrgManagementRole = isOrgManagementRole;
 exports.loadOrgAuthority = loadOrgAuthority;
+exports.requireActiveOrgAuthority = requireActiveOrgAuthority;
 exports.evaluateTransactionEligibility = evaluateTransactionEligibility;
 exports.throwEligibilityFailure = throwEligibilityFailure;
 exports.writeExchangeAudit = writeExchangeAudit;
@@ -93,7 +94,12 @@ async function loadOrgAuthority(transaction, db, orgId, uid, options = {}) {
     ]);
     const org = orgSnap.data();
     const member = memberSnap.data();
-    if (!orgSnap.exists || !org || org.status !== "active" || !memberSnap.exists || !member) {
+    if (!orgSnap.exists
+        || !org
+        || org.status !== "active"
+        || !memberSnap.exists
+        || !member
+        || member.status !== "active") {
         throw new https_1.HttpsError("permission-denied", "Active organization membership is required");
     }
     if (member.orgId !== orgId || member.uid !== uid) {
@@ -103,6 +109,14 @@ async function loadOrgAuthority(transaction, db, orgId, uid, options = {}) {
         throw new https_1.HttpsError("permission-denied", "Organization owner or administrator access is required");
     }
     return { org, member };
+}
+/**
+ * Reusable exact-active authority check for read-oriented callables that do not
+ * otherwise need a transaction. The transaction prevents authority and
+ * organization status from being observed at different revisions.
+ */
+async function requireActiveOrgAuthority(db, orgId, uid, options = {}) {
+    return db.runTransaction((transaction) => (loadOrgAuthority(transaction, db, orgId, uid, options)));
 }
 async function evaluateTransactionEligibility(params) {
     const { transaction, db, actor, territoryFips, orgId, requireVerification = true, requirePlan = false, requiredCredits = 0, permittedRoles = ["member", "externalVendor", "econPartner"], adminOverrideReason, } = params;
@@ -277,6 +291,12 @@ function writeExchangeAudit(transaction, db, input) {
         event.actorRole = input.actorRole;
     if (input.orgId)
         event.orgId = input.orgId;
+    if (input.actorOrganizationId)
+        event.actorOrganizationId = input.actorOrganizationId;
+    if (input.subjectOrganizationId)
+        event.subjectOrganizationId = input.subjectOrganizationId;
+    if (input.mode)
+        event.mode = input.mode;
     if (input.previousStatus)
         event.previousStatus = input.previousStatus;
     if (input.newStatus)

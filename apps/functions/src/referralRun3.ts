@@ -27,6 +27,7 @@ import {
   getDb,
   idempotencyRef,
   loadOrgAuthority,
+  requireActiveOrgAuthority,
   setCompletedIdempotency,
   writeExchangeAudit,
   type AuthorizedActor,
@@ -94,7 +95,7 @@ const listCursorSchema = z.object({
 const listMineInputSchema = z.object({
   direction: z.enum(["all", "sent", "received"]).default("all"),
   scope: z.enum(["all", "individual", "organization"]).default("all"),
-  orgId: trimmedId.optional(),
+  actorOrganizationId: trimmedId.optional(),
   statuses: z.array(z.enum([
     "draft", "sent", "accepted", "declined", "in_progress", "converted",
     "closed", "withdrawn", "expired",
@@ -106,24 +107,37 @@ const listMineInputSchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
   cursor: listCursorSchema.optional(),
 }).strict().superRefine((value, context) => {
-  if (value.scope === "organization" && !value.orgId) {
-    context.addIssue({ code: "custom", path: ["orgId"], message: "Organization scope requires orgId" });
+  if (value.scope === "organization" && !value.actorOrganizationId) {
+    context.addIssue({
+      code: "custom",
+      path: ["actorOrganizationId"],
+      message: "Organization scope requires actorOrganizationId",
+    });
   }
-  if (value.scope !== "organization" && value.orgId) {
-    context.addIssue({ code: "custom", path: ["orgId"], message: "orgId is valid only for organization scope" });
+  if (value.scope !== "organization" && value.actorOrganizationId) {
+    context.addIssue({
+      code: "custom",
+      path: ["actorOrganizationId"],
+      message: "actorOrganizationId is valid only for organization scope",
+    });
   }
 });
 
-const detailInputSchema = z.object({ referralId: trimmedId }).strict();
+const detailInputSchema = z.object({
+  referralId: trimmedId,
+  actorOrganizationId: trimmedId.optional(),
+}).strict();
 
 const timelineInputSchema = z.object({
   referralId: trimmedId,
+  actorOrganizationId: trimmedId.optional(),
   limit: z.number().int().min(1).max(100).default(50),
   before: z.number().int().nonnegative().optional(),
 }).strict();
 
 const reportTransactionInputSchema = z.object({
   referralId: trimmedId,
+  actorOrganizationId: trimmedId.optional(),
   idempotencyKey,
   expectedReferralVersion: z.number().int().nonnegative(),
   serviceOfferId: trimmedId.optional(),
@@ -145,6 +159,7 @@ const reportTransactionInputSchema = z.object({
 
 const reviewTransactionInputSchema = z.object({
   reportId: trimmedId,
+  actorOrganizationId: trimmedId.optional(),
   action: z.enum(["confirm", "dispute", "clarify"]),
   idempotencyKey,
   expectedVersion: z.number().int().nonnegative(),
@@ -157,15 +172,24 @@ const reviewTransactionInputSchema = z.object({
 
 const suggestionInputSchema = z.object({
   referralId: trimmedId.optional(),
+  actorOrganizationId: trimmedId.optional(),
   referrerOrgId: trimmedId.optional(),
   serviceCategory: z.string().trim().min(1).max(160).optional(),
   naicsCodes: z.array(z.string().trim().regex(/^\d{2,6}$/)).max(25).default([]),
   territoryFips: z.string().trim().regex(/^\d{5}$/).optional(),
   limit: z.number().int().min(1).max(25).default(12),
-}).strict().refine(
-  (value) => Boolean(value.referralId || value.serviceCategory || value.naicsCodes.length || value.territoryFips),
-  "A referral or capability requirement is required",
-);
+}).strict().superRefine((value, context) => {
+  if (!value.referralId && !value.serviceCategory && !value.naicsCodes.length && !value.territoryFips) {
+    context.addIssue({ code: "custom", message: "A referral or capability requirement is required" });
+  }
+  if (value.actorOrganizationId !== value.referrerOrgId) {
+    context.addIssue({
+      code: "custom",
+      path: ["actorOrganizationId"],
+      message: "The selected actor organization must match the referring organization",
+    });
+  }
+});
 
 const intelligenceScopeSchema = z.object({
   scope: z.enum(["individual", "organization", "platform"]).default("individual"),
@@ -273,7 +297,7 @@ async function loadActorScope(
       || member.uid !== actorUid
       || !role
       || !["owner", "admin", "member"].includes(role)
-      || (member.status !== undefined && member.status !== "active")
+      || member.status !== "active"
     ) return [];
     return [{ id: orgId, role: role as ActiveOrganization["role"] }];
   });
@@ -322,6 +346,38 @@ function requireReadableReferral(referral: RecordData, actor: AuthorizedActor, s
   if (!mayReadReferral(referral, actor, scope)) {
     throw new HttpsError("permission-denied", "Business-referral authority is required");
   }
+}
+
+type ReferralActorSide = "referrer" | "recipient";
+
+async function requireReferralActorSide(
+  db: FirebaseFirestore.Firestore,
+  referral: RecordData,
+  actor: AuthorizedActor,
+  actorOrganizationId?: string,
+): Promise<ReferralActorSide> {
+  if (!isCanonicalBusinessReferral(referral)) {
+    throw new HttpsError("failed-precondition", "Unsupported business-referral record");
+  }
+  if (actorOrganizationId) {
+    await requireActiveOrgAuthority(db, actorOrganizationId, actor.uid);
+    if (referral.referrerOrgId === actorOrganizationId) return "referrer";
+    if (referral.recipientOrgId === actorOrganizationId) return "recipient";
+    throw new HttpsError(
+      "permission-denied",
+      "The selected organization is not a party to this referral",
+    );
+  }
+  if (!hasField(referral, "referrerOrgId") && referral.referrerUid === actor.uid) {
+    return "referrer";
+  }
+  if (!hasField(referral, "recipientOrgId") && referral.recipientUid === actor.uid) {
+    return "recipient";
+  }
+  throw new HttpsError(
+    "permission-denied",
+    "Select an active referral-party organization before accessing this referral",
+  );
 }
 
 function subjectKeyForSide(referral: RecordData, side: "referrer" | "recipient"): string {
@@ -509,7 +565,10 @@ async function listMine(
   const input = parseInput(listMineInputSchema, request.data);
   const db = getDb();
   const actorScope = await loadActorScope(db, actor.uid);
-  if (input.orgId && !actorScope.organizationById.has(input.orgId) && !actor.isAdmin) {
+  if (
+    input.actorOrganizationId
+    && !actorScope.organizationById.has(input.actorOrganizationId)
+  ) {
     throw new HttpsError("permission-denied", "Current organization membership is required");
   }
 
@@ -538,7 +597,9 @@ async function listMine(
   } else {
     const includeIndividual = input.scope === "all" || input.scope === "individual";
     const organizations = input.scope === "organization"
-      ? actorScope.organizations.filter((organization) => organization.id === input.orgId)
+      ? actorScope.organizations.filter(
+          (organization) => organization.id === input.actorOrganizationId,
+        )
       : input.scope === "all" ? actorScope.organizations : [];
     if (includeIndividual && input.direction !== "received") addQuery("referrerUid", actor.uid);
     if (includeIndividual && input.direction !== "sent") addQuery("recipientUid", actor.uid);
@@ -563,7 +624,10 @@ async function listMine(
         if (!individualSide) continue;
       }
       if (input.scope === "organization") {
-        if (referral.referrerOrgId !== input.orgId && referral.recipientOrgId !== input.orgId) continue;
+        if (
+          referral.referrerOrgId !== input.actorOrganizationId
+          && referral.recipientOrgId !== input.actorOrganizationId
+        ) continue;
       }
       if (!queryDirectionMatches(referral, actor, actorScope, input.direction)) continue;
       if (!listFiltersMatch(referral, input)) continue;
@@ -582,7 +646,9 @@ async function listMine(
     truncated,
     ...(truncated && last ? { nextCursor: { createdAt: numberValue(last[1].createdAt) ?? 0, id: last[0] } } : {}),
     scope: {
-      organizations: actorScope.organizations.map(({ id, role, name }) => ({ id, role, ...(name ? { name } : {}) })),
+      organizations: actorScope.organizations
+        .filter(({ id }) => input.scope === "organization" && id === input.actorOrganizationId)
+        .map(({ id, role, name }) => ({ id, role, ...(name ? { name } : {}) })),
     },
   };
 }
@@ -593,13 +659,15 @@ export const businessReferral_getDetail = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
   const input = parseInput(detailInputSchema, request.data);
   const db = getDb();
-  const [scope, referralSnapshot] = await Promise.all([
-    loadActorScope(db, actor.uid),
-    db.collection("businessReferrals").doc(input.referralId).get(),
-  ]);
+  const referralSnapshot = await db.collection("businessReferrals").doc(input.referralId).get();
   if (!referralSnapshot.exists) throw new HttpsError("not-found", "Business referral not found");
   const referral = asRecord(referralSnapshot.data());
-  requireReadableReferral(referral, actor, scope);
+  const actorSide = await requireReferralActorSide(
+    db,
+    referral,
+    actor,
+    input.actorOrganizationId,
+  );
 
   const [contactSnapshot, reportSnapshot] = await Promise.all([
     db.collection("businessReferralContacts").doc(input.referralId).get(),
@@ -609,9 +677,8 @@ export const businessReferral_getDetail = onCall(async (request) => {
       .limit(50)
       .get(),
   ]);
-  const mayReadContact = actor.isAdmin || isAssignedStaff(referral, actor)
-    || isReferrer(referral, actor, scope)
-    || (isRecipient(referral, actor, scope) && contactSnapshot.get("recipientDisclosureAllowed") === true);
+  const mayReadContact = actorSide === "referrer"
+    || (actorSide === "recipient" && contactSnapshot.get("recipientDisclosureAllowed") === true);
   const detail = sanitizeBusinessReferralSummary(input.referralId, referral);
   const outcome = asRecord(referral.outcome);
   if (Object.keys(outcome).length) {
@@ -641,12 +708,14 @@ export const businessReferral_listTimeline = onCall(async (request) => {
   const actor = getAuthorizedActor(request);
   const input = parseInput(timelineInputSchema, request.data);
   const db = getDb();
-  const [scope, referralSnapshot] = await Promise.all([
-    loadActorScope(db, actor.uid),
-    db.collection("businessReferrals").doc(input.referralId).get(),
-  ]);
+  const referralSnapshot = await db.collection("businessReferrals").doc(input.referralId).get();
   if (!referralSnapshot.exists) throw new HttpsError("not-found", "Business referral not found");
-  requireReadableReferral(asRecord(referralSnapshot.data()), actor, scope);
+  await requireReferralActorSide(
+    db,
+    asRecord(referralSnapshot.data()),
+    actor,
+    input.actorOrganizationId,
+  );
   let query: FirebaseFirestore.Query = db.collection("businessReferralTimeline")
     .where("referralId", "==", input.referralId)
     .orderBy("occurredAt", "desc");
@@ -704,41 +773,30 @@ function sanitizeAcceptedTerms(terms: RecordData): RecordData {
   return result;
 }
 
-async function hasTransactionalOrgAuthority(
-  transaction: FirebaseFirestore.Transaction,
-  db: FirebaseFirestore.Firestore,
-  orgId: unknown,
-  actorUid: string,
-  managementRequired: boolean,
-): Promise<boolean> {
-  if (typeof orgId !== "string" || !orgId) return false;
-  try {
-    await loadOrgAuthority(transaction, db, orgId, actorUid, { managementRequired });
-    return true;
-  } catch (error) {
-    if (error instanceof HttpsError && error.code === "permission-denied") return false;
-    throw error;
-  }
-}
-
 async function requireRecipientFinanceAuthority(
   transaction: FirebaseFirestore.Transaction,
   db: FirebaseFirestore.Firestore,
   referral: RecordData,
   actor: AuthorizedActor,
+  actorOrganizationId?: string,
 ): Promise<string | undefined> {
-  const actorIsReferrer = hasField(referral, "referrerOrgId")
-    ? await hasTransactionalOrgAuthority(transaction, db, referral.referrerOrgId, actor.uid, false)
-    : referral.referrerUid === actor.uid;
-  if (actorIsReferrer) {
-    throw new HttpsError("permission-denied", "Referrer authority cannot report for the recipient");
+  if (actorOrganizationId) {
+    if (referral.recipientOrgId !== actorOrganizationId) {
+      throw new HttpsError(
+        "permission-denied",
+        "The selected organization is not the referral recipient",
+      );
+    }
+    await loadOrgAuthority(transaction, db, actorOrganizationId, actor.uid, {
+      managementRequired: true,
+    });
+    return actorOrganizationId;
   }
   if (hasField(referral, "recipientOrgId")) {
-    const orgId = stringValue(referral.recipientOrgId, 128);
-    if (!orgId || !await hasTransactionalOrgAuthority(transaction, db, orgId, actor.uid, true)) {
-      throw new HttpsError("permission-denied", "Recipient organization owner or administrator access is required");
-    }
-    return orgId;
+    throw new HttpsError(
+      "permission-denied",
+      "Select the referral's recipient organization before reporting a transaction",
+    );
   }
   if (referral.recipientUid !== actor.uid) {
     throw new HttpsError("permission-denied", "Recipient authority is required");
@@ -751,19 +809,25 @@ async function requireReferrerFinanceAuthority(
   db: FirebaseFirestore.Firestore,
   referral: RecordData,
   actor: AuthorizedActor,
+  actorOrganizationId?: string,
 ): Promise<string | undefined> {
-  const actorIsRecipient = hasField(referral, "recipientOrgId")
-    ? await hasTransactionalOrgAuthority(transaction, db, referral.recipientOrgId, actor.uid, false)
-    : referral.recipientUid === actor.uid;
-  if (actorIsRecipient) {
-    throw new HttpsError("permission-denied", "Recipient authority cannot confirm for the referrer");
+  if (actorOrganizationId) {
+    if (referral.referrerOrgId !== actorOrganizationId) {
+      throw new HttpsError(
+        "permission-denied",
+        "The selected organization is not the referral referrer",
+      );
+    }
+    await loadOrgAuthority(transaction, db, actorOrganizationId, actor.uid, {
+      managementRequired: true,
+    });
+    return actorOrganizationId;
   }
   if (hasField(referral, "referrerOrgId")) {
-    const orgId = stringValue(referral.referrerOrgId, 128);
-    if (!orgId || !await hasTransactionalOrgAuthority(transaction, db, orgId, actor.uid, true)) {
-      throw new HttpsError("permission-denied", "Referrer organization owner or administrator access is required");
-    }
-    return orgId;
+    throw new HttpsError(
+      "permission-denied",
+      "Select the referral's referrer organization before reviewing a transaction",
+    );
   }
   if (referral.referrerUid !== actor.uid) {
     throw new HttpsError("permission-denied", "Referrer authority is required");
@@ -920,7 +984,13 @@ export const businessReferral_reportTransaction = onCall(async (request) => {
     if (!isCanonicalBusinessReferral(referral)) {
       throw new HttpsError("failed-precondition", "Unsupported business-referral record");
     }
-    const actorOrgId = await requireRecipientFinanceAuthority(transaction, db, referral, actor);
+    const actorOrgId = await requireRecipientFinanceAuthority(
+      transaction,
+      db,
+      referral,
+      actor,
+      input.actorOrganizationId,
+    );
     if (replay) {
       const replayReportId = stringValue(replay.reportId, 128);
       if (!replayReportId) {
@@ -1059,7 +1129,13 @@ export const businessReferral_reviewTransaction = onCall(async (request) => {
     if (!isCanonicalBusinessReferral(referral)) {
       throw new HttpsError("failed-precondition", "Unsupported business-referral record");
     }
-    const actorOrgId = await requireReferrerFinanceAuthority(transaction, db, referral, actor);
+    const actorOrgId = await requireReferrerFinanceAuthority(
+      transaction,
+      db,
+      referral,
+      actor,
+      input.actorOrganizationId,
+    );
     if (
       report.schemaVersion !== 1
       || !REFERRAL_TRANSACTION_REPORT_STATUSES.has(String(report.status))
@@ -1199,7 +1275,7 @@ export const businessReferral_suggestRecipients = onCall(async (request) => {
   const input = parseInput(suggestionInputSchema, request.data);
   const db = getDb();
   const scope = await loadActorScope(db, actor.uid);
-  if (input.referrerOrgId && !scope.organizationById.has(input.referrerOrgId)) {
+  if (input.actorOrganizationId && !scope.organizationById.has(input.actorOrganizationId)) {
     throw new HttpsError("permission-denied", "Current referring-organization membership is required");
   }
   let serviceCategory = input.serviceCategory;
@@ -1209,7 +1285,15 @@ export const businessReferral_suggestRecipients = onCall(async (request) => {
     const referralSnapshot = await db.collection("businessReferrals").doc(input.referralId).get();
     if (!referralSnapshot.exists) throw new HttpsError("not-found", "Business referral not found");
     const referral = asRecord(referralSnapshot.data());
-    requireReadableReferral(referral, actor, scope);
+    const actorSide = await requireReferralActorSide(
+      db,
+      referral,
+      actor,
+      input.actorOrganizationId,
+    );
+    if (actorSide !== "referrer") {
+      throw new HttpsError("permission-denied", "Referral referrer authority is required");
+    }
     serviceCategory ??= stringValue(referral.category, 160);
     if (!naicsCodes.length) naicsCodes = stringArray(referral.naicsCodes, 25, 16);
     territoryFips ??= stringValue(referral.territoryFips, 5);
@@ -1221,7 +1305,7 @@ export const businessReferral_suggestRecipients = onCall(async (request) => {
     .limit(MAX_DISCOVERABLE_OFFERS + 1)
     .get();
   const now = Date.now();
-  const actorOrgIds = new Set(scope.organizations.map(({ id }) => id));
+  const actorOrgIds = new Set(input.actorOrganizationId ? [input.actorOrganizationId] : []);
   const candidates = offerSnapshot.docs.flatMap((document) => {
     const offer = asRecord(document.data());
     const providerUid = stringValue(offer.providerUid, 128);
