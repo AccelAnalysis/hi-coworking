@@ -34,6 +34,14 @@ jobs:
             ...(root.overrides || {}),
             'fast-xml-parser': '5.10.1',
             sharp: '0.35.3',
+            '@google-cloud/storage': {
+              ...((root.overrides || {})['@google-cloud/storage'] || {}),
+              'fast-xml-parser': '5.10.1',
+            },
+            next: {
+              ...((root.overrides || {}).next || {}),
+              sharp: '0.35.3',
+            },
           };
           fs.writeFileSync(rootPath, JSON.stringify(root, null, 2) + '\n');
 
@@ -42,8 +50,8 @@ jobs:
           functions.dependencies.sharp = '0.35.3';
           fs.writeFileSync(functionsPath, JSON.stringify(functions, null, 2) + '\n');
           NODE
-      - name: Regenerate lockfile
-        run: npm install --package-lock-only --ignore-scripts
+      - name: Regenerate targeted lockfile entries
+        run: npm update fast-xml-parser sharp --workspaces --include-workspace-root --package-lock-only --ignore-scripts
       - name: Verify clean installation
         run: npm ci
       - name: Capture remediated production audit
