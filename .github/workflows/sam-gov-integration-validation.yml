@@ -1,0 +1,78 @@
+name: SAM.gov integration validation
+
+on:
+  pull_request:
+    branches:
+      - codex/exchange-configured-acceptance-and-seed-activation
+    paths:
+      - "apps/functions/src/enrichment.ts"
+      - "apps/functions/src/enrichmentLegacy.ts"
+      - "apps/functions/src/enrichmentSearch.ts"
+      - "apps/functions/src/providers/samGovClient.ts"
+      - "tests/functions/sam-gov-client.test.ts"
+      - "scripts/core-functions-package.mjs"
+      - "docs/exchange/profile-enrichment.md"
+      - "docs/exchange/sam-gov-integration.md"
+      - ".github/workflows/sam-gov-integration-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sam-gov-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read Node version
+        id: node-version
+        shell: bash
+        run: |
+          if [[ -f .nvmrc ]]; then
+            echo "version=$(cat .nvmrc)" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=20" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build:shared
+
+      - name: Build Functions
+        run: npm run build:functions
+
+      - name: Run SAM.gov and enrichment contract tests
+        run: npx vitest run tests/functions/sam-gov-client.test.ts tests/exchange/account-profile-enrichment.test.ts
+
+      - name: Validate guarded core Functions package
+        run: |
+          node scripts/core-functions-package.mjs generate
+          node scripts/core-functions-package.mjs clean
+
+      - name: Diff whitespace check
+        run: git diff --check
+
+      - name: Clean generated Functions output
+        if: always()
+        shell: bash
+        run: |
+          git restore apps/functions/lib
+          git clean -fd apps/functions/lib .firebase-deploy
+          test -z "$(git status --short -- apps/functions/lib .firebase-deploy)"
