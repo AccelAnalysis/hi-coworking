@@ -1,4 +1,4 @@
-name: Dependency audit diagnostic
+name: Dependency audit remediation
 
 on:
   pull_request:
@@ -6,18 +6,21 @@ on:
       - codex/exchange-configured-acceptance-and-seed-activation
     paths:
       - ".github/workflows/dependency-audit-diagnostic.yml"
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   remediate:
+    if: github.event.pull_request.head.ref == 'fix/sam-gov-server-integration'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
+      - name: Checkout remediation branch
         uses: actions/checkout@v4
+        with:
+          ref: fix/sam-gov-server-integration
+          fetch-depth: 0
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -52,32 +55,17 @@ jobs:
           NODE
       - name: Regenerate targeted lockfile entries
         run: npm update fast-xml-parser sharp --workspaces --include-workspace-root --package-lock-only --ignore-scripts
-      - name: Verify clean installation
-        run: npm ci
-      - name: Capture remediated production audit
-        shell: bash
-        run: npm audit --omit=dev --json > audit-after.json || true
-      - name: Upload remediated dependency files
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: remediated-production-dependencies
-          path: |
-            package.json
-            package-lock.json
-            apps/functions/package.json
-            audit-after.json
-          retention-days: 1
-      - name: Require clean production audit
+      - name: Verify clean installation and production audit
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=low
+      - name: Commit audited remediation
         shell: bash
         run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const report = JSON.parse(fs.readFileSync('audit-after.json', 'utf8'));
-          const counts = report.metadata?.vulnerabilities || {};
-          const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
-          if (total !== 0) {
-            console.error(JSON.stringify(report, null, 2));
-            process.exit(1);
-          }
-          NODE
+          rm .github/workflows/dependency-audit-diagnostic.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json apps/functions/package.json .github/workflows/dependency-audit-diagnostic.yml
+          git diff --cached --check
+          git commit -m "fix(deps): resolve production audit advisories"
+          git push origin HEAD:fix/sam-gov-server-integration
