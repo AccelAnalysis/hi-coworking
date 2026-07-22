@@ -31,6 +31,11 @@ async function login(
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/exchange(?:\?|$)/, { timeout: 40_000 });
+  await expect(page.locator('[data-exchange-map-host="persistent"]')).toHaveCount(1);
+  await expect(page.getByLabel("Working as organization")).toBeVisible();
+  if ((page.viewportSize()?.width ?? Number.POSITIVE_INFINITY) <= 640) {
+    await expect(page).toHaveURL(/[?&]mode=map(?:&|$)/);
+  }
 }
 
 async function createFixture(projectName: string): Promise<Fixture> {
@@ -325,7 +330,7 @@ test("configured development preserves external organization context through eve
   const fixture = await createFixture(testInfo.project.name);
   const perspectiveResponses: unknown[] = [];
   page.on("response", async (response) => {
-    if (!response.url().endsWith("/exchange_resolveOrganizationPerspective") || response.status() !== 200) return;
+    if (!response.url().includes("/exchange_resolveOrganizationPerspective") || response.status() !== 200) return;
     try {
       perspectiveResponses.push(await response.json());
     } catch {
@@ -356,11 +361,20 @@ test("configured development preserves external organization context through eve
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     const drawer = page.getByLabel("Organization context drawer");
+    const workspaceSearch = page.getByLabel("Search current Exchange view");
+    const expectWorkspaceSearchPreserved = async () => {
+      await expect(workspaceSearch).toHaveCount(4);
+      await expect.poll(() => workspaceSearch.evaluateAll((inputs) => (
+        inputs.map((input) => (input as HTMLInputElement).value)
+      ))).toEqual(
+        Array(4).fill("commercial construction"),
+      );
+    };
     await expect(drawer).toBeVisible();
     await expect(drawer).toContainText(fixture.subjectName);
     await expect(drawer).toContainText(/external claimed/i);
     await expect(drawer).not.toContainText(/never-return-external/i);
-    await expect(page.getByLabel("Search current Exchange view")).toHaveValue("commercial construction");
+    await expectWorkspaceSearchPreserved();
 
     const mapHost = page.locator('[data-exchange-map-host="persistent"]');
     await expect(mapHost).toHaveCount(1);
@@ -373,7 +387,7 @@ test("configured development preserves external organization context through eve
       await viewNavigation.getByRole("button", { name: view, exact: true }).click();
       await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
       await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
-      await expect(page.getByLabel("Search current Exchange view")).toHaveValue("commercial construction");
+      await expectWorkspaceSearchPreserved();
       await expect(drawer).toBeVisible();
       await expect(page.locator('[data-exchange-map-host="persistent"]')).toHaveCount(1);
       expect(await originalMapHost!.evaluate((node) => node.isConnected)).toBe(true);
@@ -390,7 +404,7 @@ test("configured development preserves external organization context through eve
     await page.reload();
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
-    await expect(page.getByLabel("Search current Exchange view")).toHaveValue("commercial construction");
+    await expectWorkspaceSearchPreserved();
     await page.goBack();
     await page.goForward();
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);

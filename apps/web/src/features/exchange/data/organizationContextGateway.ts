@@ -153,7 +153,12 @@ export async function resolveOrganizationPerspective(input: {
 }): Promise<ExchangeOrganizationPerspective> {
   const result = await resolveOrganizationPerspectiveCallable({
     contractVersion: EXCHANGE_ORGANIZATION_CONTEXT_VERSION,
-    ...input,
+    subjectOrganizationId: input.subjectOrganizationId,
+    mode: input.mode,
+    ...(input.actorOrganizationId
+      ? { actorOrganizationId: input.actorOrganizationId }
+      : {}),
+    ...(input.secondary ? { secondary: input.secondary } : {}),
   });
   return result.data;
 }
@@ -218,7 +223,10 @@ export async function getOrganizationResourceStatus(input: {
 }) {
   const result = await getOrganizationResourceStatusCallable({
     contractVersion: EXCHANGE_ORGANIZATION_CONTEXT_VERSION,
-    ...input,
+    subjectOrganizationId: input.subjectOrganizationId,
+    ...(input.actorOrganizationId
+      ? { actorOrganizationId: input.actorOrganizationId }
+      : {}),
   });
   return result.data;
 }

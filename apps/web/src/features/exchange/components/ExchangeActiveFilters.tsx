@@ -56,7 +56,7 @@ export function ExchangeActiveFilters({
   const hiddenCount = Math.max(0, filters.length - visible.length);
   return (
     <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-slate-200 bg-white/92 px-3 py-1.5 backdrop-blur-xl" aria-label="Active Exchange filters">
-      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">Active</span>
+      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-600">Active</span>
       {visible.map((filter) => (
         <span key={filter.id} className="inline-flex min-h-8 shrink-0 items-center rounded-full bg-indigo-50 pl-2.5 text-[11px] font-semibold text-indigo-700">
           {filter.label}
