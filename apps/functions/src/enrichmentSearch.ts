@@ -70,10 +70,11 @@ function normalizeState(value?: string): string | undefined {
 }
 
 function normalizeInput(input: EnrichmentSearchInput) {
+  const state = normalizeState(input.state);
   return {
     businessName: input.businessName.trim(),
     ...(input.city?.trim() ? { city: input.city.trim() } : {}),
-    ...(normalizeState(input.state) ? { state: normalizeState(input.state) } : {}),
+    ...(state ? { state } : {}),
     ...(input.domain?.trim() ? { domain: input.domain.trim().toLowerCase() } : {}),
     ...(input.uei?.trim() ? { uei: input.uei.trim().toUpperCase() } : {}),
     ...(input.cage?.trim() ? { cage: input.cage.trim().toUpperCase() } : {}),
@@ -186,7 +187,7 @@ async function searchSamGov(
   };
   const result = await requestSamGovEntities(searchParams, key);
   if (result.status === "unavailable") {
-    logger.warn("SAM.gov entity search unavaile", result.error);
+    logger.warn("SAM.gov entity search unavailable", result.error);
     return { candidates: [], status: "unavailable" };
   }
 
