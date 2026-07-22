@@ -122,13 +122,20 @@ describe("registration and profile source contracts", () => {
     expect(registration).toContain("Complete account setup");
   });
 
-  it("requires profile versions and field-level enrichment approval", () => {
+  it("requires profile versions, server-side search, and field-level enrichment approval", () => {
     const profiles = read("apps/functions/src/profiles.ts");
-    const enrichment = read("apps/functions/src/enrichment.ts");
+    const enrichmentEntry = read("apps/functions/src/enrichment.ts");
+    const enrichmentSearch = read("apps/functions/src/enrichmentSearch.ts");
+    const enrichmentLink = read("apps/functions/src/enrichmentLegacy.ts");
+
     expect(profiles).toContain("PROFILE_VERSION_CONFLICT");
     expect(profiles).toContain("sanitizeCanonicalProfile");
-    expect(enrichment).toContain("selectedFields");
-    expect(enrichment).toContain("enrichmentFieldProvenance");
-    expect(enrichment).toContain("ENRICHMENT_RELINK_CONFIRMATION_REQUIRED");
+    expect(enrichmentEntry).toContain('export { enrichment_search } from "./enrichmentSearch"');
+    expect(enrichmentEntry).toContain('export { enrichment_link } from "./enrichmentLegacy"');
+    expect(enrichmentSearch).toContain("requestSamGovEntities");
+    expect(enrichmentSearch).toContain('method: "POST"');
+    expect(enrichmentLink).toContain("selectedFields");
+    expect(enrichmentLink).toContain("enrichmentFieldProvenance");
+    expect(enrichmentLink).toContain("ENRICHMENT_RELINK_CONFIRMATION_REQUIRED");
   });
 });

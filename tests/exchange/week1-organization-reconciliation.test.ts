@@ -73,11 +73,15 @@ describe("Week 1 organization reconciliation contract", () => {
   });
 
   it("links enrichment only from a server-owned, caller-scoped request", () => {
-    const enrichment = read("apps/functions/src/enrichment.ts");
+    const entry = read("apps/functions/src/enrichment.ts");
+    const search = read("apps/functions/src/enrichmentSearch.ts");
+    const link = read("apps/functions/src/enrichmentLegacy.ts");
     const browserFunctions = read("apps/web/src/lib/functions.ts");
-    expect(enrichment).toContain('collection("enrichmentRequests")');
-    expect(enrichment).toContain("enrichmentRequest?.uid !== uid");
-    expect(enrichment).toContain("Selected match was not returned by this enrichment request");
+    expect(entry).toContain('export { enrichment_search } from "./enrichmentSearch"');
+    expect(entry).toContain('export { enrichment_link } from "./enrichmentLegacy"');
+    expect(search).toContain('collection("enrichmentRequests")');
+    expect(link).toContain("enrichmentRequest?.uid !== uid");
+    expect(link).toContain("Selected match was not returned by this enrichment request");
     expect(browserFunctions).toContain("requestId: string");
     expect(browserFunctions).not.toContain("selectedCandidate: Record<string, unknown>");
   });
