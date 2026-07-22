@@ -83,7 +83,7 @@ function Onboarding() {
     try {
       const response = await exchangeOrganizationCreateFn({ name, city: city || undefined, state: state || undefined, website: website || undefined, forceCreate, idempotencyKey: crypto.randomUUID() });
       if (response.data.created && response.data.organizationId) {
-        router.push("/exchange");
+        router.push(`/org/settings?id=${encodeURIComponent(response.data.organizationId)}&tab=establishments&onboarding=1`);
         return;
       }
       setResults(response.data.possibleMatches || []);
@@ -183,9 +183,9 @@ function Onboarding() {
 
             <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5 sm:p-7">
               <h2 className="font-bold text-slate-900">No appropriate match?</h2>
-              <p className="mt-1 text-sm text-slate-600">Create a new profile and return to the Exchange. A paid membership is not required to browse.</p>
+              <p className="mt-1 text-sm text-slate-600">Create a new organization, then add and confirm its primary establishment. A paid membership is not required to browse.</p>
               <label className="mt-4 block max-w-xl text-sm font-semibold text-slate-700">Organization website (optional)<input type="url" value={website} onChange={(event) => setWebsite(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 font-normal outline-none focus:ring-2 focus:ring-emerald-500" placeholder="https://example.com" /></label>
-              <div className="mt-4 flex flex-wrap gap-3"><button onClick={() => create(false)} disabled={busy !== null} className="rounded-full bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">Create and return to Exchange</button>{notice.includes("likely duplicate") && <button onClick={() => create(true)} disabled={busy !== null} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700">This is a different organization</button>}<Link href="/exchange" className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700">Skip for now</Link></div>
+              <div className="mt-4 flex flex-wrap gap-3"><button onClick={() => create(false)} disabled={busy !== null} className="rounded-full bg-emerald-600 px-5 py-3 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">Create and add establishment</button>{notice.includes("likely duplicate") && <button onClick={() => create(true)} disabled={busy !== null} className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700">This is a different organization</button>}<Link href="/exchange" className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-700">Skip for now</Link></div>
             </div>
           </section>
         )}

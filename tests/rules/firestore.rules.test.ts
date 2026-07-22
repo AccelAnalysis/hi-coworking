@@ -188,6 +188,58 @@ describe("Run 1 Firestore authorization matrix", () => {
     }
   });
 
+  test("establishment, contact, geocode, and route collections expose only final public allowlists", async () => {
+    await seed({
+      "orgs/org-one": { id: "org-one", status: "active" },
+      "orgMembers/org-one_owner": { orgId: "org-one", uid: "owner", role: "owner", status: "active" },
+      "organizationLocations/private-location": { id: "private-location", organizationId: "org-one", physicalAddress: { line1: "1 Private St" }, geocode: { latitude: 36.98, longitude: -76.63 } },
+      "organizationContactPoints/private-contact": { id: "private-contact", organizationId: "org-one", normalizedValue: "secret@example.test" },
+      "organizationCommunicationRoutes/private-route": { id: "private-route", organizationId: "org-one", primaryContactPointIds: ["private-contact"] },
+      "organizationRouteDeliveries/private-delivery": { organizationId: "org-one", destinationContactPointIds: ["private-contact"] },
+      "organizationGeocodeCandidateSessions/private-session": { uid: "owner", candidates: [{ latitude: 36.98, longitude: -76.63 }] },
+      "publicOrganizationLocations/public-location": {
+        id: "public-location", organizationId: "org-one", name: "Branch", locationType: "branch",
+        isHeadquarters: false, isPrimary: true, city: "Smithfield", county: "Isle of Wight",
+        administrativeArea: "VA", countryCode: "US", addressPublicationApproved: false,
+        coordinatePublicationApproved: true, latitude: 36.98, longitude: -76.63,
+        coordinatePrecision: "address", publicContactAvailable: true, version: 1, updatedAt: 1,
+      },
+      "publicOrganizationLocations/leaky-location": {
+        id: "leaky-location", organizationId: "org-one", name: "Leaky", locationType: "branch",
+        isHeadquarters: false, isPrimary: false, addressPublicationApproved: false,
+        coordinatePublicationApproved: false, addressLine1: "1 Secret St", publicContactAvailable: false,
+        version: 1, updatedAt: 1,
+      },
+      "publicOrganizationContactPoints/public-contact": {
+        id: "public-contact", organizationId: "org-one", type: "email", purposes: ["general"],
+        displayValue: "hello@example.test", visibility: "public", publicationStatus: "approved",
+        status: "active", version: 1, updatedAt: 1,
+      },
+      "publicOrganizationContactPoints/leaky-contact": {
+        id: "leaky-contact", organizationId: "org-one", type: "email", purposes: ["general"],
+        displayValue: "secret@example.test", normalizedValue: "secret@example.test",
+        visibility: "private_operational", publicationStatus: "draft", status: "active", version: 1, updatedAt: 1,
+      },
+    });
+    const owner = authenticated("owner").firestore();
+    const outsider = authenticated("outsider").firestore();
+    const anonymous = testEnv.unauthenticatedContext().firestore();
+    for (const path of [
+      "organizationLocations/private-location", "organizationContactPoints/private-contact",
+      "organizationCommunicationRoutes/private-route", "organizationRouteDeliveries/private-delivery",
+      "organizationGeocodeCandidateSessions/private-session",
+    ]) {
+      await assertFails(getDoc(doc(owner, path)));
+      await assertFails(getDoc(doc(outsider, path)));
+    }
+    await assertSucceeds(getDoc(doc(anonymous, "publicOrganizationLocations/public-location")));
+    await assertSucceeds(getDoc(doc(anonymous, "publicOrganizationContactPoints/public-contact")));
+    await assertFails(getDoc(doc(anonymous, "publicOrganizationLocations/leaky-location")));
+    await assertFails(getDoc(doc(anonymous, "publicOrganizationContactPoints/leaky-contact")));
+    await assertFails(updateDoc(doc(owner, "publicOrganizationLocations/public-location"), { latitude: 0 }));
+    await assertFails(setDoc(doc(outsider, "organizationCommunicationRoutes/forged"), { organizationId: "org-one" }));
+  });
+
   test("private profiles stay private and only published projections are discoverable", async () => {
     await seed({
       "profiles/alice": {

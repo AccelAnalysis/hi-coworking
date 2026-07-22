@@ -489,6 +489,11 @@
     { "collectionGroup": "opportunityRecentSearches", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "ownerUid", "order": "ASCENDING" }, { "fieldPath": "actorOrganizationId", "order": "ASCENDING" }, { "fieldPath": "lastUsedAt", "order": "DESCENDING" }] },
     { "collectionGroup": "rfxAddenda", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "rfxId", "order": "ASCENDING" }, { "fieldPath": "version", "order": "ASCENDING" }] },
     { "collectionGroup": "rfxQuestions", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "rfxId", "order": "ASCENDING" }, { "fieldPath": "submittedAt", "order": "ASCENDING" }] },
+    { "collectionGroup": "organizationCommunicationRoutes", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "organizationId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
+    { "collectionGroup": "organizationContactPoints", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "organizationId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
+    { "collectionGroup": "organizationContactPoints", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "organizationId", "order": "ASCENDING" }, { "fieldPath": "normalizedValue", "order": "ASCENDING" }] },
+    { "collectionGroup": "orgMembers", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "orgId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
+    { "collectionGroup": "organizationLocations", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "organizationId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }] },
     { "collectionGroup": "rfx", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "adminApprovalStatus", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }] },
     { "collectionGroup": "rfx", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "adminApprovalStatus", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" }] }
   ],

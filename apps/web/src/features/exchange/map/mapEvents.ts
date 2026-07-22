@@ -72,10 +72,12 @@ function selectTerritory(
   callbacksRef.current.onSelectTerritory?.(id, status);
 }
 
-function selectOrganization(callbacksRef: ExchangeMapCallbacksRef, id: string): void {
+function selectOrganization(callbacksRef: ExchangeMapCallbacksRef, id: string, organizationId: string, locationId: string): void {
   if (!id) return;
-  callbacksRef.current.onSelect?.({ entityType: "organization", entityId: id });
-  callbacksRef.current.onSelectOrganization?.(id);
+  callbacksRef.current.onSelect?.(locationId
+    ? { entityType: "establishment", entityId: locationId, organizationId }
+    : { entityType: "organization", entityId: organizationId || id });
+  callbacksRef.current.onSelectOrganization?.(organizationId || id);
 }
 
 /** Events that must exist before style load, registered once per map. */
@@ -168,7 +170,12 @@ export function registerExchangeMapInteractionEvents(
       || layerId === EXCHANGE_MAP_LAYER_IDS.contextOrganizationPoint
       || layerId === EXCHANGE_MAP_LAYER_IDS.selectedOrganizationPoint
     ) {
-      selectOrganization(callbacksRef, id);
+      selectOrganization(
+        callbacksRef,
+        id,
+        propertyString(feature.properties?.organizationId),
+        propertyString(feature.properties?.locationId),
+      );
       return;
     }
 

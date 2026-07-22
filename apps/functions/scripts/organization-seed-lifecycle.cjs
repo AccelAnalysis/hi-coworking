@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const CONFIGURED_DEVELOPMENT_PROJECT = "hi-coworking-plat";
 const REVIEW_PACKET_VERSION = 1;
 const PROJECTION_VERSION = 1;
+const SEED_PACKAGE_VERSION = 2;
 const DEFAULT_SAMPLE_LIMIT = 100;
 
 const PRIVACY_CLASSIFICATIONS = Object.freeze({
@@ -38,6 +39,15 @@ const REVIEW_METADATA_KEYS = new Set([
   "reviewStatus",
   "reviewedAt",
   "reviewedBy",
+  "seedPackageVersion",
+  "organizationDecision",
+  "establishmentDecisions",
+  "contactDecisions",
+  "communicationRouteDecisions",
+  "establishments",
+  "contactPoints",
+  "communicationRoutes",
+  "seedPackageHash",
   "sourceProvenance",
 ]);
 
@@ -183,6 +193,36 @@ function reviewMetadataIssues(row, { restricted = false, requireApproved = true 
   if (!["pending", "approved", "rejected"].includes(row.reviewStatus)) {
     issues.push("reviewStatus must be pending, approved, or rejected");
   }
+  if (row.seedPackageVersion !== SEED_PACKAGE_VERSION) {
+    issues.push(`seedPackageVersion must be ${SEED_PACKAGE_VERSION}`);
+  }
+  const organizationDecisions = [
+    "approve_organization", "reject", "defer", "restricted_matching_only",
+    "duplicate_survivor", "link_existing",
+  ];
+  if (!organizationDecisions.includes(row.organizationDecision)) {
+    issues.push("organizationDecision is invalid");
+  }
+  if (!Array.isArray(row.establishmentDecisions)
+      || !Array.isArray(row.contactDecisions)
+      || !Array.isArray(row.communicationRouteDecisions)) {
+    issues.push("establishment, contact, and communication-route decisions must be arrays");
+  }
+  if (row.reviewStatus === "approved") {
+    const permittedOrganizationDecision = restricted
+      ? row.organizationDecision === "restricted_matching_only"
+      : row.organizationDecision === "approve_organization";
+    if (!permittedOrganizationDecision) issues.push("approved review requires an approving organization decision");
+    if ((row.establishmentDecisions || []).some((decision) => decision.decision === "defer_location")) {
+      issues.push("approved package cannot contain deferred establishment decisions");
+    }
+    if ((row.contactDecisions || []).some((decision) => decision.decision === "defer")) {
+      issues.push("approved package cannot contain deferred contact decisions");
+    }
+    if ((row.communicationRouteDecisions || []).some((decision) => decision.decision === "defer")) {
+      issues.push("approved package cannot contain deferred route decisions");
+    }
+  }
   if (typeof row.reviewedBy !== "string") issues.push("reviewedBy must be present as a string");
   if (row.reviewedAt !== null && (!Number.isSafeInteger(row.reviewedAt) || row.reviewedAt <= 0)) {
     issues.push("reviewedAt must be null or a positive epoch-millisecond integer");
@@ -243,6 +283,49 @@ function validateReviewRow(row, options = {}) {
   ];
 }
 
+function proposedEstablishmentDecision(candidate) {
+  const addressLine1 = typeof (candidate.addressLine1 || candidate.address) === "string"
+    ? (candidate.addressLine1 || candidate.address).trim() : "";
+  if (!addressLine1 || !candidate.city || !candidate.state) return [];
+  const privateHome = candidate.homeBased === true || candidate.privacySuppressed === true;
+  return [{
+    proposalId: `${candidate.id}:establishment:0`,
+    decision: "defer_location",
+    classification: privateHome ? "private_home" : "unresolved",
+    isHeadquarters: false,
+    isPrimary: false,
+    addressPublicationApproved: false,
+    coordinatePublicationApproved: false,
+    proposal: {
+      name: `${candidate.name} proposed location`,
+      locationType: privateHome ? "other" : "headquarters",
+      physicalAddress: {
+        line1: addressLine1,
+        ...(candidate.addressLine2 ? { line2: candidate.addressLine2 } : {}),
+        locality: candidate.city,
+        administrativeArea: candidate.state,
+        ...(candidate.postalCode ? { postalCode: candidate.postalCode } : {}),
+        countryCode: candidate.countryCode || "US",
+        ...(candidate.county ? { county: candidate.county } : {}),
+      },
+      ...(typeof candidate.latitude === "number" && typeof candidate.longitude === "number"
+        ? { coordinates: { latitude: candidate.latitude, longitude: candidate.longitude } } : {}),
+    },
+  }];
+}
+
+function proposedContactDecisions(candidate) {
+  return [["email", candidate.email], ["phone", candidate.publicPhone || candidate.phone]]
+    .filter(([, value]) => typeof value === "string" && value.trim())
+    .map(([type, value], index) => ({
+      proposalId: `${candidate.id}:contact:${index}`,
+      decision: "defer",
+      purpose: "general",
+      visibility: "private_operational",
+      proposal: { type, value },
+    }));
+}
+
 function createReviewPacket(rows, { restricted = false } = {}) {
   const seen = new Set();
   const duplicateIds = [];
@@ -268,6 +351,11 @@ function createReviewPacket(rows, { restricted = false } = {}) {
       projectionVersion: PROJECTION_VERSION,
       coordinatePublicationApproved: false,
       addressPublicationApproved: false,
+      seedPackageVersion: SEED_PACKAGE_VERSION,
+      organizationDecision: restricted ? "restricted_matching_only" : "defer",
+      establishmentDecisions: restricted ? [] : proposedEstablishmentDecision(payload),
+      contactDecisions: restricted ? [] : proposedContactDecisions(payload),
+      communicationRouteDecisions: [],
       reviewIssues: issues,
     };
   });
@@ -289,6 +377,98 @@ function createReviewPacket(rows, { restricted = false } = {}) {
       restricted,
     },
   };
+}
+
+function approvedPackageRecords(row) {
+  const establishments = (row.establishmentDecisions || []).flatMap((decision) => {
+    if (!["approve_establishment", "list_only", "mailing_only", "private_home"].includes(decision.decision)) return [];
+    const proposal = decision.proposal || {};
+    const coordinates = proposal.coordinates;
+    const publishCoordinates = decision.coordinatePublicationApproved === true
+      && decision.decision === "approve_establishment"
+      && coordinates && Number.isFinite(coordinates.latitude) && Number.isFinite(coordinates.longitude);
+    const privateHome = decision.decision === "private_home";
+    const id = decision.establishmentId || contentHash(decision.proposalId).slice(0, 28);
+    return [{
+      id: `seedloc_${id}`,
+      organizationId: row.id,
+      name: proposal.name || `${row.name} location`,
+      locationType: decision.decision === "mailing_only" ? "mailing_only" : proposal.locationType || "other",
+      isHeadquarters: decision.isHeadquarters === true,
+      isPrimary: decision.isPrimary === true,
+      status: "active",
+      ...(proposal.physicalAddress ? { physicalAddress: proposal.physicalAddress } : {}),
+      addressPublicationApproved: !privateHome && decision.addressPublicationApproved === true,
+      coordinatePublicationApproved: !privateHome && publishCoordinates,
+      ...(coordinates ? { geocode: {
+        provider: proposal.geocodeProvider || "seed_review",
+        normalizedAddress: proposal.normalizedAddress || Object.values(proposal.physicalAddress || {}).filter(Boolean).join(", "),
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        precision: proposal.precision || "unknown",
+        confidence: proposal.confidence || "unknown",
+        source: "seed_reviewed",
+        geocodedAt: row.reviewedAt,
+        confirmedByUid: row.reviewedBy,
+        confirmedAt: row.reviewedAt,
+      } } : {}),
+      serviceArea: proposal.serviceArea || {},
+      publicContactAvailable: false,
+      privateHome,
+      createdBy: row.reviewedBy,
+      createdAt: row.reviewedAt,
+      updatedAt: row.reviewedAt,
+      version: 1,
+      recordVersion: 1,
+      seedProposalId: decision.proposalId,
+    }];
+  });
+  const contactPoints = (row.contactDecisions || []).flatMap((decision) => {
+    if (!["approve_private_operational", "approve_public"].includes(decision.decision)) return [];
+    const proposal = decision.proposal || {};
+    return [{
+      id: `seedcontact_${contentHash(decision.proposalId).slice(0, 28)}`,
+      organizationId: row.id,
+      ...(decision.locationId ? { locationId: decision.locationId } : {}),
+      type: proposal.type,
+      purposes: [decision.purpose || "general"],
+      normalizedValue: String(proposal.value || "").trim().toLowerCase(),
+      displayValue: String(proposal.value || "").trim(),
+      verificationStatus: "unverified",
+      visibility: decision.decision === "approve_public" ? "public" : "private_operational",
+      publicationStatus: decision.decision === "approve_public" ? "approved" : "draft",
+      consentAuthorityBasis: "human_seed_review",
+      status: "active",
+      createdBy: row.reviewedBy,
+      createdAt: row.reviewedAt,
+      updatedAt: row.reviewedAt,
+      version: 1,
+      recordVersion: 1,
+      seedProposalId: decision.proposalId,
+    }];
+  });
+  const communicationRoutes = (row.communicationRouteDecisions || []).flatMap((decision) => (
+    decision.decision === "approve" ? [{
+      id: decision.routeId || `seedroute_${contentHash(decision.proposalId).slice(0, 28)}`,
+      organizationId: row.id,
+      ...(decision.locationId ? { locationId: decision.locationId } : {}),
+      purpose: decision.purpose,
+      primaryContactPointIds: decision.primaryContactPointIds || [],
+      fallbackContactPointIds: decision.fallbackContactPointIds || [],
+      fallbackMemberRoles: decision.fallbackMemberRoles || ["owner", "admin"],
+      inAppEnabled: decision.inAppEnabled !== false,
+      emailEnabled: decision.emailEnabled === true,
+      phoneEnabled: decision.phoneEnabled === true,
+      status: "active",
+      createdBy: row.reviewedBy,
+      createdAt: row.reviewedAt,
+      updatedAt: row.reviewedAt,
+      version: 1,
+      recordVersion: 1,
+      seedProposalId: decision.proposalId,
+    }] : []
+  ));
+  return { establishments, contactPoints, communicationRoutes };
 }
 
 function exportApprovedRows(rows, {
@@ -321,7 +501,14 @@ function exportApprovedRows(rows, {
       invalidApproved.push({ line: index + 1, id: row.id || null, issues });
       continue;
     }
-    const cleaned = { ...row, approvedExportVersion: 1 };
+    const packageRecords = approvedPackageRecords(row);
+    const cleaned = {
+      ...row,
+      approvedExportVersion: 2,
+      seedPackageVersion: SEED_PACKAGE_VERSION,
+      ...packageRecords,
+      seedPackageHash: contentHash({ organizationId: row.id, ...packageRecords }),
+    };
     delete cleaned.reviewIssues;
     approved.push(cleaned);
   }
@@ -422,6 +609,7 @@ module.exports = {
   MARKET_COORDINATE_BOUNDS,
   PRIVACY_CLASSIFICATIONS,
   PROJECTION_VERSION,
+  SEED_PACKAGE_VERSION,
   REVIEW_PACKET_VERSION,
   SeedLifecycleError,
   assertDevelopmentExpansionGate,
@@ -432,6 +620,7 @@ module.exports = {
   coordinateIssues,
   createReviewPacket,
   exportApprovedRows,
+  approvedPackageRecords,
   loadJsonLines,
   privacyClassificationFor,
   reviewMetadataIssues,

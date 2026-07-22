@@ -1,5 +1,7 @@
 # Organization seed rollback
 
+> Version 2 addendum: rollback manifests may include `organizationLocations`, `publicOrganizationLocations`, `organizationContactPoints`, `publicOrganizationContactPoints`, and `organizationCommunicationRoutes` in addition to organization and restricted-matching documents. Each entry retains before/after state and an after hash. Rollback must refuse a claimed, ownership-changed, or subsequently modified record. Organization-location legacy migration has its own exact-hash rollback script and is not conflated with seed import rollback.
+
 Every configured-development apply must create its protected rollback manifest
 before Firestore is changed. Retain that ignored `0600` file with the batch's
 acceptance evidence.

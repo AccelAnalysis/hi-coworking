@@ -74,8 +74,11 @@ export function ExchangeOrganizationContextDrawer({
     setMessage("");
     setNotice(null);
     setSubmitting(null);
+  }, [actionContextKey]);
+
+  useEffect(() => {
     setSaved(perspective?.saved ?? false);
-  }, [actionContextKey, perspective?.saved]);
+  }, [perspective?.saved]);
 
   const allowedActions = useMemo(
     () => new Set(perspective?.perspective.allowedActions ?? []),

@@ -25,6 +25,7 @@ import {
   writeExchangeAudit,
   type AuthorizedActor,
 } from "./exchange/security";
+import { resolveCommunicationRoute } from "./exchange/organizationEstablishments";
 
 interface BusinessReferralDocData {
   id: string;
@@ -845,7 +846,7 @@ export const businessReferral_send = onCall(async (request) => {
   const db = getDb();
   const referralRef = db.collection("businessReferrals").doc(input.referralId);
 
-  return db.runTransaction(async (transaction) => {
+  const sendResult = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(referralRef);
     const referral = requireReferralSnapshot(snapshot);
     await requireReferrerAuthority(
@@ -893,6 +894,30 @@ export const businessReferral_send = onCall(async (request) => {
     });
     return { success: true, version };
   });
+  if (!sendResult.idempotent) {
+    const routedReferral = (await referralRef.get()).data();
+    if (typeof routedReferral?.recipientOrgId === "string") {
+      const routingRequestId = `referral_${input.referralId}_${sendResult.version}`;
+      const routing = await resolveCommunicationRoute({
+        db,
+        actorUid: actor.uid,
+        actorOrganizationId: typeof routedReferral.referrerOrgId === "string" ? routedReferral.referrerOrgId : undefined,
+        organizationId: routedReferral.recipientOrgId,
+        purpose: "referrals",
+        requestId: routingRequestId,
+      });
+      const batch = db.batch();
+      batch.set(referralRef, { routeResolution: routing.publicResult, updatedAt: Date.now() }, { merge: true });
+      routing.destinationMemberUids.forEach((uid) => batch.set(db.collection("notifications").doc(), {
+        uid, type: "business_referral", title: "New business referral",
+        body: "Your organization received a routed referral.", linkTo: "/referrals",
+        referralId: input.referralId, requestId: routingRequestId, read: false, createdAt: Date.now(),
+      }));
+      await batch.commit();
+      return { ...sendResult, routeResolution: routing.publicResult };
+    }
+  }
+  return sendResult;
 });
 
 export const businessReferral_respond = onCall(async (request) => {

@@ -35,7 +35,19 @@ function validate(row, restricted) {
     ...reviewMetadataIssues(row, { restricted, requireApproved: true }),
   ];
   if (!row || typeof row !== "object" || Array.isArray(row)) return [...new Set(errors)];
-  if (row.approvedExportVersion !== 1) errors.push("approvedExportVersion must be 1");
+  if (![1, 2].includes(row.approvedExportVersion)) errors.push("approvedExportVersion must be 1 or 2");
+  if (row.approvedExportVersion === 2) {
+    if (row.seedPackageVersion !== 2) errors.push("seedPackageVersion must be 2");
+    if (![row.establishments, row.contactPoints, row.communicationRoutes].every(Array.isArray)) {
+      errors.push("version 2 seed packages require establishments, contactPoints, and communicationRoutes arrays");
+    }
+    if (typeof row.seedPackageHash !== "string" || row.seedPackageHash !== contentHash({
+      organizationId: row.id,
+      establishments: row.establishments,
+      contactPoints: row.contactPoints,
+      communicationRoutes: row.communicationRoutes,
+    })) errors.push("seedPackageHash is invalid");
+  }
   if (row.publicationApproved === false) errors.push("approved export cannot explicitly disable publication");
   return [...new Set(errors)];
 }
@@ -96,6 +108,7 @@ function publicProjection(row) {
     acceptsReferrals: row.acceptsReferrals === true,
     publicContactAvailable: row.publicContactAvailable === true
       || Boolean(cleanPublicString(row.website, 500)),
+    publicLocationCount: Number.isInteger(row.activeLocationCount) ? row.activeLocationCount : 0,
     claimStatus: ["unclaimed", "claim_pending", "claimed"].includes(row.claimStatus)
       ? row.claimStatus
       : "unclaimed",
@@ -228,9 +241,20 @@ function protectedExistingReason(existing) {
 }
 
 function organizationPayload(row, existing, batchId, now) {
+  const {
+    establishments = [], contactPoints: _contactPoints, communicationRoutes: _communicationRoutes,
+    establishmentDecisions: _establishmentDecisions, contactDecisions: _contactDecisions,
+    communicationRouteDecisions: _communicationRouteDecisions, ...organization
+  } = row;
+  const primary = establishments.find((location) => location.status === "active" && location.isPrimary === true);
+  const headquarters = establishments.find((location) => location.status === "active" && location.isHeadquarters === true);
   return {
-    ...row,
-    schemaVersion: 2,
+    ...organization,
+    schemaVersion: 3,
+    recordVersion: Number(existing?.recordVersion || 0) + 1,
+    activeLocationCount: establishments.filter((location) => location.status === "active").length,
+    ...(primary ? { primaryLocationId: primary.id } : {}),
+    ...(headquarters ? { headquartersLocationId: headquarters.id } : {}),
     publicationApproved: true,
     importBatchId: batchId,
     sourceContentHash: contentHash(row),
@@ -247,6 +271,76 @@ function organizationPayload(row, existing, batchId, now) {
       || row.verificationStatus
       || "unverified",
   };
+}
+
+function publicLocationProjection(location) {
+  if (location.status !== "active") return null;
+  const privateHome = location.privateHome === true;
+  const result = {
+    id: location.id, organizationId: location.organizationId,
+    name: privateHome ? (location.serviceArea?.city ? `${location.serviceArea.city} service area` : "Service area") : location.name,
+    locationType: privateHome ? "service_location" : location.locationType, isHeadquarters: location.isHeadquarters === true,
+    isPrimary: location.isPrimary === true,
+    city: location.serviceArea?.city || (location.addressPublicationApproved ? location.physicalAddress?.locality : undefined),
+    county: location.serviceArea?.county || (location.addressPublicationApproved ? location.physicalAddress?.county : undefined),
+    administrativeArea: location.serviceArea?.region || (location.addressPublicationApproved ? location.physicalAddress?.administrativeArea : undefined),
+    countryCode: location.serviceArea?.countryCode || (location.addressPublicationApproved ? location.physicalAddress?.countryCode : undefined),
+    addressPublicationApproved: !privateHome && location.addressPublicationApproved === true,
+    coordinatePublicationApproved: !privateHome && location.coordinatePublicationApproved === true
+      && !["mailing_only", "virtual"].includes(location.locationType),
+    publicContactAvailable: location.publicContactAvailable === true,
+    version: 1, updatedAt: location.updatedAt,
+  };
+  if (result.addressPublicationApproved && location.physicalAddress) {
+    result.addressLine1 = location.physicalAddress.line1;
+    if (location.physicalAddress.postalCode) result.postalCode = location.physicalAddress.postalCode;
+  }
+  if (result.coordinatePublicationApproved && Number.isFinite(location.geocode?.latitude) && Number.isFinite(location.geocode?.longitude)
+      && !(location.geocode.latitude === 0 && location.geocode.longitude === 0)) {
+    result.latitude = location.geocode.latitude; result.longitude = location.geocode.longitude;
+    if (location.geocode.geohash) result.geohash = location.geocode.geohash;
+    result.coordinatePrecision = location.geocode.precision || "unknown";
+  } else result.coordinatePublicationApproved = false;
+  return Object.fromEntries(Object.entries(result).filter(([, value]) => value !== undefined));
+}
+
+function publicContactProjection(contact) {
+  if (contact.status !== "active" || contact.visibility !== "public" || contact.publicationStatus !== "approved" || contact.type === "member_route") return null;
+  return { id: contact.id, organizationId: contact.organizationId, ...(contact.locationId ? { locationId: contact.locationId } : {}),
+    type: contact.type, purposes: contact.purposes, displayValue: contact.displayValue || contact.normalizedValue,
+    visibility: "public", publicationStatus: "approved", status: "active", version: 1, updatedAt: contact.updatedAt };
+}
+
+async function planPackageRecords(db, row, batchId, now) {
+  if (row.approvedExportVersion !== 2) return [];
+  const specs = [
+    ["organizationLocations", row.establishments, "publicOrganizationLocations", publicLocationProjection],
+    ["organizationContactPoints", row.contactPoints, "publicOrganizationContactPoints", publicContactProjection],
+    ["organizationCommunicationRoutes", row.communicationRoutes, null, null],
+  ];
+  const plans = [];
+  for (const [collection, records, publicCollection, projector] of specs) {
+    for (const record of records) {
+      if (!record?.id || record.organizationId !== row.id) throw new SeedLifecycleError("Seed package child ownership is invalid.", { organizationId: row.id, collection, recordId: record?.id });
+      const ref = db.collection(collection).doc(record.id); const snapshot = await ref.get(); const sourceContentHash = contentHash(record);
+      if (snapshot.exists && snapshot.data()?.sourceContentHash !== sourceContentHash) throw new SeedLifecycleError("Refusing to overwrite a changed seed package child.", { organizationId: row.id, collection, recordId: record.id });
+      // Preserve an unchanged imported record byte-for-byte so its public
+      // projection also remains stable on replay. A fresh updatedAt here would
+      // turn every v2 package replay into a spurious projection repair.
+      const after = snapshot.exists
+        ? snapshot.data()
+        : { ...record, importBatchId: batchId, sourceContentHash, updatedAt: now };
+      const plan = { collection, id: record.id, ref, beforeExists: snapshot.exists, before: snapshot.data?.() || null, after, merge: false, writeMain: !snapshot.exists };
+      if (publicCollection && projector) {
+        const projected = projector(after); const publicRef = db.collection(publicCollection).doc(record.id); const publicSnapshot = await publicRef.get();
+        if (projected && (!publicSnapshot.exists || snapshotHash(publicSnapshot.data()) !== snapshotHash(projected))) {
+          plan.public = { collection: publicCollection, id: record.id, ref: publicRef, beforeExists: publicSnapshot.exists, before: publicSnapshot.data?.() || null, after: projected, merge: false, writeMain: true };
+        }
+      }
+      if (plan.writeMain || plan.public) plans.push(plan);
+    }
+  }
+  return plans;
 }
 
 function restrictedPayload(row, existing, batchId, now) {
@@ -275,6 +369,7 @@ async function planCollectionImport(db, file, collectionName, restricted, batchI
     protectedExisting: [],
     protectedUnchanged: 0,
     projectionRepaired: 0,
+    packageRecordsPlanned: 0,
   };
   const seen = new Set();
   const prepared = [];
@@ -350,8 +445,10 @@ async function planCollectionImport(db, file, collectionName, restricted, batchI
           writeMain: true,
         };
       }
+      plan.package = await planPackageRecords(db, entry.row, batchId, now);
+      result.packageRecordsPlanned += plan.package.length;
     }
-    if (!plan.writeMain && !plan.public) {
+    if (!plan.writeMain && !plan.public && !plan.package?.length) {
       result.skipped += 1;
       continue;
     }
@@ -385,8 +482,16 @@ async function importRows(db, file, collectionName, restricted, batchId, dryRun)
   return planned.result;
 }
 
+function flattenPlans(plans) {
+  return plans.flatMap((plan) => [
+    plan.writeMain ? plan : null,
+    plan.public,
+    ...flattenPlans(plan.package || []),
+  ].filter(Boolean));
+}
+
 function rollbackEntries(plans) {
-  return plans.flatMap((plan) => [plan.writeMain ? plan : null, plan.public].filter(Boolean)).map((plan) => ({
+  return flattenPlans(plans).map((plan) => ({
     collection: plan.collection,
     id: plan.id,
     beforeExists: plan.beforeExists,
@@ -427,7 +532,7 @@ function writeRollbackManifest(file, manifest) {
 }
 
 async function commitPlans(db, plans, manifestRef, manifestDocument) {
-  const operations = plans.flatMap((plan) => [plan.writeMain ? plan : null, plan.public].filter(Boolean));
+  const operations = flattenPlans(plans);
   if (typeof db.batch !== "function") {
     for (const plan of operations) await setDocument(plan);
     await manifestRef.set(manifestDocument, { merge: false });
@@ -548,7 +653,12 @@ async function main() {
         entryCount: rollbackManifest.entryCount,
         strategy: "protected_local_snapshot_manifest",
         batchId,
-        collections: ["orgs", "publicOrganizations", "organizationSourceCandidates"],
+        collections: [
+          "orgs", "publicOrganizations", "organizationSourceCandidates",
+          "organizationLocations", "publicOrganizationLocations",
+          "organizationContactPoints", "publicOrganizationContactPoints",
+          "organizationCommunicationRoutes",
+        ],
       },
       createdAt: now,
       status: "applied",
@@ -587,6 +697,7 @@ module.exports = {
   commitPlans,
   contentHash,
   createRollbackManifest,
+  flattenPlans,
   importRows,
   normalizeSafetyOptions,
   planCollectionImport,

@@ -5,6 +5,7 @@ export type ExchangeMapSelection =
   | { entityType: "rfx"; entityId: string }
   | { entityType: "territory"; entityId: string }
   | { entityType: "organization"; entityId: string }
+  | { entityType: "establishment"; entityId: string; organizationId: string }
   | null;
 
 export interface ExchangeFeatureStateTarget {
@@ -34,7 +35,7 @@ export function getExchangeSelectionTargets(
     return [{ source: EXCHANGE_MAP_SOURCE_IDS.rfx, id: selection.entityId }];
   }
 
-  if (selection.entityType === "organization") {
+  if (selection.entityType === "organization" || selection.entityType === "establishment") {
     return [
       { source: EXCHANGE_MAP_SOURCE_IDS.organizations, id: selection.entityId },
       { source: EXCHANGE_MAP_SOURCE_IDS.contextOrganizations, id: selection.entityId },

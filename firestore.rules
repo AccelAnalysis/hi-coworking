@@ -263,6 +263,76 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Private establishment, contact, geocode, and routing records are exposed
+    // only through exact-active, role-bounded callables. Subject/URL context
+    // never grants direct authority.
+    match /organizationLocations/{locationId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationContactPoints/{contactPointId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationCommunicationRoutes/{routeId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationRouteDeliveries/{deliveryId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationGeocodeCandidateSessions/{sessionId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationGeocodeCache/{cacheId} {
+      allow read, create, update, delete: if false;
+    }
+
+    match /organizationGeocodeRateLimits/{limitId} {
+      allow read, create, update, delete: if false;
+    }
+
+    // Server-maintained final allowlists. Street address and exact coordinate
+    // fields are independently optional and require their own approval flag.
+    match /publicOrganizationLocations/{locationId} {
+      allow read: if resource.data.keys().hasOnly([
+                    "id", "organizationId", "name", "locationType", "isHeadquarters", "isPrimary",
+                    "city", "county", "administrativeArea", "countryCode", "addressLine1", "postalCode",
+                    "addressPublicationApproved", "coordinatePublicationApproved", "latitude", "longitude",
+                    "geohash", "coordinatePrecision", "publicContactAvailable", "version", "updatedAt"
+                  ])
+                  && resource.data.id == locationId
+                  && resource.data.organizationId is string
+                  && resource.data.addressPublicationApproved is bool
+                  && resource.data.coordinatePublicationApproved is bool
+                  && (!("addressLine1" in resource.data)
+                      || resource.data.addressPublicationApproved == true)
+                  && (!("postalCode" in resource.data)
+                      || resource.data.addressPublicationApproved == true)
+                  && (!("latitude" in resource.data)
+                      || (resource.data.coordinatePublicationApproved == true
+                          && "longitude" in resource.data))
+                  && (!("longitude" in resource.data)
+                      || (resource.data.coordinatePublicationApproved == true
+                          && "latitude" in resource.data));
+      allow create, update, delete: if false;
+    }
+
+    match /publicOrganizationContactPoints/{contactPointId} {
+      allow read: if resource.data.keys().hasOnly([
+                    "id", "organizationId", "locationId", "type", "purposes", "displayValue",
+                    "visibility", "publicationStatus", "status", "version", "updatedAt"
+                  ])
+                  && resource.data.id == contactPointId
+                  && resource.data.visibility == "public"
+                  && resource.data.publicationStatus == "approved"
+                  && resource.data.status == "active"
+                  && resource.data.type in ["email", "phone", "website", "contact_form"];
+      allow create, update, delete: if false;
+    }
+
     // Organization onboarding, claims, restricted seed candidates, rate
     // limiting, and import evidence are callable/server-authoritative.
     match /organizationClaims/{claimId} {

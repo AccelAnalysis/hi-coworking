@@ -95,10 +95,14 @@ export function projectApprovedPublicOrganization(
     issuerStatus: sanitized.issuerStatus === "approved" ? "approved" : "not_issuer",
     acceptsReferrals: sanitized.acceptsReferrals === true,
     publicContactAvailable: sanitized.publicContactAvailable === true,
+    publicLocationCount: typeof sanitized.publicLocationCount === "number" ? sanitized.publicLocationCount : 0,
     status: "active",
     publicationApproved: true,
     updatedAt: typeof sanitized.updatedAt === "number" ? sanitized.updatedAt : 0,
   };
+  if (sanitized.primaryPublicLocation && typeof sanitized.primaryPublicLocation === "object") {
+    projection.primaryPublicLocation = sanitized.primaryPublicLocation;
+  }
   if (sanitized.addressPublicationApproved === true) {
     if (text(sanitized.addressLine1, 300)) projection.addressLine1 = text(sanitized.addressLine1, 300);
     if (text(sanitized.postalCode, 20)) projection.postalCode = text(sanitized.postalCode, 20);
@@ -149,6 +153,7 @@ function privateBase(organizationId: string, source: RecordData): RecordData {
     issuerStatus: source.issuerStatus === "approved" ? "approved" : "not_issuer",
     acceptsReferrals: source.acceptsReferrals === true,
     publicContactAvailable: source.publicContactAvailable === true || Boolean(text(source.website, 500)),
+    publicLocationCount: typeof source.publicLocationCount === "number" ? source.publicLocationCount : 0,
     status: text(source.status, 40) ?? "inactive",
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : 0,
   };

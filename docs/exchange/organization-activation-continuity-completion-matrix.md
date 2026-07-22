@@ -1,34 +1,58 @@
 # Organization activation and continuity completion matrix
 
-This matrix reports all 43 Phase 22 rows. Percentages describe this workstream,
-not the broader Exchange or production readiness. The configured target is only
-`hi-coworking-plat`; no production action, seed import, or merge occurred.
+## Establishment/contact-routing continuation
+
+| Capability | Result |
+|---|---|
+| Person versus organization ownership | Profile v4 person fields; legacy business fields are proposals only |
+| Organization versus establishment | Organization v3 with separate establishment v1 records |
+| Primary/headquarters invariants | Transactional exact-one-primary and at-most-one-headquarters |
+| Geocoding | Bounded provider abstraction, confirmation session, provenance, private-home suppression |
+| Public projections | Final location/contact allowlists with independent publication flags |
+| Multi-location map | One organization card; multiple approved markers; establishment Secondary Subject |
+| Actor anchoring | Server-authoritative preferred/primary/headquarters fallback |
+| Contact/routing | Explicit visibility and purpose routes; no destination disclosure |
+| Enrichment | Field-provenanced proposals; no silent organization overwrite |
+| Legacy migration | Dry-run default, exact-project/hash/rollback guarded |
+| Seed compatibility | Governed v2 package; approval/import counts remain zero |
+| PR #21 continuity | Integrated into PR #19 at `8e94efde96a85b7154b33a34cb8a7e26bfb9ea49` |
+| Configured owner workflow | Live geocode, private/public decisions, establishment/contact edit, routes, enrichment review |
+| Configured matrix | 7/7 Chromium, Firefox, desktop WebKit, and three mobile WebKit projects |
+| Development inventory | 21/21 selected and 87/87 total Functions active; 93/93 indexes ready |
+| Security and cleanup | 120/120 emulator tests; zero synthetic Auth users/documents after the final matrix |
+
+The detailed tables below preserve the 43-row PR #21 activation/continuity
+assessment and its historical percentages. The continuation rows above and the
+current evidence snapshot record this establishment/contact-routing extension.
+The configured target is only `hi-coworking-plat`; no production action, seed
+import, PR #3 merge, or `main` merge occurred.
 
 ## Evidence snapshot
 
-- Branch: `codex/exchange-organization-activation-continuity`
-- Reconciled stack base: PR #19 head `e0b305039c6674f5b394303b2d3bb107d0e1eb58`
-- Implemented/deployed code commit: `f3c55f9`
-- Functions: 43/43 explicitly selected workstream callables are `ACTIVE` in
-  `us-central1` (14 organization/context plus 29 actor-scoped referral,
-  intelligence, service-offer, RFx, and territory callables).
-- Firestore indexes: 88/88 live composite indexes are `READY`; the six
-  pre-existing live-only indexes were preserved.
-- Firestore rules, Storage rules, and Hosting were compiled/reviewed and
-  deployed; Hosting is `https://hi-coworking-plat.web.app`.
+- Branch: `codex/exchange-establishments-contact-routing`
+- Exact starting/base SHA: PR #19 head
+  `8e94efde96a85b7154b33a34cb8a7e26bfb9ea49` after PR #21 integration.
+- Functions: the exact isolated package contains 21 endpoints and 18 compiled
+  files. All selected endpoints are active Gen 2 Node.js 20; all 87 regional
+  Functions are active.
+- Firestore indexes: 93/93 live composite indexes are `READY`.
+- Firestore rules and Hosting were deployed; Storage rules were unchanged.
+  Hosting is `https://hi-coworking-plat.web.app`.
 - Configured lifecycle: one guarded test passed organization creation,
   discovery, pending claim/list/detail, rejection, competing approval,
   idempotency, projection privacy, direct-access denials, revocation, and
   post-revocation denial.
-- Configured continuity: 7/7 projects passed at 1280×800, 1440×900, Firefox,
-  desktop WebKit/Safari, and mobile WebKit at 390×844, 393×852, and 430×932.
+- Configured establishment/continuity: 7/7 projects passed in 3.0 minutes at
+  1280×800, 1440×900, Firefox, desktop WebKit/Safari, and mobile WebKit at
+  390×844, 393×852, and 430×932.
 - Synthetic cleanup audits returned zero Auth users and zero marked documents
-  after both configured journeys.
+  after the final configured matrix.
 - Authoritative territory `territories/51093` is released from the official
   Census TIGERweb January 1, 2025 county layer; apply, no-op replay, and
   read-only rollback rehearsal passed.
-- Seed preparation contains 5,128 candidates; human-approved and imported
-  organization counts remain zero. This is a correct stop at the human gate.
+- Seed preparation contains 5,128 candidates; configured human-approved source
+  candidates and `organizationSeedImports` both remain zero. This is a correct
+  stop at the human gate.
 
 “Configured accepted” means the applicable development gate passed. “Partial”
 means later product depth remains. “Blocked—human approval” means code/tooling
@@ -104,9 +128,10 @@ is ready but the authorized external decision does not exist.
 
 ## Overall assessment
 
-The weighted workstream estimate is **89%**. The applicable configured
-development organization lifecycle, authorization, deployment, locality, and
-cross-mode continuity gates are complete. The percentage is not 100 because
-seed activation is correctly blocked at zero human approvals, configured
-long-list/draft depth and native assistive-technology checks remain, the branch
-is unmerged, and the broader Exchange product/release workstreams are separate.
+The predecessor PR #21 table's weighted **89%** remains historical context for
+the broader activation/continuity product. This establishment/contact-routing
+workstream is **98% complete** at configured-development handoff: implementation,
+deployment, automated accessibility/security, cross-browser acceptance, and
+cleanup are complete. The remaining two percent is the explicit native
+VoiceOver manual release gate. Human seed approval/import is not unfinished work
+in this run; it is intentionally the separately authorized next workstream.

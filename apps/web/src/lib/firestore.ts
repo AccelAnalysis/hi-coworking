@@ -1335,6 +1335,15 @@ export interface PublicOrganizationProjection {
   resourceProviderStatus?: "approved" | "not_provider" | "pending" | "suspended" | "rejected" | "none";
   resourceCategories?: string[];
   acceptsReferrals?: boolean;
+  publicLocationCount?: number;
+  primaryPublicLocation?: {
+    id: string;
+    name: string;
+    city?: string;
+    county?: string;
+    administrativeArea?: string;
+    coordinatePublicationApproved?: boolean;
+  };
 }
 
 /**

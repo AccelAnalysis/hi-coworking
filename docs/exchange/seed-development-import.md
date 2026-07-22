@@ -1,5 +1,7 @@
 # Configured-development organization seed import
 
+> Version 2 addendum: approved input is now a governed package containing one organization plus zero or more approved establishments, contact points, and communication routes. Child ownership and `seedPackageHash` are validated before planning. Public establishment/contact projections are generated independently, and every child/public write is included in rollback and no-op replay. Version 1 remains a temporary compatibility input; new review/export work must use version 2. No real package was imported in the establishment/contact-routing workstream.
+
 The importer accepts approved-only exports, never raw prepared candidates. It is
 dry-run by default and is constrained to the exact configured project
 `hi-coworking-plat` (or a `demo-*` emulator project). Production is rejected.

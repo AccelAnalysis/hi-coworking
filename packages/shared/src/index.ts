@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { referralTermsSnapshotSchema } from "./referralCommerce";
+import {
+  personAccessibilityPreferencesSchema,
+  personCommunicationPreferencesSchema,
+  personNotificationPreferencesSchema,
+  personProfessionalContactPublicationSchema,
+} from "./organizationEstablishments";
 
 /** Browser-navigable URL. Explicitly excludes executable and local protocols. */
 export const httpUrlSchema = z
@@ -424,10 +430,25 @@ export const orgMemberDocSchema = z.object({
 
 export type OrgMemberDoc = z.infer<typeof orgMemberDocSchema>;
 
+export * from "./organizationEstablishments";
+
 // --- Profiles (PR-03) ---
 
 export const profileDocSchema = z.object({
   uid: z.string(),
+  displayName: z.string().optional(),
+  professionalTitle: z.string().optional(),
+  preferredPrivateEmail: z.string().email().optional(),
+  preferredPrivatePhone: z.string().optional(),
+  communicationPreferences: personCommunicationPreferencesSchema.optional(),
+  accessibilityPreferences: personAccessibilityPreferencesSchema.optional(),
+  notificationPreferences: personNotificationPreferencesSchema.optional(),
+  preferredOrganizationId: z.string().optional(),
+  preferredEstablishmentId: z.string().optional(),
+  professionalContactPublication: personProfessionalContactPublicationSchema.optional(),
+  organizationOnboardingSuggestions: z.record(z.string(), z.unknown()).optional(),
+  enrichmentProposals: z.record(z.string(), z.unknown()).optional(),
+  /** @deprecated UID-owned compatibility fields; treated as organization-onboarding suggestions. */
   businessName: z.string().optional(),
   bio: z.string().optional(),
   city: z.string().optional(),

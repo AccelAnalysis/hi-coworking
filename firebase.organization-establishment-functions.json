@@ -1,0 +1,6 @@
+{
+  "functions": {
+    "source": ".firebase-deploy/organization-establishment-functions",
+    "region": "us-central1"
+  }
+}

@@ -146,12 +146,28 @@ export function sanitizePublicOrganization(
     acceptsReferrals: source.acceptsReferrals === true,
     publicContactAvailable: source.publicContactAvailable === true
       || Boolean(cleanPublicString(source.website, 500)),
+    publicLocationCount: typeof source.publicLocationCount === "number"
+      && Number.isInteger(source.publicLocationCount) && source.publicLocationCount >= 0
+      ? source.publicLocationCount : 0,
     homeBased,
     privacySuppressed,
     publicationApproved,
     status: publicationApproved && source.status === "active" ? "active" : "inactive",
     updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : Date.now(),
   };
+  if (source.primaryPublicLocation && typeof source.primaryPublicLocation === "object") {
+    const primary = source.primaryPublicLocation as Record<string, unknown>;
+    const id = cleanPublicString(primary.id, 128);
+    const name = cleanPublicString(primary.name, 160);
+    if (id && name) result.primaryPublicLocation = {
+      id,
+      name,
+      city: cleanPublicString(primary.city, 120) ?? "",
+      county: cleanPublicString(primary.county, 120) ?? "",
+      administrativeArea: cleanPublicString(primary.administrativeArea, 120) ?? "",
+      coordinatePublicationApproved: primary.coordinatePublicationApproved === true,
+    };
+  }
   if (addressPublicationApproved) {
     const addressLine1 = cleanPublicString(source.addressLine1 ?? source.address, 300);
     const postalCode = cleanPublicString(source.postalCode, 20);

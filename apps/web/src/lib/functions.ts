@@ -542,6 +542,16 @@ export const enrichmentLinkFn = httpsCallable<
 
 export interface ProfileUpdateInput {
   expectedVersion: number;
+  displayName?: string | null;
+  professionalTitle?: string | null;
+  preferredPrivateEmail?: string | null;
+  preferredPrivatePhone?: string | null;
+  communicationPreferences?: { inApp: boolean; email: boolean; sms: boolean };
+  accessibilityPreferences?: { reducedMotion: boolean; highContrast: boolean; mapAlternativePreferred: boolean };
+  notificationPreferences?: { referrals: boolean; opportunities: boolean; introductions: boolean; organizationAdministration: boolean };
+  preferredOrganizationId?: string | null;
+  preferredEstablishmentId?: string | null;
+  professionalContactPublication?: { email: boolean; phone: boolean; title: boolean };
   businessName?: string | null;
   bio?: string | null;
   city?: string | null;

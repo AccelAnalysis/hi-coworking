@@ -95,6 +95,22 @@ function approveReviewRow(row, overrides = {}) {
     reviewedAt,
     coordinatePublicationApproved: hasCoordinates,
     addressPublicationApproved: hasAddress,
+    organizationDecision: row.restrictedMatchOnly === true
+      ? "restricted_matching_only"
+      : "approve_organization",
+    establishmentDecisions: (row.establishmentDecisions || []).map((decision, index) => ({
+      ...decision,
+      decision: "approve_establishment",
+      isPrimary: index === 0,
+      isHeadquarters: index === 0,
+      addressPublicationApproved: hasAddress,
+      coordinatePublicationApproved: hasCoordinates,
+    })),
+    contactDecisions: (row.contactDecisions || []).map((decision) => ({
+      ...decision,
+      decision: "approve_private_operational",
+      visibility: "private_operational",
+    })),
     ...overrides,
   };
 }
@@ -168,7 +184,7 @@ test("approved-only export requires human identity and preserves field-level pub
   );
   const exported = exportApprovedRows([approveReviewRow(pending)]);
   assert.equal(exported.rows.length, 1);
-  assert.equal(exported.rows[0].approvedExportVersion, 1);
+  assert.equal(exported.rows[0].approvedExportVersion, 2);
   assert.equal(exported.rows[0].reviewIssues, undefined);
 });
 
@@ -198,6 +214,26 @@ test("organization seed import accepts approved exports, is dry-run safe, and is
   assert.equal(second.skipped, 2);
   assert.equal(second.updated, 0);
   assert.equal(db.documents.size, 4);
+});
+
+test("v2 organization package replay preserves child timestamps and is a formal no-op", async (t) => {
+  const [row] = approvedRows([{
+    id: "org_package_replay", name: "Package Replay LLC", normalizedName: "package replay",
+    sources: ["test_source"], addressLine1: "1 Main Street", city: "Smithfield", state: "VA",
+    postalCode: "23430", territoryFips: "51093", status: "active", publicationApproved: true,
+  }]);
+  assert.equal(row.approvedExportVersion, 2);
+  assert.equal(row.establishments.length, 1);
+  const { file } = writeJsonLines(t, [row], "package-replay.jsonl");
+  const db = fakeDb();
+  const first = await planCollectionImport(db, file, "orgs", false, "batch-package-1", reviewedAt);
+  assert.ok(first.result.packageRecordsPlanned > 0);
+  await commitPlans(db, first.plans, db.collection("organizationSeedImports").doc("batch-package-1"), { status: "applied" });
+
+  const replay = await planCollectionImport(db, file, "orgs", false, "batch-package-2", reviewedAt + 1_000);
+  assert.equal(replay.plans.length, 0);
+  assert.equal(replay.result.skipped, 1);
+  assert.equal(replay.result.packageRecordsPlanned, 0);
 });
 
 test("replay repairs a stale projection and only then reports a no-op", async (t) => {
@@ -400,6 +436,7 @@ test("public projection publishes only explicitly approved address and coordinat
     "postalCode",
     "privacySuppressed",
     "publicContactAvailable",
+    "publicLocationCount",
     "publicationApproved",
     "resourceCategories",
     "resourceProviderStatus",

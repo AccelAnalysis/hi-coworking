@@ -71,6 +71,20 @@ const profileHttpUrlSchema = z.string().trim().max(2_000).pipe(httpUrlSchema);
 export const profileUpdateInputSchema = z
   .object({
     expectedVersion: z.number().int().nonnegative(),
+    displayName: z.string().trim().max(160).nullable().optional(),
+    professionalTitle: z.string().trim().max(160).nullable().optional(),
+    preferredPrivateEmail: z.string().trim().email().max(320).nullable().optional(),
+    preferredPrivatePhone: z.string().trim().max(40).nullable().optional(),
+    communicationPreferences: z.object({
+      inApp: z.boolean(), email: z.boolean(), sms: z.boolean(),
+      quietHoursStart: z.string().trim().max(5).optional(), quietHoursEnd: z.string().trim().max(5).optional(),
+      timezone: z.string().trim().max(80).optional(),
+    }).strict().optional(),
+    accessibilityPreferences: z.object({ reducedMotion: z.boolean(), highContrast: z.boolean(), mapAlternativePreferred: z.boolean() }).strict().optional(),
+    notificationPreferences: z.object({ referrals: z.boolean(), opportunities: z.boolean(), introductions: z.boolean(), organizationAdministration: z.boolean() }).strict().optional(),
+    preferredOrganizationId: z.string().trim().max(128).nullable().optional(),
+    preferredEstablishmentId: z.string().trim().max(128).nullable().optional(),
+    professionalContactPublication: z.object({ email: z.boolean(), phone: z.boolean(), title: z.boolean() }).strict().optional(),
     businessName: z.string().trim().max(200).nullable().optional(),
     bio: z.string().trim().max(10_000).nullable().optional(),
     city: z.string().trim().max(160).nullable().optional(),
@@ -100,14 +114,9 @@ const READINESS_TIERS = new Set(["seat_ready", "bid_ready", "procurement_ready"]
 const VIDEO_STATUSES = new Set(["processing", "ready", "failed"]);
 
 const PUBLIC_STRING_FIELDS = [
-  "businessName",
+  "displayName",
+  "professionalTitle",
   "bio",
-  "city",
-  "state",
-  "domain",
-  "uei",
-  "duns",
-  "cageCode",
 ] as const;
 
 const PUBLIC_HTTP_URL_FIELDS = [
@@ -116,10 +125,6 @@ const PUBLIC_HTTP_URL_FIELDS = [
 ] as const;
 
 const PUBLIC_ASSET_FIELDS = [
-  {
-    pathField: "capabilityStatementStoragePath",
-    legacyUrlField: "capabilityStatementUrl",
-  },
   {
     pathField: "photoStoragePath",
     legacyUrlField: "photoUrl",
@@ -138,9 +143,6 @@ const PUBLIC_ASSET_FIELDS = [
 }>;
 
 const PUBLIC_STRING_ARRAY_FIELDS = [
-  "naicsCodes",
-  "certifications",
-  "verifiedCertifications",
   "badges",
 ] as const;
 
@@ -225,6 +227,15 @@ export function sanitizePublicProfile(
   for (const field of PUBLIC_STRING_FIELDS) {
     if (typeof profile[field] === "string") projection[field] = profile[field];
   }
+  const publication = isRecord(profile.professionalContactPublication)
+    ? profile.professionalContactPublication : {};
+  if (publication.email === true && typeof profile.preferredPrivateEmail === "string") {
+    projection.professionalEmail = profile.preferredPrivateEmail;
+  }
+  if (publication.phone === true && typeof profile.preferredPrivatePhone === "string") {
+    projection.professionalPhone = profile.preferredPrivatePhone;
+  }
+  if (publication.title !== true) delete projection.professionalTitle;
   for (const field of PUBLIC_HTTP_URL_FIELDS) {
     const parsed = httpUrlSchema.safeParse(profile[field]);
     if (parsed.success) projection[field] = parsed.data;

@@ -141,7 +141,7 @@ async function createActor(
     businessName: `${uid} LLC`,
     verificationStatus: options.verified === false ? "pending" : "verified",
     verificationVersion: 0,
-    profileSchemaVersion: 3,
+    profileSchemaVersion: 4,
     profileVersion: 0,
     published: false,
     createdAt: Date.now(),
@@ -444,7 +444,7 @@ describe("authoritative account initialization", () => {
       uid: actor.uid,
       published: false,
       verificationStatus: "none",
-      profileSchemaVersion: 3,
+      profileSchemaVersion: 4,
       profileVersion: 0,
     });
     expect((await db.collection("orgMembers").where("uid", "==", actor.uid).get()).empty).toBe(true);
@@ -480,7 +480,7 @@ describe("authoritative account initialization", () => {
       .not.toHaveProperty("profileSchemaVersion");
     await callFunction(admin, "profile_update", { expectedVersion: 0, published: false });
     expect((await db.collection("profiles").doc(admin.uid).get()).data()).toMatchObject({
-      profileSchemaVersion: 3,
+      profileSchemaVersion: 4,
       profileVersion: 1,
       legacyMigratedAt: expect.any(Number),
     });
@@ -3054,7 +3054,7 @@ describe("short-lived storage grant cleanup concurrency", () => {
 describe("profile save and enrichment identity boundaries", () => {
   it("saves current-schema and legacy profiles without weakening the strict input contract", async () => {
     const member = await createActor("profile-current-member", "member");
-    await db.collection("profiles").doc(member.uid).update({ profileSchemaVersion: 3 });
+    await db.collection("profiles").doc(member.uid).update({ profileSchemaVersion: 4 });
 
     const currentResult = await callFunction<{
       success: boolean;
@@ -3074,11 +3074,11 @@ describe("profile save and enrichment identity boundaries", () => {
       videoIntroPosterStoragePath: null,
       published: false,
     });
-    expect(currentResult).toMatchObject({ success: true, profileSchemaVersion: 3, profileVersion: 1 });
+    expect(currentResult).toMatchObject({ success: true, profileSchemaVersion: 4, profileVersion: 1 });
     expect((await db.collection("profiles").doc(member.uid).get()).data()).toMatchObject({
       uid: member.uid,
       businessName: "Current Schema Member LLC",
-      profileSchemaVersion: 3,
+      profileSchemaVersion: 4,
       profileVersion: 1,
     });
 
@@ -3114,7 +3114,7 @@ describe("profile save and enrichment identity boundaries", () => {
     expect(migrated).toMatchObject({
       uid: legacy.uid,
       businessName: "Legacy Administrator LLC",
-      profileSchemaVersion: 3,
+      profileSchemaVersion: 4,
       profileVersion: 1,
       createdAt: 1,
     });
@@ -3186,8 +3186,22 @@ describe("profile save and enrichment identity boundaries", () => {
         requestId: "request-owned-by-member",
         provider: "sam_gov",
       },
-      businessName: candidate.legalName,
-      uei: candidate.uei,
+      businessName: `${member.uid} LLC`,
+      organizationOnboardingSuggestions: {
+        businessName: candidate.legalName,
+        uei: candidate.uei,
+      },
+      enrichmentProposals: {
+        "request-owned-by-member": {
+          status: "proposed",
+          matchId: candidate.matchId,
+          provider: "sam_gov",
+          proposedFields: {
+            businessName: candidate.legalName,
+            uei: candidate.uei,
+          },
+        },
+      },
       profileVersion: 1,
       enrichmentFieldProvenance: {
         businessName: {
@@ -3232,6 +3246,169 @@ describe("profile save and enrichment identity boundaries", () => {
       }),
       "invalid-argument",
     );
+  });
+
+  it("keeps enrichment address and contact data proposed until an authorized owner classifies it", async () => {
+    const owner = await createActor("enrichment-proposal-owner", "member");
+    const external = await createActor("enrichment-proposal-external", "member");
+    const organizationId = "enrichment-proposal-org";
+    const primaryId = "enrichment-proposal-primary";
+    const now = Date.now();
+    await Promise.all([
+      db.collection("orgs").doc(organizationId).set({
+        id: organizationId,
+        name: "Authoritative Owner Organization",
+        legalName: "Authoritative Owner Organization",
+        status: "active",
+        claimStatus: "claimed",
+        verificationStatus: "unverified",
+        publicationStatus: "draft",
+        recordVersion: 1,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.collection("orgMembers").doc(`${organizationId}_${owner.uid}`).set({
+        id: `${organizationId}_${owner.uid}`,
+        orgId: organizationId,
+        uid: owner.uid,
+        role: "owner",
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      db.collection("organizationLocations").doc(primaryId).set({
+        id: primaryId,
+        organizationId,
+        name: "Owner-entered headquarters",
+        locationType: "headquarters",
+        isHeadquarters: true,
+        isPrimary: true,
+        status: "active",
+        physicalAddress: {
+          line1: "100 Owner Street",
+          locality: "Windsor",
+          administrativeArea: "VA",
+          postalCode: "23487",
+          countryCode: "US",
+        },
+        addressPublicationApproved: false,
+        coordinatePublicationApproved: false,
+        serviceArea: { city: "Windsor", region: "VA", countryCode: "US" },
+        publicContactAvailable: false,
+        privateHome: false,
+        createdBy: owner.uid,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        recordVersion: 1,
+      }),
+    ]);
+    await db.collection("profiles").doc(owner.uid).set({
+      enrichmentProposals: {
+        "external-proposal-1": {
+          status: "proposed",
+          provider: "sam_gov",
+          proposedFields: { businessName: "External Suggested Name" },
+          proposedAddresses: [{
+            id: "address-proposal-1",
+            address: {
+              line1: "4600 Silver Hill Road",
+              locality: "Washington",
+              administrativeArea: "DC",
+              postalCode: "20233",
+              countryCode: "US",
+            },
+          }],
+          proposedContacts: [{
+            id: "contact-proposal-1",
+            type: "email",
+            value: "PROPOSED@example.test",
+            label: "External general contact",
+          }],
+          createdAt: now,
+        },
+      },
+    }, { merge: true });
+
+    const before = await callFunction<{ enrichmentProposals: Array<{ id: string }> }>(
+      owner,
+      "exchange_getOrganizationManagement",
+      { organizationId },
+    );
+    expect(before.enrichmentProposals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "external-proposal-1" }),
+    ]));
+    expect((await db.collection("orgs").doc(organizationId).get()).data()?.legalName)
+      .toBe("Authoritative Owner Organization");
+
+    await expectCallableError(
+      callFunction(external, "exchange_reviewOrganizationEnrichmentProposal", {
+        organizationId,
+        proposalId: "external-proposal-1",
+        itemType: "address",
+        itemId: "address-proposal-1",
+        classification: "branch",
+        label: "Reviewed branch",
+        makePrimary: false,
+        addressPublicationApproved: false,
+        coordinatePublicationApproved: false,
+      }),
+      "permission-denied",
+    );
+
+    const addressResult = await callFunction<{ resultId: string; publicProjectionPublished: boolean }>(
+      owner,
+      "exchange_reviewOrganizationEnrichmentProposal",
+      {
+        organizationId,
+        proposalId: "external-proposal-1",
+        itemType: "address",
+        itemId: "address-proposal-1",
+        classification: "branch",
+        label: "Reviewed branch",
+        makePrimary: false,
+        addressPublicationApproved: false,
+        coordinatePublicationApproved: false,
+      },
+    );
+    expect(addressResult).toMatchObject({ publicProjectionPublished: true });
+    expect((await db.collection("organizationLocations").doc(addressResult.resultId).get()).data())
+      .toMatchObject({ name: "Reviewed branch", locationType: "branch", isPrimary: false });
+    const publicBranch = (await db.collection("publicOrganizationLocations").doc(addressResult.resultId).get()).data();
+    expect(publicBranch).toMatchObject({ city: "Washington", addressPublicationApproved: false, coordinatePublicationApproved: false });
+    expect(publicBranch).not.toHaveProperty("addressLine1");
+    expect(publicBranch).not.toHaveProperty("latitude");
+
+    const contactResult = await callFunction<{ resultId: string; publicProjectionPublished: boolean }>(
+      owner,
+      "exchange_reviewOrganizationEnrichmentProposal",
+      {
+        organizationId,
+        proposalId: "external-proposal-1",
+        itemType: "contact",
+        itemId: "contact-proposal-1",
+        classification: "private_operational",
+      },
+    );
+    expect(contactResult).toMatchObject({ publicProjectionPublished: false });
+    expect((await db.collection("organizationContactPoints").doc(contactResult.resultId).get()).data())
+      .toMatchObject({ normalizedValue: "proposed@example.test", visibility: "private_operational", publicationStatus: "draft" });
+    expect((await db.collection("publicOrganizationContactPoints").doc(contactResult.resultId).get()).exists).toBe(false);
+    expect((await db.collection("profiles").doc(owner.uid).get()).data()).toMatchObject({
+      enrichmentProposals: {
+        "external-proposal-1": {
+          status: "reviewed",
+          proposedFields: { businessName: "External Suggested Name" },
+          decisions: {
+            "address:address-proposal-1": { classification: "branch", organizationId },
+            "contact:contact-proposal-1": { classification: "private_operational", organizationId },
+          },
+        },
+      },
+    });
+    expect((await db.collection("orgs").doc(organizationId).get()).data()?.legalName)
+      .toBe("Authoritative Owner Organization");
+    expect((await db.collection("organizationLocations").doc(primaryId).get()).data()?.isPrimary).toBe(true);
   });
 });
 

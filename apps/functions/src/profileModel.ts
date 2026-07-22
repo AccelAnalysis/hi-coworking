@@ -1,7 +1,9 @@
-export const PROFILE_SCHEMA_VERSION = 3;
+export const PROFILE_SCHEMA_VERSION = 4;
 
 export function computeProfileCompleteness(profile: Record<string, unknown>): number {
   let score = 0;
+  if (profile.displayName) score += 10;
+  if (profile.professionalTitle) score += 5;
   if (profile.businessName) score += 15;
   if (profile.bio) score += 10;
   if (profile.website) score += 5;
@@ -31,6 +33,18 @@ export function computeProfileReadiness(
 
 const CANONICAL_PROFILE_RESPONSE_FIELDS = [
   "uid",
+  "displayName",
+  "professionalTitle",
+  "preferredPrivateEmail",
+  "preferredPrivatePhone",
+  "communicationPreferences",
+  "accessibilityPreferences",
+  "notificationPreferences",
+  "preferredOrganizationId",
+  "preferredEstablishmentId",
+  "professionalContactPublication",
+  "organizationOnboardingSuggestions",
+  "enrichmentProposals",
   "businessName",
   "bio",
   "city",

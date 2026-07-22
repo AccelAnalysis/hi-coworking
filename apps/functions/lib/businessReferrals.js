@@ -43,6 +43,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const zod_1 = require("zod");
 const contracts_1 = require("./exchange/contracts");
 const security_1 = require("./exchange/security");
+const organizationEstablishments_1 = require("./exchange/organizationEstablishments");
 const MAX_REFERRAL_EVIDENCE_FILE_SIZE = 15 * 1024 * 1024;
 const BUSINESS_REFERRAL_SENT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const BUSINESS_REFERRAL_STORAGE_GRANT_TTL_MS = 60 * 1000;
@@ -670,7 +671,7 @@ exports.businessReferral_send = (0, https_1.onCall)(async (request) => {
     const input = (0, contracts_1.parseCallableInput)(contracts_1.businessReferralSendInputSchema, request.data);
     const db = (0, security_1.getDb)();
     const referralRef = db.collection("businessReferrals").doc(input.referralId);
-    return db.runTransaction(async (transaction) => {
+    const sendResult = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(referralRef);
         const referral = requireReferralSnapshot(snapshot);
         await requireReferrerAuthority(transaction, referral, actor, input.actorOrganizationId);
@@ -713,6 +714,30 @@ exports.businessReferral_send = (0, https_1.onCall)(async (request) => {
         });
         return { success: true, version };
     });
+    if (!sendResult.idempotent) {
+        const routedReferral = (await referralRef.get()).data();
+        if (typeof routedReferral?.recipientOrgId === "string") {
+            const routingRequestId = `referral_${input.referralId}_${sendResult.version}`;
+            const routing = await (0, organizationEstablishments_1.resolveCommunicationRoute)({
+                db,
+                actorUid: actor.uid,
+                actorOrganizationId: typeof routedReferral.referrerOrgId === "string" ? routedReferral.referrerOrgId : undefined,
+                organizationId: routedReferral.recipientOrgId,
+                purpose: "referrals",
+                requestId: routingRequestId,
+            });
+            const batch = db.batch();
+            batch.set(referralRef, { routeResolution: routing.publicResult, updatedAt: Date.now() }, { merge: true });
+            routing.destinationMemberUids.forEach((uid) => batch.set(db.collection("notifications").doc(), {
+                uid, type: "business_referral", title: "New business referral",
+                body: "Your organization received a routed referral.", linkTo: "/referrals",
+                referralId: input.referralId, requestId: routingRequestId, read: false, createdAt: Date.now(),
+            }));
+            await batch.commit();
+            return { ...sendResult, routeResolution: routing.publicResult };
+        }
+    }
+    return sendResult;
 });
 exports.businessReferral_respond = (0, https_1.onCall)(async (request) => {
     const actor = (0, security_1.getAuthorizedActor)(request);

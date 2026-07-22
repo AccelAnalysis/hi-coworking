@@ -2,20 +2,28 @@
   "name": "@hi/shared",
   "private": true,
   "version": "0.0.0",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "types": "src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "node": "./dist/index.js",
       "default": "./src/index.ts"
     },
     "./opportunity-discovery": {
       "types": "./src/opportunityDiscovery.ts",
+      "node": "./dist/opportunityDiscovery.js",
       "default": "./src/opportunityDiscovery.ts"
     },
     "./exchange-organization-context": {
       "types": "./src/exchangeOrganizationContext.ts",
+      "node": "./dist/exchangeOrganizationContext.js",
       "default": "./src/exchangeOrganizationContext.ts"
+    },
+    "./organization-establishments": {
+      "types": "./src/organizationEstablishments.ts",
+      "node": "./dist/organizationEstablishments.js",
+      "default": "./src/organizationEstablishments.ts"
     }
   },
   "scripts": {

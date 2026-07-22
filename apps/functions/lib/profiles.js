@@ -7,6 +7,7 @@ const security_1 = require("./exchange/security");
 const contracts_1 = require("./exchange/contracts");
 const publicProfiles_1 = require("./exchange/publicProfiles");
 const profileModel_1 = require("./profileModel");
+const profileBusinessMigration_1 = require("./profileBusinessMigration");
 const PROFILE_ASSET_FIELD_PAIRS = [
     ["capabilityStatementStoragePath", "capabilityStatementUrl"],
     ["photoStoragePath", "photoUrl"],
@@ -14,6 +15,12 @@ const PROFILE_ASSET_FIELD_PAIRS = [
     ["videoIntroPosterStoragePath", "videoIntroPosterUrl"],
 ];
 const CLEARABLE_SCALAR_FIELDS = [
+    "displayName",
+    "professionalTitle",
+    "preferredPrivateEmail",
+    "preferredPrivatePhone",
+    "preferredOrganizationId",
+    "preferredEstablishmentId",
     "businessName",
     "bio",
     "city",
@@ -75,6 +82,12 @@ exports.profile_update = (0, https_1.onCall)(async (request) => {
         };
         delete merged.expectedVersion;
         const inputRecord = input;
+        // Legacy UID-owned business fields remain readable, but are no longer
+        // organization authority. Copy them into an explicit suggestion envelope
+        // for owner-reviewed organization onboarding without overwriting an org.
+        const suggestions = (0, profileBusinessMigration_1.mergeOrganizationOnboardingSuggestions)(previous, inputRecord);
+        if (Object.keys(suggestions).length)
+            merged.organizationOnboardingSuggestions = suggestions;
         for (const field of CLEARABLE_SCALAR_FIELDS) {
             if (inputRecord[field] === null)
                 delete merged[field];

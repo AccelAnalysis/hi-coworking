@@ -67,6 +67,20 @@ const profileHttpUrlSchema = zod_1.z.string().trim().max(2000).pipe(exports.http
 exports.profileUpdateInputSchema = zod_1.z
     .object({
     expectedVersion: zod_1.z.number().int().nonnegative(),
+    displayName: zod_1.z.string().trim().max(160).nullable().optional(),
+    professionalTitle: zod_1.z.string().trim().max(160).nullable().optional(),
+    preferredPrivateEmail: zod_1.z.string().trim().email().max(320).nullable().optional(),
+    preferredPrivatePhone: zod_1.z.string().trim().max(40).nullable().optional(),
+    communicationPreferences: zod_1.z.object({
+        inApp: zod_1.z.boolean(), email: zod_1.z.boolean(), sms: zod_1.z.boolean(),
+        quietHoursStart: zod_1.z.string().trim().max(5).optional(), quietHoursEnd: zod_1.z.string().trim().max(5).optional(),
+        timezone: zod_1.z.string().trim().max(80).optional(),
+    }).strict().optional(),
+    accessibilityPreferences: zod_1.z.object({ reducedMotion: zod_1.z.boolean(), highContrast: zod_1.z.boolean(), mapAlternativePreferred: zod_1.z.boolean() }).strict().optional(),
+    notificationPreferences: zod_1.z.object({ referrals: zod_1.z.boolean(), opportunities: zod_1.z.boolean(), introductions: zod_1.z.boolean(), organizationAdministration: zod_1.z.boolean() }).strict().optional(),
+    preferredOrganizationId: zod_1.z.string().trim().max(128).nullable().optional(),
+    preferredEstablishmentId: zod_1.z.string().trim().max(128).nullable().optional(),
+    professionalContactPublication: zod_1.z.object({ email: zod_1.z.boolean(), phone: zod_1.z.boolean(), title: zod_1.z.boolean() }).strict().optional(),
     businessName: zod_1.z.string().trim().max(200).nullable().optional(),
     bio: zod_1.z.string().trim().max(10000).nullable().optional(),
     city: zod_1.z.string().trim().max(160).nullable().optional(),
@@ -94,24 +108,15 @@ const VERIFICATION_STATUSES = new Set(["none", "pending", "verified", "rejected"
 const READINESS_TIERS = new Set(["seat_ready", "bid_ready", "procurement_ready"]);
 const VIDEO_STATUSES = new Set(["processing", "ready", "failed"]);
 const PUBLIC_STRING_FIELDS = [
-    "businessName",
+    "displayName",
+    "professionalTitle",
     "bio",
-    "city",
-    "state",
-    "domain",
-    "uei",
-    "duns",
-    "cageCode",
 ];
 const PUBLIC_HTTP_URL_FIELDS = [
     "website",
     "linkedin",
 ];
 const PUBLIC_ASSET_FIELDS = [
-    {
-        pathField: "capabilityStatementStoragePath",
-        legacyUrlField: "capabilityStatementUrl",
-    },
     {
         pathField: "photoStoragePath",
         legacyUrlField: "photoUrl",
@@ -126,9 +131,6 @@ const PUBLIC_ASSET_FIELDS = [
     },
 ];
 const PUBLIC_STRING_ARRAY_FIELDS = [
-    "naicsCodes",
-    "certifications",
-    "verifiedCertifications",
     "badges",
 ];
 const PUBLIC_NUMBER_FIELDS = [
@@ -196,6 +198,16 @@ function sanitizePublicProfile(profileId, profile) {
         if (typeof profile[field] === "string")
             projection[field] = profile[field];
     }
+    const publication = isRecord(profile.professionalContactPublication)
+        ? profile.professionalContactPublication : {};
+    if (publication.email === true && typeof profile.preferredPrivateEmail === "string") {
+        projection.professionalEmail = profile.preferredPrivateEmail;
+    }
+    if (publication.phone === true && typeof profile.preferredPrivatePhone === "string") {
+        projection.professionalPhone = profile.preferredPrivatePhone;
+    }
+    if (publication.title !== true)
+        delete projection.professionalTitle;
     for (const field of PUBLIC_HTTP_URL_FIELDS) {
         const parsed = exports.httpUrlSchema.safeParse(profile[field]);
         if (parsed.success)

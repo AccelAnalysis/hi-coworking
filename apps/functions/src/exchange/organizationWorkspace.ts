@@ -23,6 +23,7 @@ import {
   projectPrivateOrganization,
   resolveOrganizationPerspectiveModel,
 } from "./organizationPerspective";
+import { resolveCommunicationRoute } from "./organizationEstablishments";
 
 const CONTRACT_VERSION = 1 as const;
 const MAX_ACTOR_ORGANIZATIONS = 100;
@@ -30,7 +31,7 @@ const safeId = z.string().trim().min(1).max(200).refine((value) => !value.includ
 const idempotencyKey = z.string().trim().min(8).max(160).regex(/^[A-Za-z0-9_.:@-]+$/);
 const modeSchema = z.enum(["intelligence", "referrals", "opportunities", "resources"]);
 const secondarySchema = z.object({
-  type: z.enum(["opportunity", "referral", "resource", "territory", "team", "organization"]),
+  type: z.enum(["opportunity", "referral", "resource", "territory", "team", "organization", "establishment"]),
   id: safeId,
 }).strict();
 
@@ -699,7 +700,7 @@ export const exchange_requestOrganizationContact = onCall(async (request) => {
   const fingerprint = fingerprintRequest(input);
   const dedupeRef = idempotencyRef(db, actor.uid, action, input.idempotencyKey);
   const contactRef = db.collection("organizationContactRequests").doc();
-  return db.runTransaction(async (transaction) => {
+  const contactResult = await db.runTransaction(async (transaction) => {
     const dedupeSnapshot = await transaction.get(dedupeRef);
     await loadOrgAuthority(transaction, db, input.actorOrganizationId, actor.uid);
     const prior = completedIdempotentResult(dedupeSnapshot, actor.uid, action, fingerprint);
@@ -781,6 +782,22 @@ export const exchange_requestOrganizationContact = onCall(async (request) => {
     });
     return { contractVersion: CONTRACT_VERSION, ...result, idempotent: false };
   });
+  if (!contactResult.idempotent) {
+    const routing = await resolveCommunicationRoute({
+      db,
+      actorUid: actor.uid,
+      actorOrganizationId: input.actorOrganizationId,
+      organizationId: input.subjectOrganizationId,
+      purpose: "general",
+      requestId: contactRef.id,
+    });
+    await contactRef.set({
+      routeResolution: routing.publicResult,
+      deliveryState: "queued",
+      updatedAt: Date.now(),
+    }, { merge: true });
+  }
+  return contactResult;
 });
 
 const introductionInputSchema = z.object({

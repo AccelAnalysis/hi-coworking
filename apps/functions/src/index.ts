@@ -181,6 +181,17 @@ import {
   exchange_requestOrganizationIntroduction,
   exchange_getOrganizationResourceStatus,
 } from "./exchange/organizationWorkspace";
+import {
+  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_reviewOrganizationEnrichmentProposal,
+  exchange_resolveOrganizationCommunicationRoute,
+  exchange_searchOrganizationGeocodes,
+  exchange_updateOrganizationProfile,
+  exchange_upsertOrganizationCommunicationRoute,
+  exchange_upsertOrganizationContactPoint,
+  exchange_upsertOrganizationEstablishment,
+} from "./exchange/organizationEstablishments";
 
 import {
   team_listMine,
@@ -292,6 +303,15 @@ export {
   exchange_requestOrganizationContact,
   exchange_requestOrganizationIntroduction,
   exchange_getOrganizationResourceStatus,
+  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_reviewOrganizationEnrichmentProposal,
+  exchange_resolveOrganizationCommunicationRoute,
+  exchange_searchOrganizationGeocodes,
+  exchange_updateOrganizationProfile,
+  exchange_upsertOrganizationCommunicationRoute,
+  exchange_upsertOrganizationContactPoint,
+  exchange_upsertOrganizationEstablishment,
 };
 
 // Exchange commercial foundation (organization scoped; physical membership remains separate)

@@ -45,6 +45,7 @@ function main() {
   writeProtectedJsonLines(targetingOutput, targeting.rows);
   const manifest = {
     reviewPacketVersion: 1,
+    seedPackageVersion: 2,
     generatedAt: Date.now(),
     humanApprovalInferred: false,
     protectedArtifact: true,

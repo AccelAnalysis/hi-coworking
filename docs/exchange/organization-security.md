@@ -1,5 +1,13 @@
 # Organization activation and continuity security
 
+## Establishment and route addendum
+
+Private locations, contacts, communication routes, geocode sessions/caches, and delivery audits deny every browser read/write, including owner, staff, Actor URL, and selected Subject. Management callables re-read exact-active organization status and composite membership and require owner/admin for mutation.
+
+Public location/contact reads pass Firestore final-key allowlists plus server projection allowlists. Unapproved street data, one-sided/unapproved coordinates, private/home locations, private contacts, billing contacts, routes, destination IDs, and raw provider payload are excluded. Address/geocode confirmation never implies publication. Route responses contain no private destination value.
+
+Authority revocation takes effect on the next callable/read because Actor selection and Secondary establishment state are preferences, not authorization grants.
+
 The central security rule is that organization authority comes only from an
 exact active canonical membership and an active canonical organization. Actor,
 subject, URL, session, profile, marker, and platform-role concepts remain
@@ -100,9 +108,13 @@ Source and emulator suites cover or define coverage for:
 
 ## Remaining risk and acceptance
 
-Configured Function/rule/index deployment has not yet been accepted. Full
-external-subject network inspection, live token refresh after revocation,
-cross-mode cache inspection, direct-access probes, actor-aware index readiness,
-claim competition, and synthetic cleanup must still pass on
-`hi-coworking-plat`. The branch is draft and stacked, so integration and merge
-risk remains. No production-readiness claim is made.
+Configured development acceptance passed on `hi-coworking-plat`: the exact 21
+selected endpoints are active Gen 2 Node.js 20, all 93 indexes are ready, the
+Firestore rules are deployed, 120 emulator security/function/rule/migration
+tests pass, and the seven-project browser matrix passed external-response/DOM
+inspection, revocation with an unsaved draft, cross-mode Secondary Subject
+continuity, and exact synthetic cleanup. Storage rules were unchanged.
+
+Native VoiceOver remains a manual release gate. Node.js 20 and the pinned
+Firebase Functions SDK require a later bounded runtime upgrade. The workstream
+branch is draft and stacked, and no production-readiness claim is made.

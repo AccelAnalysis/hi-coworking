@@ -60,7 +60,8 @@ function main() {
   const body = `${exported.rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
   fs.writeFileSync(path.resolve(output), body, { encoding: "utf8", flag: "wx", mode: 0o600 });
   const manifest = {
-    approvedExportVersion: 1,
+    approvedExportVersion: 2,
+    seedPackageVersion: 2,
     projectId,
     environment,
     generatedAt: Date.now(),

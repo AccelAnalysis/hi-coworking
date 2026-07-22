@@ -13,6 +13,7 @@ import {
   PROFILE_SCHEMA_VERSION,
   sanitizeCanonicalProfile,
 } from "./profileModel";
+import { mergeOrganizationOnboardingSuggestions } from "./profileBusinessMigration";
 
 const PROFILE_ASSET_FIELD_PAIRS = [
   ["capabilityStatementStoragePath", "capabilityStatementUrl"],
@@ -22,6 +23,12 @@ const PROFILE_ASSET_FIELD_PAIRS = [
 ] as const;
 
 const CLEARABLE_SCALAR_FIELDS = [
+  "displayName",
+  "professionalTitle",
+  "preferredPrivateEmail",
+  "preferredPrivatePhone",
+  "preferredOrganizationId",
+  "preferredEstablishmentId",
   "businessName",
   "bio",
   "city",
@@ -90,8 +97,14 @@ export const profile_update = onCall(async (request) => {
       ...(previous.profileSchemaVersion === PROFILE_SCHEMA_VERSION ? {} : { legacyMigratedAt: now }),
     };
     delete merged.expectedVersion;
-
     const inputRecord = input as Record<string, unknown>;
+
+    // Legacy UID-owned business fields remain readable, but are no longer
+    // organization authority. Copy them into an explicit suggestion envelope
+    // for owner-reviewed organization onboarding without overwriting an org.
+    const suggestions = mergeOrganizationOnboardingSuggestions(previous, inputRecord);
+    if (Object.keys(suggestions).length) merged.organizationOnboardingSuggestions = suggestions;
+
     for (const field of CLEARABLE_SCALAR_FIELDS) {
       if (inputRecord[field] === null) delete merged[field];
     }

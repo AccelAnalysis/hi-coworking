@@ -137,6 +137,7 @@ export const exchangeSecondaryContextSchema = z.object({
     "territory",
     "team",
     "organization",
+    "establishment",
   ]),
   id: z.string().trim().min(1).max(200),
 }).strict();
@@ -221,6 +222,11 @@ export const exchangePublicOrganizationProjectionSchema = z.object({
   issuerStatus: z.enum(["approved", "not_issuer"]),
   acceptsReferrals: z.boolean(),
   publicContactAvailable: z.boolean(),
+  publicLocationCount: z.number().int().nonnegative().optional(),
+  primaryPublicLocation: z.object({
+    id: z.string(), name: z.string(), city: z.string(), county: z.string(),
+    administrativeArea: z.string(), coordinatePublicationApproved: z.boolean(),
+  }).strict().optional(),
   status: z.literal("active"),
   publicationApproved: z.literal(true),
   updatedAt: z.number(),

@@ -31,7 +31,6 @@ import {
   Check,
   ChevronRight,
   ChevronLeft,
-  Building2,
   FileText,
   Shield,
   Upload,
@@ -49,7 +48,7 @@ import {
 } from "lucide-react";
 
 const STEPS = [
-  { id: "business", label: "Business Info", icon: Building2 },
+  { id: "person", label: "Person & Suggestions", icon: Users },
   { id: "procurement", label: "Procurement", icon: Shield },
   { id: "documents", label: "Documents", icon: FileText },
 ] as const;
@@ -69,6 +68,13 @@ const CERTIFICATION_OPTIONS = [
 ];
 
 type FormData = {
+  displayName: string;
+  professionalTitle: string;
+  preferredPrivateEmail: string;
+  preferredPrivatePhone: string;
+  publishProfessionalEmail: boolean;
+  publishProfessionalPhone: boolean;
+  publishProfessionalTitle: boolean;
   businessName: string;
   bio: string;
   city: string;
@@ -136,6 +142,13 @@ function ProfileContent() {
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Partial<ProfileDoc> | null>(null);
   const [form, setForm] = useState<FormData>({
+    displayName: "",
+    professionalTitle: "",
+    preferredPrivateEmail: "",
+    preferredPrivatePhone: "",
+    publishProfessionalEmail: false,
+    publishProfessionalPhone: false,
+    publishProfessionalTitle: true,
     businessName: "",
     bio: "",
     city: "",
@@ -228,6 +241,13 @@ function ProfileContent() {
         if (existing) {
           setProfile(existing);
           setForm({
+            displayName: existing.displayName || "",
+            professionalTitle: existing.professionalTitle || "",
+            preferredPrivateEmail: existing.preferredPrivateEmail || "",
+            preferredPrivatePhone: existing.preferredPrivatePhone || "",
+            publishProfessionalEmail: existing.professionalContactPublication?.email ?? false,
+            publishProfessionalPhone: existing.professionalContactPublication?.phone ?? false,
+            publishProfessionalTitle: existing.professionalContactPublication?.title ?? true,
             businessName: existing.businessName || "",
             bio: existing.bio || "",
             city: existing.city || "",
@@ -294,6 +314,18 @@ function ProfileContent() {
 
     return {
       expectedVersion: profileVersion,
+      displayName: form.displayName.trim() || null,
+      professionalTitle: form.professionalTitle.trim() || null,
+      preferredPrivateEmail: form.preferredPrivateEmail.trim() || null,
+      preferredPrivatePhone: form.preferredPrivatePhone.trim() || null,
+      communicationPreferences: { inApp: true, email: true, sms: false },
+      accessibilityPreferences: { reducedMotion: false, highContrast: false, mapAlternativePreferred: false },
+      notificationPreferences: { referrals: true, opportunities: true, introductions: true, organizationAdministration: true },
+      professionalContactPublication: {
+        email: form.publishProfessionalEmail,
+        phone: form.publishProfessionalPhone,
+        title: form.publishProfessionalTitle,
+      },
       businessName: form.businessName.trim() || null,
       bio: form.bio.trim() || null,
       city: form.city.trim() || null,
@@ -335,6 +367,12 @@ function ProfileContent() {
   void _expectedVersion;
   const computedProfileForDisplay: Partial<ProfileDoc> = {
     ...computedProfileFields,
+    displayName: computedProfileFields.displayName ?? undefined,
+    professionalTitle: computedProfileFields.professionalTitle ?? undefined,
+    preferredPrivateEmail: computedProfileFields.preferredPrivateEmail ?? undefined,
+    preferredPrivatePhone: computedProfileFields.preferredPrivatePhone ?? undefined,
+    preferredOrganizationId: computedProfileFields.preferredOrganizationId ?? undefined,
+    preferredEstablishmentId: computedProfileFields.preferredEstablishmentId ?? undefined,
     businessName: computedProfileFields.businessName ?? undefined,
     bio: computedProfileFields.bio ?? undefined,
     city: computedProfileFields.city ?? undefined,
@@ -727,10 +765,10 @@ function ProfileContent() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
-              Business Profile
+              Person Profile
             </h1>
             <p className="text-slate-500 mt-1">
-              Complete your profile to unlock procurement opportunities.
+              Manage your personal identity and review organization-onboarding suggestions.
             </p>
           </div>
 
@@ -1158,7 +1196,7 @@ function ProfileContent() {
   );
 }
 
-// --- Step 1: Business Info ---
+// --- Step 1: Person profile and legacy organization suggestions ---
 
 function StepBusiness({
   form,
@@ -1179,12 +1217,45 @@ function StepBusiness({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold text-slate-900 mb-1">
-          Business Information
+          Person Profile
         </h2>
         <p className="text-sm text-slate-500">
-          Tell us about your business so other members and procurement officers
-          can find you.
+          Your login and private contact preferences belong to you. They are never
+          treated as an organization&apos;s public contact route automatically.
         </p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+          <input type="text" value={form.displayName} onChange={(e) => updateField("displayName", e.target.value)} autoComplete="name" className="w-full rounded-lg px-4 py-3 border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Professional title</label>
+          <input type="text" value={form.professionalTitle} onChange={(e) => updateField("professionalTitle", e.target.value)} className="w-full rounded-lg px-4 py-3 border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Preferred private email</label>
+          <input type="email" value={form.preferredPrivateEmail} onChange={(e) => updateField("preferredPrivateEmail", e.target.value)} autoComplete="email" className="w-full rounded-lg px-4 py-3 border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Preferred private telephone</label>
+          <input type="tel" value={form.preferredPrivatePhone} onChange={(e) => updateField("preferredPrivatePhone", e.target.value)} autoComplete="tel" className="w-full rounded-lg px-4 py-3 border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none" />
+        </div>
+      </div>
+      <fieldset className="rounded-xl border border-slate-200 p-4">
+        <legend className="px-1 text-sm font-bold text-slate-800">Professional publication decisions</legend>
+        <div className="grid gap-2">
+          {([
+            ["publishProfessionalTitle", "Publish professional title"],
+            ["publishProfessionalEmail", "Publish professional email"],
+            ["publishProfessionalPhone", "Publish professional telephone"],
+          ] as const).map(([field, label]) => <label key={field} className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={form[field]} onChange={(event) => updateField(field, event.target.checked)} />{label}</label>)}
+        </div>
+      </fieldset>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h3 className="font-bold text-amber-950">Organization-onboarding suggestions</h3>
+        <p className="mt-1 text-sm text-amber-900">The compatibility fields below can propose an organization profile. They do not overwrite an existing organization, location, contact point, or publication decision.</p>
       </div>
 
       {/* Photo */}
@@ -1231,7 +1302,7 @@ function StepBusiness({
       {/* Business Name */}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-          Business Name
+          Suggested organization name
         </label>
         <input
           type="text"
@@ -1245,7 +1316,7 @@ function StepBusiness({
       {/* Bio */}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-          Business Description
+          Suggested organization description
         </label>
         <textarea
           rows={4}

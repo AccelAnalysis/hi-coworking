@@ -146,7 +146,7 @@ function parseSelection(
     ?? params.get("selected")
     ?? "";
   if (
-    !["rfx", "opportunity", "territory", "organization", "referral", "resource", "team", "relationship", "industry"].includes(
+    !["rfx", "opportunity", "territory", "organization", "establishment", "referral", "resource", "team", "relationship", "industry"].includes(
       entityType ?? "",
     )
     || entityId.length === 0
@@ -155,7 +155,7 @@ function parseSelection(
   ) {
     return null;
   }
-  const allowedForView = entityType === "organization"
+  const allowedForView = entityType === "organization" || entityType === "establishment"
     ? true
     : view === "opportunities" || view === "businesses" || view === "teaming"
       ? entityType === "rfx"

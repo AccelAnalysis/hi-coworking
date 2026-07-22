@@ -581,9 +581,9 @@ describe("public profile projection backfill", () => {
     expect(projected).toMatchObject({
       uid: "published",
       published: true,
-      businessName: "Published Co",
       trustStats: { referralsConverted: 2 },
     });
+    expect(projected).not.toHaveProperty("businessName");
     expect(projected).not.toHaveProperty("email");
     expect(projected).not.toHaveProperty("enrichmentData");
     expect(projected).not.toHaveProperty("verificationReviewedBy");

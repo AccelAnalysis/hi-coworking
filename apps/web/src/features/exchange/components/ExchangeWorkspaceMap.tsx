@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExchangeOrganizationPerspective } from "@hi/shared/exchange-organization-context";
+import type { PublicOrganizationEstablishment } from "@hi/shared/organization-establishments";
 import type { PublicOrganizationProjection } from "@/lib/firestore";
 import { filterPublicOrganizations } from "../data/organizationDiscovery";
 import { loadPrimaryBusinessAnchor } from "../data/exchangeMapAnchor";
@@ -10,10 +11,14 @@ import {
   loadPublicOrganizationsForExchange,
   subscribePublicOrganizationsForExchange,
 } from "../data/publicOrganizationRepository";
+import {
+  loadPublicOrganizationLocations,
+  subscribePublicOrganizationLocations,
+} from "../data/publicOrganizationLocationRepository";
 import { liveExchangeOpportunityRepository } from "../data/exchangeRepository";
 import { useExchangeData } from "../data/useExchangeData";
 import { exchangeDemoOpportunityRepository } from "../demo/exchangeDemoGateway";
-import type { PublicOrganizationMapRecord } from "../map/geojson";
+import { establishmentMarkers, type PublicOrganizationMapRecord } from "../map/geojson";
 import {
   DEFAULT_EXCHANGE_MAP_VIEWPORT,
   type ExchangeMapBounds,
@@ -53,9 +58,12 @@ function asMapSelection(state: ExchangeWorkspaceState): ExchangeMapSelection {
   const selection = state.secondaryContext ?? state.selection;
   return selection && (
     selection.entityType === "organization"
+    || selection.entityType === "establishment"
     || selection.entityType === "rfx"
     || selection.entityType === "territory"
-  ) ? selection : null;
+  ) ? (selection.entityType === "establishment"
+      ? { entityType: "establishment", entityId: selection.entityId, organizationId: selection.organizationId ?? state.subjectOrganizationId ?? "" }
+      : selection) : null;
 }
 
 function contextOrganizations(
@@ -98,6 +106,7 @@ export function ExchangeWorkspaceMap({
   perspective?: ExchangeOrganizationPerspective | null;
 }) {
   const [organizations, setOrganizations] = useState<PublicOrganizationProjection[]>([]);
+  const [locations, setLocations] = useState<PublicOrganizationEstablishment[]>([]);
   const [fitRequest, setFitRequest] = useState(0);
   const [initialViewport, setInitialViewport] = useState<ExchangeMapViewport | null>(() =>
     state.viewport ?? (demoMode ? { ...DEFAULT_EXCHANGE_MAP_VIEWPORT } : null),
@@ -181,6 +190,18 @@ export function ExchangeWorkspaceMap({
   }, [demoMode, viewerUid]);
 
   useEffect(() => {
+    if (demoMode || !viewerUid) { setLocations([]); return; }
+    let active = true;
+    const unsubscribe = subscribePublicOrganizationLocations((records) => {
+      if (active) setLocations(records);
+    });
+    void loadPublicOrganizationLocations().then((records) => {
+      if (active) setLocations(records);
+    }).catch(() => { if (active) setLocations([]); });
+    return () => { active = false; unsubscribe(); };
+  }, [demoMode, viewerUid]);
+
+  useEffect(() => {
     const fit = () => setFitRequest((value) => value + 1);
     window.addEventListener("hi-exchange-fit-map", fit);
     return () => window.removeEventListener("hi-exchange-fit-map", fit);
@@ -195,6 +216,13 @@ export function ExchangeWorkspaceMap({
     return filteredOrganizations.filter((organization) =>
       organization.resourceProviderStatus === "approved");
   }, [activeView, filteredOrganizations]);
+  const modeMarkers = useMemo(
+    () => establishmentMarkers(
+      modeOrganizations,
+      locations.filter((location) => modeOrganizations.some((organization) => organization.id === location.organizationId)),
+    ),
+    [locations, modeOrganizations],
+  );
   const activeContextOrganizations = useMemo(
     () => contextOrganizations(
       organizations,
@@ -230,7 +258,7 @@ export function ExchangeWorkspaceMap({
     >
       {initialViewport ? <ExchangeMap
         rfxList={activeView === "opportunities" ? rfx : []}
-        organizations={modeOrganizations}
+        organizations={modeMarkers}
         contextOrganizations={activeContextOrganizations}
         releasedTerritories={releasedTerritories}
         scheduledTerritories={scheduledTerritories}
@@ -247,6 +275,12 @@ export function ExchangeWorkspaceMap({
           if (selection.entityType === "organization") {
             applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
             applyAction(exchangeWorkspaceActions.setSubjectOrganization(selection.entityId), "push");
+            return;
+          }
+          if (selection.entityType === "establishment") {
+            applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
+            applyAction(exchangeWorkspaceActions.setSubjectOrganization(selection.organizationId), "push");
+            applyAction(exchangeWorkspaceActions.setSecondaryContext(selection), "push");
             return;
           }
           applyAction(exchangeWorkspaceActions.setSecondaryContext(selection), "push");

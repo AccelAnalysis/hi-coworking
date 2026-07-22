@@ -28,6 +28,24 @@ type EnrichmentCandidate = {
   matchReason: string;
   source: "sam_gov" | "usaspending";
   providers: Array<"sam_gov" | "usaspending">;
+  proposedAddresses?: Array<{
+    id: string;
+    address: {
+      line1: string;
+      line2?: string;
+      locality: string;
+      administrativeArea: string;
+      postalCode?: string;
+      countryCode: string;
+      county?: string;
+    };
+  }>;
+  proposedContacts?: Array<{
+    id: string;
+    type: "email" | "phone";
+    value: string;
+    label?: string;
+  }>;
 };
 
 type EnrichmentProviderStatus = "ok" | "not_configured" | "unavailable";
@@ -78,6 +96,62 @@ function normalize(value?: string): string {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function firstText(values: unknown[], max = 500): string | undefined {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const candidate = value.trim().replace(/\s+/g, " ").slice(0, max);
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
+function proposalId(prefix: string, parts: Array<string | undefined>): string {
+  return `${prefix}_${createHash("sha256").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 20)}`;
+}
+
+function extractSamProposalDetails(row: Record<string, unknown>): Pick<EnrichmentCandidate, "proposedAddresses" | "proposedContacts"> {
+  const core = record(row.coreData);
+  const registration = record(row.entityRegistration);
+  const address = record(row.physicalAddress ?? core.physicalAddress ?? registration.physicalAddress);
+  const line1 = firstText([address.addressLine1, address.line1, row.physicalAddressLine1]);
+  const line2 = firstText([address.addressLine2, address.line2, row.physicalAddressLine2]);
+  const locality = firstText([address.city, address.cityName, address.physicalAddressCityName, row.physicalAddressCityName], 120);
+  const administrativeArea = firstText([address.stateOrProvinceCode, address.state, row.physicalAddressStateOrProvinceCode], 120);
+  const postalCode = firstText([address.zipCode, address.postalCode, row.physicalAddressZipCode], 32);
+  const countryCode = firstText([address.countryCode, row.physicalAddressCountryCode], 2)?.toUpperCase() ?? "US";
+  const county = firstText([address.county, address.countyName, row.physicalAddressCountyName], 120);
+  const proposedAddresses = line1 && locality && administrativeArea
+    ? [{
+      id: proposalId("address", [line1, locality, administrativeArea, postalCode]),
+      address: { line1, ...(line2 ? { line2 } : {}), locality, administrativeArea, ...(postalCode ? { postalCode } : {}), countryCode, ...(county ? { county } : {}) },
+    }]
+    : undefined;
+
+  const points = Array.isArray(row.pointsOfContact)
+    ? row.pointsOfContact
+    : Array.isArray(core.pointsOfContact) ? core.pointsOfContact : [];
+  const proposedContacts = points.flatMap((raw, index) => {
+    const point = record(raw);
+    const email = firstText([point.email, point.emailAddress], 320);
+    const phone = firstText([point.phone, point.phoneNumber, point.usPhone], 80);
+    const label = firstText([point.contactType, point.type, point.name], 120);
+    return [
+      ...(email ? [{ id: proposalId("email", [email, String(index)]), type: "email" as const, value: email, ...(label ? { label } : {}) }] : []),
+      ...(phone ? [{ id: proposalId("phone", [phone, String(index)]), type: "phone" as const, value: phone, ...(label ? { label } : {}) }] : []),
+    ];
+  }).slice(0, 20);
+  return {
+    ...(proposedAddresses ? { proposedAddresses } : {}),
+    ...(proposedContacts.length ? { proposedContacts } : {}),
+  };
 }
 
 function toCacheKey(data: {
@@ -211,8 +285,10 @@ async function searchSamGov(params: {
 
     const rows = data.entityData || data.entities || [];
     const candidates = rows.slice(0, 15).map((row, index) => {
+      const core = record(row.coreData);
+      const registration = record(row.entityRegistration ?? core.entityRegistration);
       const legalName = String(
-        row.legalBusinessName || row.entityName || row.legalName || params.businessName
+        row.legalBusinessName || registration.legalBusinessName || row.entityName || row.legalName || params.businessName
       );
       const city = String(row.physicalAddressCityName || row.city || "") || undefined;
       const state = String(row.physicalAddressStateOrProvinceCode || row.state || "") || undefined;
@@ -233,6 +309,7 @@ async function searchSamGov(params: {
         matchReason: reason,
         source: "sam_gov" as const,
         providers: ["sam_gov" as const],
+        ...extractSamProposalDetails(row),
       };
     });
     return { candidates, status: "ok" };
@@ -588,10 +665,29 @@ export const enrichment_link = onCall(async (request) => {
       };
     }
 
+    const organizationOnboardingSuggestions = previous.organizationOnboardingSuggestions
+      && typeof previous.organizationOnboardingSuggestions === "object"
+      ? { ...previous.organizationOnboardingSuggestions as Record<string, unknown>, ...appliedValues }
+      : { ...appliedValues };
+    const enrichmentProposals = previous.enrichmentProposals
+      && typeof previous.enrichmentProposals === "object"
+      ? { ...previous.enrichmentProposals as Record<string, unknown> }
+      : {};
+    enrichmentProposals[requestId] = {
+      status: "proposed",
+      matchId,
+      provider: selectedCandidate.source,
+      proposedFields: appliedValues,
+      proposedAddresses: selectedCandidate.proposedAddresses ?? [],
+      proposedContacts: selectedCandidate.proposedContacts ?? [],
+      fieldProvenance,
+      createdAt: now,
+    };
     const merged: Record<string, unknown> = {
       ...previous,
-      ...appliedValues,
       uid,
+      organizationOnboardingSuggestions,
+      enrichmentProposals,
       enrichmentMatchId: matchId,
       enrichmentData: selectedCandidate,
       enrichmentSource: selectedCandidate.source,

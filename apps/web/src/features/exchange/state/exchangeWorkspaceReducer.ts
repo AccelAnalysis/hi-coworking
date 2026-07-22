@@ -108,6 +108,7 @@ export function normalizeExchangeSelection(
     && candidate.entityType !== "opportunity"
     && candidate.entityType !== "territory"
     && candidate.entityType !== "organization"
+    && candidate.entityType !== "establishment"
     && candidate.entityType !== "referral"
     && candidate.entityType !== "resource"
     && candidate.entityType !== "team"
@@ -122,6 +123,10 @@ export function normalizeExchangeSelection(
   return {
     entityType: candidate.entityType,
     entityId,
+    ...(candidate.entityType === "establishment"
+      && typeof (candidate as { organizationId?: unknown }).organizationId === "string"
+      ? { organizationId: normalizeExchangeEntityId((candidate as { organizationId: string }).organizationId) }
+      : {}),
   };
 }
 
@@ -681,10 +686,23 @@ export function exchangeWorkspaceReducer(
   switch (action.type) {
     case "SET_VIEW":
       if (!isExchangeView(action.view)) return state;
-      return restoreMode(
-        { ...snapshotMode(state), view: action.view },
-        canonicalExchangeMode(action.view),
-      );
+      {
+        const selectedEstablishment = state.secondaryContext?.entityType === "establishment"
+          ? state.secondaryContext
+          : null;
+        const restored = restoreMode(
+          { ...snapshotMode(state), view: action.view },
+          canonicalExchangeMode(action.view),
+        );
+        if (!selectedEstablishment) return restored;
+        return snapshotMode({
+          ...restored,
+          secondaryContext: selectedEstablishment,
+          selection: selectedEstablishment,
+          rightPanelOpen: state.rightPanelOpen,
+          mobileDetailOpen: state.rightPanelOpen || state.organizationDrawerOpen,
+        });
+      }
     case "SET_REQUESTED_ACTOR_ORGANIZATION":
       return {
         ...state,

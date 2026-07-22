@@ -18,26 +18,13 @@ const expectedEndpoints = [
   "account_initialize",
   "enrichment_link",
   "enrichment_search",
-  "exchange_adminGetOrganizationClaim",
-  "exchange_adminListOrganizationClaims",
-  "exchange_adminReviewOrganizationClaim",
-  "exchange_getOrganizationResourceStatus",
-  "exchange_listActorOrganizations",
-  "exchange_organizationCreate",
-  "exchange_organizationDirectory",
-  "exchange_organizationListMyClaims",
-  "exchange_organizationRequestClaim",
-  "exchange_organizationSearch",
-  "exchange_requestOrganizationContact",
-  "exchange_requestOrganizationIntroduction",
-  "exchange_resolveOrganizationPerspective",
-  "exchange_saveOrganization",
   "profile_update",
 ].sort();
 const compiledFiles = [
   "coreFirebaseEntry.js",
   "accounts.js",
   "profiles.js",
+  "profileBusinessMigration.js",
   "enrichment.js",
   "enrichmentLegacy.js",
   "enrichmentSearch.js",
@@ -46,10 +33,6 @@ const compiledFiles = [
   "exchange/contracts.js",
   "exchange/security.js",
   "exchange/publicProfiles.js",
-  "exchange/organizationModel.js",
-  "exchange/organizationPerspective.js",
-  "exchange/organizationWorkspace.js",
-  "exchange/organizations.js",
 ];
 
 const manifest = {
@@ -108,7 +91,7 @@ function artifactHashes() {
 function validatePackage() {
   const marker = JSON.parse(readFileSync(markerPath, "utf8"));
   if (
-    marker.contractVersion !== 3
+    marker.contractVersion !== 4
     || JSON.stringify(marker.endpoints) !== JSON.stringify(expectedEndpoints)
     || JSON.stringify(marker.compiledFiles) !== JSON.stringify(listRelativeFiles(resolve(stagingRoot, "lib")))
   ) {
@@ -161,7 +144,7 @@ if (operation === "generate") {
   }, null, 2)}\n`);
   writeFileSync(resolve(stagingRoot, "functions.yaml"), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(markerPath, `${JSON.stringify({
-    contractVersion: 3,
+    contractVersion: 4,
     endpoints: expectedEndpoints,
     compiledFiles: listRelativeFiles(resolve(stagingRoot, "lib")),
     artifactHashes: artifactHashes(),

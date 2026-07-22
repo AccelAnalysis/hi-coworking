@@ -18,6 +18,14 @@ type Fixture = {
   subjectOrganizationId: string;
   actorName: string;
   subjectName: string;
+  actorHeadquartersId: string;
+  subjectHeadquartersId: string;
+  subjectBranchId: string;
+  subjectMailingId: string;
+  subjectHomeId: string;
+  subjectPublicGeneralContactId: string;
+  subjectPrivateReferralContactId: string;
+  subjectReferralRouteId: string;
   createdAt: number;
 };
 
@@ -38,6 +46,22 @@ async function login(
   }
 }
 
+async function gotoStable(page: import("@playwright/test").Page, path: string) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(path);
+      await expect(page).toHaveURL(new RegExp(`${path.split("?")[0].replaceAll("/", "\\/")}(?:\\?|$)`));
+      return;
+    } catch (error) {
+      lastError = error;
+      const message = String(error).toLowerCase();
+      if (!message.includes("interrupted by another navigation") && !message.includes("frame load interrupted")) throw error;
+    }
+  }
+  throw lastError;
+}
+
 async function createFixture(projectName: string): Promise<Fixture> {
   const appName = `configured-org-continuity-${projectName}-${crypto.randomUUID()}`;
   const app = getApps().find((candidate) => candidate.name === appName)
@@ -53,6 +77,14 @@ async function createFixture(projectName: string): Promise<Fixture> {
   const subjectName = `Codex External Organization ${suffix}`;
   const actorOrganizationId = `codex-org-actor-${suffix}`;
   const subjectOrganizationId = `codex-org-subject-${suffix}`;
+  const actorHeadquartersId = `${actorOrganizationId}-hq`;
+  const subjectHeadquartersId = `${subjectOrganizationId}-hq`;
+  const subjectBranchId = `${subjectOrganizationId}-branch`;
+  const subjectMailingId = `${subjectOrganizationId}-mailing`;
+  const subjectHomeId = `${subjectOrganizationId}-home`;
+  const subjectPublicGeneralContactId = `${subjectOrganizationId}-public-general`;
+  const subjectPrivateReferralContactId = `${subjectOrganizationId}-private-referral`;
+  const subjectReferralRouteId = `${subjectOrganizationId}-referral-route`;
   const createdAt = Date.now();
   const owner = await auth.createUser({
     email: ownerEmail,
@@ -117,6 +149,9 @@ async function createFixture(projectName: string): Promise<Fixture> {
     developmentTestPurpose: TEST_PURPOSE,
     createdAt,
     updatedAt: createdAt,
+    primaryLocationId: actorHeadquartersId,
+    headquartersLocationId: actorHeadquartersId,
+    publicLocationCount: 1,
   };
   const subjectPrivate = {
     id: subjectOrganizationId,
@@ -148,6 +183,13 @@ async function createFixture(projectName: string): Promise<Fixture> {
     developmentTestPurpose: TEST_PURPOSE,
     createdAt,
     updatedAt: createdAt,
+    primaryLocationId: subjectHeadquartersId,
+    headquartersLocationId: subjectHeadquartersId,
+    publicLocationCount: 4,
+    primaryPublicLocation: {
+      id: subjectHeadquartersId, name: "Smithfield Headquarters", city: "Smithfield",
+      county: "Isle of Wight", administrativeArea: "VA", coordinatePublicationApproved: true,
+    },
   };
   const publicProjection = (source: typeof actorPrivate) => ({
     id: source.id,
@@ -182,6 +224,26 @@ async function createFixture(projectName: string): Promise<Fixture> {
     developmentTestPurpose: TEST_PURPOSE,
     createdAt,
     updatedAt: createdAt,
+    publicLocationCount: source.id === subjectOrganizationId ? 4 : 1,
+    ...(source.id === subjectOrganizationId ? { primaryPublicLocation: subjectPrivate.primaryPublicLocation } : {}),
+  });
+  const address = (line1: string, locality: string) => ({
+    line1, locality, administrativeArea: "VA", postalCode: "23430", countryCode: "US", county: "Isle of Wight",
+  });
+  const geocode = (line1: string, latitude: number, longitude: number) => ({
+    provider: "configured_fixture", normalizedAddress: `${line1}, Smithfield, VA 23430`, latitude, longitude,
+    precision: "address", confidence: "high", source: "administrator_confirmed", geocodedAt: createdAt,
+    confirmedByUid: owner.uid, confirmedAt: createdAt,
+  });
+  const privateLocation = (input: Record<string, unknown>) => ({
+    organizationId: subjectOrganizationId, status: "active", addressPublicationApproved: false,
+    coordinatePublicationApproved: false, publicContactAvailable: false, privateHome: false,
+    createdBy: owner.uid, createdAt, updatedAt: createdAt, version: 1, recordVersion: 1,
+    ...input,
+  });
+  const publicLocation = (input: Record<string, unknown>) => ({
+    organizationId: subjectOrganizationId, addressPublicationApproved: false, coordinatePublicationApproved: false,
+    publicContactAvailable: false, version: 1, updatedAt: createdAt, ...input,
   });
   const batch = db.batch();
   for (const [uid, email, displayName] of [
@@ -199,6 +261,49 @@ async function createFixture(projectName: string): Promise<Fixture> {
       updatedAt: createdAt,
     });
   }
+  batch.set(db.collection("profiles").doc(owner.uid), {
+    uid: owner.uid,
+    displayName: owner.displayName,
+    businessName: "Compatibility-only owner suggestion",
+    published: false,
+    profileSchemaVersion: 4,
+    profileVersion: 0,
+    enrichmentProposals: {
+      [`configured-enrichment-${suffix}`]: {
+        status: "proposed",
+        provider: "configured_external_provider",
+        proposedFields: { businessName: "Never overwrite the authoritative actor name" },
+        proposedAddresses: [{
+          id: `configured-address-${suffix}`,
+          address: {
+            line1: "4600 Silver Hill Road",
+            locality: "Washington",
+            administrativeArea: "DC",
+            postalCode: "20233",
+            countryCode: "US",
+          },
+        }],
+        proposedContacts: [{
+          id: `configured-contact-${suffix}`,
+          type: "email",
+          value: `configured-proposal-${suffix}@example.test`,
+          label: "External general contact",
+        }],
+        createdAt,
+      },
+    },
+    createdAt,
+    updatedAt: createdAt,
+  });
+  batch.set(db.collection("profiles").doc(externalOwner.uid), {
+    uid: externalOwner.uid,
+    displayName: externalOwner.displayName,
+    published: false,
+    profileSchemaVersion: 4,
+    profileVersion: 0,
+    createdAt,
+    updatedAt: createdAt,
+  });
   batch.set(db.collection("orgs").doc(actorOrganizationId), actorPrivate);
   batch.set(db.collection("orgs").doc(subjectOrganizationId), subjectPrivate);
   batch.set(db.collection("publicOrganizations").doc(actorOrganizationId), publicProjection(actorPrivate));
@@ -231,6 +336,73 @@ async function createFixture(projectName: string): Promise<Fixture> {
     developmentTestPurpose: TEST_PURPOSE,
     updatedAt: createdAt,
   });
+  batch.set(db.collection("organizationLocations").doc(actorHeadquartersId), {
+    ...privateLocation({ id: actorHeadquartersId, organizationId: actorOrganizationId, name: "Actor Headquarters",
+      locationType: "headquarters", isHeadquarters: true, isPrimary: true, physicalAddress: address("100 Main Street", "Smithfield"),
+      geocode: geocode("100 Main Street", 36.9824, -76.6311), coordinatePublicationApproved: true }),
+  });
+  batch.set(db.collection("publicOrganizationLocations").doc(actorHeadquartersId), publicLocation({
+    id: actorHeadquartersId, organizationId: actorOrganizationId, name: "Actor Headquarters", locationType: "headquarters",
+    isHeadquarters: true, isPrimary: true, city: "Smithfield", county: "Isle of Wight", administrativeArea: "VA",
+    countryCode: "US", coordinatePublicationApproved: true, latitude: 36.9824, longitude: -76.6311,
+    coordinatePrecision: "address",
+  }));
+  batch.set(db.collection("organizationLocations").doc(subjectHeadquartersId), privateLocation({
+    id: subjectHeadquartersId, name: "Smithfield Headquarters", locationType: "headquarters", isHeadquarters: true,
+    isPrimary: true, physicalAddress: address("319 Main Street", "Smithfield"),
+    geocode: geocode("319 Main Street", 36.9827, -76.6320), coordinatePublicationApproved: true,
+  }));
+  batch.set(db.collection("organizationLocations").doc(subjectBranchId), privateLocation({
+    id: subjectBranchId, name: "Windsor Branch", locationType: "branch", isHeadquarters: false,
+    isPrimary: false, physicalAddress: address("70 East Windsor Boulevard", "Windsor"),
+    serviceArea: { city: "Windsor", county: "Isle of Wight", region: "VA", countryCode: "US" },
+    geocode: geocode("70 East Windsor Boulevard", 36.8085, -76.7441), coordinatePublicationApproved: true,
+  }));
+  batch.set(db.collection("organizationLocations").doc(subjectMailingId), privateLocation({
+    id: subjectMailingId, name: "Mail processing", locationType: "mailing_only", isHeadquarters: false,
+    isPrimary: false, mailingAddress: address("319 Main Street", "Smithfield"),
+  }));
+  batch.set(db.collection("organizationLocations").doc(subjectHomeId), privateLocation({
+    id: subjectHomeId, name: "Owner private home", locationType: "office", isHeadquarters: false,
+    isPrimary: false, privateHome: true, physicalAddress: address("1 Private Lane", "Smithfield"),
+    serviceArea: { city: "Smithfield", county: "Isle of Wight", region: "VA", countryCode: "US" },
+    geocode: geocode("1 Private Lane", 36.95, -76.65),
+  }));
+  for (const projection of [
+    publicLocation({ id: subjectHeadquartersId, name: "Smithfield Headquarters", locationType: "headquarters", isHeadquarters: true,
+      isPrimary: true, city: "Smithfield", county: "Isle of Wight", administrativeArea: "VA", countryCode: "US",
+      coordinatePublicationApproved: true, latitude: 36.9827, longitude: -76.6320, coordinatePrecision: "address" }),
+    publicLocation({ id: subjectBranchId, name: "Windsor Branch", locationType: "branch", isHeadquarters: false,
+      isPrimary: false, city: "Windsor", county: "Isle of Wight", administrativeArea: "VA", countryCode: "US",
+      coordinatePublicationApproved: true, latitude: 36.8085, longitude: -76.7441, coordinatePrecision: "address" }),
+    publicLocation({ id: subjectMailingId, name: "Mail processing", locationType: "mailing_only", isHeadquarters: false, isPrimary: false }),
+    publicLocation({ id: subjectHomeId, name: "Smithfield service area", locationType: "service_location", isHeadquarters: false,
+      isPrimary: false, city: "Smithfield", county: "Isle of Wight", administrativeArea: "VA", countryCode: "US" }),
+  ]) batch.set(db.collection("publicOrganizationLocations").doc(String(projection.id)), projection);
+  batch.set(db.collection("organizationContactPoints").doc(subjectPublicGeneralContactId), {
+    id: subjectPublicGeneralContactId, organizationId: subjectOrganizationId, type: "email", purposes: ["general"],
+    normalizedValue: "public-general@example.test", displayValue: "public-general@example.test", verificationStatus: "verified",
+    visibility: "public", publicationStatus: "approved", consentAuthorityBasis: "configured_fixture", status: "active",
+    createdBy: externalOwner.uid, createdAt, updatedAt: createdAt, version: 1, recordVersion: 1,
+  });
+  batch.set(db.collection("publicOrganizationContactPoints").doc(subjectPublicGeneralContactId), {
+    id: subjectPublicGeneralContactId, organizationId: subjectOrganizationId, type: "email", purposes: ["general"],
+    displayValue: "public-general@example.test", visibility: "public", publicationStatus: "approved", status: "active",
+    version: 1, updatedAt: createdAt,
+  });
+  batch.set(db.collection("organizationContactPoints").doc(subjectPrivateReferralContactId), {
+    id: subjectPrivateReferralContactId, organizationId: subjectOrganizationId, type: "email", purposes: ["referrals"],
+    normalizedValue: "never-return-private-referral@example.test", displayValue: "Private referral intake",
+    verificationStatus: "verified", visibility: "private_operational", publicationStatus: "draft",
+    consentAuthorityBasis: "configured_fixture", status: "active", createdBy: externalOwner.uid,
+    createdAt, updatedAt: createdAt, version: 1, recordVersion: 1,
+  });
+  batch.set(db.collection("organizationCommunicationRoutes").doc(subjectReferralRouteId), {
+    id: subjectReferralRouteId, organizationId: subjectOrganizationId, purpose: "referrals",
+    primaryContactPointIds: [subjectPrivateReferralContactId], fallbackContactPointIds: [], fallbackMemberRoles: ["owner"],
+    inAppEnabled: true, emailEnabled: true, phoneEnabled: false, status: "active", createdBy: externalOwner.uid,
+    createdAt, updatedAt: createdAt, version: 1, recordVersion: 1,
+  });
   await batch.commit();
   return {
     ownerUid: owner.uid,
@@ -241,6 +413,14 @@ async function createFixture(projectName: string): Promise<Fixture> {
     subjectOrganizationId,
     actorName,
     subjectName,
+    actorHeadquartersId,
+    subjectHeadquartersId,
+    subjectBranchId,
+    subjectMailingId,
+    subjectHomeId,
+    subjectPublicGeneralContactId,
+    subjectPrivateReferralContactId,
+    subjectReferralRouteId,
     createdAt,
   };
 }
@@ -289,6 +469,15 @@ async function cleanupFixture(fixture: Fixture, projectName: string) {
     deleteQueryDocuments(db, "opportunitySavedSearches", "ownerUid", [fixture.ownerUid]),
     deleteQueryDocuments(db, "organizationContactRequests", "requestedByUid", [fixture.ownerUid]),
     deleteQueryDocuments(db, "organizationIntroductionRequests", "requestedByUid", [fixture.ownerUid]),
+    deleteQueryDocuments(db, "organizationRouteDeliveries", "actorUid", [fixture.ownerUid]),
+    deleteQueryDocuments(db, "notifications", "uid", [fixture.ownerUid, fixture.externalOwnerUid]),
+    deleteQueryDocuments(db, "organizationGeocodeRateLimits", "uid", [fixture.ownerUid]),
+    deleteQueryDocuments(db, "organizationGeocodeCandidateSessions", "uid", [fixture.ownerUid]),
+    deleteQueryDocuments(db, "organizationLocations", "organizationId", [fixture.actorOrganizationId, fixture.subjectOrganizationId]),
+    deleteQueryDocuments(db, "publicOrganizationLocations", "organizationId", [fixture.actorOrganizationId, fixture.subjectOrganizationId]),
+    deleteQueryDocuments(db, "organizationContactPoints", "organizationId", [fixture.actorOrganizationId, fixture.subjectOrganizationId]),
+    deleteQueryDocuments(db, "publicOrganizationContactPoints", "organizationId", [fixture.actorOrganizationId, fixture.subjectOrganizationId]),
+    deleteQueryDocuments(db, "organizationCommunicationRoutes", "organizationId", [fixture.actorOrganizationId, fixture.subjectOrganizationId]),
   ]);
   const batch = db.batch();
   for (const uid of [fixture.ownerUid, fixture.externalOwnerUid]) {
@@ -303,6 +492,15 @@ async function cleanupFixture(fixture: Fixture, projectName: string) {
     batch.delete(db.collection("publicOrganizations").doc(organizationId));
     batch.delete(db.collection("orgs").doc(organizationId));
   }
+  for (const locationId of [fixture.actorHeadquartersId, fixture.subjectHeadquartersId, fixture.subjectBranchId, fixture.subjectMailingId, fixture.subjectHomeId]) {
+    batch.delete(db.collection("organizationLocations").doc(locationId));
+    batch.delete(db.collection("publicOrganizationLocations").doc(locationId));
+  }
+  for (const contactId of [fixture.subjectPublicGeneralContactId, fixture.subjectPrivateReferralContactId]) {
+    batch.delete(db.collection("organizationContactPoints").doc(contactId));
+    batch.delete(db.collection("publicOrganizationContactPoints").doc(contactId));
+  }
+  batch.delete(db.collection("organizationCommunicationRoutes").doc(fixture.subjectReferralRouteId));
   await batch.commit();
 }
 
@@ -340,6 +538,133 @@ test("configured development preserves external organization context through eve
 
   try {
     await login(page, fixture.ownerEmail, fixture.ownerPassword);
+    await gotoStable(page, `/org/settings?id=${fixture.actorOrganizationId}&tab=establishments`);
+    await expect(page.getByRole("heading", { name: fixture.actorName })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole("heading", { name: "Establishments" })).toBeVisible();
+    await expect(page.getByText("Actor Headquarters", { exact: true })).toBeVisible();
+    await expect(page.getByText("Address private", { exact: true })).toBeVisible();
+    const settingsOverflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(settingsOverflow.scrollWidth).toBeLessThanOrEqual(settingsOverflow.clientWidth + 1);
+
+    if (testInfo.project.name === "configured-development-chromium") {
+      const headquartersCard = page.getByRole("listitem").filter({ hasText: "Actor Headquarters" });
+      await headquartersCard.getByRole("button", { name: "Edit" }).click();
+      await page.getByLabel("Address line 1").fill("4600 Silver Hill Road");
+      await page.getByLabel("City").fill("Washington");
+      await page.getByLabel("State / region").fill("DC");
+      await page.getByLabel("Postal code").fill("20233");
+      await page.getByLabel("County").fill("Prince George's");
+      const geocodeResponse = page.waitForResponse((response) => response.url().includes("/exchange_searchOrganizationGeocodes") && response.request().method() === "POST");
+      await page.getByRole("button", { name: "Search standardized addresses" }).click();
+      const geocodeResult = await geocodeResponse;
+      expect(geocodeResult.status(), JSON.stringify(await geocodeResult.json())).toBe(200);
+      const candidate = page.getByRole("radio", { name: /4600 SILVER HILL/i }).first();
+      await expect(candidate).toBeVisible({ timeout: 30_000 });
+      await candidate.focus();
+      await candidate.press("Space");
+      await expect(page.getByRole("img", { name: /Map coordinate preview/ })).toBeVisible();
+      await page.getByLabel("Publish street address").uncheck();
+      await page.getByLabel("Publish exact map coordinate").check();
+      await page.getByRole("button", { name: "Save establishment" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Establishment updated." })).toBeVisible();
+
+      await page.reload();
+      await expect(page.getByRole("heading", { name: fixture.actorName })).toBeVisible({ timeout: 60_000 });
+      const persistedHeadquarters = page.getByRole("listitem").filter({ hasText: "Actor Headquarters" });
+      await expect(persistedHeadquarters).toContainText("Address private");
+      await expect(persistedHeadquarters).toContainText("Marker public");
+      await persistedHeadquarters.getByRole("button", { name: "Edit" }).click();
+      await expect(page.getByLabel("Address line 1")).toHaveValue("4600 Silver Hill Road");
+      await expect(page.getByLabel("City")).toHaveValue("Washington");
+
+      await page.getByRole("tab", { name: "Contact & Routing" }).click();
+      const contactSection = page.locator("section").filter({ has: page.getByRole("heading", { name: "Contact points" }) });
+      const routeSection = page.locator("section").filter({ has: page.getByRole("heading", { name: "Communication routes" }) });
+      const privateEmail = `configured-general-${fixture.ownerUid}@example.test`;
+      const editedPrivateEmail = `configured-edited-${fixture.ownerUid}@example.test`;
+      const privatePhone = "+1 202 555 0147";
+      await contactSection.getByLabel("Contact type").selectOption("email");
+      await contactSection.getByLabel("Contact value").fill(privateEmail);
+      await contactSection.getByLabel(/^Purpose/).selectOption("general");
+      await contactSection.getByLabel("Visibility").selectOption("private_operational");
+      await contactSection.getByRole("button", { name: "Add contact" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Contact point added." })).toBeVisible();
+
+      await contactSection.getByLabel("Contact type").selectOption("phone");
+      await contactSection.getByLabel("Contact value").fill(privatePhone);
+      await contactSection.getByLabel(/^Purpose/).selectOption("general");
+      await contactSection.getByRole("button", { name: "Add contact" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Contact point added." })).toBeVisible();
+
+      await routeSection.getByLabel(/^Route purpose/).selectOption("referrals");
+      await routeSection.getByLabel("Primary contact").selectOption({ label: privateEmail });
+      await routeSection.getByRole("button", { name: "Add route" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Communication route saved." })).toBeVisible();
+      await routeSection.getByLabel(/^Route purpose/).selectOption("opportunities");
+      await routeSection.getByLabel("Primary contact").selectOption({ label: privatePhone });
+      await routeSection.getByRole("button", { name: "Add route" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Communication route saved." })).toBeVisible();
+
+      await contactSection.getByRole("listitem").filter({ hasText: privateEmail }).getByRole("button", { name: "Edit" }).click();
+      await contactSection.getByLabel("Contact value").fill(editedPrivateEmail);
+      await contactSection.getByRole("button", { name: "Save contact" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Contact point updated." })).toBeVisible();
+      await page.reload();
+      await expect(page.getByRole("heading", { name: fixture.actorName })).toBeVisible({ timeout: 60_000 });
+      await page.getByRole("tab", { name: "Contact & Routing" }).click();
+      await expect(contactSection.getByRole("strong").filter({ hasText: editedPrivateEmail })).toBeVisible({ timeout: 60_000 });
+      await expect(routeSection.getByRole("listitem").filter({ hasText: "referrals" })).toBeVisible();
+      await expect(routeSection.getByRole("listitem").filter({ hasText: "opportunities" })).toBeVisible();
+
+      await page.getByRole("tab", { name: "Profile" }).click();
+      await expect(page.getByRole("heading", { name: "Enrichment proposals" })).toBeVisible();
+      await page.getByLabel(/^Classify proposed address /).selectOption("branch");
+      await page.getByLabel("Location label").fill("Reviewed enrichment branch");
+      await page.getByRole("button", { name: "Record address decision" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Enrichment address decision recorded." })).toBeVisible();
+      await page.getByLabel(/^Classify proposed contact /).selectOption("private_operational");
+      await page.getByRole("button", { name: "Record contact decision" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Enrichment contact decision recorded." })).toBeVisible();
+
+      const evidenceApp = initializeApp({ projectId: PROJECT_ID }, `configured-management-evidence-${crypto.randomUUID()}`);
+      const evidenceDb = getFirestore(evidenceApp);
+      const [privateLocations, publicLocations, privateContacts, publicContacts, routes, organization] = await Promise.all([
+        evidenceDb.collection("organizationLocations").where("organizationId", "==", fixture.actorOrganizationId).get(),
+        evidenceDb.collection("publicOrganizationLocations").where("organizationId", "==", fixture.actorOrganizationId).get(),
+        evidenceDb.collection("organizationContactPoints").where("organizationId", "==", fixture.actorOrganizationId).get(),
+        evidenceDb.collection("publicOrganizationContactPoints").where("organizationId", "==", fixture.actorOrganizationId).get(),
+        evidenceDb.collection("organizationCommunicationRoutes").where("organizationId", "==", fixture.actorOrganizationId).get(),
+        evidenceDb.collection("orgs").doc(fixture.actorOrganizationId).get(),
+      ]);
+      const persistedHeadquartersData = privateLocations.docs.find((document) => document.id === fixture.actorHeadquartersId)?.data();
+      expect(persistedHeadquartersData).toMatchObject({
+        isPrimary: true,
+        isHeadquarters: true,
+        addressPublicationApproved: false,
+        coordinatePublicationApproved: true,
+        geocode: { provider: "census", source: "owner_confirmed" },
+      });
+      const publicHeadquarters = publicLocations.docs.find((document) => document.id === fixture.actorHeadquartersId)?.data();
+      expect(publicHeadquarters).not.toHaveProperty("addressLine1");
+      expect(publicHeadquarters).toMatchObject({ coordinatePublicationApproved: true });
+      expect(privateLocations.docs.find((document) => document.get("name") === "Reviewed enrichment branch")?.data()).toMatchObject({
+        isPrimary: false,
+        addressPublicationApproved: false,
+        coordinatePublicationApproved: false,
+      });
+      expect(publicLocations.docs.find((document) => document.get("name") === "Reviewed enrichment branch")?.data()).not.toHaveProperty("addressLine1");
+      expect(privateContacts.docs.map((document) => document.data())).toEqual(expect.arrayContaining([
+        expect.objectContaining({ normalizedValue: editedPrivateEmail.toLowerCase(), visibility: "private_operational" }),
+        expect.objectContaining({ normalizedValue: "+12025550147", visibility: "private_operational" }),
+      ]));
+      expect(publicContacts.empty).toBe(true);
+      expect(routes.docs.map((document) => document.get("purpose"))).toEqual(expect.arrayContaining(["referrals", "opportunities"]));
+      expect(organization.get("name")).toBe(fixture.actorName);
+    }
+
     const selfParams = new URLSearchParams({
       view: "opportunities",
       actorOrg: fixture.actorOrganizationId,
@@ -350,14 +675,17 @@ test("configured development preserves external organization context through eve
       lat: "36.9066",
       z: "10",
     });
-    await page.goto(`/exchange?${selfParams.toString()}`);
+    await gotoStable(page, `/exchange?${selfParams.toString()}`);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Organization context drawer")).toContainText(/self/i);
     await expect(page.getByLabel("Organization context drawer")).toContainText(/private owner/i);
 
     const params = new URLSearchParams(selfParams);
     params.set("subjectOrg", fixture.subjectOrganizationId);
-    await page.goto(`/exchange?${params.toString()}`);
+    params.set("entity", "establishment");
+    params.set("selected", fixture.subjectBranchId);
+    params.set("panel", "detail");
+    await gotoStable(page, `/exchange?${params.toString()}`);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     const drawer = page.getByLabel("Organization context drawer");
@@ -391,6 +719,10 @@ test("configured development preserves external organization context through eve
       await expect(drawer).toBeVisible();
       await expect(page.locator('[data-exchange-map-host="persistent"]')).toHaveCount(1);
       expect(await originalMapHost!.evaluate((node) => node.isConnected)).toBe(true);
+      const modeUrl = new URL(page.url());
+      expect(modeUrl.searchParams.get("subjectOrg")).toBe(fixture.subjectOrganizationId);
+      expect(modeUrl.searchParams.get("entity")).toBe("establishment");
+      expect(modeUrl.searchParams.get("selected")).toBe(fixture.subjectBranchId);
     }
     await expect(drawer).toContainText(new RegExp(`Opportunities for ${fixture.actorName} related to ${fixture.subjectName}`, "i"));
 
@@ -416,6 +748,26 @@ test("configured development preserves external organization context through eve
     expect(responseText).not.toContain("never-return-external-billing@example.test");
     expect(responseText).not.toContain("never-return-external-admin-notes");
     expect(responseText).not.toContain(fixture.externalOwnerUid);
+    expect(responseText).not.toContain("never-return-private-referral@example.test");
+
+    const drawerRequest = page.getByLabel("Organization context drawer");
+    await drawerRequest.getByLabel("Request message").fill("Configured routing acceptance request.");
+    await drawerRequest.getByRole("button", { name: "Request contact" }).click();
+    await expect(drawerRequest.getByText("Contact request submitted. Protected contact details were not disclosed.")).toBeVisible();
+    await expect(drawerRequest).not.toContainText("never-return-private-referral@example.test");
+    const evidenceApp = initializeApp({ projectId: PROJECT_ID }, `configured-route-evidence-${testInfo.project.name}-${crypto.randomUUID()}`);
+    const evidenceDb = getFirestore(evidenceApp);
+    await expect.poll(async () => {
+      const requests = await evidenceDb.collection("organizationContactRequests")
+        .where("requestedByUid", "==", fixture.ownerUid).get();
+      const request = requests.docs.find((document) => document.data().subjectOrganizationId === fixture.subjectOrganizationId)?.data();
+      return request?.routeResolution ?? null;
+    }).toMatchObject({
+      organizationId: fixture.subjectOrganizationId,
+      purpose: "general",
+      publicDisclosureLevel: "public",
+      fallbackUsed: "none",
+    });
 
     await page.addScriptTag({ path: axePath });
     const accessibility = await page.evaluate(async () => {
@@ -435,8 +787,19 @@ test("configured development preserves external organization context through eve
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
 
+    await gotoStable(page, `/org/settings?id=${fixture.actorOrganizationId}&tab=establishments`);
+    await expect(page.getByRole("heading", { name: fixture.actorName })).toBeVisible({ timeout: 60_000 });
+    await page.getByRole("listitem").filter({ hasText: "Actor Headquarters" }).getByRole("button", { name: "Edit" }).click();
+    await page.getByLabel("Location label").fill("Unsaved revoked establishment draft");
     await revokeActorMembership(fixture, testInfo.project.name);
     await page.reload();
+    await expect(page.getByRole("heading", { name: "Organization settings unavailable" })).toBeVisible({ timeout: 60_000 });
+    const revokedEvidenceApp = initializeApp({ projectId: PROJECT_ID }, `configured-revoked-evidence-${crypto.randomUUID()}`);
+    const revokedEvidenceDb = getFirestore(revokedEvidenceApp);
+    expect((await revokedEvidenceDb.collection("organizationLocations").doc(fixture.actorHeadquartersId).get()).get("name"))
+      .toBe("Actor Headquarters");
+
+    await page.goto(`/exchange?${params.toString()}`);
     await expect(page.getByLabel("Working as organization")).toHaveValue("");
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     await expect(page.getByLabel("Organization context drawer")).not.toContainText(/private owner/i);

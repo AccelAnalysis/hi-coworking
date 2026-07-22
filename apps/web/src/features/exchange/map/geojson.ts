@@ -1,4 +1,5 @@
 import type { RfxDoc, TerritoryDoc } from "@hi/shared";
+import type { PublicOrganizationEstablishment } from "@hi/shared/organization-establishments";
 
 export type ExchangeTerritoryMapStatus = TerritoryDoc["status"];
 type ExchangeVisibleTerritoryMapStatus = "released" | "scheduled";
@@ -26,6 +27,8 @@ export interface TerritoryMapProperties {
 
 export interface PublicOrganizationMapRecord {
   id: string;
+  organizationId?: string;
+  locationId?: string;
   name: string;
   city?: string;
   state?: string;
@@ -44,9 +47,45 @@ export interface PublicOrganizationMapRecord {
   contextType?: "actor" | "subject" | "actor_subject";
 }
 
+interface MarkerOrganizationRecord {
+  id: string; name: string; city?: string; state?: string; territoryFips?: string;
+  status?: string; claimStatus?: string; verificationStatus?: string;
+  latitude?: number; longitude?: number; homeBased?: boolean; privacySuppressed?: boolean;
+  coordinatePublicationApproved?: boolean; coordinateConfidence?: "authoritative" | "verified" | "approximate";
+  naicsCodes?: string[]; capabilityKeywords?: string[];
+}
+
+export function establishmentMarkers(
+  organizations: readonly MarkerOrganizationRecord[],
+  locations: readonly PublicOrganizationEstablishment[],
+): PublicOrganizationMapRecord[] {
+  const organizationById = new Map(organizations.map((organization) => [organization.id, organization]));
+  const locationOrganizationIds = new Set(locations.map((location) => location.organizationId));
+  const locationMarkers = locations.flatMap((location) => {
+    const organization = organizationById.get(location.organizationId);
+    if (!organization || location.coordinatePublicationApproved !== true
+      || typeof location.latitude !== "number" || typeof location.longitude !== "number") return [];
+    return [{
+      id: location.id, organizationId: location.organizationId, locationId: location.id,
+      name: `${organization.name} — ${location.name}`,
+      city: location.city ?? "", state: location.administrativeArea ?? "",
+      territoryFips: organization.territoryFips, status: "active",
+      claimStatus: organization.claimStatus, verificationStatus: organization.verificationStatus,
+      latitude: location.latitude, longitude: location.longitude,
+      coordinatePublicationApproved: true, coordinateConfidence: "verified" as const,
+      naicsCodes: organization.naicsCodes, capabilityKeywords: organization.capabilityKeywords,
+    }];
+  });
+  // Compatibility only: approved legacy markers remain until the guarded
+  // migration creates public establishment projections.
+  return [...locationMarkers, ...organizations.filter((organization) => !locationOrganizationIds.has(organization.id))];
+}
+
 export interface OrganizationMapProperties {
   entityType: "organization";
   id: string;
+  organizationId?: string;
+  locationId?: string;
   name: string;
   city: string;
   state: string;
@@ -254,6 +293,8 @@ export function toOrganizationFeatureCollection(
       properties: {
         entityType: "organization",
         id,
+        ...(organization.organizationId ? { organizationId: organization.organizationId } : {}),
+        ...(organization.locationId ? { locationId: organization.locationId } : {}),
         name,
         city: typeof organization.city === "string" ? organization.city : "",
         state: typeof organization.state === "string" ? organization.state : "",

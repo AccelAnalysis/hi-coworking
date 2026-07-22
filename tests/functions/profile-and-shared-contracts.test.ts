@@ -87,7 +87,6 @@ describe("profile URL and public-projection contracts", () => {
     expect(projected).toEqual({
       uid: "canonical-uid",
       published: true,
-      businessName: "Safe Business",
       linkedin: "https://www.linkedin.com/company/safe-business",
       badges: ["verified_business"],
       trustStats: { referralsConverted: 4 },
@@ -95,16 +94,14 @@ describe("profile URL and public-projection contracts", () => {
     });
   });
 
-  it("projects exact canonical assets without also publishing legacy bearer URLs", () => {
+  it("projects person-owned assets without publishing organization documents or legacy bearer URLs", () => {
     const projected = sanitizePublicProfile("canonical-uid", {
       uid: "canonical-uid",
       published: true,
       photoStoragePath: "profilePhotos/canonical-uid/selected.png",
       photoUrl: "https://firebasestorage.googleapis.com/legacy-photo-token",
-      capabilityStatementStoragePath:
-        "capabilityStatements/canonical-uid/selected.pdf",
-      capabilityStatementUrl:
-        "https://firebasestorage.googleapis.com/legacy-capability-token",
+      capabilityStatementStoragePath: "capabilityStatements/canonical-uid/selected.pdf",
+      capabilityStatementUrl: "https://firebasestorage.googleapis.com/legacy-capability-token",
       videoIntroStoragePath: "profileVideos/canonical-uid/processed/selected.mp4",
       videoIntroPosterStoragePath:
         "profilePhotos/canonical-uid/selected.png",
@@ -115,13 +112,12 @@ describe("profile URL and public-projection contracts", () => {
       uid: "canonical-uid",
       published: true,
       photoStoragePath: "profilePhotos/canonical-uid/selected.png",
-      capabilityStatementStoragePath:
-        "capabilityStatements/canonical-uid/selected.pdf",
       videoIntroStoragePath: "profileVideos/canonical-uid/processed/selected.mp4",
       videoIntroPosterStoragePath:
         "profilePhotos/canonical-uid/selected.png",
     });
     expect(projected).not.toHaveProperty("photoUrl");
+    expect(projected).not.toHaveProperty("capabilityStatementStoragePath");
     expect(projected).not.toHaveProperty("capabilityStatementUrl");
 
     const rawVideoProjection = sanitizePublicProfile("canonical-uid", {

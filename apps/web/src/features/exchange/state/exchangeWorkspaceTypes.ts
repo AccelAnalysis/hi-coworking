@@ -128,6 +128,7 @@ export type ExchangeSelection =
   | { entityType: "opportunity"; entityId: string }
   | { entityType: "territory"; entityId: string }
   | { entityType: "organization"; entityId: string }
+  | { entityType: "establishment"; entityId: string; organizationId?: string }
   | { entityType: "referral"; entityId: string }
   | { entityType: "resource"; entityId: string }
   | { entityType: "team"; entityId: string }

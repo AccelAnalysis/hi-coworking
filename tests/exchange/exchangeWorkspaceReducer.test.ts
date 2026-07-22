@@ -181,6 +181,37 @@ describe("exchangeWorkspaceReducer", () => {
     }
   });
 
+  it("carries a selected establishment as Secondary context through all four modes", () => {
+    let state = reduce(
+      createInitialExchangeWorkspaceState(),
+      actions.setSubjectOrganization("subject-1"),
+      actions.setSecondaryContext({
+        entityType: "establishment",
+        entityId: "branch-1",
+        organizationId: "subject-1",
+      }),
+    );
+
+    for (const view of [
+      "referrals",
+      "intelligence",
+      "resources",
+      "opportunities",
+    ] as const) {
+      state = exchangeWorkspaceReducer(state, actions.setView(view));
+      expect(state).toMatchObject({
+        view,
+        subjectOrganizationId: "subject-1",
+        secondaryContext: {
+          entityType: "establishment",
+          entityId: "branch-1",
+          organizationId: "subject-1",
+        },
+        rightPanelOpen: true,
+      });
+    }
+  });
+
   it("never changes actor authority when an organization marker becomes the subject", () => {
     const state = reduce(
       createInitialExchangeWorkspaceState(),

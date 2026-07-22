@@ -1,20 +1,46 @@
-# Organization activation and continuity configured acceptance
+# Organization establishment and contact-routing configured acceptance
+
+## Establishment/contact-routing extension
+
+Configured acceptance covers single-location, multi-location, home-based,
+external-contact, authority-revocation, and enrichment-proposal scenarios. The
+live owner journey used Census geocoding, keyboard candidate selection, map
+preview, independent private-address/public-coordinate decisions,
+establishment refresh and edit, private email/telephone creation and email
+edit, referral and opportunity routes, explicit enrichment decisions, and
+database/public-projection evidence.
+
+The browser matrix is Chromium 1280×800 and 1440×900, Firefox, desktop WebKit,
+and mobile WebKit 390×844, 393×852, and 430×932. Automated accessibility covers
+keyboard operation, accessible status/error surfaces, Axe, and horizontal-
+overflow checks. Native VoiceOver remains a manual release gate.
+
+The workstream began at exact PR #19 head
+`8e94efde96a85b7154b33a34cb8a7e26bfb9ea49` after PR #21 was reviewed, made
+ready, and merged into the PR #19 branch. PR #3 and `main` were not changed.
 
 ## Scope and result
 
 Configured acceptance ran only against Firebase project `hi-coworking-plat`,
 Functions region `us-central1`, and canonical Hosting
-`https://hi-coworking-plat.web.app` on 2026-07-22. The final deployed web code is
-commit `f3c55f9`; backend code is `c54c0cd443b1800af7de602a9e7091b6c06613e3`.
-No production, seed-import, Stripe, mail, social, or merge action occurred.
+`https://hi-coworking-plat.web.app` on 2026-07-22. The exact isolated deployment
+package contained 21 reviewed endpoints and 18 compiled Function files. All 21
+are active Gen 2 Node.js 20 Functions; the complete regional inventory is 87/87
+active. No unexpected Function deletion occurred.
+
+Firestore rules and five new composite indexes were deployed; the complete
+index inventory is 93/93 `READY`. Hosting serves `/org/settings` with HTTP 200,
+and the new enrichment-review callable answers preflight with HTTP 204. Storage
+rules were reviewed but unchanged, so there was no Storage deployment in this
+extension. No production, real seed-import, Stripe, mail, social, PR #3, or
+`main` action occurred.
 
 Applicable organization lifecycle, actor/subject authorization, external
 projection privacy, cross-mode map/search/drawer continuity, history/refresh,
 mobile layout, automated accessibility, and cleanup gates passed. Organization
-seed browsing remains inapplicable and blocked because human-approved count is
-zero. Populated long-list scroll, configured draft submission, and native
-Safari/VoiceOver remain explicit depth/manual follow-ups rather than claimed
-evidence.
+seed activation remains blocked because both the human-approved and imported
+counts are zero. Native Safari/VoiceOver remains the sole manual accessibility
+gate rather than claimed evidence.
 
 ## Configured lifecycle journey
 
@@ -74,7 +100,7 @@ npx playwright test \
   --workers=1 --reporter=line
 ```
 
-Final result: **7/7 passed** in 2.2 minutes.
+Final clean result: **7/7 passed** in 3.0 minutes.
 
 | Project | Viewport/device | Result |
 | --- | --- | --- |
@@ -87,8 +113,10 @@ Final result: **7/7 passed** in 2.2 minutes.
 | configured-development-mobile-safari-430 | iPhone Pro Max/WebKit 430×932 | Passed |
 
 Every project created two marked synthetic users, an actor/self organization,
-an external claimed non-resource organization, active memberships, public and
-private records, and an actor preference. It verified:
+an external claimed non-resource organization, five establishment types,
+public and private contact points, a referral route, active memberships, and an
+actor preference. The Chromium project additionally exercised the full owner
+management workflow. Collectively the matrix verified:
 
 - owner self projection is `self` / `private_owner`;
 - actor A remains selected while external subject B is viewed;
@@ -97,6 +125,20 @@ private records, and an actor preference. It verified:
   never appear in DOM or captured callable responses;
 - the same single persistent map host stays connected through Opportunities,
   Referrals, Intelligence, Resources, and return to Opportunities;
+- selecting an establishment preserves the organization as Subject and the
+  establishment as Secondary Subject through all four modes;
+- one organization card represents multiple establishments while only approved
+  physical coordinates become markers;
+- mailing-only and private-home locations never create exact public markers;
+- the owner can search live bounded geocodes, confirm and edit an establishment,
+  and separately decide address and coordinate publication;
+- email and telephone contacts can be entered and edited with explicit
+  visibility, and referral/opportunity routes persist;
+- private contact destinations are absent from external DOM and callable
+  responses while a contact request resolves through the configured route;
+- address/contact enrichment remains private proposal data until an explicit
+  owner classification, does not replace organization identity or primary
+  location, and does not publish without separate approval;
 - Resources keeps the non-provider external organization as context rather
   than a resource result;
 - all four mounted mode search controls retain the workspace query;
@@ -104,33 +146,37 @@ private records, and an actor preference. It verified:
 - hard refresh, Back, and Forward restore actor and subject;
 - no horizontal document overflow at each viewport;
 - axe reports no critical or serious WCAG 2 A/AA/2.1 AA violations;
+- an unsaved establishment draft is not submitted after membership removal;
 - removing the actor membership causes safe individual fallback after refresh;
   and
 - the external subject remains selected/public after actor authority loss.
 
-The first configured browser attempt found that Hosting rewrote `/login` to the
-root export. `cleanUrls: true` fixed that route. The next attempt exposed a
-strict-payload bug: an absent secondary subject was serialized as `null`; the
-client now omits absent optional fields and keeps the server schema strict. The
-matrix also found and corrected one serious low-contrast “Active” label. The
-final seven-project run used the corrected deployed bytes.
+This extension's configured passes found and corrected a success-notice race,
+strict undefined payload/writes, WebKit Secondary Subject loss during mode
+switching, and a mobile WebKit router-navigation race. The final matrix used the
+corrected deployed bytes and a clean synthetic baseline.
 
 Each browser fixture ran `finally` cleanup with exact marker checks and Auth-
 first deletion. The independent post-suite audit returned:
 
 ```json
-{"orgs":0,"publicOrganizations":0,"orgMembers":0,"users":0,"exchangeWorkspacePreferences":0,"fixtureAuthUsers":0}
+{"fixtureDocs":0,"fixtureAuthUsers":0,"organizationSeedImports":0,"humanApprovedSourceCandidates":0}
 ```
 
 ## Additional live evidence
 
-- All 43 selected workstream callables inventory as `ACTIVE`.
-- Auth-required representative endpoints return 401 rather than ingress 403.
-- Anonymous empty directory query returns 200 after its index became ready.
-- All 88 composite indexes inventory as `READY`.
-- Firestore and Storage rule deployments compiled and released.
-- The in-app browser smoke opened live `/exchange` and observed the correct
-  guarded sign-in surface (`Welcome back` and the Exchange sign-in copy).
+- The exact 21-endpoint establishment package regenerated with 18 compiled
+  Function files and matching content hashes, then was safely removed.
+- All 21 selected endpoints inventory as active Gen 2 Node.js 20; all 87
+  regional Functions inventory as `ACTIVE`.
+- All 93 composite indexes inventory as `READY`.
+- The new enrichment-review endpoint returned HTTP 204 to `OPTIONS`; canonical
+  Hosting returned HTTP 200 for `/org/settings`.
+- Firestore rules compiled and released. Storage rules remain unchanged.
+- Automated totals are 120 security/rules/functions/migrations, 132 Exchange,
+  16 establishment/geocode/contact/route, 31 development-readiness/seed, 37 Run
+  3, and 34 Run 4 tests, all passing. Lint has zero errors and five unrelated
+  pre-existing warnings; the production build generated 59/59 static pages.
 - Authoritative territory `51093` is released; its replay was a no-op and its
   rollback rehearsal reported ready without applying a rollback.
 
@@ -139,11 +185,9 @@ first deletion. The independent post-suite audit returned:
 - No approved seed organization exists, so no sample or expanded organization
   seed import, organization seed replay, organization seed rollback, or seeded
   marker browser scenario is claimed.
-- No populated configured long-list fixture was used to measure scroll
-  restoration.
-- No configured referral draft was submitted; draft preservation has strong
-  reducer/session/source evidence only.
 - Automated WebKit is not a substitute for a native Safari/VoiceOver manual
   release pass.
-- The branch is stacked and unmerged; this is development acceptance, not
-  production readiness.
+- Node.js 20 and the currently pinned Firebase Functions SDK have lifecycle
+  warnings that belong in a bounded dependency-runtime follow-up.
+- The branch remains stacked and unmerged; this is configured development
+  acceptance, not production readiness.
