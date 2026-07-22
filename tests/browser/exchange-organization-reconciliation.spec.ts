@@ -37,7 +37,7 @@ test.beforeEach(async () => {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
 });
 
-test("new user creates an organization, saves a profile, and retains the canonical Exchange", async ({ page }) => {
+test("new user creates an organization, enters establishment setup, and saves a profile", async ({ page }) => {
   const email = await register(page, "ordinary-user");
 
   for (const viewport of [
@@ -58,8 +58,8 @@ test("new user creates an organization, saves a profile, and retains the canonic
   await page.getByLabel("City").fill("Smithfield");
   await page.getByRole("button", { name: "Search organizations" }).click();
   await expect(page.getByText("No likely match found")).toBeVisible();
-  await page.getByRole("button", { name: "Create and return to Exchange" }).click();
-  await expect(page).toHaveURL(/\/exchange$/);
+  await page.getByRole("button", { name: "Create and add establishment" }).click();
+  await expect(page).toHaveURL(/\/org\/settings\?id=[^&]+&tab=establishments&onboarding=1$/);
 
   const user = await adminAuth.getUserByEmail(email);
   const memberships = await db.collection("orgMembers").where("uid", "==", user.uid).get();
@@ -177,6 +177,6 @@ test("seeded claim is nonblocking, admin approval is audited, and a legacy admin
   await adminPage.goto("/profile");
   await adminPage.getByRole("button", { name: "Save Profile" }).click();
   await expect(adminPage.getByText("Saved", { exact: true })).toBeVisible();
-  expect((await db.collection("profiles").doc("legacy-super-admin").get()).data()?.profileSchemaVersion).toBe(3);
+  expect((await db.collection("profiles").doc("legacy-super-admin").get()).data()?.profileSchemaVersion).toBe(4);
   await adminContext.close();
 });
