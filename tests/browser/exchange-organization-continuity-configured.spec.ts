@@ -798,6 +798,16 @@ test("configured development preserves external organization context through eve
     expect(Number(currentUrl.searchParams.get("lng"))).toBeCloseTo(-76.6311, 1);
     expect(Number(currentUrl.searchParams.get("lat"))).toBeCloseTo(36.9824, 1);
 
+    const externalHistoryUrl = page.url();
+    await page.evaluate((url) => {
+      window.history.pushState(window.history.state, "", url);
+    }, `/exchange?${selfParams.toString()}`);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.actorName);
+    await page.evaluate((url) => {
+      window.history.pushState(window.history.state, "", url);
+    }, externalHistoryUrl);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
+
     await page.reload();
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
@@ -806,10 +816,7 @@ test("configured development preserves external organization context through eve
     await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     const backSubjectOrganizationId = new URL(page.url()).searchParams.get("subjectOrg");
-    expect([
-      fixture.actorOrganizationId,
-      fixture.subjectOrganizationId,
-    ]).toContain(backSubjectOrganizationId);
+    expect(backSubjectOrganizationId).toBe(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(
       backSubjectOrganizationId === fixture.actorOrganizationId
         ? fixture.actorName
