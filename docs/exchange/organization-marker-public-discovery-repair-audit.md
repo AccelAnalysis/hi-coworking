@@ -5,37 +5,33 @@ Repository: `AccelAnalysis/hi-coworking`
 Pull request: #23  
 Branch: `codex/exchange-business-registration-map-activation`  
 Base: `codex/exchange-establishments-contact-routing`  
-Recorded starting head: `267168e14ef9095a08b1ee0e9dc93a4a7cce98fb`
+Recorded starting head: `267168e14ef9095a08b1ee0e9dc93a4a7cce98fb`  
+Validated repair commit: `c49a0f99c363f3d56563e439d473387e46affd77`
 
-## Scope and evidence boundary
+## Evidence boundary
 
-This repair run used the GitHub repository and GitHub Actions evidence available through the connected GitHub integration. It did not have an authenticated browser session, Firebase CLI credentials, configured-development test-account credentials, or direct Firestore access. Therefore this document distinguishes code-level reproduction and CI evidence from configured-development UI evidence. No organization IDs, location IDs, private addresses, private coordinates, contacts, provider payloads, or test-account credentials are invented or recorded.
+This run had GitHub repository and GitHub Actions access. It did not have an authenticated configured-development browser session, Firebase CLI credentials, disposable test-account credentials, or direct Firestore access. Code defects and the complete local/CI command matrix were therefore reproduced and verified, but configured-development two-account evidence, exact browser Console output, persisted-record inspection, and development deployment were not fabricated or claimed.
 
-Configured two-account registration, persisted-record inspection, callable request/response capture, browser console capture, Firebase deployment, and synthetic-account cleanup remain required before PR #23 can be declared complete.
+No private addresses, private coordinates, contacts, provider payloads, account credentials, or synthetic organization/location IDs are recorded in this audit.
 
 ## Starting state
 
 - PR #23 was open, draft, unmerged, and based on `codex/exchange-establishments-contact-routing`.
-- The head was `267168e14ef9095a08b1ee0e9dc93a4a7cce98fb`.
-- Exchange web build and Week 1 Organization Reconciliation had succeeded on that head.
-- Exchange security failed before functional tests because `npm audit --omit=dev --audit-level=low` reported a moderate PostCSS advisory and high Sharp advisories through the web application's Next.js dependency path.
-- The PR description identifies the configured-development Hosting release as `1784781980447000`, application commit `53e71732f950bc01b763bd502693869b6de63c6a`, but this run could not independently query Firebase Hosting to verify that deployment inventory.
+- The starting head was `267168e14ef9095a08b1ee0e9dc93a4a7cce98fb`.
+- Exchange web build and Week 1 Organization Reconciliation were green on the starting head.
+- Exchange security stopped at `npm audit --omit=dev --audit-level=low` because of a moderate PostCSS advisory and high Sharp advisories through the web/Next dependency path.
+- The unsafe automated suggestion would have changed Next across a major compatibility boundary; it was not used.
+- The PR description identified configured-development Hosting release `1784781980447000` from application commit `53e71732f950bc01b763bd502693869b6de63c6a`. Firebase Hosting was not independently queried in this run.
 
-## Code-level defect reproduction
+## Confirmed root causes
 
-### Establishment selection was not atomic
+### Non-atomic marker selection
 
-Before repair, one establishment marker click executed separate workspace operations:
+An establishment-marker click performed separate actions for the Subject organization and establishment Secondary Subject, each with its own history push. This created an intermediate subject-only URL, two browser-history entries, and an opportunity for perspective resolution to run between transitions.
 
-1. open organization drawer;
-2. set Subject organization with a browser-history push;
-3. set establishment Secondary Subject with a second browser-history push.
+### Client/server Secondary Subject drift
 
-Each history-bearing action serialized the intermediate reducer state. The first URL therefore contained a Subject without the establishment. The second URL added the establishment separately. Back/Forward could restore the intermediate subject-only state, and perspective resolution could run between the two transitions.
-
-### Establishment was dropped from the perspective request
-
-The client shared-state type allowed an `establishment` secondary context, and the server schema accepted:
+The shared contract and server schema supported:
 
 ```json
 {
@@ -44,132 +40,138 @@ The client shared-state type allowed an `establishment` secondary context, and t
 }
 ```
 
-However, `toServerSecondary` did not serialize establishments. A selected marker could remain present in workspace state and URL state while the perspective callable received no establishment secondary context. This was confirmed as client/server contract drift.
+The client serializer omitted establishments. Workspace and URL state could therefore identify an establishment while `exchange_resolveOrganizationPerspective` received no establishment Secondary Subject.
 
-### Perspective loading erased safe context
+### False unavailable and selection loss
 
-The organization-context hook cleared the current perspective when a new request began and also cleared it when the request failed. The drawer then received no organization projection and rendered its unavailable fallback. This made a transient request look like an authoritative unavailable result and allowed the UI to lose the safe public name already carried by the selected map feature.
+The organization-context hook cleared the last perspective when a new request started and again on failure. A pending or retryable callable error therefore looked like an authoritative unavailable result, allowing the drawer and selected marker context to disappear.
 
-### Public organization subscription was not server-live
+### Apparent territory refocus
 
-The former public-organization `subscribe` function only attached listeners to an in-memory cache. It had no Firestore listener, callable invalidation source, visibility refresh, identity refresh, polling interval, or publication-generation signal. A second account that had already loaded the Exchange could remain stale after publication or suppression.
+The marker click path did not directly invoke locality focus. The observed refocus is consistent with selection/perspective context clearing and the map falling back to its normal territory/results behavior. The repaired path retains Subject, Secondary Subject, marker, drawer, and viewport during loading and retryable failure. Configured browser verification is still required to exclude an independent remaining camera trigger.
 
-### Organization search used stale directory input
+### Cross-account stale discovery
 
-The server already exposes a bounded organization-directory callable with current query/filter evaluation. The persistent workspace map nevertheless loaded a broad client directory and filtered that array locally. Organization-oriented search could therefore use stale records and could not force current exact/partial name resolution.
+The former public-organization `subscribe` API observed only an in-memory cache. It had no server invalidation source, visibility refresh, identity refresh, polling interval, or publication-generation signal. Organization search also filtered a previously loaded client array rather than issuing current server-backed organization search input.
 
-### Territory refocus was a downstream symptom
+### Missing server establishment validation
 
-The marker click path itself did not directly call locality focus. The observed territory refocus is consistent with selection/perspective context being cleared while map/results fallback logic remains active. The repair prevents a pending or retryable perspective request from clearing Subject, Secondary Subject, selected marker, drawer, or viewport. Configured browser evidence is still required to confirm there is no remaining independent fit-to-territory trigger.
+The perspective callable did not validate that an establishment belonged to the selected Subject organization or that the viewer was resolving the appropriate private or approved public projection.
 
 ## Implemented repair
 
-### Atomic organization and establishment selection
+### Atomic selection
 
-Added one action creator that hydrates the complete selection snapshot in a single reducer transition:
+One reducer action now applies the complete organization/establishment snapshot:
 
 - Subject organization ID;
-- establishment Secondary Subject and parent organization ID;
+- establishment Secondary Subject ID;
+- parent organization ID;
 - selected map entity;
-- organization drawer open;
-- right/detail panel open;
-- mobile detail open;
+- organization drawer state;
+- desktop/mobile detail state;
 - optional viewport.
 
-Marker selection and Return to Organization Home now issue one action and one intentional history push.
+One marker click now produces one reducer transition, one URL snapshot, and one intentional browser-history push. Organization-only selection has an equivalent atomic action and does not fabricate an establishment.
 
-### Complete client serialization for establishments
+### Complete Secondary Subject contract
 
-`toServerSecondary` now returns the shared establishment contract. Existing opportunity, referral, territory, organization, resource, and team mappings are preserved.
+`toServerSecondary` now serializes establishment, opportunity, referral, territory, organization, resource, and team contexts. Establishments are sent as `{ type: "establishment", id: establishmentId }`.
 
-### Stable perspective loading and retry behavior
+The perspective callable now validates establishment ownership against:
 
-The hook now distinguishes:
+- `organizationLocations` for an authorized self/managed private perspective, requiring an active organization-owned establishment; or
+- `publicOrganizationLocations` for an external perspective, requiring organization ownership, coordinate publication approval, and valid finite public coordinates.
 
-- `idle`;
-- `loading`;
-- `resolved`;
-- `retryable_error`;
-- `unavailable`;
-- `forbidden`.
+The selected establishment is preserved in the returned perspective. The validation never grants organization authority from establishment selection.
 
-For the same validated Actor/Subject pair, loading and retryable errors retain the last verified projection. Actor changes clear the prior projection so private data cannot cross an identity boundary. Only a resolved server response with unavailable projection semantics is treated as authoritative unavailability.
+### Stable perspective states
 
-### Current server-backed directory refresh
+The client now distinguishes `idle`, `loading`, `resolved`, `retryable_error`, `unavailable`, and `forbidden`.
 
-The former cache-only subscription was replaced by a bounded callable refresh architecture that:
+For the same validated Actor/Subject pair, loading and retryable errors retain the last verified projection, safe organization name, marker selection, drawer, and camera. Actor changes clear prior private context. Only a resolved server unavailable projection is treated as authoritative unavailability.
 
-- keys cache entries by authenticated viewer UID, normalized query, and validated filters;
-- uses a short bounded TTL;
-- deduplicates concurrent requests;
-- does not cache rejected promises;
-- supports force refresh;
-- refreshes when the tab becomes visible;
-- refreshes when connectivity returns;
-- refreshes on a bounded interval;
-- uses current server search terms and filters;
-- does not key public data by Actor URL state.
+### Current public-directory refresh
 
-A compatibility export remains for existing view consumers, but it now delegates to the active server watcher rather than subscribing to an in-memory cache.
+The cache is keyed by authenticated UID, normalized query, and validated filters. It now provides:
 
-### Server-backed organization-oriented search
+- bounded TTL;
+- concurrent-request deduplication;
+- force refresh;
+- rejected-request recovery without cache poisoning;
+- refresh on identity change, tab visibility, restored connectivity, and a bounded interval;
+- separation of private/self additions by authenticated viewer;
+- no public cache key derived from unvalidated Actor URL state.
 
-The persistent Exchange map now supplies the current search query, industries, capabilities, NAICS, certifications, locality, and resource-provider context to the directory callable. Returned organizations still pass view-specific client presentation filtering. List-only organizations remain selectable without a fabricated establishment marker.
+The compatibility subscription export delegates to the active server watcher rather than a cache-only listener.
 
-### Refresh status
+### Server-backed organization search
 
-When verified organizations are already displayed, the map presents a small non-blocking status while the directory refreshes or when a refresh is delayed.
+The Exchange map sends the current organization-oriented query and relevant industries, capabilities, NAICS, certifications, locality, and resource-provider filters to the directory callable. Current results are deduplicated by canonical organization ID before marker/list presentation. List-only organizations remain searchable without a fabricated marker.
 
-## Tests added
+### Publication diagnostic
 
-Added `tests/exchange/organization-marker-public-discovery-repair.test.ts` covering:
+Added `exchange_getOrganizationPublicationDiagnostic`, limited to an exact-active organization owner/admin or platform administrator. It reports server-confirmed organization, establishment, and discovery gates and reasons, including final public-sanitizer status and expected canonical IDs.
+
+The callable does not return private addresses, private coordinates, contacts, evidence bodies, provider payloads, or tokens. Organization Settings now displays an `Exchange visibility status` panel using the server result rather than inferring publication from selected checkboxes.
+
+### Privacy-safe observability
+
+Perspective logging now includes request ID, callable name, hashed viewer UID, Actor organization ID, Subject organization ID, Secondary type/ID, projection level, and failure code. It does not log addresses, contacts, auth tokens, or private document bodies.
+
+## Tests and validation
+
+Permanent tests cover:
 
 - establishment Secondary serialization;
-- one atomic reducer transition for organization/establishment selection;
-- one complete URL snapshot;
-- list-only organization selection without a fabricated marker;
-- concurrent server request deduplication;
-- authenticated identity-bound cache separation;
-- force refresh despite valid TTL;
-- rejected request recovery without cache poisoning.
+- atomic establishment and organization-only selection;
+- complete single URL snapshot;
+- list-only discovery without fabricated markers;
+- concurrent directory-request deduplication;
+- identity-bound cache separation;
+- forced refresh;
+- rejected-request recovery;
+- approved directory/marker diagnostic;
+- private-sentinel exclusion from diagnostic output;
+- list-only diagnostic behavior;
+- private-home marker suppression.
 
-## CI evidence during repair
+A guarded final validation run passed all of the following against the exact committed repair and regenerated dependency manifests:
 
-An intermediate head failed the web build because a legacy opportunities view still imported the old subscription export. The build artifact reported that exact missing export. The repository was then corrected by retaining the export as an active server-watcher compatibility wrapper.
+- `npm audit --omit=dev --audit-level=low`;
+- repaired dependency-tree verification;
+- clean `npm ci`;
+- `npm run build:shared`;
+- `npm run build:functions`;
+- `npm run lint`;
+- `npm run test:exchange`;
+- `npm run test:security`;
+- `npm run test:run3`;
+- `npm run test:run4`;
+- `npm run build` with the official CI Firebase demo environment;
+- `git diff --check`.
 
-The Exchange security workflow still exits at the production dependency audit before shared build, functions build, lint, Exchange tests, security tests, Run 3, Run 4, production build, and diff check. This behavior is not treated as a green functional or security result.
+The dependency remediation pins safe web-workspace versions and regenerates the lockfile without weakening the audit step or severity. The committed web manifest resolves PostCSS `8.5.22` and Sharp `0.35.3`. No unsafe Next downgrade was used.
 
-## Dependency diagnostic
+## Configured-development work still required
 
-The lockfile contains web-workspace nested copies installed through Next.js:
+PR #23 is not complete until the following are performed with real configured-development access:
 
-- Next.js `16.2.11` declares exact PostCSS `8.4.31`;
-- Next.js `16.2.11` declares optional Sharp `^0.34.5`;
-- the nested installation resolves Sharp `0.34.5`;
-- root overrides and root lock entries already reference newer PostCSS and Sharp versions, but those overrides did not eliminate the nested web-workspace copies used by the audit path.
-
-The unsafe automatic command proposes a major downgrade and was not used. The audit severity was not weakened, suppressed, or removed. A lockfile regeneration with a forward-compatible package-manager resolution remains required and must be validated with the full command matrix.
-
-## Work not completed in this integration-only run
-
-The following remain blocking:
-
-- real UI creation of Accounts A and B;
-- pre-repair configured-development failure capture;
-- exact repeated browser Console error and callable request ID;
-- exact persisted organization/location IDs;
-- server-authoritative publication diagnostic and Organization Settings visibility panel;
-- server validation that an establishment belongs to the selected Subject organization and is visible at the viewer's authorized projection level;
-- configured own-marker and external-marker 20-click stress tests;
-- already-open second-account publication and suppression acceptance;
-- fresh-account exact, partial, capability, and locality search acceptance;
-- list-only, unpublish, and private-home configured scenarios;
-- exact persisted-record assertions;
-- browser matrix, Axe, keyboard, and mobile-overflow acceptance;
-- dependency lock remediation and green Exchange security workflow;
-- Firebase Function, Hosting, rules, or index deployment;
-- synthetic test-account and test-record cleanup audit.
+- create Accounts A and B through the real business-only UI;
+- record exact organization/location IDs;
+- reproduce and capture the exact pre-repair Console/callable error if it remains obtainable;
+- run own-marker and external-marker 20-click stress tests;
+- verify one history transition per click in the browser;
+- verify all four modes, Back, Forward, and refresh preservation;
+- verify already-open Account B sees publish and unpublish changes within the bounded interval;
+- verify fresh-account exact-name, partial-name, capability, NAICS, certification, and locality discovery;
+- verify list-only and private-home scenarios;
+- inspect exact final persisted records and public/private field isolation;
+- run browser matrix, Axe, keyboard, mobile-overflow, Console, and page-error acceptance;
+- query exact configured Function/Hosting/rules/index inventory;
+- deploy only the reviewed development resources if the configured acceptance passes;
+- audit and remove disposable accounts/records created by configured acceptance.
 
 ## Safety and change controls
 
-No seed organizations were reviewed, approved, or imported. No Stripe, mail, social, production, canonical-branch, PR merge, or unexpected Function deletion action occurred. PR #23 remains draft and unmerged.
+No seed organizations were reviewed, approved, or imported. No Stripe, mail, social, production, canonical-branch, or merge action occurred. No Firebase Function, Hosting, rules, or index resource was deployed in this run. Temporary repair workflows and scripts were removed after the validated repair commit. PR #23 remains draft and unmerged.
