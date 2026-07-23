@@ -1,4 +1,4 @@
-name: PR23 final application repair patch
+name: PR23 final application repair patch v2
 
 on:
   pull_request:
