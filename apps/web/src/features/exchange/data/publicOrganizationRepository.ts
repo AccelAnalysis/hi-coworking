@@ -28,6 +28,7 @@ export interface PublicOrganizationDirectoryRequest {
 }
 
 const cache = new Map<string, DirectoryCacheEntry>();
+const listeners = new Map<string, Set<(records: PublicOrganizationProjection[]) => void>>();
 
 function scope(value: string): string {
   const result = value.trim();
@@ -83,6 +84,10 @@ function entry(cacheKey: string): DirectoryCacheEntry {
 
 function bounded(records: PublicOrganizationProjection[], maximum: number) {
   return records.length <= maximum ? records : records.slice(0, maximum);
+}
+
+function publish(cacheKey: string, records: PublicOrganizationProjection[]): void {
+  for (const listener of listeners.get(cacheKey) ?? []) listener(records);
 }
 
 function project(record: ExchangePublicOrganizationProjection): PublicOrganizationProjection {
@@ -169,12 +174,16 @@ export async function loadPublicOrganizationsForExchange(
     current.records = records;
     current.request = null;
     current.expiresAt = Date.now() + ttlMs;
+    publish(cacheKey, records);
     return records;
   } catch (error) {
-    if (current.generation === generation && current.request === request) {
-      current.request = null;
-      current.expiresAt = 0;
+    if (current.generation !== generation || current.request !== request) {
+      if (current.request) return bounded(await current.request, maximum);
+      if (current.records) return bounded(current.records, maximum);
+      throw error;
     }
+    current.request = null;
+    if (!current.records) current.expiresAt = 0;
     throw error;
   }
 }
@@ -186,6 +195,8 @@ export function watchPublicOrganizationsForExchange(
 ): () => void {
   let active = true;
   let inFlight = false;
+  const browserWindow = typeof window === "undefined" ? null : window;
+  const browserDocument = typeof document === "undefined" ? null : document;
   const refresh = async (force: boolean) => {
     if (!active || inFlight) return;
     inFlight = true;
@@ -203,19 +214,19 @@ export function watchPublicOrganizationsForExchange(
     }
   };
   const visible = () => {
-    if (document.visibilityState === "visible") void refresh(true);
+    if (browserDocument?.visibilityState === "visible") void refresh(true);
   };
   const online = () => void refresh(true);
   const refreshMs = Math.max(10_000, Math.min(60_000, input.refreshIntervalMs ?? DEFAULT_REFRESH_MS));
-  const timer = window.setInterval(() => void refresh(true), refreshMs);
-  document.addEventListener("visibilitychange", visible);
-  window.addEventListener("online", online);
+  const timer = browserWindow?.setInterval(() => void refresh(true), refreshMs);
+  browserDocument?.addEventListener("visibilitychange", visible);
+  browserWindow?.addEventListener("online", online);
   void refresh(false);
   return () => {
     active = false;
-    window.clearInterval(timer);
-    document.removeEventListener("visibilitychange", visible);
-    window.removeEventListener("online", online);
+    if (timer !== undefined) browserWindow?.clearInterval(timer);
+    browserDocument?.removeEventListener("visibilitychange", visible);
+    browserWindow?.removeEventListener("online", online);
   };
 }
 
@@ -223,12 +234,27 @@ export function subscribePublicOrganizationsForExchange(
   cacheScope: string,
   listener: (records: PublicOrganizationProjection[]) => void,
 ): () => void {
-  return watchPublicOrganizationsForExchange({ cacheScope }, listener);
+  const cacheKey = key({ cacheScope });
+  const scopedListeners = listeners.get(cacheKey) ?? new Set();
+  scopedListeners.add(listener);
+  listeners.set(cacheKey, scopedListeners);
+  const existing = cache.get(cacheKey)?.records;
+  if (existing) listener(existing);
+  const stopServerWatch = typeof window !== "undefined" && typeof document !== "undefined"
+    ? watchPublicOrganizationsForExchange({ cacheScope }, () => undefined)
+    : () => undefined;
+  return () => {
+    stopServerWatch();
+    const current = listeners.get(cacheKey);
+    current?.delete(listener);
+    if (!current?.size) listeners.delete(cacheKey);
+  };
 }
 
 export function clearPublicOrganizationsForExchangeCache(cacheScope?: string): void {
   if (cacheScope === undefined) {
     cache.clear();
+    listeners.clear();
     return;
   }
   const target = scope(cacheScope);
@@ -238,5 +264,6 @@ export function clearPublicOrganizationsForExchangeCache(cacheScope?: string): v
     current.generation += 1;
     current.request = null;
     cache.delete(cacheKey);
+    listeners.delete(cacheKey);
   }
 }
