@@ -194,6 +194,7 @@ if (operation === "generate") {
     resolve(sharedDist, "index.js"),
     resolve(sharedDist, "opportunityDiscovery.js"),
     resolve(sharedDist, "exchangeOrganizationContext.js"),
+    resolve(sharedDist, "organizationEstablishments.js"),
   ]) {
     if (!existsSync(required)) throw new Error(`Build the Functions/shared packages first; missing ${required}`);
   }
@@ -226,6 +227,7 @@ if (operation === "generate") {
       ".": "./dist/index.js",
       "./opportunity-discovery": "./dist/opportunityDiscovery.js",
       "./exchange-organization-context": "./dist/exchangeOrganizationContext.js",
+      "./organization-establishments": "./dist/organizationEstablishments.js",
     },
     dependencies: { zod: sourcePackage.dependencies.zod },
   }, null, 2)}\n`);
