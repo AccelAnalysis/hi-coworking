@@ -14,7 +14,7 @@ permissions:
 jobs:
   repair-lock:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,15 +32,14 @@ jobs:
         run: npm audit --omit=dev --audit-level=low
       - name: Verify repaired dependency tree
         run: npm ls postcss sharp next --all
-      - name: Validate repaired repository
-        run: |
-          npm ci
-          npm run build:shared
-          npm run build:functions
-          npm run lint
-          npm run test:exchange
-          npm run build
-          git diff --check
+      - name: Reinstall from repaired manifests
+        run: npm ci
+      - run: npm run build:shared
+      - run: npm run build:functions
+      - run: npm run lint
+      - run: npm run test:exchange
+      - run: npm run build
+      - run: git diff --check
       - name: Commit validated dependency repair
         run: |
           if git diff --quiet -- apps/web/package.json package-lock.json; then
