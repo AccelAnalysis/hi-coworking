@@ -1,0 +1,40 @@
+name: PR23 dependency lock refresh
+
+on:
+  push:
+    branches:
+      - codex/exchange-business-registration-map-activation
+    paths:
+      - ".github/workflows/pr23-lock-refresh.yml"
+      - "package.json"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-registration-map-activation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Regenerate lockfile from declared forward overrides
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Verify production dependency audit
+        run: npm audit --omit=dev --audit-level=low
+      - name: Commit regenerated lockfile
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "fix(deps): refresh safe web dependency resolutions"
+          git push origin HEAD:codex/exchange-business-registration-map-activation
