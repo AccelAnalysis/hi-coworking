@@ -493,6 +493,34 @@ describe("authoritative account initialization", () => {
       "unauthenticated",
     );
   });
+
+  it("never downgrades a completed business registration during sign-in repair", async () => {
+    const actor = await createUnprovisionedActor("account-initialize-business");
+    await callFunction(actor, "account_initialize", {
+      displayName: "Business Representative",
+      professionalTitle: "Owner",
+      preferredPrivateEmail: "representative@example.test",
+      preferredPrivatePhone: "+1 757 555 0199",
+      communicationPreferences: { inApp: true, email: true, sms: false },
+      businessRepresentativeAttestation: true,
+      idempotencyKey: "business-registration-attempt-0001",
+      registrationVersion: 2,
+    });
+    await callFunction(actor, "account_initialize", {
+      idempotencyKey: "sign-in-repair-attempt-0001",
+      registrationVersion: 1,
+    });
+    expect((await db.collection("users").doc(actor.uid).get()).data()).toMatchObject({
+      registrationVersion: 2,
+      businessRepresentativeAttestationVersion: 1,
+      businessRepresentativeAttestedAt: expect.any(Number),
+    });
+    expect((await db.collection("profiles").doc(actor.uid).get()).data()).toMatchObject({
+      professionalTitle: "Owner",
+      preferredPrivateEmail: "representative@example.test",
+      personEssentialsCompletedAt: expect.any(Number),
+    });
+  });
 });
 
 describe("Opportunity discovery gateway boundaries", () => {

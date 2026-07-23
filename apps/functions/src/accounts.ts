@@ -98,6 +98,10 @@ export async function provisionAccountDocuments(
     ]);
     const previousUser = userSnapshot.data() ?? {};
     const previousProfile = profileSnapshot.data() ?? {};
+    const registrationVersion = previousUser.registrationVersion === 2
+      || input.registrationVersion === 2
+      ? 2
+      : 1;
     const idempotentReplay = previousUser.lastAccountInitializationKeyHash === requestHash;
     const profileVersion = Number.isInteger(previousProfile.profileVersion)
       ? Number(previousProfile.profileVersion)
@@ -111,7 +115,7 @@ export async function provisionAccountDocuments(
       membershipStatus: previousUser.membershipStatus ?? "none",
       credits: previousUser.credits ?? 0,
       lifetimeCreditsPurchased: previousUser.lifetimeCreditsPurchased ?? 0,
-      registrationVersion: input.registrationVersion,
+      registrationVersion,
       ...(input.registrationVersion === 2 && input.businessRepresentativeAttestation === true
         ? {
           businessRepresentativeAttestedAt:

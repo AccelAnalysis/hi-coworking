@@ -743,6 +743,8 @@ test("configured development preserves external organization context through eve
     params.set("subjectOrg", fixture.subjectOrganizationId);
     params.set("entity", "establishment");
     params.set("selected", fixture.subjectBranchId);
+    params.set("secondaryEntity", "establishment");
+    params.set("secondarySelected", fixture.subjectBranchId);
     params.set("panel", "detail");
     await gotoStable(page, `/exchange?${params.toString()}`);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
@@ -801,7 +803,11 @@ test("configured development preserves external organization context through eve
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     await expectWorkspaceSearchPreserved();
     await page.goBack();
+    await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
+    await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     await page.goForward();
+    await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
 
