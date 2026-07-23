@@ -1,47 +1,54 @@
-name: PR23 dependency lock diagnostic
+name: PR23 dependency lock repair
 
 on:
-  pull_request:
+  push:
     branches:
-      - codex/exchange-establishments-contact-routing
+      - codex/exchange-business-registration-map-activation
     paths:
       - ".github/workflows/pr23-lock-refresh.yml"
-      - "apps/web/package.json"
-      - "package.json"
-      - "package-lock.json"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose-lock:
+  repair-lock:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-registration-map-activation
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - name: Test safe web pins and non-breaking audit repair
-        shell: bash
+      - name: Apply safe web dependency resolution
         run: |
-          set -o pipefail
-          npm install --workspace web --save-exact postcss@8.5.19 sharp@0.35.3 --ignore-scripts 2>&1 | tee lock-refresh.log
-          npm audit fix --omit=dev --ignore-scripts 2>&1 | tee -a lock-refresh.log
-          npm dedupe --ignore-scripts 2>&1 | tee -a lock-refresh.log
-          git diff --stat -- apps/web/package.json package-lock.json | tee -a lock-refresh.log
-          npm ls postcss sharp next --all 2>&1 | tee -a lock-refresh.log || true
+          npm install --workspace web --save-exact postcss@8.5.19 sharp@0.35.3 --ignore-scripts
+          npm audit fix --omit=dev --ignore-scripts
+          npm dedupe --ignore-scripts
       - name: Verify production dependency audit
-        shell: bash
+        run: npm audit --omit=dev --audit-level=low
+      - name: Verify repaired dependency tree
+        run: npm ls postcss sharp next --all
+      - name: Validate repaired repository
         run: |
-          set -o pipefail
-          npm audit --omit=dev --audit-level=low 2>&1 | tee -a lock-refresh.log
-      - name: Upload dependency diagnostic
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr23-lock-diagnostic
-          path: lock-refresh.log
-          if-no-files-found: error
+          npm ci
+          npm run build:shared
+          npm run build:functions
+          npm run lint
+          npm run test:exchange
+          npm run build
+          git diff --check
+      - name: Commit validated dependency repair
+        run: |
+          if git diff --quiet -- apps/web/package.json package-lock.json; then
+            echo "Dependency manifests already repaired."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/package.json package-lock.json
+          git commit -m "fix(deps): repair Exchange production dependency audit"
+          git push origin HEAD:codex/exchange-business-registration-map-activation
