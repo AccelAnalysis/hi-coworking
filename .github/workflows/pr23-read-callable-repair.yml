@@ -1,0 +1,71 @@
+name: PR23 read callable payload repair
+
+on:
+  pull_request:
+    branches:
+      - codex/exchange-establishments-contact-routing
+    paths:
+      - .github/workflows/pr23-read-callable-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-registration-map-activation
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Apply repair
+        run: python scripts/pr23-read-callable-repair.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate repair
+        run: |
+          npx vitest run tests/exchange/callable-read-payload-normalization.test.ts
+          npm run build:shared
+          npm run build:functions
+          npm run lint
+          npm run test:exchange
+          npm run test:run3
+          git diff --check
+
+      - name: Validate production web build
+        run: npm run build
+        env:
+          SKIP_BOOKSTORE_SYNC: "true"
+          NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+          NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
+
+      - name: Commit validated repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/lib/callableReadPayloads.ts \
+            apps/web/src/features/exchange/data/organizationContextGateway.ts \
+            apps/web/src/lib/functions.ts \
+            tests/exchange/callable-read-payload-normalization.test.ts
+          git commit -m "fix(exchange): normalize read callable payloads"
+          git push origin HEAD:codex/exchange-business-registration-map-activation
