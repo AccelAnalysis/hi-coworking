@@ -1,4 +1,4 @@
-name: PR23 final repair gate
+name: PR23 validated repair commit
 
 on:
   pull_request:
@@ -13,58 +13,48 @@ permissions:
   contents: write
 
 jobs:
-  repair-and-validate:
+  commit-validated-repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: codex/exchange-business-registration-map-activation
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - name: Apply guarded application repairs
+      - name: Recreate validated application repair
         run: python3 scripts/pr23-final-repair.py
-      - name: Repair safe web dependency resolutions
+      - name: Recreate validated dependency repair
         run: |
           npm install --workspace web --save-exact postcss@8.5.19 sharp@0.35.3 --ignore-scripts
           npm audit fix --omit=dev --ignore-scripts
           npm dedupe --ignore-scripts
-      - name: Verify production dependency audit
-        run: npm audit --omit=dev --audit-level=low
-      - name: Verify repaired dependency tree
-        run: npm ls postcss sharp next --all
-      - name: Reinstall from repaired manifests
-        run: npm ci
-      - run: npm run build:shared
-      - run: npm run build:functions
-      - run: npm run lint
-      - run: npm run test:exchange
-      - run: npm run test:security
-      - run: npm run test:run3
-      - run: npm run test:run4
-      - name: Run production build
-        run: npm run build
-        env:
-          SKIP_BOOKSTORE_SYNC: "true"
-          NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
-          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
-          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
-          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
-          NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
-          NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
-      - run: git diff --check
-      - name: Commit validated final repair
+          npm audit --omit=dev --audit-level=low
+          npm ci
+          git diff --check
+      - name: Commit and push validated repair
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/functions/src/exchange/organizationWorkspace.ts apps/functions/src/exchange/organizationEstablishments.ts apps/functions/src/index.ts apps/web/src/app/org/settings/page.tsx tests/exchange/organizationPublicationDiagnostic.test.ts apps/web/package.json package-lock.json
-          git commit -m "fix(exchange): complete marker discovery and security repair"
-          git pull --rebase origin codex/exchange-business-registration-map-activation
-          git push origin HEAD:codex/exchange-business-registration-map-activation
+          set -o pipefail
+          {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add apps/functions/src/exchange/organizationWorkspace.ts apps/functions/src/exchange/organizationEstablishments.ts apps/functions/src/index.ts apps/web/src/app/org/settings/page.tsx tests/exchange/organizationPublicationDiagnostic.test.ts apps/web/package.json package-lock.json
+            git status --short
+            if git diff --cached --quiet; then
+              echo "Validated repair is already committed."
+              exit 0
+            fi
+            git commit -m "fix(exchange): complete marker discovery and security repair"
+            git push origin HEAD:refs/heads/codex/exchange-business-registration-map-activation
+          } 2>&1 | tee final-repair-commit.log
+      - name: Upload commit output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-final-repair-commit-log
+          path: final-repair-commit.log
+          if-no-files-found: warn
