@@ -691,8 +691,6 @@ test("configured development preserves external organization context through eve
     await expect(dimensionControl).toBeVisible();
     await expect(dimensionControl.getByRole("button", { name: "3D" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator('[data-map-dimension="3d"]')).toBeVisible();
-    const originalDimensionControl = await dimensionControl.elementHandle();
-    expect(originalDimensionControl).toBeTruthy();
     const controlPosition = await dimensionControl.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       return {
@@ -770,6 +768,8 @@ test("configured development preserves external organization context through eve
     await expect(page.locator(".mapboxgl-canvas")).toHaveCount(1, { timeout: 40_000 });
     const originalMapHost = await mapHost.elementHandle();
     expect(originalMapHost).toBeTruthy();
+    const originalDimensionControl = await dimensionControl.elementHandle();
+    expect(originalDimensionControl).toBeTruthy();
 
     const viewNavigation = page.getByRole("navigation", { name: /Exchange views|Primary Exchange navigation/ });
     for (const view of ["Referrals", "Intelligence", "Resources", "Opportunities"] as const) {
