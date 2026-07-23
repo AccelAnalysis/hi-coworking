@@ -29,10 +29,30 @@ jobs:
           set -o pipefail
           python3 - <<'PY' 2>&1 | tee publication-patch.log
           from pathlib import Path
-          source = Path(".github/workflows/pr23-publication-diagnostic-runner.yml").read_text()
+          source = Path(".github/workflows/pr23-publication-diagnostic-patch.yml").read_text()
           raw = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
           script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
-          exec(compile(script, "pr23-publication-diagnostic-runner", "exec"))
+          strict = '''def replace_once(path: Path, old: str, new: str) -> None:
+    text = path.read_text()
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{path}: guarded replacement expected once, found {count}: {old[:100]!r}")
+    path.write_text(text.replace(old, new, 1))'''
+          idempotent = '''def replace_once(path: Path, old: str, new: str) -> None:
+    text = path.read_text()
+    count = text.count(old)
+    if path.name == "index.ts" and "exchange_getOrganizationPublicationDiagnostic" in new:
+        if count == 2:
+            path.write_text(text.replace(old, new))
+            return
+        if count == 0 and text.count(new) == 2:
+            return
+    if count != 1:
+        raise SystemExit(f"{path}: guarded replacement expected once, found {count}: {old[:100]!r}")
+    path.write_text(text.replace(old, new, 1))'''
+          if strict not in script:
+              raise SystemExit("Could not locate strict guarded replacement helper")
+          exec(compile(script.replace(strict, idempotent, 1), "pr23-publication-diagnostic-patch", "exec"))
           PY
       - name: Upload publication patch diagnostic
         if: always()
