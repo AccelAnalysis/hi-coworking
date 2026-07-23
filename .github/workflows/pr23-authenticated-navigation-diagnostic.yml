@@ -43,7 +43,7 @@ jobs:
       - name: Reproduce Exchange to Profile navigation
         shell: bash
         run: |
-          cat > /tmp/pr23-authenticated-navigation.mjs <<'EOF'
+          cat > pr23-authenticated-navigation.mjs <<'EOF'
           import { chromium } from "playwright";
           import fs from "node:fs";
           import crypto from "node:crypto";
@@ -148,7 +148,7 @@ jobs:
             relevantFailureCount: relevantFailures.length,
           }, null, 2));
           EOF
-          node /tmp/pr23-authenticated-navigation.mjs
+          node ./pr23-authenticated-navigation.mjs
 
       - name: Upload authenticated diagnostic
         if: always()
