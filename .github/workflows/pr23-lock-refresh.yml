@@ -6,6 +6,7 @@ on:
       - codex/exchange-establishments-contact-routing
     paths:
       - ".github/workflows/pr23-lock-refresh.yml"
+      - "scripts/pr23-final-repair.py"
   workflow_dispatch:
 
 permissions:
@@ -14,7 +15,7 @@ permissions:
 jobs:
   repair-and-validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,60 +29,8 @@ jobs:
           node-version: 24
           cache: npm
       - name: Apply guarded application repairs
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 - <<'PY' 2>&1 | tee final-repair-patch.log
-          from pathlib import Path
-
-          def extract(path: str) -> str:
-              source = Path(path).read_text()
-              raw = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-              return "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
-
-          publication = extract(".github/workflows/pr23-publication-diagnostic-patch.yml")
-          strict = '''def replace_once(path: Path, old: str, new: str) -> None:
-    text = path.read_text()
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{path}: guarded replacement expected once, found {count}: {old[:100]!r}")
-    path.write_text(text.replace(old, new, 1))'''
-          idempotent = '''def replace_once(path: Path, old: str, new: str) -> None:
-    text = path.read_text()
-    count = text.count(old)
-    if path.name == "index.ts" and "exchange_getOrganizationPublicationDiagnostic" in new:
-        if count == 2:
-            path.write_text(text.replace(old, new))
-            return
-        if count == 0 and text.count(new) == 2:
-            return
-    if count != 1:
-        raise SystemExit(f"{path}: guarded replacement expected once, found {count}: {old[:100]!r}")
-    path.write_text(text.replace(old, new, 1))'''
-          if strict not in publication:
-              raise SystemExit("Could not locate publication replacement helper")
-          exec(compile(publication.replace(strict, idempotent, 1), "publication-patch", "exec"))
-
-          server = extract(".github/workflows/pr23-server-contract-corrected.yml")
-          needle = '''        actorOrganizationId: input.actorOrganizationId,
-        subjectOrganizationId: input.organizationId,
-        mode: input.mode,'''
-          replacement = '''        contractVersion: CONTRACT_VERSION,
-        actorOrganizationId: input.actorOrganizationId,
-        subjectOrganizationId: input.organizationId,
-        mode: input.mode,'''
-          if server.count(needle) != 2:
-              raise SystemExit(f"Expected two directory perspective call patterns, found {server.count(needle)}")
-          exec(compile(server.replace(needle, replacement), "server-patch", "exec"))
-          PY
-      - name: Upload application patch output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr23-final-repair-patch-log
-          path: final-repair-patch.log
-          if-no-files-found: error
-      - name: Apply safe web dependency resolution
+        run: python3 scripts/pr23-final-repair.py
+      - name: Repair safe web dependency resolutions
         run: |
           npm install --workspace web --save-exact postcss@8.5.19 sharp@0.35.3 --ignore-scripts
           npm audit fix --omit=dev --ignore-scripts
@@ -100,10 +49,7 @@ jobs:
       - run: npm run test:run3
       - run: npm run test:run4
       - name: Run production build
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run build 2>&1 | tee final-repair-build.log
+        run: npm run build
         env:
           SKIP_BOOKSTORE_SYNC: "true"
           NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
@@ -113,13 +59,6 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
           NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
-      - name: Upload production build output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr23-final-repair-build-log
-          path: final-repair-build.log
-          if-no-files-found: error
       - run: git diff --check
       - name: Commit validated final repair
         run: |
