@@ -31,15 +31,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate repair
-        run: |
-          npx vitest run tests/exchange/callable-read-payload-normalization.test.ts
-          npm run build:shared
-          npm run build:functions
-          npm run lint
-          npm run test:exchange
-          npm run test:run3
-          git diff --check
+      - name: Run focused payload tests
+        run: npx vitest run tests/exchange/callable-read-payload-normalization.test.ts
+
+      - name: Build shared package
+        run: npm run build:shared
+
+      - name: Build Functions
+        run: npm run build:functions
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run Exchange tests
+        run: npm run test:exchange
+
+      - name: Run Run 3 tests
+        run: npm run test:run3
+
+      - name: Check patch formatting
+        run: git diff --check
 
       - name: Validate production web build
         run: npm run build
