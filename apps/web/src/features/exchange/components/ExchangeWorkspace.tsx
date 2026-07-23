@@ -292,8 +292,8 @@ function ExchangeWorkspaceIdentityBoundary({
         urlReplaceTimerRef.current = null;
       }
     };
-    window.addEventListener("popstate", markBrowserHistoryNavigation);
-    return () => window.removeEventListener("popstate", markBrowserHistoryNavigation);
+    window.addEventListener("popstate", markBrowserHistoryNavigation, { capture: true });
+    return () => window.removeEventListener("popstate", markBrowserHistoryNavigation, { capture: true });
   }, []);
 
   useEffect(() => () => {
