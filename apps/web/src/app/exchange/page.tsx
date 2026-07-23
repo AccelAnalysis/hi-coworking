@@ -53,7 +53,9 @@ function ExchangeActivationGate({ children }: { children: React.ReactNode }) {
         const connected = response.data.completedSteps.includes("organization_connected");
         const activationReady = response.data.currentStep === "map_activation"
           || response.data.currentStep === "completed";
-        if (connected && (!response.data.guidedActivationRequired || activationReady)) {
+        const activationGateSatisfied = !response.data.guidedActivationRequired
+          || (connected && activationReady);
+        if (activationGateSatisfied) {
           setAuthorized(true);
           const params = new URLSearchParams(window.location.search);
           const establishmentId = params.get("secondarySelected");
