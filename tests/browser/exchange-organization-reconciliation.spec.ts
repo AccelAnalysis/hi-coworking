@@ -23,12 +23,16 @@ async function register(page: import("@playwright/test").Page, prefix: string) {
   const email = `${prefix}@example.test`;
   await page.goto("/register");
   await page.getByLabel("Full Name").fill(`${prefix} User`);
-  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Professional title").fill("Owner");
+  await page.getByLabel("Login and preferred private email").fill(email);
+  await page.getByLabel("Preferred private telephone").fill("+1 757 555 0142");
   await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByLabel(
+    "I am registering as an authorized representative of a business or organization.",
+  ).check();
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/profile\?onboarding=1$/, { timeout: 40_000 });
-  await page.getByRole("link", { name: "Continue to Exchange" }).click();
-  await expect(page).toHaveURL(/\/exchange$/, { timeout: 40_000 });
+  await expect(page).toHaveURL(/\/exchange\/onboarding$/, { timeout: 40_000 });
+  await expect(page.getByText(/Organization connection is required/)).toBeVisible();
   return email;
 }
 
@@ -49,17 +53,22 @@ test("new user creates an organization, enters establishment setup, and saves a 
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/exchange");
-    await expect(page).toHaveURL(/\/exchange/);
-    await page.screenshot({ path: `${SCREENSHOT_DIR}/exchange-${viewport.name}.png`, fullPage: false });
+    await expect(page).toHaveURL(/\/exchange\/onboarding$/);
+    await expect(page.getByRole("heading", { name: "Find or create the organization you represent." })).toBeVisible();
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/onboarding-${viewport.name}.png`, fullPage: false });
   }
 
-  await page.goto("/exchange/onboarding");
   await page.getByLabel("Organization name").fill("Browser Founder Studio LLC");
   await page.getByLabel("City").fill("Smithfield");
   await page.getByRole("button", { name: "Search organizations" }).click();
   await expect(page.getByText("No likely match found")).toBeVisible();
-  await page.getByRole("button", { name: "Create and add establishment" }).click();
-  await expect(page).toHaveURL(/\/org\/settings\?id=[^&]+&tab=establishments&onboarding=1$/);
+  await page.getByRole("button", { name: "Create this organization" }).click();
+  await expect(page).toHaveURL(/\/org\/settings\?id=[^&]+&tab=enrichment&onboarding=1$/);
+  await expect(page.getByRole("tab", { name: "1. Enrichment" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Complete enrichment review" }).click();
+  await expect(page.getByRole("status")).toContainText("Enrichment review completed.");
+  await page.getByRole("tab", { name: "3. Establishments" }).click();
+  await expect(page.getByRole("heading", { name: "Establishments" })).toBeVisible();
 
   const user = await adminAuth.getUserByEmail(email);
   const memberships = await db.collection("orgMembers").where("uid", "==", user.uid).get();
@@ -74,7 +83,7 @@ test("new user creates an organization, enters establishment setup, and saves a 
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
 });
 
-test("seeded claim is nonblocking, admin approval is audited, and a legacy admin profile saves", async ({ page, browser }) => {
+test("seeded claim blocks organization authority until admin approval and a legacy admin profile saves", async ({ page, browser }) => {
   const now = Date.now();
   await db.collection("orgs").doc("browser-seeded-org").set({
     id: "browser-seeded-org",
@@ -132,9 +141,10 @@ test("seeded claim is nonblocking, admin approval is audited, and a legacy admin
   await expect(page.getByText("Browser Seeded Services LLC")).toBeVisible();
   await page.getByLabel("Why are you authorized to claim this organization?").fill("I am the business owner and control its official domain.");
   await page.getByRole("button", { name: "Request claim" }).click();
-  await expect(page.getByText(/Claim request received/)).toBeVisible();
-  await page.getByRole("link", { name: "Open the Exchange map" }).first().click();
-  await expect(page).toHaveURL(/\/exchange$/);
+  await expect(page.getByText("Organization claim pending", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open the Exchange map/i })).toHaveCount(0);
+  await page.goto("/exchange");
+  await expect(page).toHaveURL(/\/exchange\/onboarding$/);
 
   await adminAuth.createUser({ uid: "legacy-super-admin", email: "legacy-admin@example.test", password: PASSWORD, emailVerified: true });
   await adminAuth.setCustomUserClaims("legacy-super-admin", { role: "master" });
