@@ -18,7 +18,7 @@ import type {
 } from "@hi/shared/organization-establishments";
 import { ArrowLeft, Building2, Check, Loader2, MapPin, Plus, Route, ShieldCheck } from "lucide-react";
 
-type Tab = "profile" | "establishments" | "contact" | "members" | "seats";
+type Tab = "enrichment" | "profile" | "establishments" | "contact" | "members" | "seats";
 type OrganizationModel = {
   id: string; legalName: string; tradeNames: string[]; identifiers: Record<string, string>;
   description: string; domain: string; website: string; industries: string[]; capabilities: string[];
@@ -32,6 +32,7 @@ type ManagementModel = {
   contactPoints: OrganizationContactPoint[];
   communicationRoutes: OrganizationCommunicationRoute[];
   enrichmentProposals: EnrichmentProposal[];
+  preferredOrientationEstablishmentId: string | null;
 };
 type EnrichmentProposal = {
   id: string; status: string; provider: string; proposedFields: Record<string, unknown>; createdAt: number;
@@ -51,6 +52,7 @@ const upsertLocation = httpsCallable<Record<string, unknown>, { locationId: stri
 const upsertContact = httpsCallable<Record<string, unknown>, { contactPointId: string; recordVersion: number }>(functions, "exchange_upsertOrganizationContactPoint");
 const upsertRoute = httpsCallable<Record<string, unknown>, { routeId: string; recordVersion: number }>(functions, "exchange_upsertOrganizationCommunicationRoute");
 const reviewEnrichmentProposal = httpsCallable<Record<string, unknown>, { resultId: string | null; proposalStatus: string }>(functions, "exchange_reviewOrganizationEnrichmentProposal");
+const recordActivationProgress = httpsCallable<Record<string, unknown>, { success: true }>(functions, "exchange_recordBusinessActivationProgress");
 const purchaseSeats = httpsCallable<{ orgId: string; seats: number }, { success: boolean }>(functions, "org_purchaseSeats");
 
 const fieldClass = "mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200";
@@ -76,7 +78,7 @@ function OrgSettingsContent() {
   const search = useSearchParams();
   const organizationId = search.get("id") ?? "";
   const requestedTab = search.get("tab") as Tab | null;
-  const [tab, setTab] = useState<Tab>(requestedTab && ["profile", "establishments", "contact", "members", "seats"].includes(requestedTab) ? requestedTab : "profile");
+  const [tab, setTab] = useState<Tab>(requestedTab && ["enrichment", "profile", "establishments", "contact", "members", "seats"].includes(requestedTab) ? requestedTab : "profile");
   const [model, setModel] = useState<ManagementModel | null>(null);
   const [members, setMembers] = useState<OrgMemberDoc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +114,7 @@ function OrgSettingsContent() {
   if (!model) return <AppShell><div className="mx-auto max-w-3xl py-20 text-center"><Building2 className="mx-auto h-12 w-12 text-slate-300" /><h1 className="mt-4 text-xl font-bold">Organization settings unavailable</h1><p className="mt-2 text-sm text-slate-600">{error || "Add an organization ID and confirm active owner or administrator authority."}</p></div></AppShell>;
 
   const tabs: Array<{ id: Tab; label: string }> = [
-    { id: "profile", label: "Profile" }, { id: "establishments", label: "Establishments" },
+    { id: "enrichment", label: "1. Enrichment" }, { id: "profile", label: "2. Profile" }, { id: "establishments", label: "3. Establishments" },
     { id: "contact", label: "Contact & Routing" }, { id: "members", label: "Members" }, { id: "seats", label: "Seats" },
   ];
 
@@ -127,9 +129,10 @@ function OrgSettingsContent() {
     <div role="tablist" aria-label="Organization settings" className="mb-7 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
       {tabs.map((item) => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-bold ${tab === item.id ? "bg-white text-slate-950 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>{item.label}</button>)}
     </div>
-    {tab === "profile" && <div className="space-y-6"><OrganizationProfileForm organization={model.organization} busy={busy} onSave={(payload) => run(() => updateProfile(cleanCallablePayload({ organizationId, expectedRecordVersion: model.organization.recordVersion, ...payload })), "Organization profile saved.")} /><EnrichmentProposalPanel organizationId={organizationId} proposals={model.enrichmentProposals ?? []} locations={model.locations} busy={busy} run={run} /></div>}
-    {tab === "establishments" && <EstablishmentsPanel organizationId={organizationId} locations={model.locations} busy={busy} run={run} />}
-    {tab === "contact" && <ContactRoutingPanel organizationId={organizationId} locations={model.locations} contacts={model.contactPoints} routes={model.communicationRoutes} busy={busy} run={run} />}
+    {tab === "enrichment" && <div className="space-y-5"><EnrichmentProposalPanel organizationId={organizationId} proposals={model.enrichmentProposals ?? []} locations={model.locations} busy={busy} run={run} /><button type="button" disabled={busy} onClick={() => void run(() => recordActivationProgress({ action: "enrichment_reviewed", organizationId }), "Enrichment review completed. Continue to Organization Profile.")} className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">Complete enrichment review</button></div>}
+    {tab === "profile" && <OrganizationProfileForm organization={model.organization} busy={busy} onSave={(payload) => run(() => updateProfile(cleanCallablePayload({ organizationId, expectedRecordVersion: model.organization.recordVersion, ...payload })), "Organization profile saved. Continue to Establishments.")} />}
+    {tab === "establishments" && <EstablishmentsPanel organizationId={organizationId} organizationPublished={model.organization.publicationStatus === "approved"} locations={model.locations} preferredOrientationEstablishmentId={model.preferredOrientationEstablishmentId} busy={busy} run={run} />}
+    {tab === "contact" && <ContactRoutingPanel organizationId={organizationId} locations={model.locations} contacts={model.contactPoints} routes={model.communicationRoutes} preferredOrientationEstablishmentId={model.preferredOrientationEstablishmentId} busy={busy} run={run} />}
     {tab === "members" && <MembersPanel members={members} />}
     {tab === "seats" && <SeatsPanel organizationId={organizationId} busy={busy} run={run} />}
   </main></AppShell>;
@@ -160,15 +163,15 @@ function OrganizationProfileForm({ organization, busy, onSave }: { organization:
   </form>;
 }
 
-function EstablishmentsPanel({ organizationId, locations, busy, run }: { organizationId: string; locations: OrganizationEstablishment[]; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
+function EstablishmentsPanel({ organizationId, organizationPublished, locations, preferredOrientationEstablishmentId, busy, run }: { organizationId: string; organizationPublished: boolean; locations: OrganizationEstablishment[]; preferredOrientationEstablishmentId: string | null; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
   const [editing, setEditing] = useState<OrganizationEstablishment | null>(null);
   return <div className="space-y-6"><Section title="Establishments" description="One firm may have multiple physical locations. Exactly one active establishment is primary; headquarters is explicit.">
-    {locations.length ? <ul className="grid gap-3">{locations.map((location) => <li key={location.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-slate-950">{location.name}</p><p className="text-sm text-slate-600">{location.locationType.replaceAll("_", " ")} · {location.status}</p><div className="mt-2 flex flex-wrap gap-2">{location.isPrimary && <Badge>Primary</Badge>}{location.isHeadquarters && <Badge>Headquarters</Badge>}<Badge>{location.addressPublicationApproved ? "Address public" : "Address private"}</Badge><Badge>{location.coordinatePublicationApproved ? "Marker public" : "Marker private"}</Badge></div></div><button type="button" onClick={() => setEditing(location)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Edit</button></div></li>)}</ul> : <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">No establishment yet. Add the primary or headquarters location to complete onboarding.</p>}
+    {locations.length ? <ul className="grid gap-3">{locations.map((location) => <li key={location.id} className="rounded-xl border border-slate-200 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-slate-950">{location.name}</p><p className="text-sm text-slate-600">{location.locationType.replaceAll("_", " ")} · {location.status}</p><div className="mt-2 flex flex-wrap gap-2">{location.isPrimary && <Badge>Primary</Badge>}{location.isHeadquarters && <Badge>Headquarters</Badge>}{location.id === preferredOrientationEstablishmentId && <Badge>Exchange orientation</Badge>}<Badge>{location.addressPublicationApproved ? "Address public" : "Address private"}</Badge><Badge>{location.coordinatePublicationApproved && organizationPublished ? "Marker public" : "Marker private"}</Badge></div></div><button type="button" onClick={() => setEditing(location)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Edit</button></div></li>)}</ul> : <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-950">No establishment yet. Add the primary or headquarters location to complete onboarding.</p>}
     <button type="button" onClick={() => setEditing(null)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white"><Plus className="h-4 w-4" />Add establishment</button>
-  </Section><EstablishmentForm key={editing?.id ?? `new-${locations.length}`} organizationId={organizationId} location={editing} hasActiveLocations={locations.some((item) => item.status === "active" && item.id !== editing?.id)} busy={busy} run={run} /></div>;
+  </Section><EstablishmentForm key={editing?.id ?? `new-${locations.length}`} organizationId={organizationId} organizationPublished={organizationPublished} location={editing} preferredOrientation={editing?.id === preferredOrientationEstablishmentId} hasActiveLocations={locations.some((item) => item.status === "active" && item.id !== editing?.id)} busy={busy} run={run} /></div>;
 }
 
-function EstablishmentForm({ organizationId, location, hasActiveLocations, busy, run }: { organizationId: string; location: OrganizationEstablishment | null; hasActiveLocations: boolean; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
+function EstablishmentForm({ organizationId, organizationPublished, location, preferredOrientation: initialPreferredOrientation, hasActiveLocations, busy, run }: { organizationId: string; organizationPublished: boolean; location: OrganizationEstablishment | null; preferredOrientation: boolean; hasActiveLocations: boolean; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
   const address = location?.physicalAddress;
   const [name, setName] = useState(location?.name ?? "Headquarters"); const [type, setType] = useState(location?.locationType ?? "headquarters");
   const [line1, setLine1] = useState(address?.line1 ?? ""); const [line2, setLine2] = useState(address?.line2 ?? "");
@@ -177,30 +180,40 @@ function EstablishmentForm({ organizationId, location, hasActiveLocations, busy,
   const [isPrimary, setPrimary] = useState(location?.isPrimary ?? !hasActiveLocations); const [isHeadquarters, setHeadquarters] = useState(location?.isHeadquarters ?? !hasActiveLocations);
   const [addressPublic, setAddressPublic] = useState(location?.addressPublicationApproved ?? false); const [coordinatePublic, setCoordinatePublic] = useState(location?.coordinatePublicationApproved ?? false);
   const [privateHome, setPrivateHome] = useState(location?.privateHome ?? false); const [geocodeRequestId, setGeocodeRequestId] = useState("");
+  const [preferredOrientation, setPreferredOrientation] = useState(initialPreferredOrientation || !hasActiveLocations);
+  const [markerState, setMarkerState] = useState("");
+  const [publicMarkerState, setPublicMarkerState] = useState("");
+  const [savedLocationId, setSavedLocationId] = useState(location?.id ?? "");
   const [candidates, setCandidates] = useState<GeocodeCandidate[]>([]); const [candidateId, setCandidateId] = useState(""); const [searching, setSearching] = useState(false);
   const locationTypeExcludesMarker = type === "mailing_only" || type === "virtual";
+  const addressEntered = type !== "virtual" && Boolean(line1.trim() && city.trim() && region.trim());
+  const publicMarkerActive = ["public_visible", "private_and_public_visible"].includes(publicMarkerState);
   const physicalAddress = type === "virtual" ? undefined : { line1, line2: line2 || undefined, locality: city, administrativeArea: region, postalCode: postalCode || undefined, countryCode, county: county || undefined };
   const searchAddress = async () => { setSearching(true); try { const result = await searchGeocodes(cleanCallablePayload({ organizationId, address: physicalAddress })); setGeocodeRequestId(result.data.requestId); setCandidates(result.data.candidates); setCandidateId(result.data.candidates[0]?.id ?? ""); } finally { setSearching(false); } };
   const selected = candidates.find((candidate) => candidate.id === candidateId);
-  return <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); void run(() => upsertLocation(cleanCallablePayload({
+  return <form className="space-y-5" onSubmit={(event) => { event.preventDefault(); void run(async () => { const response = await upsertLocation(cleanCallablePayload({
     organizationId, locationId: location?.id, expectedRecordVersion: location?.recordVersion,
     name, locationType: type, isHeadquarters, isPrimary, status: "active", physicalAddress,
     addressPublicationApproved: privateHome ? false : addressPublic,
     coordinatePublicationApproved: privateHome || locationTypeExcludesMarker ? false : coordinatePublic,
-    publicContactAvailable: false, privateHome,
+    publicContactAvailable: false, privateHome, preferredOrientation,
     serviceArea: { city, county: county || undefined, region, countryCode },
     ...(selected ? { geocodeSelection: { requestId: geocodeRequestId, candidateId: selected.id } } : {}),
-  })), location ? "Establishment updated." : "Establishment added."); }}>
+  })); const data = response.data as { locationId: string; markerState?: string; publicMarkerState?: string }; setSavedLocationId(data.locationId); setMarkerState(data.markerState ?? ""); setPublicMarkerState(data.publicMarkerState ?? ""); return response; }, location ? "Establishment updated." : "Establishment added."); }}>
     <Section title={location ? `Edit ${location.name}` : "New establishment"} description="Confirm a standardized result before saving a new map coordinate. Geocoding never grants publication approval.">
       <div className="grid gap-4 sm:grid-cols-2"><Field label="Location label" required value={name} onChange={setName} /><label className={labelClass}>Location type<select className={fieldClass} value={type} onChange={(event) => { const value = event.target.value as typeof type; setType(value); if (value === "mailing_only" || value === "virtual") setCoordinatePublic(false); }}><option value="headquarters">Headquarters</option><option value="branch">Branch</option><option value="office">Office</option><option value="retail">Retail</option><option value="production">Production</option><option value="warehouse">Warehouse</option><option value="service_location">Service location</option><option value="coworking">Coworking</option><option value="virtual">Virtual</option><option value="mailing_only">Mailing only</option><option value="other">Other</option></select></label></div>
       {type !== "virtual" && <div className="grid gap-4 sm:grid-cols-2"><Field label="Address line 1" required value={line1} onChange={setLine1} /><Field label="Address line 2" value={line2} onChange={setLine2} /><Field label="City" required value={city} onChange={setCity} /><Field label="State / region" required value={region} onChange={setRegion} /><Field label="Postal code" value={postalCode} onChange={setPostalCode} /><Field label="County" value={county} onChange={setCounty} /><Field label="Country code" required value={countryCode} onChange={(value) => setCountryCode(value.toUpperCase())} /></div>}
       {!locationTypeExcludesMarker && <div><button type="button" disabled={searching || !line1 || !city || !region} onClick={() => void searchAddress()} className="inline-flex items-center gap-2 rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-900 disabled:opacity-50"><MapPin className="h-4 w-4" />{searching ? "Searching…" : "Search standardized addresses"}</button>{candidates.length > 0 && <fieldset className="mt-4"><legend className="text-sm font-bold">Choose and confirm a result</legend><div className="mt-2 grid gap-2">{candidates.map((candidate) => <label key={candidate.id} className="flex cursor-pointer gap-3 rounded-xl border border-slate-200 p-3 focus-within:ring-2 focus-within:ring-blue-500"><input type="radio" name="geocode" checked={candidateId === candidate.id} onChange={() => setCandidateId(candidate.id)} /><span><span className="block text-sm font-semibold">{candidate.normalizedAddress}</span><span className="block text-xs text-slate-600">{candidate.precision} · {candidate.confidence} confidence · {candidate.attribution}</span></span></label>)}</div></fieldset>}{selected && <div role="img" aria-label={`Map coordinate preview at latitude ${selected.latitude} and longitude ${selected.longitude}`} className="relative mt-3 h-36 overflow-hidden rounded-xl border border-slate-300 bg-[radial-gradient(circle_at_center,_#dbeafe_0_5px,_#e2e8f0_6px_100%)]"><MapPin className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-full text-blue-700" /><span className="absolute bottom-2 left-2 rounded bg-white/90 px-2 py-1 text-xs font-semibold">{selected.latitude.toFixed(5)}, {selected.longitude.toFixed(5)}</span></div>}</div>}
-      <fieldset><legend className="text-sm font-bold text-slate-800">Role and privacy</legend><div className="mt-2 grid gap-2"><CheckRow checked={isPrimary} onChange={setPrimary} label="Primary active establishment" /><CheckRow checked={isHeadquarters} onChange={setHeadquarters} label="Headquarters" /><CheckRow checked={privateHome} onChange={(value) => { setPrivateHome(value); if (value) { setAddressPublic(false); setCoordinatePublic(false); } }} label="Private home location (always suppress precise public data)" /><CheckRow checked={addressPublic} disabled={privateHome} onChange={setAddressPublic} label="Publish street address" /><CheckRow checked={coordinatePublic} disabled={privateHome || locationTypeExcludesMarker} onChange={setCoordinatePublic} label="Publish exact map coordinate" /></div></fieldset>
+      <fieldset><legend className="text-sm font-bold text-slate-800">Role and privacy</legend><div className="mt-2 grid gap-2"><CheckRow checked={isPrimary} onChange={setPrimary} label="Primary active establishment" /><CheckRow checked={isHeadquarters} onChange={setHeadquarters} label="Headquarters" /><CheckRow checked={preferredOrientation} disabled={locationTypeExcludesMarker} onChange={setPreferredOrientation} label="Use this establishment for Exchange orientation" /><CheckRow checked={privateHome} onChange={(value) => { setPrivateHome(value); if (value) { setAddressPublic(false); setCoordinatePublic(false); } }} label="Private home location (always suppress precise public data)" /><CheckRow checked={addressPublic} disabled={privateHome} onChange={setAddressPublic} label="Publish street address" /><CheckRow checked={coordinatePublic} disabled={privateHome || locationTypeExcludesMarker} onChange={setCoordinatePublic} label="Publish exact map coordinate" /></div></fieldset>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm"><p className="font-bold">Public marker checklist</p><ul className="mt-2 grid gap-1 text-slate-700"><li>{organizationPublished ? "✓" : "○"} Organization approved for directory {!organizationPublished && <Link className="ml-1 font-bold text-blue-700 underline" href={`/org/settings?id=${encodeURIComponent(organizationId)}&tab=profile`}>Review profile publication</Link>}</li><li>✓ Establishment active</li><li>{addressEntered ? "✓" : "○"} Address entered</li><li>{selected || location?.geocode?.confirmedAt ? "✓" : "○"} Location confirmed</li><li>{coordinatePublic ? "✓" : "○"} Coordinate publication approved</li><li>{publicMarkerActive ? "✓" : "○"} Public marker active</li></ul></div>
+      {markerState ? <div role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950"><p className="font-black uppercase">{markerState.replaceAll("_", " ")}</p><p className="mt-1">{markerState.includes("private") ? "Your organization can see this confirmed location on the Exchange. Public visibility remains a separate decision." : markerState.includes("public") ? "This establishment is available as a public company marker." : "Review the checklist above to resolve this marker state."}</p></div> : null}
+      {publicMarkerState && publicMarkerState !== markerState ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-950">Public marker: {publicMarkerState.replaceAll("_", " ")}. Use the checklist above for the direct next action.</p> : null}
+      {savedLocationId && (selected || location?.geocode) ? <Link href={`/exchange?actorOrg=${encodeURIComponent(organizationId)}&subjectOrg=${encodeURIComponent(organizationId)}&secondaryEntity=establishment&secondarySelected=${encodeURIComponent(savedLocationId)}&drawer=organization&lng=${selected?.longitude ?? location?.geocode?.longitude}&lat=${selected?.latitude ?? location?.geocode?.latitude}&z=16.5&p=55&b=-20`} className="inline-flex rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white">View this establishment in the Exchange</Link> : null}
     </Section><SaveButton busy={busy} label={location ? "Save establishment" : "Add establishment"} />
   </form>;
 }
 
-function ContactRoutingPanel({ organizationId, locations, contacts, routes, busy, run }: { organizationId: string; locations: OrganizationEstablishment[]; contacts: OrganizationContactPoint[]; routes: OrganizationCommunicationRoute[]; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
+function ContactRoutingPanel({ organizationId, locations, contacts, routes, preferredOrientationEstablishmentId, busy, run }: { organizationId: string; locations: OrganizationEstablishment[]; contacts: OrganizationContactPoint[]; routes: OrganizationCommunicationRoute[]; preferredOrientationEstablishmentId: string | null; busy: boolean; run(operation: () => Promise<unknown>, success: string): Promise<void> }) {
   const [type, setType] = useState<"email" | "phone" | "website" | "contact_form">("email"); const [value, setValue] = useState("");
   const [purpose, setPurpose] = useState<OrganizationContactPoint["purposes"][number]>("general"); const [visibility, setVisibility] = useState<OrganizationContactPoint["visibility"]>("private_operational"); const [locationId, setLocationId] = useState("");
   const [editingContactId, setEditingContactId] = useState("");
@@ -208,6 +221,20 @@ function ContactRoutingPanel({ organizationId, locations, contacts, routes, busy
   const [editingRouteId, setEditingRouteId] = useState("");
   const editingContact = contacts.find((item) => item.id === editingContactId);
   const editingRoute = routes.find((item) => item.id === editingRouteId);
+  const eligibleActivationLocations = locations.filter((item) => (
+    item.status === "active"
+    && item.privateHome !== true
+    && item.locationType !== "mailing_only"
+    && item.locationType !== "virtual"
+    && item.geocode?.confirmedAt
+  ));
+  const activationLocation = eligibleActivationLocations.find((item) => item.id === preferredOrientationEstablishmentId)
+    ?? eligibleActivationLocations.find((item) => item.isHeadquarters)
+    ?? eligibleActivationLocations.find((item) => item.isPrimary)
+    ?? eligibleActivationLocations[0];
+  const hasReferralRoute = routes.some((item) => item.status === "active" && item.purpose === "referrals");
+  const hasOpportunityRoute = routes.some((item) => item.status === "active" && item.purpose === "opportunities");
+  const activationReady = Boolean(activationLocation && contacts.some((item) => item.status === "active") && hasReferralRoute && hasOpportunityRoute);
   const editContact = (contact: OrganizationContactPoint) => {
     if (contact.type === "member_route") return;
     setEditingContactId(contact.id); setType(contact.type); setValue(contact.displayValue ?? contact.normalizedValue);
@@ -223,6 +250,24 @@ function ContactRoutingPanel({ organizationId, locations, contacts, routes, busy
     {routes.length > 0 && <ul className="mb-5 grid gap-2">{routes.map((route) => <li key={route.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 text-sm"><span><strong>{route.purpose.replaceAll("_", " ")}</strong><span className="ml-2 text-slate-600">{route.locationId ? "location-specific" : "organization default"} · {[route.inAppEnabled && "in-app", route.emailEnabled && "email", route.phoneEnabled && "phone"].filter(Boolean).join(", ")}</span></span><button type="button" onClick={() => editRoute(route)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-bold">Edit</button></li>)}</ul>}
     <form className="grid gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void run(() => upsertRoute(cleanCallablePayload({ organizationId, routeId: editingRoute?.id, expectedRecordVersion: editingRoute?.recordVersion, locationId: routeLocationId || undefined, purpose: routePurpose, primaryContactPointIds: routeContactId ? [routeContactId] : [], fallbackContactPointIds: [], fallbackMemberRoles: routePurpose === "referrals" ? ["referral_manager", "owner", "admin"] : routePurpose === "opportunities" ? ["response_team", "owner", "admin"] : ["owner", "admin"], inAppEnabled: true, emailEnabled: contacts.find((item) => item.id === routeContactId)?.type === "email", phoneEnabled: contacts.find((item) => item.id === routeContactId)?.type === "phone", status: "active" })), "Communication route saved."); }}><PurposeSelect label="Route purpose" value={routePurpose} onChange={setRoutePurpose} /><label className={labelClass}>Primary contact<select className={fieldClass} value={routeContactId} onChange={(event) => setRouteContactId(event.target.value)}><option value="">In-app member fallback</option>{contacts.filter((item) => item.status === "active").map((contact) => <option key={contact.id} value={contact.id}>{contact.displayValue}</option>)}</select></label><LocationSelect locations={locations} value={routeLocationId} onChange={setRouteLocationId} /><div className="flex items-end gap-2"><SaveButton busy={busy} label={editingRoute ? "Save route" : "Add route"} icon="route" />{editingRoute && <button type="button" onClick={() => setEditingRouteId("")} className="min-h-10 rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold">Cancel</button>}</div></form>
     <p className="mt-4 flex items-start gap-2 rounded-xl bg-blue-50 p-3 text-xs text-blue-950"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />Billing routes remain private. External senders receive delivery state and an audit ID, never the destination email or telephone.</p>
+  </Section>
+  <Section title="Complete business activation" description="A contact point plus referral and opportunity routes are required before the first organization-home map activation. Private operational destinations remain hidden from external users.">
+    <ul className="grid gap-1 text-sm text-slate-700">
+      <li>{contacts.some((item) => item.status === "active") ? "✓" : "○"} Organization contact point configured</li>
+      <li>{hasReferralRoute ? "✓" : "○"} Referral route configured</li>
+      <li>{hasOpportunityRoute ? "✓" : "○"} Opportunity route configured</li>
+      <li>{activationLocation ? "✓" : "○"} Confirmed orientation establishment available</li>
+    </ul>
+    {activationReady && activationLocation?.geocode ? (
+      <Link
+        href={`/exchange?actorOrg=${encodeURIComponent(organizationId)}&subjectOrg=${encodeURIComponent(organizationId)}&secondaryEntity=establishment&secondarySelected=${encodeURIComponent(activationLocation.id)}&drawer=organization&lng=${activationLocation.geocode.longitude}&lat=${activationLocation.geocode.latitude}&z=16.5&p=55&b=-20`}
+        className="mt-4 inline-flex rounded-xl bg-blue-700 px-4 py-3 text-sm font-bold text-white"
+      >
+        Complete onboarding in the Exchange
+      </Link>
+    ) : (
+      <p className="mt-3 text-sm font-semibold text-amber-800">Complete the unchecked requirements to activate the organization map view.</p>
+    )}
   </Section></div>;
 }
 

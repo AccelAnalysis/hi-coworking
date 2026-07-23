@@ -114,11 +114,13 @@ describe("canonical profile model", () => {
 });
 
 describe("registration and profile source contracts", () => {
-  it("confirms authoritative registration before progressive profile onboarding", () => {
+  it("confirms authoritative business registration before mandatory organization onboarding", () => {
     const registration = read("apps/web/src/app/register/page.tsx");
     expect(registration).toContain("accountInitializeFn");
-    expect(registration).toContain('router.push("/profile?onboarding=1")');
+    expect(registration).toContain('router.push("/exchange/onboarding")');
     expect(registration).not.toContain('router.push("/exchange")');
+    expect(registration).not.toContain('router.push("/profile?onboarding=1")');
+    expect(registration).toContain("businessRepresentativeAttestation");
     expect(registration).toContain("Complete account setup");
   });
 

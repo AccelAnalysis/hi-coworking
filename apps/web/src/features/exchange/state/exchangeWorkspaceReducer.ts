@@ -318,6 +318,7 @@ function modeFilterSnapshot(
       budgetMax: state.budgetMax,
       opportunitySort: state.opportunitySort,
       activeSavedSearchId: state.activeSavedSearchId,
+      issuerOrganizationId: state.modeStates.opportunities.filters.issuerOrganizationId,
     };
   }
   if (mode === "referrals") {
@@ -455,7 +456,12 @@ function normalizeModeState(
         providerFilters: normalizeStringList(rawFilters.providerFilters),
         serviceFilters: normalizeStringList(rawFilters.serviceFilters),
       }
-    : modeFilterSnapshot(filterState, mode);
+    : {
+      ...modeFilterSnapshot(filterState, mode),
+      ...(mode === "opportunities" && normalizeExchangeEntityId(rawFilters.issuerOrganizationId)
+        ? { issuerOrganizationId: normalizeExchangeEntityId(rawFilters.issuerOrganizationId) }
+        : {}),
+    };
   return {
     filters,
     secondaryContext: secondary === undefined ? fallback.secondaryContext : secondary,

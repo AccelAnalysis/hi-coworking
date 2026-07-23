@@ -244,11 +244,11 @@ describe("organization workspace callables", () => {
       ownerUid: creator.uid,
       claimStatus: "claimed",
       verificationStatus: "unverified",
-      publicationApproved: true,
+      publicationApproved: false,
     });
     expect(publicOrganization.data()).toMatchObject({
-      status: "active",
-      publicationApproved: true,
+      status: "inactive",
+      publicationApproved: false,
       claimStatus: "claimed",
       verificationStatus: "unverified",
     });

@@ -152,9 +152,18 @@ export function updateExchangeSelectedOrganizationSource(
   selection: ExchangeMapSelection,
 ): void {
   const selectedFeature = selection?.entityType === "organization"
-    ? data.contextOrganizations.features.find((feature) => feature.properties.id === selection.entityId)
-      ?? data.organizations.features.find((feature) => feature.properties.id === selection.entityId)
-    : undefined;
+    ? data.contextOrganizations.features.find((feature) =>
+      feature.properties.id === selection.entityId
+      || feature.properties.organizationId === selection.entityId)
+      ?? data.organizations.features.find((feature) =>
+        feature.properties.id === selection.entityId
+        || feature.properties.organizationId === selection.entityId)
+    : selection?.entityType === "establishment"
+      ? data.contextOrganizations.features.find((feature) =>
+        feature.properties.locationId === selection.entityId)
+        ?? data.organizations.features.find((feature) =>
+          feature.properties.locationId === selection.entityId)
+      : undefined;
   setGeoJsonSourceData(map, EXCHANGE_MAP_SOURCE_IDS.selectedOrganization, {
     type: "FeatureCollection",
     features: selectedFeature ? [selectedFeature] : [],

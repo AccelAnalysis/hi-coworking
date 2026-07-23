@@ -16,9 +16,35 @@ const PLATFORM_ROLES = new Set([
 
 const accountInitializeInputSchema = z.object({
   displayName: z.string().trim().min(1).max(160).optional(),
+  professionalTitle: z.string().trim().min(1).max(160).optional(),
+  preferredPrivateEmail: z.string().trim().email().max(320).optional(),
+  preferredPrivatePhone: z.string().trim().min(7).max(40).optional(),
+  communicationPreferences: z.object({
+    inApp: z.boolean().default(true),
+    email: z.boolean().default(true),
+    sms: z.boolean().default(false),
+  }).strict().optional(),
+  businessRepresentativeAttestation: z.boolean().optional(),
   idempotencyKey: z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
-  registrationVersion: z.literal(1).default(1),
-}).strict();
+  registrationVersion: z.union([z.literal(1), z.literal(2)]).default(1),
+}).strict().superRefine((input, context) => {
+  if (input.registrationVersion !== 2) return;
+  for (const [value, path, message] of [
+    [input.displayName, "displayName", "Full name is required"],
+    [input.professionalTitle, "professionalTitle", "Professional title is required"],
+    [input.preferredPrivateEmail, "preferredPrivateEmail", "Preferred private email is required"],
+    [input.preferredPrivatePhone, "preferredPrivatePhone", "Preferred private telephone is required"],
+  ] as const) {
+    if (!value) context.addIssue({ code: "custom", path: [path], message });
+  }
+  if (input.businessRepresentativeAttestation !== true) {
+    context.addIssue({
+      code: "custom",
+      path: ["businessRepresentativeAttestation"],
+      message: "Business-representative attestation is required",
+    });
+  }
+});
 
 type ProvisionAccountInput = {
   uid: string;
@@ -26,7 +52,16 @@ type ProvisionAccountInput = {
   displayName?: string;
   trustedRole?: string;
   idempotencyKey: string;
-  registrationVersion: 1;
+  registrationVersion: 1 | 2;
+  professionalTitle?: string;
+  preferredPrivateEmail?: string;
+  preferredPrivatePhone?: string;
+  communicationPreferences?: {
+    inApp: boolean;
+    email: boolean;
+    sms: boolean;
+  };
+  businessRepresentativeAttestation?: boolean;
 };
 
 function normalizeEmail(email: string): string {
@@ -77,6 +112,13 @@ export async function provisionAccountDocuments(
       credits: previousUser.credits ?? 0,
       lifetimeCreditsPurchased: previousUser.lifetimeCreditsPurchased ?? 0,
       registrationVersion: input.registrationVersion,
+      ...(input.registrationVersion === 2 && input.businessRepresentativeAttestation === true
+        ? {
+          businessRepresentativeAttestedAt:
+            previousUser.businessRepresentativeAttestedAt ?? now,
+          businessRepresentativeAttestationVersion: 1,
+        }
+        : {}),
       accountInitializedAt: previousUser.accountInitializedAt ?? now,
       lastAccountInitializationAt: now,
       lastAccountInitializationKeyHash: requestHash,
@@ -89,6 +131,20 @@ export async function provisionAccountDocuments(
       published: previousProfile.published === true,
       verificationStatus: previousProfile.verificationStatus ?? "none",
       badges: Array.isArray(previousProfile.badges) ? previousProfile.badges : [],
+      ...(input.displayName ? { displayName: input.displayName.trim() } : {}),
+      ...(input.professionalTitle ? { professionalTitle: input.professionalTitle.trim() } : {}),
+      ...(input.preferredPrivateEmail
+        ? { preferredPrivateEmail: normalizeEmail(input.preferredPrivateEmail) }
+        : {}),
+      ...(input.preferredPrivatePhone
+        ? { preferredPrivatePhone: input.preferredPrivatePhone.trim() }
+        : {}),
+      ...(input.communicationPreferences
+        ? { communicationPreferences: input.communicationPreferences }
+        : {}),
+      ...(input.registrationVersion === 2
+        ? { schemaVersion: 2, personEssentialsCompletedAt: previousProfile.personEssentialsCompletedAt ?? now }
+        : {}),
       ...(profileSnapshot.exists ? {} : { profileSchemaVersion: PROFILE_SCHEMA_VERSION }),
       profileVersion,
       createdAt: previousProfile.createdAt ?? now,
@@ -146,6 +202,11 @@ export const account_initialize = onCall(async (request) => {
     trustedRole,
     idempotencyKey: input.idempotencyKey,
     registrationVersion: input.registrationVersion,
+    professionalTitle: input.professionalTitle,
+    preferredPrivateEmail: input.preferredPrivateEmail,
+    preferredPrivatePhone: input.preferredPrivatePhone,
+    communicationPreferences: input.communicationPreferences,
+    businessRepresentativeAttestation: input.businessRepresentativeAttestation,
   });
 
   return {

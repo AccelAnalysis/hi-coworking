@@ -53,6 +53,7 @@ export interface UseExchangeMapOptions extends ExchangeMapCallbacks {
   selection?: ExchangeMapSelection;
   initialViewport?: ExchangeMapViewport;
   viewport?: ExchangeMapViewport;
+  cameraPadding?: { top: number; right: number; bottom: number; left: number };
   fitRequest?: number;
   resizeSignal?: unknown;
   onStatusChange?: (status: ExchangeMapStatus, error: Error | null) => void;
@@ -82,6 +83,7 @@ export function useExchangeMap({
   selection = null,
   initialViewport,
   viewport,
+  cameraPadding,
   fitRequest = 0,
   resizeSignal,
   onSelect,
@@ -100,6 +102,7 @@ export function useExchangeMap({
   const selectionRef = useRef<ExchangeMapSelection>(selection);
   const previousSelectionRef = useRef<ExchangeMapSelection>(null);
   const viewportRef = useRef<ExchangeMapViewport | undefined>(viewport);
+  const cameraPaddingRef = useRef(cameraPadding);
   const fitRequestRef = useRef(fitRequest);
   const completedFitRequestRef = useRef(fitRequest);
   const initialOptionsRef = useRef<InitialMapOptions>({
@@ -137,6 +140,10 @@ export function useExchangeMap({
   useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  useEffect(() => {
+    cameraPaddingRef.current = cameraPadding;
+  }, [cameraPadding]);
 
   useEffect(() => {
     fitRequestRef.current = fitRequest;
@@ -197,6 +204,7 @@ export function useExchangeMap({
           zoom: nextViewport.zoom,
           bearing: nextViewport.bearing ?? 0,
           pitch: nextViewport.pitch ?? 0,
+          padding: cameraPaddingRef.current,
         });
       }
     },

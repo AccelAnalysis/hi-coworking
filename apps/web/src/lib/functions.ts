@@ -22,6 +22,7 @@ export interface ExchangeOrganizationCandidate {
   matchReason: string;
   canRequestClaim: boolean;
   external: boolean;
+  authorizedActor?: boolean;
 }
 
 export interface ExchangeOrganizationClaim {
@@ -594,8 +595,17 @@ export const profileUpdateFn = httpsCallable<
 export const accountInitializeFn = httpsCallable<
   {
     displayName?: string;
+    professionalTitle?: string;
+    preferredPrivateEmail?: string;
+    preferredPrivatePhone?: string;
+    communicationPreferences?: {
+      inApp: boolean;
+      email: boolean;
+      sms: boolean;
+    };
+    businessRepresentativeAttestation?: boolean;
     idempotencyKey: string;
-    registrationVersion?: 1;
+    registrationVersion?: 1 | 2;
   },
   {
     success: boolean;
@@ -607,6 +617,54 @@ export const accountInitializeFn = httpsCallable<
     claimsRefreshRequired: boolean;
   }
 >(functions, "account_initialize");
+
+export type BusinessActivationMarkerState =
+  | "private_actor_visible"
+  | "public_visible"
+  | "private_and_public_visible"
+  | "list_only"
+  | "blocked_missing_address"
+  | "blocked_missing_geocode"
+  | "blocked_unconfirmed_geocode"
+  | "blocked_organization_not_published"
+  | "blocked_coordinate_not_approved"
+  | "private_home_suppressed"
+  | "mailing_only"
+  | "virtual_location"
+  | "inactive_establishment"
+  | "unauthorized"
+  | "claim_pending";
+
+export interface BusinessActivationState {
+  contractVersion: 1;
+  registrationVersion: 1 | 2;
+  guidedActivationRequired: boolean;
+  currentStep: string;
+  completedSteps: string[];
+  blockedSteps: string[];
+  allowedNextActions: string[];
+  organizationId: string | null;
+  claimState: string;
+  managementAuthorityActive: boolean;
+  primaryEstablishmentId: string | null;
+  headquartersEstablishmentId: string | null;
+  preferredOrientationEstablishmentId: string | null;
+  markerState: BusinessActivationMarkerState;
+  publicMarkerState: BusinessActivationMarkerState;
+  safeResumeRoute: string;
+}
+
+export const exchangeGetBusinessActivationStateFn = httpsCallable<
+  { organizationId?: string },
+  BusinessActivationState
+>(functions, "exchange_getBusinessActivationState");
+
+export const exchangeRecordBusinessActivationProgressFn = httpsCallable<
+  | { action: "enrichment_reviewed"; organizationId: string }
+  | { action: "preferred_orientation"; organizationId: string; establishmentId: string }
+  | { action: "map_activated"; organizationId: string; establishmentId: string },
+  { success: boolean; action: string; updatedAt: number }
+>(functions, "exchange_recordBusinessActivationProgress");
 
 export const verificationSubmitFn = httpsCallable<
   {

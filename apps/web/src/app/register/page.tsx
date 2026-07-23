@@ -14,6 +14,11 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [professionalTitle, setProfessionalTitle] = useState("");
+  const [preferredPhone, setPreferredPhone] = useState("");
+  const [emailUpdates, setEmailUpdates] = useState(true);
+  const [smsUpdates, setSmsUpdates] = useState(false);
+  const [attested, setAttested] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [initializationPending, setInitializationPending] = useState(false);
@@ -25,15 +30,24 @@ export default function RegisterPage() {
     idempotencyKey.current ??= `register-${crypto.randomUUID()}`;
     const result = await accountInitializeFn({
       displayName: name.trim(),
+      professionalTitle: professionalTitle.trim(),
+      preferredPrivateEmail: email.trim().toLowerCase(),
+      preferredPrivatePhone: preferredPhone.trim(),
+      communicationPreferences: {
+        inApp: true,
+        email: emailUpdates,
+        sms: smsUpdates,
+      },
+      businessRepresentativeAttestation: attested,
       idempotencyKey: idempotencyKey.current,
-      registrationVersion: 1,
+      registrationVersion: 2,
     });
     if (!result.data.accountInitialized) {
       throw new Error("Account initialization was not confirmed");
     }
     await currentUser.getIdToken(true);
     setInitializationPending(false);
-    router.push("/profile?onboarding=1");
+    router.push("/exchange/onboarding");
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -81,11 +95,11 @@ export default function RegisterPage() {
         <span className="font-bold text-2xl tracking-tight text-slate-900">Coworking</span>
       </Link>
 
-      <div className="w-full max-w-md bg-white rounded-xl shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 overflow-hidden">
+      <div className="w-full max-w-xl bg-white rounded-xl shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 overflow-hidden">
         <div className="p-8">
-          <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Create an account</h1>
+          <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Create your representative account</h1>
           <p className="text-center text-slate-500 text-sm mb-8">
-            Register to enter the Hi-Coworking Exchange. Connecting an organization remains optional while you browse.
+            This individual account identifies the person authorized to act for a business or organization. Every registered Exchange user must connect to an organization before activation.
           </p>
 
           <form onSubmit={handleRegister} className="space-y-4">
@@ -111,8 +125,23 @@ export default function RegisterPage() {
             </div>
 
             <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-slate-700" htmlFor="professional-title">
+                Professional title
+              </label>
+              <input
+                id="professional-title"
+                type="text"
+                required
+                value={professionalTitle}
+                onChange={(e) => setProfessionalTitle(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
+                placeholder="Owner, Operations Director, Procurement Lead"
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700" htmlFor="email">
-                Email
+                Login and preferred private email
               </label>
               <input
                 id="email"
@@ -122,6 +151,23 @@ export default function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
                 placeholder="you@company.com"
+              />
+              <p className="text-xs leading-5 text-slate-500">This remains person-level data. It is not automatically published or used as an organization contact route.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-slate-700" htmlFor="preferred-phone">
+                Preferred private telephone
+              </label>
+              <input
+                id="preferred-phone"
+                type="tel"
+                required
+                minLength={7}
+                value={preferredPhone}
+                onChange={(e) => setPreferredPhone(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
+                placeholder="+1 757 555 0142"
               />
             </div>
 
@@ -140,9 +186,35 @@ export default function RegisterPage() {
               />
             </div>
 
+            <fieldset className="rounded-xl border border-slate-200 p-4">
+              <legend className="px-1 text-sm font-semibold text-slate-700">Essential communication preferences</legend>
+              <label className="mt-1 flex items-center gap-3 text-sm text-slate-700">
+                <input type="checkbox" checked={emailUpdates} onChange={(event) => setEmailUpdates(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+                Email account and organization-administration updates
+              </label>
+              <label className="mt-3 flex items-center gap-3 text-sm text-slate-700">
+                <input type="checkbox" checked={smsUpdates} onChange={(event) => setSmsUpdates(event.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+                SMS account and organization-administration updates
+              </label>
+            </fieldset>
+
+            <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold leading-6 text-amber-950">
+              <input
+                type="checkbox"
+                required
+                checked={attested}
+                onChange={(event) => setAttested(event.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-amber-400"
+              />
+              <span>I am registering as an authorized representative of a business or organization.</span>
+            </label>
+            <p className="text-xs leading-5 text-slate-500">
+              Creating an account does not verify the organization. Authority is established separately through organization creation, active membership, or an approved governed claim.
+            </p>
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !attested}
               className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
             >
               {loading

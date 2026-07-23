@@ -382,6 +382,8 @@ export const userDocSchema = z.object({
   lifetimeCreditsPurchased: z.number().default(0),
 
   registrationVersion: z.number().int().positive().optional(),
+  businessRepresentativeAttestedAt: z.number().optional(),
+  businessRepresentativeAttestationVersion: z.number().int().positive().optional(),
   accountInitializedAt: z.number().optional(),
   lastAccountInitializationAt: z.number().optional(),
   lastAccountInitializationKeyHash: z.string().optional(),

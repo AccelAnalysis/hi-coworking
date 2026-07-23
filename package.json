@@ -73,7 +73,8 @@
     "@google-cloud/storage": {
       "fast-xml-parser": "5.10.1"
     },
-    "next": {
+    "next@^16.2.11": {
+      "postcss": "8.5.19",
       "sharp": "0.35.3"
     }
   }

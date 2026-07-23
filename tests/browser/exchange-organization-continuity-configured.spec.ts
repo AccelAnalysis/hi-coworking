@@ -8,6 +8,10 @@ const enabled = process.env.EXCHANGE_DEV_ORGANIZATION_CONTINUITY === "true";
 const PROJECT_ID = "hi-coworking-plat";
 const TEST_PURPOSE = "configured-organization-continuity-acceptance";
 const axePath = resolve(process.cwd(), "node_modules/axe-core/axe.min.js");
+const evidenceDirectory = resolve(
+  process.cwd(),
+  "docs/exchange/evidence/business-registration-map-activation",
+);
 
 type Fixture = {
   ownerUid: string;
@@ -619,7 +623,7 @@ test("configured development preserves external organization context through eve
       await expect(routeSection.getByRole("listitem").filter({ hasText: "referrals" })).toBeVisible();
       await expect(routeSection.getByRole("listitem").filter({ hasText: "opportunities" })).toBeVisible();
 
-      await page.getByRole("tab", { name: "Profile" }).click();
+      await page.getByRole("tab", { name: "1. Enrichment" }).click();
       await expect(page.getByRole("heading", { name: "Enrichment proposals" })).toBeVisible();
       await page.getByLabel(/^Classify proposed address /).selectOption("branch");
       await page.getByLabel("Location label").fill("Reviewed enrichment branch");
@@ -669,16 +673,73 @@ test("configured development preserves external organization context through eve
       view: "opportunities",
       actorOrg: fixture.actorOrganizationId,
       subjectOrg: fixture.actorOrganizationId,
+      secondaryEntity: "establishment",
+      secondarySelected: fixture.actorHeadquartersId,
       drawer: "organization",
       q: "commercial construction",
-      lng: "-76.7093",
-      lat: "36.9066",
-      z: "10",
+      lng: "-76.6311",
+      lat: "36.9824",
+      z: "16.5",
+      p: "55",
+      b: "-20",
     });
     await gotoStable(page, `/exchange?${selfParams.toString()}`);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Organization context drawer")).toContainText(/self/i);
     await expect(page.getByLabel("Organization context drawer")).toContainText(/private owner/i);
+    const dimensionControl = page.getByRole("group", { name: "Map dimension" });
+    await expect(dimensionControl).toBeVisible();
+    await expect(dimensionControl.getByRole("button", { name: "3D" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[data-map-dimension="3d"]')).toBeVisible();
+    const originalDimensionControl = await dimensionControl.elementHandle();
+    expect(originalDimensionControl).toBeTruthy();
+    const controlPosition = await dimensionControl.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        left: Math.round(bounds.left),
+        top: Math.round(bounds.top),
+        right: Math.round(bounds.right),
+        bottom: Math.round(bounds.bottom),
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height),
+      };
+    });
+    console.log(`MAP_CONTROL_POSITION ${JSON.stringify({
+      project: testInfo.project.name,
+      viewport: page.viewportSize(),
+      control: controlPosition,
+    })}`);
+    for (const name of ["2D", "3D"] as const) {
+      const button = dimensionControl.getByRole("button", { name });
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      const viewport = page.viewportSize();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+      expect(await button.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || element.contains(hit);
+      })).toBe(true);
+    }
+    await dimensionControl.getByRole("button", { name: "3D" }).click();
+    await expect(page.locator('[data-map-dimension="3d"]')).toBeVisible();
+    await expect(dimensionControl.getByRole("button", { name: "3D" })).toHaveAttribute("aria-pressed", "true");
+    await dimensionControl.getByRole("button", { name: "2D" }).click();
+    await expect(page.locator('[data-map-dimension="2d"]')).toBeVisible();
+    await dimensionControl.getByRole("button", { name: "3D" }).click();
+    await expect(page.locator('[data-map-dimension="3d"]')).toBeVisible();
+    await page.screenshot({
+      path: resolve(evidenceDirectory, `map-control-${testInfo.project.name}.png`),
+      fullPage: false,
+      animations: "disabled",
+    });
 
     const params = new URLSearchParams(selfParams);
     params.set("subjectOrg", fixture.subjectOrganizationId);
@@ -719,6 +780,8 @@ test("configured development preserves external organization context through eve
       await expect(drawer).toBeVisible();
       await expect(page.locator('[data-exchange-map-host="persistent"]')).toHaveCount(1);
       expect(await originalMapHost!.evaluate((node) => node.isConnected)).toBe(true);
+      expect(await originalDimensionControl!.evaluate((node) => node.isConnected)).toBe(true);
+      await expect(dimensionControl).toBeVisible();
       const modeUrl = new URL(page.url());
       expect(modeUrl.searchParams.get("subjectOrg")).toBe(fixture.subjectOrganizationId);
       expect(modeUrl.searchParams.get("entity")).toBe("establishment");
@@ -730,8 +793,8 @@ test("configured development preserves external organization context through eve
     expect(currentUrl.searchParams.get("actorOrg")).toBe(fixture.actorOrganizationId);
     expect(currentUrl.searchParams.get("subjectOrg")).toBe(fixture.subjectOrganizationId);
     expect(currentUrl.searchParams.get("q")).toBe("commercial construction");
-    expect(Number(currentUrl.searchParams.get("lng"))).toBeCloseTo(-76.7093, 1);
-    expect(Number(currentUrl.searchParams.get("lat"))).toBeCloseTo(36.9066, 1);
+    expect(Number(currentUrl.searchParams.get("lng"))).toBeCloseTo(-76.6311, 1);
+    expect(Number(currentUrl.searchParams.get("lat"))).toBeCloseTo(36.9824, 1);
 
     await page.reload();
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);

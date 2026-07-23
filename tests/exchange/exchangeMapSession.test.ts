@@ -94,8 +94,8 @@ describe("Exchange map session precedence", () => {
       longitude: -76.62,
       latitude: 36.98,
       zoom: 14.5,
-      bearing: -14,
-      pitch: 58,
+      bearing: -20,
+      pitch: 55,
     });
     expect(businessAnchorViewport(null)).toBeNull();
     expect(

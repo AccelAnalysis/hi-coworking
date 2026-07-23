@@ -26,6 +26,7 @@ type OrganizationCandidate = {
   matchReason: string;
   canRequestClaim: boolean;
   external: boolean;
+  authorizedActor?: boolean;
 };
 
 function getDb() { return admin.firestore(); }
@@ -158,6 +159,47 @@ async function searchUsaSpending(name: string): Promise<OrganizationCandidate[]>
   }
 }
 
+async function searchActorOrganizations(
+  uid: string,
+  input: { name: string; city?: string; state?: string; website?: string },
+): Promise<OrganizationCandidate[]> {
+  const memberships = await getDb().collection("orgMembers").where("uid", "==", uid).limit(50).get();
+  const active = memberships.docs.filter((document) => document.get("status") === "active");
+  if (!active.length) return [];
+  const snapshots = await getDb().getAll(...active.map((document) =>
+    getDb().collection("orgs").doc(String(document.get("orgId")))));
+  return snapshots.flatMap((snapshot) => {
+    const data = snapshot.data();
+    if (!snapshot.exists || !data || data.status !== "active") return [];
+    const organizationName = cleanString(data.legalName || data.name) ?? "Organization";
+    const match = scoreOrganizationMatch(input, {
+      name: organizationName,
+      city: cleanString(data.city),
+      state: cleanString(data.state),
+      website: cleanString(data.website),
+      websiteDomain: cleanString(data.websiteDomain),
+    });
+    if (match.score < 30) return [];
+    return [{
+      id: snapshot.id,
+      name: organizationName,
+      city: cleanString(data.city),
+      state: cleanString(data.state),
+      website: cleanString(data.website),
+      claimStatus: "claimed" as const,
+      verificationStatus: String(data.verificationStatus || "unverified"),
+      sources: [],
+      confidenceScore: match.score + 1_000,
+      matchReason: data.publicationApproved === true
+        ? "Your organization"
+        : "Your organization — directory draft",
+      canRequestClaim: false,
+      external: false,
+      authorizedActor: true,
+    }];
+  });
+}
+
 function dedupeCandidates(candidates: OrganizationCandidate[]): OrganizationCandidate[] {
   const best = new Map<string, OrganizationCandidate>();
   for (const candidate of candidates) {
@@ -206,11 +248,16 @@ export const exchange_organizationSearch = onCall(async (request) => {
   if (!name || name.length < 2) throw new HttpsError("invalid-argument", "Enter at least two characters of the organization name.");
   await enforceSearchRateLimit(request.auth.uid);
 
-  const [local, usaspending] = await Promise.all([
+  const [local, actorOrganizations, usaspending] = await Promise.all([
     searchLocalOrganizations({ name, city, state, website }),
+    searchActorOrganizations(request.auth.uid, { name, city, state, website }),
     searchUsaSpending(name),
   ]);
-  return { candidates: dedupeCandidates([...local, ...usaspending]) };
+  await getDb().collection("users").doc(request.auth.uid).set({
+    organizationSearchCompletedAt: Date.now(),
+    updatedAt: Date.now(),
+  }, { merge: true });
+  return { candidates: dedupeCandidates([...actorOrganizations, ...local, ...usaspending]) };
 });
 
 export const exchange_organizationCreate = onCall(async (request) => {
@@ -271,7 +318,7 @@ export const exchange_organizationCreate = onCall(async (request) => {
     identifiers: {},
     industries: [],
     capabilities: [],
-    publicationStatus: "approved",
+    publicationStatus: "draft",
     activeLocationCount: 0,
     recordVersion: 0,
     canonicalName: name,
@@ -291,7 +338,7 @@ export const exchange_organizationCreate = onCall(async (request) => {
     geohash: "",
     homeBased: false,
     privacySuppressed: false,
-    publicationApproved: true,
+    publicationApproved: false,
     addressPublicationApproved: false,
     coordinatePublicationApproved: false,
     naicsCodes: [],

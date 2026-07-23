@@ -77,8 +77,14 @@ export const DEFAULT_EXCHANGE_MAP_VIEWPORT: Readonly<ExchangeMapViewport> = Obje
 });
 
 export const EXCHANGE_3D_VIEWPORT = Object.freeze({
-  bearing: -14,
-  pitch: 58,
+  bearing: -20,
+  pitch: 55,
+});
+
+export const EXCHANGE_3D_ACTIVATION_VIEWPORT = Object.freeze({
+  zoom: 16.5,
+  bearing: -20,
+  pitch: 55,
 });
 
 export const EXCHANGE_RFX_CLUSTER_OPTIONS = Object.freeze({

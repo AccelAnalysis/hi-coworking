@@ -3371,13 +3371,11 @@ describe("profile save and enrichment identity boundaries", () => {
         coordinatePublicationApproved: false,
       },
     );
-    expect(addressResult).toMatchObject({ publicProjectionPublished: true });
+    expect(addressResult).toMatchObject({ publicProjectionPublished: false });
     expect((await db.collection("organizationLocations").doc(addressResult.resultId).get()).data())
       .toMatchObject({ name: "Reviewed branch", locationType: "branch", isPrimary: false });
-    const publicBranch = (await db.collection("publicOrganizationLocations").doc(addressResult.resultId).get()).data();
-    expect(publicBranch).toMatchObject({ city: "Washington", addressPublicationApproved: false, coordinatePublicationApproved: false });
-    expect(publicBranch).not.toHaveProperty("addressLine1");
-    expect(publicBranch).not.toHaveProperty("latitude");
+    const publicBranch = await db.collection("publicOrganizationLocations").doc(addressResult.resultId).get();
+    expect(publicBranch.exists).toBe(false);
 
     const contactResult = await callFunction<{ resultId: string; publicProjectionPublished: boolean }>(
       owner,

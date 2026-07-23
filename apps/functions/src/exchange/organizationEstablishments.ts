@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
@@ -21,6 +22,14 @@ import {
   type PublicOrganizationEstablishment,
 } from "@hi/shared/organization-establishments";
 import { getAuthorizedActor, loadOrgAuthority, writeExchangeAudit } from "./security";
+import {
+  deriveBusinessActivationMarkerState,
+  derivePublicBusinessMarkerState,
+} from "./businessActivation";
+import {
+  createSearchTokens,
+  normalizeOrganizationName,
+} from "./organizationModel";
 
 const ID = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/);
 const VERSION = ORGANIZATION_ESTABLISHMENT_CONTRACT_VERSION;
@@ -65,6 +74,7 @@ const locationInputSchema = z.object({
   }).strict().optional(),
   publicContactAvailable: z.boolean(),
   privateHome: z.boolean().default(false),
+  preferredOrientation: z.boolean().default(false),
   geocodeSelection: z.object({ requestId: ID, candidateId: ID }).strict().optional(),
 }).strict();
 
@@ -338,12 +348,20 @@ async function confirmedGeocode(
   };
 }
 
-async function refreshLocationSummary(transaction: FirebaseFirestore.Transaction, organizationId: string, locations: OrganizationEstablishment[], now: number): Promise<void> {
-  const publicLocations = locations.map(projectPublicEstablishment).filter((item): item is PublicOrganizationEstablishment => Boolean(item));
+async function refreshLocationSummary(
+  transaction: FirebaseFirestore.Transaction,
+  organizationId: string,
+  locations: OrganizationEstablishment[],
+  now: number,
+  organizationPublished: boolean,
+): Promise<void> {
+  const publicLocations = organizationPublished
+    ? locations.map(projectPublicEstablishment).filter((item): item is PublicOrganizationEstablishment => Boolean(item))
+    : [];
   const primary = publicLocations.find((item) => item.isPrimary);
   transaction.set(db().collection("orgs").doc(organizationId), {
-    primaryLocationId: locations.find((item) => item.status === "active" && item.isPrimary)?.id ?? admin.firestore.FieldValue.delete(),
-    headquartersLocationId: locations.find((item) => item.status === "active" && item.isHeadquarters)?.id ?? admin.firestore.FieldValue.delete(),
+    primaryLocationId: locations.find((item) => item.status === "active" && item.isPrimary)?.id ?? FieldValue.delete(),
+    headquartersLocationId: locations.find((item) => item.status === "active" && item.isHeadquarters)?.id ?? FieldValue.delete(),
     activeLocationCount: locations.filter((item) => item.status === "active").length, schemaVersion: 3, updatedAt: now,
   }, { merge: true });
   transaction.set(db().collection("publicOrganizations").doc(organizationId), {
@@ -351,7 +369,7 @@ async function refreshLocationSummary(transaction: FirebaseFirestore.Transaction
     primaryPublicLocation: primary ? {
       id: primary.id, name: primary.name, city: primary.city ?? "", county: primary.county ?? "",
       administrativeArea: primary.administrativeArea ?? "", coordinatePublicationApproved: primary.coordinatePublicationApproved,
-    } : admin.firestore.FieldValue.delete(),
+    } : FieldValue.delete(),
     publicContactAvailable: publicLocations.some((item) => item.publicContactAvailable), updatedAt: now,
   }, { merge: true });
 }
@@ -359,9 +377,15 @@ async function refreshLocationSummary(transaction: FirebaseFirestore.Transaction
 export const exchange_upsertOrganizationEstablishment = onCall(async (request) => {
   const actor = getAuthorizedActor(request); const input = parse(locationInputSchema, request.data); const now = Date.now(); const locationId = input.locationId ?? randomUUID();
   return db().runTransaction(async (transaction) => {
-    await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true });
+    const { org } = await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true });
+    const organizationPublished = org.publicationStatus === "approved" || org.publicationApproved === true;
     const ref = db().collection("organizationLocations").doc(locationId);
-    const [existing, all] = await Promise.all([transaction.get(ref), transaction.get(db().collection("organizationLocations").where("organizationId", "==", input.organizationId))]);
+    const profileRef = db().collection("profiles").doc(actor.uid);
+    const [existing, all, profile] = await Promise.all([
+      transaction.get(ref),
+      transaction.get(db().collection("organizationLocations").where("organizationId", "==", input.organizationId)),
+      transaction.get(profileRef),
+    ]);
     const previous = existing.data();
     if (previous && previous.organizationId !== input.organizationId) throw new HttpsError("permission-denied", "Establishment ownership mismatch");
     const currentVersion = Number(previous?.recordVersion ?? 0);
@@ -375,6 +399,23 @@ export const exchange_upsertOrganizationEstablishment = onCall(async (request) =
       geocode, serviceArea: input.serviceArea, publicContactAvailable: input.publicContactAvailable, privateHome: input.privateHome,
       createdBy: previous?.createdBy ?? actor.uid, createdAt: previous?.createdAt ?? now, updatedAt: now, version: VERSION, recordVersion: currentVersion + 1,
     });
+    if (
+      input.preferredOrientation
+      && (
+        candidate.status !== "active"
+        || candidate.privateHome
+        || candidate.locationType === "mailing_only"
+        || candidate.locationType === "virtual"
+        || !candidate.physicalAddress
+        || !validCoordinate(candidate.geocode?.latitude, candidate.geocode?.longitude)
+        || !candidate.geocode?.confirmedAt
+      )
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "The Exchange orientation location must be an active, confirmed physical establishment",
+      );
+    }
     let locations = all.docs.filter((document) => document.id !== locationId).map((document) => organizationEstablishmentSchema.parse({ id: document.id, ...document.data() }));
     const designationTransfers: OrganizationEstablishment[] = [];
     if (candidate.status === "active" && (candidate.isPrimary || candidate.isHeadquarters)) {
@@ -398,16 +439,56 @@ export const exchange_upsertOrganizationEstablishment = onCall(async (request) =
     for (const transferred of designationTransfers) {
       transaction.set(db().collection("organizationLocations").doc(transferred.id), firestoreSafe(transferred));
       const transferredPublicRef = db().collection("publicOrganizationLocations").doc(transferred.id);
-      const transferredProjection = projectPublicEstablishment(transferred);
+      const transferredProjection = organizationPublished
+        ? projectPublicEstablishment(transferred)
+        : null;
       if (transferredProjection) transaction.set(transferredPublicRef, firestoreSafe(transferredProjection)); else transaction.delete(transferredPublicRef);
     }
     transaction.set(ref, firestoreSafe(candidate));
-    const publicRef = db().collection("publicOrganizationLocations").doc(locationId); const projection = projectPublicEstablishment(candidate);
+    const publicRef = db().collection("publicOrganizationLocations").doc(locationId);
+    const projection = organizationPublished ? projectPublicEstablishment(candidate) : null;
     if (projection) transaction.set(publicRef, firestoreSafe(projection)); else transaction.delete(publicRef);
-    await refreshLocationSummary(transaction, input.organizationId, locations, now);
+    if (input.preferredOrientation) {
+      transaction.set(profileRef, {
+        preferredOrganizationId: input.organizationId,
+        preferredEstablishmentId: locationId,
+        updatedAt: now,
+      }, { merge: true });
+    } else if (
+      profile.get("preferredOrganizationId") === input.organizationId
+      && profile.get("preferredEstablishmentId") === locationId
+    ) {
+      transaction.set(profileRef, {
+        preferredEstablishmentId: FieldValue.delete(),
+        updatedAt: now,
+      }, { merge: true });
+    }
+    await refreshLocationSummary(
+      transaction,
+      input.organizationId,
+      locations,
+      now,
+      organizationPublished,
+    );
     writeExchangeAudit(transaction, db(), { actorUid: actor.uid, actorRole: actor.role, actorOrganizationId: input.organizationId,
       action: existing.exists ? "organization.location.updated" : "organization.location.created", entityType: "organization_location", entityId: locationId, newStatus: candidate.status, createdAt: now });
-    return { success: true, locationId, recordVersion: candidate.recordVersion, publicProjectionPublished: Boolean(projection) };
+    return {
+      success: true,
+      locationId,
+      recordVersion: candidate.recordVersion,
+      publicProjectionPublished: Boolean(projection?.coordinatePublicationApproved),
+      markerState: deriveBusinessActivationMarkerState({
+        authorized: true,
+        organization: org,
+        location: candidate,
+        publicLocationExists: Boolean(projection?.coordinatePublicationApproved),
+      }),
+      publicMarkerState: derivePublicBusinessMarkerState({
+        organization: org,
+        location: candidate,
+        publicLocationExists: Boolean(projection?.coordinatePublicationApproved),
+      }),
+    };
   });
 });
 
@@ -422,7 +503,7 @@ export const exchange_upsertOrganizationContactPoint = onCall(async (request) =>
   let normalizedValue: string;
   try { normalizedValue = normalizeContactValue(input.type, input.value); } catch (error) { throw new HttpsError("invalid-argument", error instanceof Error ? error.message : "Invalid contact value"); }
   return db().runTransaction(async (transaction) => {
-    await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true }); await ownedLocation(transaction, input.organizationId, input.locationId);
+    const { org } = await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true }); await ownedLocation(transaction, input.organizationId, input.locationId);
     const ref = db().collection("organizationContactPoints").doc(contactPointId); const existing = await transaction.get(ref); const previous = existing.data();
     if (previous && previous.organizationId !== input.organizationId) throw new HttpsError("permission-denied", "Contact ownership mismatch");
     const currentVersion = Number(previous?.recordVersion ?? 0);
@@ -435,7 +516,9 @@ export const exchange_upsertOrganizationContactPoint = onCall(async (request) =>
       visibility: input.visibility, publicationStatus: input.publicationStatus, consentAuthorityBasis: input.consentAuthorityBasis, status: input.status,
       createdBy: previous?.createdBy ?? actor.uid, createdAt: previous?.createdAt ?? now, updatedAt: now, version: VERSION, recordVersion: currentVersion + 1,
     });
-    transaction.set(ref, firestoreSafe(contact)); const publicRef = db().collection("publicOrganizationContactPoints").doc(contactPointId); const projection = projectPublicContactPoint(contact);
+    transaction.set(ref, firestoreSafe(contact)); const publicRef = db().collection("publicOrganizationContactPoints").doc(contactPointId);
+    const organizationPublished = org.publicationStatus === "approved" || org.publicationApproved === true;
+    const projection = organizationPublished ? projectPublicContactPoint(contact) : null;
     if (projection) transaction.set(publicRef, firestoreSafe(projection)); else transaction.delete(publicRef);
     writeExchangeAudit(transaction, db(), { actorUid: actor.uid, actorRole: actor.role, actorOrganizationId: input.organizationId,
       action: existing.exists ? "organization.contact.updated" : "organization.contact.created", entityType: "organization_contact_point", entityId: contactPointId, newStatus: contact.status, createdAt: now });
@@ -491,6 +574,10 @@ export const exchange_updateOrganizationProfile = onCall(async (request) => {
   return db().runTransaction(async (transaction) => {
     const { org } = await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true });
     const currentVersion = Number(org.recordVersion ?? 0); if (input.expectedRecordVersion !== currentVersion) throw new HttpsError("aborted", "Organization changed after it was loaded");
+    const [locationSnapshots, contactSnapshots] = await Promise.all([
+      transaction.get(db().collection("organizationLocations").where("organizationId", "==", input.organizationId)),
+      transaction.get(db().collection("organizationContactPoints").where("organizationId", "==", input.organizationId)),
+    ]);
     const profile = organizationProfileV3Schema.parse({
       id: input.organizationId,
       legalName: input.legalName,
@@ -511,12 +598,65 @@ export const exchange_updateOrganizationProfile = onCall(async (request) => {
       claimStatus: ["claimed", "claim_pending"].includes(String(org.claimStatus)) ? org.claimStatus : "unclaimed",
       verificationStatus: ["pending", "verified", "rejected"].includes(String(org.verificationStatus)) ? org.verificationStatus : "unverified",
       version: 3, recordVersion: currentVersion + 1 });
+    const normalizedName = normalizeOrganizationName(profile.legalName);
+    const searchTokens = [...new Set([
+      ...createSearchTokens(profile.legalName),
+      ...profile.tradeNames.flatMap(createSearchTokens),
+      ...profile.industries.flatMap(createSearchTokens),
+      ...profile.capabilities.flatMap(createSearchTokens),
+      ...profile.certifications.flatMap(createSearchTokens),
+    ])].slice(0, 50);
+    const organizationPublished = profile.publicationStatus === "approved";
+    const locationRecords = locationSnapshots.docs.map((snapshot) => (
+      organizationEstablishmentSchema.parse({ id: snapshot.id, ...snapshot.data() })
+    ));
+    const contactRecords = contactSnapshots.docs.map((snapshot) => (
+      organizationContactPointSchema.parse({ id: snapshot.id, ...snapshot.data() })
+    ));
+    const projectedLocations = organizationPublished
+      ? locationRecords.map(projectPublicEstablishment)
+        .filter((item): item is PublicOrganizationEstablishment => Boolean(item))
+      : [];
+    const projectedContacts = organizationPublished
+      ? contactRecords.map(projectPublicContactPoint)
+        .filter((item): item is PublicOrganizationContactPoint => Boolean(item))
+      : [];
+    const primaryPublicLocation = projectedLocations.find((location) => location.isPrimary);
     transaction.set(db().collection("orgs").doc(input.organizationId), firestoreSafe({ ...profile, name: profile.legalName,
-      publicationApproved: profile.publicationStatus === "approved", updatedAt: now }), { merge: true });
+      normalizedName,
+      searchTokens,
+      capabilityKeywords: profile.capabilities,
+      publicationApproved: profile.publicationStatus === "approved",
+      publicLocationCount: projectedLocations.length,
+      organizationProfileCompletedAt: now,
+      updatedAt: now }), { merge: true });
     transaction.set(db().collection("publicOrganizations").doc(input.organizationId), { name: profile.legalName,
+      normalizedName, searchTokens,
       tradeNames: profile.tradeNames, website: profile.website ?? "", industries: profile.industries,
       description: profile.description ?? "", capabilityKeywords: profile.capabilities, certifications: profile.certifications,
+      publicLocationCount: projectedLocations.length,
+      primaryPublicLocation: primaryPublicLocation ? {
+        id: primaryPublicLocation.id,
+        name: primaryPublicLocation.name,
+        city: primaryPublicLocation.city ?? "",
+        county: primaryPublicLocation.county ?? "",
+        administrativeArea: primaryPublicLocation.administrativeArea ?? "",
+        coordinatePublicationApproved: primaryPublicLocation.coordinatePublicationApproved,
+      } : FieldValue.delete(),
+      publicContactAvailable: projectedContacts.length > 0 || Boolean(profile.website),
       publicationApproved: profile.publicationStatus === "approved", status: profile.publicationStatus === "approved" ? "active" : "inactive", schemaVersion: 3, updatedAt: now }, { merge: true });
+    for (const location of locationRecords) {
+      const projection = organizationPublished ? projectPublicEstablishment(location) : null;
+      const publicRef = db().collection("publicOrganizationLocations").doc(location.id);
+      if (projection) transaction.set(publicRef, firestoreSafe(projection));
+      else transaction.delete(publicRef);
+    }
+    for (const contact of contactRecords) {
+      const projection = organizationPublished ? projectPublicContactPoint(contact) : null;
+      const publicRef = db().collection("publicOrganizationContactPoints").doc(contact.id);
+      if (projection) transaction.set(publicRef, firestoreSafe(projection));
+      else transaction.delete(publicRef);
+    }
     return { success: true, recordVersion: profile.recordVersion, updatedAt: now };
   });
 });
@@ -566,6 +706,9 @@ export const exchange_getOrganizationManagement = onCall(async (request) => {
       description: org.description ?? "", domain: org.domain ?? "", website: org.website ?? "", industries: org.industries ?? [], capabilities: org.capabilities ?? org.capabilityKeywords ?? [],
       certifications: org.certifications ?? [], media: org.media ?? [], documents: org.documents ?? [], publicationStatus: org.publicationStatus ?? (org.publicationApproved === true ? "approved" : "draft"),
       primaryLocationId: org.primaryLocationId ?? null, headquartersLocationId: org.headquartersLocationId ?? null, recordVersion: Number(org.recordVersion ?? 0) },
+    preferredOrientationEstablishmentId: profile.get("preferredOrganizationId") === input.organizationId
+      ? profile.get("preferredEstablishmentId") ?? null
+      : null,
     locations: locations.docs.map((document) => organizationEstablishmentSchema.parse({ id: document.id, ...document.data() })),
     contactPoints: contacts.docs.map((document) => organizationContactPointSchema.parse({ id: document.id, ...document.data() })),
     communicationRoutes: routes.docs.map((document) => organizationCommunicationRouteSchema.parse({ id: document.id, ...document.data() })),
@@ -578,7 +721,8 @@ export const exchange_reviewOrganizationEnrichmentProposal = onCall(async (reque
   const now = Date.now();
   const resultId = `enrichment_${createHash("sha256").update(`${actor.uid}:${input.proposalId}:${input.itemType}:${input.itemId}`).digest("hex").slice(0, 28)}`;
   return db().runTransaction(async (transaction) => {
-    await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true });
+    const { org } = await loadOrgAuthority(transaction, db(), input.organizationId, actor.uid, { managementRequired: true });
+    const organizationPublished = org.publicationStatus === "approved" || org.publicationApproved === true;
     const profileRef = db().collection("profiles").doc(actor.uid);
     const resultRef = db().collection(input.itemType === "address" ? "organizationLocations" : "organizationContactPoints").doc(resultId);
     const [profileSnapshot, allLocations, allContacts, priorResult] = await Promise.all([
@@ -653,13 +797,21 @@ export const exchange_reviewOrganizationEnrichmentProposal = onCall(async (reque
         try { assertOrganizationLocationInvariants(nextLocations); } catch (error) { throw new HttpsError("failed-precondition", error instanceof Error ? error.message : "Invalid establishment state"); }
         for (const changed of reassigned.filter((item, index) => item !== existingLocations[index])) {
           transaction.set(db().collection("organizationLocations").doc(changed.id), firestoreSafe(changed));
-          const publicRef = db().collection("publicOrganizationLocations").doc(changed.id); const projection = projectPublicEstablishment(changed);
+          const publicRef = db().collection("publicOrganizationLocations").doc(changed.id);
+          const projection = organizationPublished ? projectPublicEstablishment(changed) : null;
           if (projection) transaction.set(publicRef, firestoreSafe(projection)); else transaction.delete(publicRef);
         }
         transaction.set(resultRef, firestoreSafe(location));
-        const publicRef = db().collection("publicOrganizationLocations").doc(resultId); const projection = projectPublicEstablishment(location);
+        const publicRef = db().collection("publicOrganizationLocations").doc(resultId);
+        const projection = organizationPublished ? projectPublicEstablishment(location) : null;
         if (projection) transaction.set(publicRef, firestoreSafe(projection)); else transaction.delete(publicRef);
-        await refreshLocationSummary(transaction, input.organizationId, nextLocations, now);
+        await refreshLocationSummary(
+          transaction,
+          input.organizationId,
+          nextLocations,
+          now,
+          organizationPublished,
+        );
         published = Boolean(projection); decisionResultId = resultId;
       }
     } else {
@@ -693,7 +845,8 @@ export const exchange_reviewOrganizationEnrichmentProposal = onCall(async (reque
           version: VERSION, recordVersion: Number(priorResult.get("recordVersion") ?? 0) + 1,
         });
         transaction.set(resultRef, firestoreSafe(contact));
-        const publicRef = db().collection("publicOrganizationContactPoints").doc(resultId); const projection = projectPublicContactPoint(contact);
+        const publicRef = db().collection("publicOrganizationContactPoints").doc(resultId);
+        const projection = organizationPublished ? projectPublicContactPoint(contact) : null;
         if (projection) transaction.set(publicRef, firestoreSafe(projection)); else transaction.delete(publicRef);
         published = Boolean(projection); decisionResultId = resultId;
       }
@@ -788,13 +941,55 @@ export const exchange_getActorMapAnchor = onCall(async (request) => {
   const actor = getAuthorizedActor(request); const input = parse(z.object({ organizationId: ID }).strict(), request.data);
   const { org } = await db().runTransaction((transaction) => loadOrgAuthority(transaction, db(), input.organizationId, actor.uid));
   const [profile, locations] = await Promise.all([db().collection("profiles").doc(actor.uid).get(), db().collection("organizationLocations").where("organizationId", "==", input.organizationId).where("status", "==", "active").get()]);
-  const preferredId = profile.get("preferredEstablishmentId"); const precedence = [preferredId, org.primaryLocationId, org.headquartersLocationId].filter((value): value is string => typeof value === "string");
-  const ordered = [...precedence.map((id) => locations.docs.find((document) => document.id === id)), ...locations.docs].filter(Boolean) as FirebaseFirestore.QueryDocumentSnapshot[];
+  const preferredId = profile.get("preferredOrganizationId") === input.organizationId
+    ? profile.get("preferredEstablishmentId")
+    : undefined;
+  const precedence = [preferredId, org.headquartersLocationId, org.primaryLocationId].filter((value): value is string => typeof value === "string");
+  const eligibleLocations = locations.docs.filter((document) => (
+    document.get("privateHome") !== true
+    && !["mailing_only", "virtual"].includes(String(document.get("locationType")))
+    && Boolean(document.get("physicalAddress"))
+    && Boolean(document.get("geocode.confirmedAt"))
+    && validCoordinate(document.get("geocode.latitude"), document.get("geocode.longitude"))
+  ));
+  const ordered = [...precedence.map((id) => eligibleLocations.find((document) => document.id === id)), ...eligibleLocations].filter(Boolean) as FirebaseFirestore.QueryDocumentSnapshot[];
   const unique = [...new Map(ordered.map((document) => [document.id, document])).values()];
-  const selected = unique.find((document) => validCoordinate(document.get("geocode.latitude"), document.get("geocode.longitude")));
-  if (!selected) return { anchor: null, source: "released_locality" };
-  return { anchor: { latitude: selected.get("geocode.latitude"), longitude: selected.get("geocode.longitude") }, locationId: selected.id,
-    source: selected.id === preferredId ? "preferred_establishment" : selected.id === org.primaryLocationId ? "primary_location" : selected.id === org.headquartersLocationId ? "headquarters" : "authorized_location" };
+  const selected = unique[0];
+  const safeOrganizationName = text(org.legalName ?? org.name, 200) ?? "Your organization";
+  const actorLocations = unique.flatMap((document) => {
+    const latitude = document.get("geocode.latitude"); const longitude = document.get("geocode.longitude");
+    if (!validCoordinate(latitude, longitude)) return [];
+    const locationType = String(document.get("locationType") ?? "other");
+    return [{
+      organizationId: input.organizationId,
+      locationId: document.id,
+      organizationName: safeOrganizationName,
+      establishmentLabel: text(document.get("name"), 160) ?? "Organization location",
+      locationType,
+      primary: document.get("isPrimary") === true,
+      headquarters: document.get("isHeadquarters") === true,
+      preferredOrientation: document.id === preferredId,
+      latitude,
+      longitude,
+      visibilityClassification: document.get("coordinatePublicationApproved") === true
+        && document.get("privateHome") !== true
+        && locationType !== "virtual"
+        && locationType !== "mailing_only"
+        ? "private_and_public_candidate"
+        : "private_actor",
+      markerState: "private_actor_visible",
+    }];
+  });
+  if (!selected) return { anchor: null, source: "released_locality", locations: actorLocations };
+  return {
+    anchor: { latitude: selected.get("geocode.latitude"), longitude: selected.get("geocode.longitude") },
+    locationId: selected.id,
+    locations: actorLocations,
+    source: selected.id === preferredId ? "preferred_establishment"
+      : selected.id === org.headquartersLocationId ? "headquarters"
+        : selected.id === org.primaryLocationId ? "primary_location"
+          : "authorized_location",
+  };
 });
 
 export function assertDevelopmentMigrationGuard(projectId: string, apply: boolean, confirmation?: string): void {

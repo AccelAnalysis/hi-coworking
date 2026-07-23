@@ -49,6 +49,9 @@ export function workspaceToOpportunityQuery(
   return {
     contractVersion: 1,
     ...(state.actorOrganizationId ? { actorOrganizationId: state.actorOrganizationId } : {}),
+    ...(state.modeStates.opportunities.filters.issuerOrganizationId
+      ? { issuerOrganizationId: state.modeStates.opportunities.filters.issuerOrganizationId }
+      : {}),
     query: state.searchQuery,
     filters: {
       naics: state.naicsFilters,

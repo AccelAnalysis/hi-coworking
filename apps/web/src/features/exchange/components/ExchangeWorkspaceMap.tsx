@@ -6,7 +6,11 @@ import type { ExchangeOrganizationPerspective } from "@hi/shared/exchange-organi
 import type { PublicOrganizationEstablishment } from "@hi/shared/organization-establishments";
 import type { PublicOrganizationProjection } from "@/lib/firestore";
 import { filterPublicOrganizations } from "../data/organizationDiscovery";
-import { loadPrimaryBusinessAnchor } from "../data/exchangeMapAnchor";
+import {
+  loadActorBusinessMapContext,
+  loadPrimaryBusinessAnchor,
+  type ActorEstablishmentMapProjection,
+} from "../data/exchangeMapAnchor";
 import {
   loadPublicOrganizationsForExchange,
   subscribePublicOrganizationsForExchange,
@@ -21,6 +25,8 @@ import { exchangeDemoOpportunityRepository } from "../demo/exchangeDemoGateway";
 import { establishmentMarkers, type PublicOrganizationMapRecord } from "../map/geojson";
 import {
   DEFAULT_EXCHANGE_MAP_VIEWPORT,
+  EXCHANGE_3D_ACTIVATION_VIEWPORT,
+  type ExchangeMapDimension,
   type ExchangeMapBounds,
   type ExchangeMapViewport,
 } from "../map/mapConfig";
@@ -94,6 +100,7 @@ export function ExchangeWorkspaceMap({
   demoMode,
   viewerUid,
   perspective,
+  dimension,
 }: {
   state: ExchangeWorkspaceState;
   applyAction: (
@@ -104,9 +111,13 @@ export function ExchangeWorkspaceMap({
   demoMode: boolean;
   viewerUid?: string;
   perspective?: ExchangeOrganizationPerspective | null;
+  dimension: ExchangeMapDimension;
 }) {
   const [organizations, setOrganizations] = useState<PublicOrganizationProjection[]>([]);
   const [locations, setLocations] = useState<PublicOrganizationEstablishment[]>([]);
+  const [actorLocations, setActorLocations] = useState<ActorEstablishmentMapProjection[]>([]);
+  const [compactViewport, setCompactViewport] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(844);
   const [fitRequest, setFitRequest] = useState(0);
   const [initialViewport, setInitialViewport] = useState<ExchangeMapViewport | null>(() =>
     state.viewport ?? (demoMode ? { ...DEFAULT_EXCHANGE_MAP_VIEWPORT } : null),
@@ -124,6 +135,21 @@ export function ExchangeWorkspaceMap({
     updateViewport,
   } = useExchangeData(repository);
   const activeView = canonicalView(state.view);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => {
+      setCompactViewport(media.matches);
+      setViewportHeight(window.innerHeight);
+    };
+    update();
+    media.addEventListener("change", update);
+    window.addEventListener("resize", update);
+    return () => {
+      media.removeEventListener("change", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (initialViewportResolvedRef.current) return;
@@ -158,6 +184,24 @@ export function ExchangeWorkspaceMap({
       active = false;
     };
   }, [demoMode, releasedTerritories, repositoryLoading, state.viewport, viewerUid]);
+
+  useEffect(() => {
+    if (demoMode || !viewerUid) {
+      setActorLocations([]);
+      return;
+    }
+    let active = true;
+    void loadActorBusinessMapContext(viewerUid, state.actorOrganizationId)
+      .then((context) => {
+        if (active) setActorLocations(context?.locations ?? []);
+      })
+      .catch(() => {
+        if (active) setActorLocations([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [demoMode, state.actorOrganizationId, viewerUid]);
 
   useEffect(() => {
     if (demoMode) {
@@ -220,18 +264,67 @@ export function ExchangeWorkspaceMap({
     () => establishmentMarkers(
       modeOrganizations,
       locations.filter((location) => modeOrganizations.some((organization) => organization.id === location.organizationId)),
-    ),
-    [locations, modeOrganizations],
+    ).filter((marker) => !actorLocations.some((actorLocation) =>
+      actorLocation.locationId === marker.locationId)),
+    [actorLocations, locations, modeOrganizations],
   );
   const activeContextOrganizations = useMemo(
-    () => contextOrganizations(
+    () => [
+      ...actorLocations.map((location): PublicOrganizationMapRecord => ({
+        id: location.locationId,
+        organizationId: location.organizationId,
+        locationId: location.locationId,
+        name: `${location.organizationName} — ${location.establishmentLabel}`,
+        status: "active",
+        latitude: location.latitude,
+        longitude: location.longitude,
+        coordinatePublicationApproved: false,
+        privateActorVisible: true,
+        coordinateConfidence: "authoritative",
+        contextType: state.subjectOrganizationId === location.organizationId
+          ? "actor_subject"
+          : "actor",
+      })),
+      ...contextOrganizations(
       organizations,
       state.actorOrganizationId,
       state.subjectOrganizationId,
       perspective?.organization,
-    ),
-    [organizations, perspective?.organization, state.actorOrganizationId, state.subjectOrganizationId],
+      ).filter((organization) => !actorLocations.some((location) =>
+        location.organizationId === organization.id)),
+    ],
+    [actorLocations, organizations, perspective?.organization, state.actorOrganizationId, state.subjectOrganizationId],
   );
+
+  useEffect(() => {
+    const returnHome = () => {
+      const organizationId = state.actorOrganizationId;
+      if (!organizationId) return;
+      const location = actorLocations.find((candidate) =>
+        candidate.organizationId === organizationId && candidate.preferredOrientation)
+        ?? actorLocations.find((candidate) =>
+          candidate.organizationId === organizationId && candidate.headquarters)
+        ?? actorLocations.find((candidate) =>
+          candidate.organizationId === organizationId && candidate.primary)
+        ?? actorLocations.find((candidate) => candidate.organizationId === organizationId);
+      if (!location) return;
+      const viewport = {
+        longitude: location.longitude,
+        latitude: location.latitude,
+        ...EXCHANGE_3D_ACTIVATION_VIEWPORT,
+      };
+      applyAction(exchangeWorkspaceActions.setSubjectOrganization(organizationId));
+      applyAction(exchangeWorkspaceActions.setSecondaryContext({
+        entityType: "establishment",
+        entityId: location.locationId,
+        organizationId,
+      }));
+      applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
+      applyAction(exchangeWorkspaceActions.setViewport(viewport), "push");
+    };
+    window.addEventListener("hi-exchange-organization-home", returnHome);
+    return () => window.removeEventListener("hi-exchange-organization-home", returnHome);
+  }, [actorLocations, applyAction, state.actorOrganizationId]);
 
   const handleViewportChange = useCallback((bounds: ExchangeMapBounds) => {
     const viewport = {
@@ -266,6 +359,12 @@ export function ExchangeWorkspaceMap({
         selection={asMapSelection(state)}
         initialViewport={initialViewport}
         viewport={state.viewport}
+        dimension={dimension}
+        cameraPadding={state.organizationDrawerOpen
+          ? compactViewport
+            ? { top: 16, right: 16, bottom: Math.round(viewportHeight * 0.48), left: 16 }
+            : { top: 16, right: 440, bottom: 16, left: 16 }
+          : { top: 16, right: 16, bottom: 16, left: 16 }}
         fitRequest={fitRequest}
         resizeSignal={`${state.leftPanelCollapsed}:${state.rightPanelOpen}:${state.mobileFilterOpen}:${state.mobileDetailOpen}:${activeView}`}
         className="absolute inset-0 h-full min-h-0 w-full border-0"

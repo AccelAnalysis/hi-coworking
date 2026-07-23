@@ -17,13 +17,17 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(exchangeRoute).not.toContain('../rfx/page');
   });
 
-  it("sends registration and sign-in into the Exchange without organization gating", () => {
+  it("sends new representatives into mandatory organization activation while preserving sign-in resume", () => {
     const login = read("apps/web/src/app/login/page.tsx");
     const register = read("apps/web/src/app/register/page.tsx");
+    const exchange = read("apps/web/src/app/exchange/page.tsx");
     expect(login).toContain('router.push("/exchange")');
-    expect(register).toContain('router.push("/profile?onboarding=1")');
+    expect(register).toContain('router.push("/exchange/onboarding")');
     expect(register).toContain("accountInitializeFn");
-    expect(register).toMatch(/Connecting an organization remains optional/i);
+    expect(register).toContain("businessRepresentativeAttestation");
+    expect(register).not.toMatch(/Connecting an organization remains optional/i);
+    expect(exchange).toContain("guidedActivationRequired");
+    expect(exchange).toContain("activationReady");
   });
 
   it("uses the approved five-item mobile order and removes Businesses and Teaming from primary navigation", () => {

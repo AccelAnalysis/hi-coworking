@@ -50,6 +50,8 @@ import { ExchangeOrganizationContextBar } from "./ExchangeOrganizationContextBar
 import { ExchangeOrganizationContextDrawer } from "./ExchangeOrganizationContextDrawer";
 import { ExchangeMobileNavigation } from "./ExchangeMobileNavigation";
 import { ExchangeWorkspaceMap } from "./ExchangeWorkspaceMap";
+import { ExchangeMapControls } from "./ExchangeMapControls";
+import type { ExchangeMapDimension } from "../map/mapConfig";
 
 type CanonicalExchangeView = "intelligence" | "referrals" | "opportunities" | "resources";
 
@@ -115,6 +117,9 @@ function ExchangeWorkspaceIdentityBoundary({
     ),
   );
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mapDimension, setMapDimension] = useState<ExchangeMapDimension>(() =>
+    (state.viewport?.pitch ?? 0) > 0 ? "3d" : "2d",
+  );
   const stateRef = useRef<ExchangeWorkspaceState>(state);
   const selfWrittenQueriesRef = useRef<Set<string>>(new Set());
   const browserHistoryNavigationRef = useRef(false);
@@ -133,6 +138,10 @@ function ExchangeWorkspaceIdentityBoundary({
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    setMapDimension((state.viewport?.pitch ?? 0) > 0 ? "3d" : "2d");
+  }, [state.viewport?.pitch]);
 
   const writeUrl = useCallback((
     next: ExchangeWorkspaceState,
@@ -336,6 +345,18 @@ function ExchangeWorkspaceIdentityBoundary({
           demoMode={demoMode}
           viewerUid={authenticatedUid}
           perspective={organizationContext.perspective}
+          dimension={mapDimension}
+        />
+
+        <ExchangeMapControls
+          dimension={mapDimension}
+          onDimensionChange={setMapDimension}
+          onOrganizationHome={() => {
+            setMapDimension("3d");
+            window.dispatchEvent(new CustomEvent("hi-exchange-organization-home"));
+          }}
+          organizationHomeAvailable={Boolean(state.actorOrganizationId)}
+          drawerOpen={state.organizationDrawerOpen}
         />
 
         <div className={cn(

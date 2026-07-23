@@ -1,5 +1,23 @@
 # Organization establishment and contact-routing configured acceptance
 
+## Business-registration/map-activation extension (pending live rerun)
+
+The extension begins at PR #22 head `a368d4d0b33df0d1382c0d107623f04d33ae0e04`. Local shared, Functions, and 59-page web builds pass after adding business-only registration, authoritative activation state, private actor location projections, exact issuer filtering, the workspace control layer, and the close 3D activation camera.
+
+The configured Playwright matrix now additionally asserts one connected Map dimension group, in-viewport 2D/3D bounding boxes, successful center-point hit testing, 3D/2D state transitions, control-node continuity through all four views, no horizontal overflow, and a screenshot per project:
+
+| Project | Viewport | Expected control position |
+| --- | --- | --- |
+| Chromium | 1280×800 | top/right safe-area inset; drawer-aware desktop right offset |
+| Chromium | 1440×900 | top/right safe-area inset; drawer-aware desktop right offset |
+| Firefox | 1280×800 | top/right safe-area inset; drawer-aware desktop right offset |
+| Desktop WebKit | 1440×900 | top/right safe-area inset; drawer-aware desktop right offset |
+| Mobile WebKit | 390×844 | top/right safe-area inset above bottom drawer |
+| Mobile WebKit | 393×852 | top/right safe-area inset above bottom drawer |
+| Mobile WebKit | 430×932 | top/right safe-area inset above bottom drawer |
+
+Do not read the historical 7/7 result below as evidence for these new assertions. The extension’s live deployment, exact test totals, screenshot artifact paths, and post-run cleanup audit must be appended after the reviewed development deployment.
+
 ## Establishment/contact-routing extension
 
 Configured acceptance covers single-location, multi-location, home-based,

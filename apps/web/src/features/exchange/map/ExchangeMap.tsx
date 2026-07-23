@@ -5,7 +5,6 @@ import type { RfxDoc, TerritoryDoc } from "@hi/shared";
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./exchangeMapLayering.css";
 
-import { cn } from "@/lib/utils";
 import {
   EXCHANGE_3D_VIEWPORT,
   EXCHANGE_MAP_LAYER_IDS,
@@ -36,11 +35,13 @@ export interface ExchangeMapProps extends ExchangeMapCallbacks {
   selection?: ExchangeMapSelection;
   initialViewport?: ExchangeMapViewport;
   viewport?: ExchangeMapViewport;
+  cameraPadding?: { top: number; right: number; bottom: number; left: number };
   fitRequest?: number;
   resizeSignal?: unknown;
   accessToken?: string;
   className?: string;
   ariaLabel?: string;
+  dimension?: ExchangeMapDimension;
   onStatusChange?: (status: ExchangeMapStatus, error: Error | null) => void;
   onRetry?: () => void;
 }
@@ -258,6 +259,8 @@ function ExchangeMapboxCanvas({
   viewport,
   fitRequest,
   resizeSignal,
+  cameraPadding,
+  dimension: controlledDimension,
   accessToken,
   diagnostics,
   className = "h-full min-h-[360px] w-full",
@@ -267,11 +270,11 @@ function ExchangeMapboxCanvas({
   ...callbacks
 }: ExchangeMapProps & { accessToken: string; diagnostics: MapboxRuntimeDiagnostics }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [dimension, setDimension] = useState<ExchangeMapDimension>(() =>
+  const [fallbackDimension] = useState<ExchangeMapDimension>(() =>
     (initialViewport?.pitch ?? viewport?.pitch ?? 0) > 0 ? "3d" : "2d",
   );
-  const dimensionChangeOriginRef = useRef<"initial" | "external" | "user">("initial");
-  const pendingUserDimensionRef = useRef<ExchangeMapDimension | null>(null);
+  const dimension = controlledDimension ?? fallbackDimension;
+  const previousDimensionRef = useRef<ExchangeMapDimension>(dimension);
   const [loadTimeoutError, setLoadTimeoutError] = useState<Error | null>(null);
   const { mapRef, status, error } = useExchangeMap({
     containerRef,
@@ -285,24 +288,12 @@ function ExchangeMapboxCanvas({
     selection,
     initialViewport,
     viewport,
+    cameraPadding,
     fitRequest,
     resizeSignal,
     onStatusChange,
     ...callbacks,
   });
-
-  useEffect(() => {
-    const nextDimension = (viewport?.pitch ?? initialViewport?.pitch ?? 0) > 0 ? "3d" : "2d";
-    if (pendingUserDimensionRef.current) {
-      if (nextDimension === pendingUserDimensionRef.current) {
-        pendingUserDimensionRef.current = null;
-      }
-      return;
-    }
-    if (nextDimension === dimension) return;
-    dimensionChangeOriginRef.current = "external";
-    setDimension(nextDimension);
-  }, [dimension, initialViewport?.pitch, viewport?.pitch]);
 
   useEffect(() => {
     if (status !== "initializing") {
@@ -338,7 +329,7 @@ function ExchangeMapboxCanvas({
         threeDimensional ? "visible" : "none",
       );
     }
-    if (dimensionChangeOriginRef.current === "user") {
+    if (previousDimensionRef.current !== dimension) {
       const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
       map.easeTo({
         pitch: threeDimensional ? EXCHANGE_3D_VIEWPORT.pitch : 0,
@@ -346,7 +337,7 @@ function ExchangeMapboxCanvas({
         duration: reduceMotion ? 0 : 500,
       });
     }
-    dimensionChangeOriginRef.current = "initial";
+    previousDimensionRef.current = dimension;
   }, [dimension, mapRef, status]);
 
   const providerError = error ?? loadTimeoutError;
@@ -379,29 +370,6 @@ function ExchangeMapboxCanvas({
           <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-600/80" /> Not active</span>
         </div>
       ) : null}
-      <div className="absolute right-3 top-3 z-30 flex rounded-xl border border-white/50 bg-white/70 p-1 shadow-lg backdrop-blur-xl" role="group" aria-label="Map dimension">
-        {(["2d", "3d"] as const).map((candidate) => (
-          <button
-            key={candidate}
-            type="button"
-            onClick={() => {
-              if (candidate === dimension) return;
-              pendingUserDimensionRef.current = candidate;
-              dimensionChangeOriginRef.current = "user";
-              setDimension(candidate);
-            }}
-            aria-pressed={dimension === candidate}
-            className={cn(
-              "min-h-9 rounded-lg px-3 text-xs font-black uppercase tracking-[0.08em] outline-none transition focus-visible:ring-2 focus-visible:ring-blue-600",
-              dimension === candidate
-                ? "bg-slate-950 text-white shadow-sm"
-                : "text-slate-600 hover:bg-white/80 hover:text-slate-950",
-            )}
-          >
-            {candidate.toUpperCase()}
-          </button>
-        ))}
-      </div>
       {status === "initializing" && !providerError ? (
         <div
           className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-slate-100/55 p-6 text-center backdrop-blur-sm"

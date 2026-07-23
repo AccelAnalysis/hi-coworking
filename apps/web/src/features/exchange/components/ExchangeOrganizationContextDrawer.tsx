@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   Mail,
   MapPin,
+  Search,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -163,7 +164,7 @@ export function ExchangeOrganizationContextDrawer({
 
   return (
     <aside
-      className="absolute bottom-3 right-3 top-3 z-[1300] flex w-[min(94vw,26rem)] flex-col overflow-hidden rounded-3xl border border-white/70 bg-white/90 shadow-2xl backdrop-blur-2xl"
+      className="absolute bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-3 right-3 z-[1300] flex max-h-[46%] flex-col overflow-hidden rounded-3xl border border-white/70 bg-white/90 shadow-2xl backdrop-blur-2xl lg:bottom-3 lg:left-auto lg:right-3 lg:top-3 lg:max-h-none lg:w-[min(94vw,26rem)]"
       aria-label="Organization context drawer"
       data-exchange-organization-drawer
     >
@@ -210,7 +211,7 @@ export function ExchangeOrganizationContextDrawer({
               ) : null}
             </div>
 
-            <dl className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm">
+            <dl data-organization-establishments className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-4 text-sm">
               <div className="flex items-start gap-2">
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
                 <dt className="font-semibold text-slate-600">Location</dt>
@@ -229,14 +230,14 @@ export function ExchangeOrganizationContextDrawer({
             </dl>
 
             {organization.description ? (
-              <div>
+              <div data-organization-profile>
                 <h3 className="text-xs font-black uppercase tracking-wide text-slate-500">About</h3>
                 <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{organization.description}</p>
               </div>
             ) : null}
 
             {tags.length ? (
-              <div>
+              <div data-organization-capabilities>
                 <h3 className="text-xs font-black uppercase tracking-wide text-slate-500">Published capabilities</h3>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {tags.map((tag) => (
@@ -247,6 +248,20 @@ export function ExchangeOrganizationContextDrawer({
             ) : null}
 
             <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={() => document.querySelector("[data-exchange-organization-drawer] [data-organization-profile]")?.scrollIntoView({ behavior: "smooth", block: "nearest" })}
+                className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                View organization profile
+              </button>
+              <button
+                type="button"
+                onClick={() => document.querySelector("[data-exchange-organization-drawer] [data-organization-establishments]")?.scrollIntoView({ behavior: "smooth", block: "nearest" })}
+                className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                View public establishments
+              </button>
               {website ? (
                 <a href={website} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500">
                   Website <ExternalLink className="h-4 w-4" aria-hidden="true" />
@@ -256,6 +271,59 @@ export function ExchangeOrganizationContextDrawer({
                 <button type="button" onClick={() => void submitSave()} disabled={submitting !== null} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500 disabled:opacity-50">
                   <Bookmark className="h-4 w-4" aria-hidden="true" /> {saved ? "Unsave" : "Save"}
                 </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  applyAction(exchangeWorkspaceActions.setModeFilters(
+                    { issuerOrganizationId: subjectOrganizationId },
+                    "opportunities",
+                  ));
+                  applyAction(exchangeWorkspaceActions.setView("opportunities"), "push");
+                }}
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                <Search className="h-4 w-4" aria-hidden="true" />
+                View opportunities offered by this organization
+              </button>
+              {actorOrganizationId !== subjectOrganizationId ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => applyAction(exchangeWorkspaceActions.setView("referrals"), "push")}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+                  >
+                    <Handshake className="h-4 w-4" aria-hidden="true" /> Send referral
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyAction(exchangeWorkspaceActions.setView("resources"), "push")}
+                    className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+                  >
+                    View public resources or programs
+                  </button>
+                  {tags.length ? (
+                    <button
+                      type="button"
+                      onClick={() => document.querySelector("[data-exchange-organization-drawer] [data-organization-capabilities]")?.scrollIntoView({ behavior: "smooth", block: "nearest" })}
+                      className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800 outline-none hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-violet-500"
+                    >
+                      Explore capabilities and certifications
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+              {actorOrganizationId === subjectOrganizationId ? (
+                <>
+                  <a href={`/org/settings?id=${encodeURIComponent(subjectOrganizationId)}&tab=profile`} className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Manage organization</a>
+                  <a href={`/org/settings?id=${encodeURIComponent(subjectOrganizationId)}&tab=establishments`} className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Manage establishments</a>
+                  <a href="/rfx/new" className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Add opportunity</a>
+                  <button type="button" onClick={() => applyAction(exchangeWorkspaceActions.setView("referrals"), "push")} className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Manage referrals</button>
+                  <a href={`/org/settings?id=${encodeURIComponent(subjectOrganizationId)}&tab=establishments`} className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Review marker visibility</a>
+                  <button type="button" onClick={() => document.querySelector("[data-exchange-organization-drawer] [data-organization-profile]")?.scrollIntoView({ behavior: "smooth", block: "nearest" })} className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">View public profile</button>
+                  <button type="button" onClick={() => window.dispatchEvent(new CustomEvent("hi-exchange-organization-home"))} className="min-h-11 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Return to organization home</button>
+                  <a href={`/org/settings?id=${encodeURIComponent(subjectOrganizationId)}&tab=establishments`} className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-800">Change orientation establishment</a>
+                </>
               ) : null}
             </div>
 

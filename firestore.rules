@@ -297,7 +297,10 @@ service cloud.firestore {
     // Server-maintained final allowlists. Street address and exact coordinate
     // fields are independently optional and require their own approval flag.
     match /publicOrganizationLocations/{locationId} {
-      allow read: if resource.data.keys().hasOnly([
+      allow read: if exists(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId))
+                  && get(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId)).data.status == "active"
+                  && get(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId)).data.publicationApproved == true
+                  && resource.data.keys().hasOnly([
                     "id", "organizationId", "name", "locationType", "isHeadquarters", "isPrimary",
                     "city", "county", "administrativeArea", "countryCode", "addressLine1", "postalCode",
                     "addressPublicationApproved", "coordinatePublicationApproved", "latitude", "longitude",
@@ -321,7 +324,10 @@ service cloud.firestore {
     }
 
     match /publicOrganizationContactPoints/{contactPointId} {
-      allow read: if resource.data.keys().hasOnly([
+      allow read: if exists(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId))
+                  && get(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId)).data.status == "active"
+                  && get(/databases/$(database)/documents/publicOrganizations/$(resource.data.organizationId)).data.publicationApproved == true
+                  && resource.data.keys().hasOnly([
                     "id", "organizationId", "locationId", "type", "purposes", "displayValue",
                     "visibility", "publicationStatus", "status", "version", "updatedAt"
                   ])

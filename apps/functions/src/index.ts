@@ -192,6 +192,10 @@ import {
   exchange_upsertOrganizationContactPoint,
   exchange_upsertOrganizationEstablishment,
 } from "./exchange/organizationEstablishments";
+import {
+  exchange_getBusinessActivationState,
+  exchange_recordBusinessActivationProgress,
+} from "./exchange/businessActivation";
 
 import {
   team_listMine,
@@ -312,6 +316,8 @@ export {
   exchange_upsertOrganizationCommunicationRoute,
   exchange_upsertOrganizationContactPoint,
   exchange_upsertOrganizationEstablishment,
+  exchange_getBusinessActivationState,
+  exchange_recordBusinessActivationProgress,
 };
 
 // Exchange commercial foundation (organization scoped; physical membership remains separate)

@@ -176,6 +176,7 @@ export interface ExchangeModeFilterState {
   budgetMax?: number;
   opportunitySort?: OpportunitySort;
   activeSavedSearchId?: string;
+  issuerOrganizationId?: string;
   connectionMode?: ExchangeConnectionMode;
   referralStatusFilters?: ExchangeReferralStatus[];
   connectionIndustryFilters?: string[];
@@ -374,6 +375,7 @@ export function createInitialExchangeModeStates(): ExchangeModeStates {
         closingSoon: false,
         teamingSuitable: false,
         opportunitySort: DEFAULT_EXCHANGE_OPPORTUNITY_SORT,
+        issuerOrganizationId: undefined,
       },
       secondaryContext: null,
       listScrollTop: 0,

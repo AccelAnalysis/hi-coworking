@@ -699,7 +699,12 @@ export function ExchangeOpportunitiesView({
               <ExchangeStateView
                 kind={blockingState}
                 compact
-                message={blockingState === "error" ? error?.message : undefined}
+                message={blockingState === "error"
+                  ? error?.message
+                  : blockingState === "filtered-empty"
+                    && state.modeStates.opportunities.filters.issuerOrganizationId
+                    ? "This organization has no published opportunities. Its organization marker remains available, and no opportunity was created."
+                    : undefined}
                 onRetry={blockingState === "error"
                   ? () => void (demoMode ? retryRepository() : discovery.retry())
                   : undefined}

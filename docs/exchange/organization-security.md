@@ -1,5 +1,13 @@
 # Organization activation and continuity security
 
+## Business-registration and actor-marker addendum
+
+Representative attestation is policy evidence, not organization authority. Activation state derives connection and management authority only from active `orgs` plus exact-active composite `orgMembers`. A pending claim is explicitly blocked from private actor markers, organization mutation, opportunity issuance, and private contact routing.
+
+The actor location callable returns only organization/location IDs, safe labels, type/designation flags, coordinate, visibility classification, and marker state. It omits street addresses, contacts, billing, provider data, notes, claim evidence, and verification evidence. The client may admit unpublished coordinates only when `privateActorVisible` came from this membership-gated response and only into the unclustered actor-context source. Public repositories and GeoJSON retain explicit publication gates.
+
+The activation callable is read-only with respect to authority. Progress recording revalidates membership on every action and requires owner/admin for enrichment and orientation preference. Map completion requires active membership. `issuerOrganizationId` narrows results but never bypasses Opportunity Discovery visibility rules.
+
 ## Establishment and route addendum
 
 Private locations, contacts, communication routes, geocode sessions/caches, and delivery audits deny every browser read/write, including owner, staff, Actor URL, and selected Subject. Management callables re-read exact-active organization status and composite membership and require owner/admin for mutation.

@@ -205,9 +205,10 @@ export function createExchangeMapLayerSpecifications(): LayerSpecification[] {
       source: EXCHANGE_MAP_SOURCE_IDS.selectedOrganization,
       paint: {
         "circle-color": "#312e81",
-        "circle-radius": 11,
-        "circle-stroke-width": 4,
+        "circle-radius": 16,
+        "circle-stroke-width": 6,
         "circle-stroke-color": "#ffffff",
+        "circle-blur": 0.04,
       },
     },
     {

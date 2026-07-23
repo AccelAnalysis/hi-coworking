@@ -61,6 +61,7 @@ const discoveryInputSchema = z.object({
   contractVersion: z.literal(PROJECTION_VERSION).default(PROJECTION_VERSION),
   query: z.string().max(240).default(""),
   actorOrganizationId: z.string().trim().min(1).max(160).optional(),
+  issuerOrganizationId: z.string().trim().min(1).max(160).optional(),
   exactPhrase: z.string().max(240).optional(),
   filters: z.object({
     naics: z.array(z.string().regex(/^\d{2,6}$/)).max(40).default([]),
@@ -730,6 +731,10 @@ function containsString(values: readonly string[], value: string): boolean {
 
 function matchesFilters(record: RecordData, input: DiscoveryInput, now: number): boolean {
   const filters = input.filters;
+  if (
+    input.issuerOrganizationId
+    && stringValue(record.issuerOrganizationId, 160) !== input.issuerOrganizationId
+  ) return false;
   if (!matchesPrefix(record.naicsCodes, filters.naics)) return false;
   if (!intersects(record.industryLabels, filters.industries)) return false;
   if (!intersects(record.capabilityKeywords, filters.capabilities)) return false;

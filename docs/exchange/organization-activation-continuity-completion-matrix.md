@@ -1,5 +1,23 @@
 # Organization activation and continuity completion matrix
 
+## Business-registration/map-activation extension
+
+| Capability | Local implementation | Configured status |
+|---|---|---|
+| Business-only registration | v2 required attestation and person essentials; direct organization onboarding | Local build passed; live rerun pending |
+| Activation state | Server-derived current/completed/blocked/actions/resume and marker states | Functions build passed; deploy pending |
+| Claim pending | No actor authority or private marker | Implemented; configured rerun pending |
+| Enrichment order | Dedicated step before Organization Profile procurement fields | Implemented; configured rerun pending |
+| Orientation preference | Separate person preference; headquarters then primary fallback | Implemented; configured rerun pending |
+| Private actor marker | Membership-gated privacy-minimized context feature | Unit/source coverage added; live rerun pending |
+| Public marker | Explicit organization and coordinate publication checklist | Implemented; live rerun pending |
+| Issued opportunities | Canonical exact `issuerOrganizationId` filter | Build coverage; configured empty-state rerun pending |
+| 3D activation | zoom 16.5, pitch 55, bearing -20, drawer-aware padding | Local build passed; browser matrix pending |
+| Selected marker | Unclustered source, 16px point, 6px ring | Local source coverage; visual rerun pending |
+| 2D/3D control | One workspace-level group at z1200; responsive safe-area offsets | Local build/source coverage; 7-project rerun pending |
+
+These rows supersede only the matching historical status below. The prior workstream’s configured evidence remains valid for its deployed SHA, but cannot be counted as proof of the extension until the new branch is deployed and rerun.
+
 ## Establishment/contact-routing continuation
 
 | Capability | Result |

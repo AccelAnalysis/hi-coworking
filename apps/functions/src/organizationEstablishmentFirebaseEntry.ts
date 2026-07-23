@@ -27,3 +27,7 @@ export {
   exchange_upsertOrganizationEstablishment,
 } from "./exchange/organizationEstablishments";
 export { businessReferral_send } from "./businessReferrals";
+export {
+  exchange_getBusinessActivationState,
+  exchange_recordBusinessActivationProgress,
+} from "./exchange/businessActivation";

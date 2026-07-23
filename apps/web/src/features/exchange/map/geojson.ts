@@ -45,6 +45,7 @@ export interface PublicOrganizationMapRecord {
   naicsCodes?: string[];
   capabilityKeywords?: string[];
   contextType?: "actor" | "subject" | "actor_subject";
+  privateActorVisible?: boolean;
 }
 
 interface MarkerOrganizationRecord {
@@ -280,9 +281,9 @@ export function toOrganizationFeatureCollection(
       !id
       || !name
       || organization.status !== "active"
-      || organization.homeBased === true
-      || organization.privacySuppressed === true
-      || organization.coordinatePublicationApproved !== true
+      || (organization.privateActorVisible !== true && organization.homeBased === true)
+      || (organization.privateActorVisible !== true && organization.privacySuppressed === true)
+      || (organization.privateActorVisible !== true && organization.coordinatePublicationApproved !== true)
       || !isValidLongitude(longitude)
       || !isValidLatitude(latitude)
     ) continue;

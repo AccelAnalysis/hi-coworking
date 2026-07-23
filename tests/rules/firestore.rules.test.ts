@@ -191,6 +191,8 @@ describe("Run 1 Firestore authorization matrix", () => {
   test("establishment, contact, geocode, and route collections expose only final public allowlists", async () => {
     await seed({
       "orgs/org-one": { id: "org-one", status: "active" },
+      "publicOrganizations/org-one": { id: "org-one", status: "active", publicationApproved: true },
+      "publicOrganizations/draft-org": { id: "draft-org", status: "inactive", publicationApproved: false },
       "orgMembers/org-one_owner": { orgId: "org-one", uid: "owner", role: "owner", status: "active" },
       "organizationLocations/private-location": { id: "private-location", organizationId: "org-one", physicalAddress: { line1: "1 Private St" }, geocode: { latitude: 36.98, longitude: -76.63 } },
       "organizationContactPoints/private-contact": { id: "private-contact", organizationId: "org-one", normalizedValue: "secret@example.test" },
@@ -210,6 +212,12 @@ describe("Run 1 Firestore authorization matrix", () => {
         coordinatePublicationApproved: false, addressLine1: "1 Secret St", publicContactAvailable: false,
         version: 1, updatedAt: 1,
       },
+      "publicOrganizationLocations/draft-location": {
+        id: "draft-location", organizationId: "draft-org", name: "Draft location", locationType: "branch",
+        isHeadquarters: false, isPrimary: true, addressPublicationApproved: false,
+        coordinatePublicationApproved: true, latitude: 36.99, longitude: -76.64,
+        publicContactAvailable: false, version: 1, updatedAt: 1,
+      },
       "publicOrganizationContactPoints/public-contact": {
         id: "public-contact", organizationId: "org-one", type: "email", purposes: ["general"],
         displayValue: "hello@example.test", visibility: "public", publicationStatus: "approved",
@@ -219,6 +227,11 @@ describe("Run 1 Firestore authorization matrix", () => {
         id: "leaky-contact", organizationId: "org-one", type: "email", purposes: ["general"],
         displayValue: "secret@example.test", normalizedValue: "secret@example.test",
         visibility: "private_operational", publicationStatus: "draft", status: "active", version: 1, updatedAt: 1,
+      },
+      "publicOrganizationContactPoints/draft-contact": {
+        id: "draft-contact", organizationId: "draft-org", type: "email", purposes: ["general"],
+        displayValue: "draft@example.test", visibility: "public", publicationStatus: "approved",
+        status: "active", version: 1, updatedAt: 1,
       },
     });
     const owner = authenticated("owner").firestore();
@@ -236,6 +249,8 @@ describe("Run 1 Firestore authorization matrix", () => {
     await assertSucceeds(getDoc(doc(anonymous, "publicOrganizationContactPoints/public-contact")));
     await assertFails(getDoc(doc(anonymous, "publicOrganizationLocations/leaky-location")));
     await assertFails(getDoc(doc(anonymous, "publicOrganizationContactPoints/leaky-contact")));
+    await assertFails(getDoc(doc(anonymous, "publicOrganizationLocations/draft-location")));
+    await assertFails(getDoc(doc(anonymous, "publicOrganizationContactPoints/draft-contact")));
     await assertFails(updateDoc(doc(owner, "publicOrganizationLocations/public-location"), { latitude: 0 }));
     await assertFails(setDoc(doc(outsider, "organizationCommunicationRoutes/forged"), { organizationId: "org-one" }));
   });
