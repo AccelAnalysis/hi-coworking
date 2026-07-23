@@ -1,0 +1,92 @@
+name: PR23 publication diagnostic corrected runner
+
+on:
+  push:
+    branches:
+      - codex/exchange-business-registration-map-activation
+    paths:
+      - ".github/workflows/pr23-publication-diagnostic-runner.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-registration-map-activation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Execute corrected guarded patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          source = Path(".github/workflows/pr23-publication-diagnostic-patch.yml").read_text()
+          script = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+          script = dedent(script)
+          old = dedent('''
+          index = Path("apps/functions/src/index.ts")
+          replace_once(
+              index,
+              ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + ''',
+              ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_getOrganizationPublicationDiagnostic,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + ''',
+          )
+          replace_once(
+              index,
+              ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + ''',
+              ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_getOrganizationPublicationDiagnostic,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + ''',
+          )
+          ''')
+          new = dedent('''
+          index = Path("apps/functions/src/index.ts")
+          index_text = index.read_text()
+          index_needle = ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + '''
+          index_replacement = ''' + "'''" + '''  exchange_getActorMapAnchor,
+  exchange_getOrganizationManagement,
+  exchange_getOrganizationPublicationDiagnostic,
+  exchange_reviewOrganizationEnrichmentProposal,'''+ "'''" + '''
+          if index_text.count(index_needle) != 2:
+              raise SystemExit(f"index.ts: expected two diagnostic insertion points, found {index_text.count(index_needle)}")
+          index.write_text(index_text.replace(index_needle, index_replacement))
+          ''')
+          if old not in script:
+              raise SystemExit("Could not locate the guarded index patch block")
+          exec(compile(script.replace(old, new, 1), "pr23-publication-diagnostic-patch", "exec"))
+          PY
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run build:functions
+      - run: npm run lint
+      - run: npm run test:exchange
+      - run: npm run build
+      - run: git diff --check
+      - name: Commit validated publication diagnostic
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/functions/src/exchange/organizationEstablishments.ts apps/functions/src/index.ts apps/web/src/app/org/settings/page.tsx tests/exchange/organizationPublicationDiagnostic.test.ts
+          git commit -m "feat(exchange): add publication visibility diagnostic"
+          git pull --rebase origin codex/exchange-business-registration-map-activation
+          git push origin HEAD:codex/exchange-business-registration-map-activation
