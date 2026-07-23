@@ -24,4 +24,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx vitest run tests/exchange/organization-marker-public-discovery-repair.test.ts --reporter=verbose
+      - name: Run focused marker repair test
+        shell: bash
+        run: |
+          set -o pipefail
+          npx vitest run tests/exchange/organization-marker-public-discovery-repair.test.ts --reporter=verbose 2>&1 | tee focused-test.log
+      - name: Upload focused test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-focused-test-log
+          path: focused-test.log
+          if-no-files-found: error
