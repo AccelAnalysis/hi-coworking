@@ -1,4 +1,4 @@
-name: PR23 server contract PR runner
+name: PR23 server contract PR runner v2
 
 on:
   pull_request:
@@ -60,7 +60,17 @@ jobs:
       - run: npm run lint
       - run: npm run test:exchange
       - run: npm run test:security
-      - run: npm run build
+      - name: Run production build
+        run: npm run build
+        env:
+          SKIP_BOOKSTORE_SYNC: "true"
+          NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+          NEXT_PUBLIC_EXCHANGE_DEMO_MODE: "true"
       - run: git diff --check
       - name: Commit validated server repair
         run: |
