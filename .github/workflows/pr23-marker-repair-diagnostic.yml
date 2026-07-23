@@ -1,0 +1,27 @@
+name: PR23 marker repair diagnostic
+
+on:
+  push:
+    branches:
+      - codex/exchange-business-registration-map-activation
+    paths:
+      - "tests/exchange/organization-marker-public-discovery-repair.test.ts"
+      - "apps/web/src/features/exchange/data/publicOrganizationRepository.ts"
+      - ".github/workflows/pr23-marker-repair-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/exchange/organization-marker-public-discovery-repair.test.ts --reporter=verbose
