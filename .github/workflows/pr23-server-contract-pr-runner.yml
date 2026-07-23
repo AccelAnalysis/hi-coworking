@@ -1,0 +1,54 @@
+name: PR23 server contract PR runner
+
+on:
+  pull_request:
+    branches:
+      - codex/exchange-establishments-contact-routing
+    paths:
+      - ".github/workflows/pr23-server-contract-pr-runner.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-registration-map-activation
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Execute corrected server patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+          source = Path(".github/workflows/pr23-server-contract-corrected.yml").read_text()
+          script = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+          exec(compile(dedent(script), "pr23-server-contract-corrected", "exec"))
+          PY
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run build:functions
+      - run: npm run lint
+      - run: npm run test:exchange
+      - run: npm run test:security
+      - run: npm run build
+      - run: git diff --check
+      - name: Commit validated server repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/functions/src/exchange/organizationWorkspace.ts
+          git commit -m "fix(exchange): validate establishment perspective context"
+          git pull --rebase origin codex/exchange-business-registration-map-activation
+          git push origin HEAD:codex/exchange-business-registration-map-activation
