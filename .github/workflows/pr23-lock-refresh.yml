@@ -1,9 +1,9 @@
 name: PR23 dependency lock repair
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/exchange-business-registration-map-activation
+      - codex/exchange-establishments-contact-routing
     paths:
       - ".github/workflows/pr23-lock-refresh.yml"
   workflow_dispatch:
@@ -51,4 +51,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add apps/web/package.json package-lock.json
           git commit -m "fix(deps): repair Exchange production dependency audit"
+          git pull --rebase origin codex/exchange-business-registration-map-activation
           git push origin HEAD:codex/exchange-business-registration-map-activation
