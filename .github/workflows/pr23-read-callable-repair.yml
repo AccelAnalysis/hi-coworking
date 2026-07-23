@@ -25,6 +25,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Apply repair
         run: python scripts/pr23-read-callable-repair.py
 
