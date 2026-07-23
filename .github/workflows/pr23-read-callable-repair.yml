@@ -47,7 +47,19 @@ jobs:
         run: npm run test:exchange
 
       - name: Run Run 3 tests
-        run: npm run test:run3
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:run3 2>&1 | tee pr23-run3.log
+
+      - name: Upload Run 3 diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-run3-diagnostic
+          path: pr23-run3.log
+          if-no-files-found: ignore
+          retention-days: 3
 
       - name: Check patch formatting
         run: git diff --check
