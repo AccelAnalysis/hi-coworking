@@ -20,7 +20,7 @@ export function ExchangeMapControls({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute top-[max(0.75rem,env(safe-area-inset-top))] z-[1200] flex max-w-[calc(100%-1.5rem)] items-center gap-2",
+        "pointer-events-none absolute top-[max(0.75rem,env(safe-area-inset-top))] z-[1200] flex max-w-[calc(100%-1.5rem)] items-center gap-2 lg:top-[5.5rem]",
         drawerOpen
           ? "right-[max(0.75rem,env(safe-area-inset-right))] lg:right-[calc(min(94vw,26rem)+1.5rem)]"
           : "right-[max(0.75rem,env(safe-area-inset-right))]",
