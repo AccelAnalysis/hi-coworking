@@ -1,9 +1,9 @@
 name: PR23 marker repair diagnostic
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/exchange-business-registration-map-activation
+      - codex/exchange-establishments-contact-routing
     paths:
       - "tests/exchange/organization-marker-public-discovery-repair.test.ts"
       - "apps/web/src/features/exchange/data/publicOrganizationRepository.ts"
