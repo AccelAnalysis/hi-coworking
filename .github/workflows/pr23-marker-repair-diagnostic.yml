@@ -1,12 +1,12 @@
-name: PR23 marker repair diagnostic
+name: PR23 Exchange test diagnostic
 
 on:
   pull_request:
     branches:
       - codex/exchange-establishments-contact-routing
     paths:
-      - "tests/exchange/organization-marker-public-discovery-repair.test.ts"
-      - "apps/web/src/features/exchange/data/publicOrganizationRepository.ts"
+      - "tests/exchange/**"
+      - "apps/web/src/features/exchange/**"
       - ".github/workflows/pr23-marker-repair-diagnostic.yml"
   workflow_dispatch:
 
@@ -14,9 +14,9 @@ permissions:
   contents: read
 
 jobs:
-  focused-test:
+  exchange-test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,15 +25,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:shared
-      - name: Run focused marker repair test
+      - name: Run complete Exchange test suite
         shell: bash
         run: |
           set -o pipefail
-          npx vitest run tests/exchange/organization-marker-public-discovery-repair.test.ts --reporter=verbose 2>&1 | tee focused-test.log
-      - name: Upload focused test output
+          npm run test:exchange 2>&1 | tee exchange-test.log
+      - name: Upload Exchange test output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pr23-focused-test-log
-          path: focused-test.log
+          name: pr23-exchange-test-log
+          path: exchange-test.log
           if-no-files-found: error
