@@ -15,6 +15,8 @@ describe("business registration and map activation", () => {
     expect(registration).toContain("businessRepresentativeAttestation: attested");
     expect(registration).toContain('registrationVersion: 2');
     expect(registration).toContain('router.push("/exchange/onboarding")');
+    expect(onboarding).toContain("listActorOrganizations()");
+    expect(onboarding).not.toContain("getUserOrgs");
     expect(`${registration}\n${onboarding}`).not.toMatch(/Browse as individual|Skip for now|continue using the Exchange without one/i);
   });
 

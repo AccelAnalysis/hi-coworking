@@ -560,7 +560,7 @@ test("configured development completes the canonical organization lifecycle", {
     requestedActorOrganizationId: competingOrganizationId,
   });
   assert.equal(actorFallback.actors.some((actor) => actor.organizationId === competingOrganizationId), false);
-  assert.equal(actorFallback.selectedActorOrganizationId, null);
+  assert.equal(actorFallback.selectedActorOrganizationId, claimedOrganizationId);
   assert.equal(actorFallback.fallbackApplied, true);
   const revokedPerspective = await callFunction("exchange_resolveOrganizationPerspective", claimantToken, {
     contractVersion: 1,
@@ -568,7 +568,9 @@ test("configured development completes the canonical organization lifecycle", {
     subjectOrganizationId: competingOrganizationId,
     mode: "opportunities",
   });
-  assert.equal(revokedPerspective.actor.valid, false);
+  assert.equal(revokedPerspective.actor.valid, true);
+  assert.equal(revokedPerspective.actor.organizationId, claimedOrganizationId);
+  assert.equal(revokedPerspective.actor.fallbackApplied, true);
   assert.equal(revokedPerspective.perspective.projectionLevel, "public_claimed");
   assert.equal(revokedPerspective.organization.ownerUid, undefined);
   await callFunction("exchange_saveOrganization", claimantToken, {

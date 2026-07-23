@@ -115,7 +115,7 @@ test("configured development permits sign-in, Exchange access, and a profile sav
   expect(outcome, `Configured profile save failed: ${JSON.stringify(functionDiagnostics)}`).toBe("saved");
 });
 
-test("configured development completes a disposable business-registration journey", async ({ page }, testInfo) => {
+test("configured development completes a disposable registration business-activation journey", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "configured-development-chromium", "The disposable mutation runs once in Chromium.");
   test.skip(!allowAccountJourney, "Set EXCHANGE_DEV_ALLOW_ACCOUNT_JOURNEY=true for the guarded disposable journey.");
 

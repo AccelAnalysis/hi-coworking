@@ -7,7 +7,10 @@ import { Building2, CheckCircle2, Loader2, MapPin, Search, ShieldCheck } from "l
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
-import { getUserOrgs, getOrg } from "@/lib/firestore";
+import {
+  listActorOrganizations,
+  type ExchangeActorOrganizationOption,
+} from "@/features/exchange/data/organizationContextGateway";
 import {
   exchangeOrganizationCreateFn,
   exchangeOrganizationRequestClaimFn,
@@ -16,7 +19,6 @@ import {
   type ExchangeOrganizationClaim,
   type ExchangeOrganizationCandidate,
 } from "@/lib/functions";
-import type { OrgDoc } from "@hi/shared";
 
 export default function ExchangeOnboardingPage() {
   return <RequireAuth><Onboarding /></RequireAuth>;
@@ -30,7 +32,7 @@ function Onboarding() {
   const [state, setState] = useState("VA");
   const [website, setWebsite] = useState("");
   const [results, setResults] = useState<ExchangeOrganizationCandidate[]>([]);
-  const [existingOrgs, setExistingOrgs] = useState<OrgDoc[]>([]);
+  const [existingOrgs, setExistingOrgs] = useState<ExchangeActorOrganizationOption[]>([]);
   const [claims, setClaims] = useState<ExchangeOrganizationClaim[]>([]);
   const [claimReasons, setClaimReasons] = useState<Record<string, string>>({});
   const [searched, setSearched] = useState(false);
@@ -40,9 +42,8 @@ function Onboarding() {
 
   useEffect(() => {
     if (!user) return;
-    getUserOrgs(user.uid)
-      .then((memberships) => Promise.all(memberships.map((membership) => getOrg(membership.orgId))))
-      .then((orgs) => setExistingOrgs(orgs.filter((org): org is OrgDoc => Boolean(org))))
+    listActorOrganizations()
+      .then((result) => setExistingOrgs(result.actors))
       .catch(() => setExistingOrgs([]));
     exchangeOrganizationListMyClaimsFn({}).then((result) => setClaims(result.data.claims)).catch(() => setClaims([]));
   }, [user]);
@@ -109,10 +110,10 @@ function Onboarding() {
             <h2 className="font-bold text-emerald-950">Your organizations</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {existingOrgs.map((org) => (
-                <article key={org.id} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-emerald-100">
+                <article key={org.organizationId} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-emerald-100">
                   <div className="flex items-center gap-3"><Building2 className="h-5 w-5 text-emerald-600" /><strong className="block text-sm text-slate-900">{org.name}</strong></div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Link href={`/org/settings?id=${encodeURIComponent(org.id)}&tab=enrichment&onboarding=1`} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-bold text-white">Continue organization setup</Link>
+                    <Link href={`/org/settings?id=${encodeURIComponent(org.organizationId)}&tab=enrichment&onboarding=1`} className="rounded-full bg-slate-950 px-4 py-2 text-xs font-bold text-white">Continue organization setup</Link>
                   </div>
                 </article>
               ))}
