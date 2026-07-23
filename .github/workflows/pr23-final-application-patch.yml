@@ -1,9 +1,9 @@
-name: PR23 final application repair patch v2
+name: PR23 final application repair patch v3
 
 on:
-  pull_request:
+  push:
     branches:
-      - codex/exchange-establishments-contact-routing
+      - codex/exchange-business-registration-map-activation
     paths:
       - ".github/workflows/pr23-final-application-patch.yml"
   workflow_dispatch:
