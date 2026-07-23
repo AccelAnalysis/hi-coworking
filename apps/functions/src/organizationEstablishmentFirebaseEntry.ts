@@ -6,7 +6,12 @@ export { account_initialize } from "./accounts";
 export { profile_update } from "./profiles";
 export { enrichment_link } from "./enrichment";
 export {
+  exchange_adminGetOrganizationClaim,
+  exchange_adminListOrganizationClaims,
+  exchange_adminReviewOrganizationClaim,
+  exchange_organizationListMyClaims,
   exchange_organizationCreate,
+  exchange_organizationRequestClaim,
   exchange_organizationSearch,
 } from "./exchange/organizations";
 export {

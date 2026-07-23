@@ -799,24 +799,25 @@ test("configured development preserves external organization context through eve
     expect(Number(currentUrl.searchParams.get("lat"))).toBeCloseTo(36.9824, 1);
 
     const externalHistoryUrl = page.url();
-    await page.evaluate((url) => {
-      window.history.pushState(window.history.state, "", url);
-    }, `/exchange?${selfParams.toString()}`);
-    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.actorName);
-    await page.evaluate((url) => {
-      window.history.pushState(window.history.state, "", url);
-    }, externalHistoryUrl);
-    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
-
     await page.reload();
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
     await expectWorkspaceSearchPreserved();
+
+    await gotoStable(page, `/exchange?${selfParams.toString()}`);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.actorName);
+    const externalHistoryLocation = new URL(externalHistoryUrl);
+    await gotoStable(page, `${externalHistoryLocation.pathname}${externalHistoryLocation.search}`);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
+
     await page.goBack();
     await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
+    await expect.poll(
+      () => new URL(page.url()).searchParams.get("subjectOrg"),
+      { message: "browser history restored the self organization context" },
+    ).toBe(fixture.actorOrganizationId);
     const backSubjectOrganizationId = new URL(page.url()).searchParams.get("subjectOrg");
-    expect(backSubjectOrganizationId).toBe(fixture.actorOrganizationId);
     await expect(page.getByLabel("Exchange organization context")).toContainText(
       backSubjectOrganizationId === fixture.actorOrganizationId
         ? fixture.actorName

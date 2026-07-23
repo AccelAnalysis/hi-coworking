@@ -108,8 +108,7 @@ async function searchLocalOrganizations(input: { name: string; city?: string; st
       confidenceScore: match.score,
       matchReason: match.reasons.join(" + ") || "name similarity",
       canRequestClaim: data.status === "active"
-        && data.publicationApproved === true
-        && data.claimStatus !== "claimed",
+        && data.publicationApproved === true,
       external: false,
     } satisfies OrganizationCandidate;
   };
@@ -484,10 +483,7 @@ export const exchange_organizationRequestClaim = onCall(async (request) => {
       throw new HttpsError("not-found", "Organization not found.");
     }
     if (org?.status !== "active") throw new HttpsError("failed-precondition", "Organization is unavailable.");
-    if (org?.claimStatus === "claimed") {
-      if (org.ownerUid === request.auth.uid && claimSnap.data()?.status === "approved") return;
-      throw new HttpsError("already-exists", "This organization is already claimed.");
-    }
+    if (org?.ownerUid === request.auth.uid && claimSnap.data()?.status === "approved") return;
     if (["pending", "approved"].includes(String(claimSnap.data()?.status || ""))) return;
     tx.set(claimRef, {
       id: claimRef.id,
@@ -507,7 +503,12 @@ export const exchange_organizationRequestClaim = onCall(async (request) => {
       reviewedAt: null,
       reviewedBy: "",
     }, { merge: true });
-    const updatedOrg = { ...org, claimStatus: "claim_pending", exchangeVerificationStatus: "claim_pending", updatedAt: now };
+    // A governed competing claim must not demote an already-claimed
+    // organization or revoke its current members while review is pending.
+    const alreadyClaimed = org?.claimStatus === "claimed" && Boolean(org?.ownerUid);
+    const updatedOrg = alreadyClaimed
+      ? { ...org, updatedAt: now }
+      : { ...org, claimStatus: "claim_pending", exchangeVerificationStatus: "claim_pending", updatedAt: now };
     tx.set(orgRef, updatedOrg, { merge: true });
     if (publicSnap.exists && publicSnap.get("publicationApproved") === true) {
       tx.set(publicRef, sanitizePublicOrganization(organizationId, updatedOrg), { merge: true });
@@ -615,9 +616,6 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
     ]);
     if (!orgSnap.exists) throw new HttpsError("not-found", "Organization not found.");
     const org = orgSnap.data() || {};
-    if (decision === "approve" && org.claimStatus === "claimed" && org.ownerUid !== requestedBy) {
-      throw new HttpsError("failed-precondition", "A competing claim has already been approved.");
-    }
     const now = Date.now();
     tx.update(claimRef, { status: nextStatus, reviewNote, reviewedBy: request.auth.uid, reviewedAt: now, updatedAt: now });
 
@@ -695,7 +693,9 @@ export const exchange_adminReviewOrganizationClaim = onCall(async (request) => {
       }
     } else {
       const otherPending = competing.docs.some((doc) => doc.id !== claimId);
-      nextClaimStatus = otherPending ? "claim_pending" : "unclaimed";
+      nextClaimStatus = org.ownerUid
+        ? "claimed"
+        : otherPending ? "claim_pending" : "unclaimed";
       updatedOrg = {
         ...org,
         claimStatus: nextClaimStatus,

@@ -13,7 +13,6 @@ const requireSmoke = process.env.EXCHANGE_DEV_REQUIRE_SMOKE === "true";
 const allowAccountJourney = process.env.EXCHANGE_DEV_ALLOW_ACCOUNT_JOURNEY === "true";
 const allowLegacyJourney = process.env.EXCHANGE_DEV_ALLOW_LEGACY_JOURNEY === "true";
 const PROJECT_ID = "hi-coworking-plat";
-const EXPECTED_ATTESTATION = "I confirm I am authorized to represent this company.";
 
 function requiredConfiguredDevelopmentInputsPresent() {
   return Boolean(baseURL && memberEmail && memberPassword);
@@ -116,7 +115,7 @@ test("configured development permits sign-in, Exchange access, and a profile sav
   expect(outcome, `Configured profile save failed: ${JSON.stringify(functionDiagnostics)}`).toBe("saved");
 });
 
-test("configured development completes a disposable registration, profile, and enrichment journey", async ({ page }, testInfo) => {
+test("configured development completes a disposable business-registration journey", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "configured-development-chromium", "The disposable mutation runs once in Chromium.");
   test.skip(!allowAccountJourney, "Set EXCHANGE_DEV_ALLOW_ACCOUNT_JOURNEY=true for the guarded disposable journey.");
 
@@ -124,6 +123,7 @@ test("configured development completes a disposable registration, profile, and e
   const email = `codex-exchange-smoke-${suffix}@example.test`;
   const password = `Codex!${crypto.randomUUID()}9a`;
   const displayName = "Codex Journey Acceptance";
+  const organizationName = `Codex Business Registration ${suffix}`;
   const adminApp = getApps().find((app) => app.name === "configured-account-journey")
     ?? initializeApp({ projectId: PROJECT_ID }, "configured-account-journey");
   const adminAuth = getAuth(adminApp);
@@ -136,13 +136,29 @@ test("configured development completes a disposable registration, profile, and e
   page.on("pageerror", (error) => pageErrors.push(error.name));
 
   let uid: string | undefined;
+  let organizationId: string | undefined;
   try {
     await page.goto("/register");
+    await expect(page.getByRole("heading", { name: "Create your representative account" })).toBeVisible();
+    const representativeAttestation = page.getByLabel(
+      "I am registering as an authorized representative of a business or organization.",
+    );
+    await expect(representativeAttestation).toBeVisible();
+    await expect(representativeAttestation).toHaveAttribute("required", "");
+    await expect(page.getByText(/browse as individual|individual browse|skip organization/i)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create account" })).toBeDisabled();
+
     await page.getByLabel("Full Name").fill(displayName);
-    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Professional title").fill("Owner");
+    await page.getByLabel("Login and preferred private email").fill(email);
+    await page.getByLabel("Preferred private telephone").fill("+1 757 555 0198");
     await page.getByLabel("Password").fill(password);
+    await representativeAttestation.check();
     await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page).toHaveURL(/\/profile\?onboarding=1$/, { timeout: 40_000 });
+    await expect(page).toHaveURL(/\/exchange\/onboarding$/, { timeout: 40_000 });
+    await expect(page.getByRole("heading", { name: "Find or create the organization you represent." })).toBeVisible();
+    await expect(page.getByText(/Organization connection is required/)).toBeVisible();
+    await expect(page.getByText(/skip organization|browse as individual/i)).toHaveCount(0);
 
     await expect.poll(async () => {
       try {
@@ -155,9 +171,13 @@ test("configured development completes a disposable registration, profile, and e
         return {
           role: record.customClaims?.role,
           userRole: userDocument.data()?.role,
+          registrationVersion: userDocument.data()?.registrationVersion,
+          attested: typeof userDocument.data()?.businessRepresentativeAttestedAt === "number",
           membershipStatus: userDocument.data()?.membershipStatus,
-          profileVersion: profileDocument.data()?.profileVersion,
-          published: profileDocument.data()?.published,
+          professionalTitle: profileDocument.data()?.professionalTitle,
+          privateEmail: profileDocument.data()?.preferredPrivateEmail,
+          privatePhone: profileDocument.data()?.preferredPrivatePhone,
+          personEssentials: typeof profileDocument.data()?.personEssentialsCompletedAt === "number",
         };
       } catch {
         return null;
@@ -165,67 +185,57 @@ test("configured development completes a disposable registration, profile, and e
     }).toEqual({
       role: "member",
       userRole: "member",
+      registrationVersion: 2,
+      attested: true,
       membershipStatus: "none",
-      profileVersion: 0,
-      published: false,
+      professionalTitle: "Owner",
+      privateEmail: email,
+      privatePhone: "+1 757 555 0198",
+      personEssentials: true,
     });
     expect(uid).toBeTruthy();
     expect((await db.collection("orgMembers").where("uid", "==", uid!).get()).empty).toBe(true);
     expect((await adminAuth.getUser(uid!)).customClaims).not.toHaveProperty("adminMarketingEmail");
 
-    await page.getByPlaceholder("Acme Consulting LLC").fill("International Business Machines Corporation");
-    await page.getByLabel("City").fill("Armonk");
-    await page.getByLabel("State / region").fill("NY");
-    await page.getByLabel("Business domain").fill("ibm.com");
-    await page.getByRole("button", { name: "Save Profile" }).click();
-    await expect(page.getByText("Saved", { exact: true })).toBeVisible();
-
-    await page.reload();
-    await expect(page.getByPlaceholder("Acme Consulting LLC"))
-      .toHaveValue("International Business Machines Corporation");
-    await expect(page.getByLabel("City")).toHaveValue("Armonk");
-
-    await page.getByRole("button", { name: "Search candidate matches" }).click();
-    await expect(page.getByText(/SAM\.gov: unavailable · USAspending: ok/i)).toBeVisible({ timeout: 30_000 });
-    const review = page.getByRole("group", { name: "Choose the exact fields to apply" });
-    await expect(review).toBeVisible();
-    const fieldCheckboxes = review.getByRole("checkbox");
-    expect(await fieldCheckboxes.count()).toBeGreaterThanOrEqual(2);
-    for (let index = 0; index < await fieldCheckboxes.count(); index += 1) {
-      await fieldCheckboxes.nth(index).check();
-    }
-    await page.getByPlaceholder(EXPECTED_ATTESTATION).fill(EXPECTED_ATTESTATION);
-    await page.getByLabel(/I certify this information is mine/).check();
-    await page.getByLabel(/I understand false representation/).check();
-    const linkResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/enrichment_link") && response.request().method() === "POST",
-    );
-    await page.getByRole("button", { name: "Link selected company" }).click();
-    expect((await linkResponse).status()).toBe(200);
-
-    const linkedProfile = (await db.collection("profiles").doc(uid!).get()).data();
-    expect(linkedProfile).toMatchObject({
-      uid,
-      profileSchemaVersion: 3,
-      profileVersion: 2,
-      enrichmentSource: "usaspending",
-      published: false,
+    await page.getByLabel("Organization name").fill(organizationName);
+    await page.getByLabel("City").fill("Smithfield");
+    await page.getByLabel("State").fill("VA");
+    await page.getByRole("button", { name: "Search organizations" }).click();
+    await expect(page.getByText("No likely match found. Create the organization below to continue.")).toBeVisible({
+      timeout: 30_000,
     });
-    expect(linkedProfile?.enrichmentMatchId).toEqual(expect.any(String));
-    expect(Object.keys(linkedProfile?.enrichmentFieldProvenance || {}).length).toBeGreaterThanOrEqual(2);
+    await expect(page.getByText(/review enrichment before entering procurement identifiers/i)).toBeVisible();
+    await page.getByRole("button", { name: "Create this organization" }).click();
+    await expect(page).toHaveURL(/\/org\/settings\?id=[^&]+&tab=enrichment&onboarding=1$/, { timeout: 40_000 });
+    organizationId = new URL(page.url()).searchParams.get("id") ?? undefined;
+    expect(organizationId).toBeTruthy();
+    await expect(page.getByRole("heading", { name: organizationName })).toBeVisible({ timeout: 40_000 });
+    await expect(page.getByRole("heading", { name: "Enrichment proposals" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "1. Enrichment" })).toHaveAttribute("aria-selected", "true");
 
-    await page.reload();
-    await expect(page.getByPlaceholder("Acme Consulting LLC"))
-      .toHaveValue(String(linkedProfile?.businessName));
+    const [organization, membership, publicProjection, opportunities] = await Promise.all([
+      db.collection("orgs").doc(organizationId!).get(),
+      db.collection("orgMembers").doc(`${organizationId}_${uid}`).get(),
+      db.collection("publicOrganizations").doc(organizationId!).get(),
+      db.collection("rfx").where("issuerOrganizationId", "==", organizationId!).get(),
+    ]);
+    expect(organization.data()).toMatchObject({
+      legalName: organizationName,
+      ownerUid: uid,
+      publicationStatus: "draft",
+      publicationApproved: false,
+    });
+    expect(membership.data()).toMatchObject({ uid, orgId: organizationId, role: "owner", status: "active" });
+    expect(publicProjection.data()?.publicationApproved).toBe(false);
+    expect(opportunities.empty).toBe(true);
+
     await page.getByRole("button", { name: "Open account menu" }).click();
     await page.getByRole("button", { name: "Sign Out" }).click();
     await expect(page).toHaveURL(/\/login$/);
     await login(page, email, password);
-    await gotoStable(page, "/profile");
-    await expect(page.getByPlaceholder("Acme Consulting LLC"))
-      .toHaveValue(String(linkedProfile?.businessName));
-    await page.getByRole("link", { name: "Continue to Exchange" }).click();
-    await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
+    await gotoStable(page, "/exchange/onboarding");
+    await expect(page.getByText(organizationName, { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Continue organization setup" })).toBeVisible();
 
     expect(consoleErrors.filter((message) => message.includes("Profile update failed"))).toEqual([]);
     expect(pageErrors).toEqual([]);
@@ -245,15 +255,39 @@ test("configured development completes a disposable registration, profile, and e
       if (!safeIdentity) throw new Error("Refusing cleanup because the disposable identity guard did not match");
       await adminAuth.deleteUser(record.uid);
       await Promise.all([
-        deleteQueryDocuments(db, "enrichmentRequests", "uid", record.uid),
-        deleteQueryDocuments(db, "enrichmentRateLimit", "uid", record.uid),
         deleteQueryDocuments(db, "exchangeAudit", "actorUid", record.uid),
-        deleteQueryDocuments(db, "verificationAuditLog", "uid", record.uid),
+        deleteQueryDocuments(db, "organizationClaims", "requestedBy", record.uid),
+        deleteQueryDocuments(db, "organizationSearchRateLimits", "uid", record.uid),
+        deleteQueryDocuments(db, "notifications", "uid", record.uid),
+        deleteQueryDocuments(db, "orgMembers", "uid", record.uid),
       ]);
+      if (organizationId) {
+        const organization = await db.collection("orgs").doc(organizationId).get();
+        const safeOrganization = organization.data()?.legalName === organizationName
+          && organization.data()?.ownerUid === record.uid
+          && Date.now() - Number(organization.data()?.createdAt ?? 0) < 60 * 60 * 1_000;
+        if (!safeOrganization) throw new Error("Refusing cleanup because the disposable organization guard did not match");
+        await Promise.all([
+          deleteQueryDocuments(db, "organizationIdentityReservations", "organizationId", organizationId),
+          deleteQueryDocuments(db, "exchangeIdempotency", "entityId", organizationId),
+          deleteQueryDocuments(db, "organizationLocations", "organizationId", organizationId),
+          deleteQueryDocuments(db, "publicOrganizationLocations", "organizationId", organizationId),
+          deleteQueryDocuments(db, "organizationContactPoints", "organizationId", organizationId),
+          deleteQueryDocuments(db, "publicOrganizationContactPoints", "organizationId", organizationId),
+          deleteQueryDocuments(db, "organizationCommunicationRoutes", "organizationId", organizationId),
+        ]);
+        await Promise.all([
+          db.collection("orgs").doc(organizationId).delete(),
+          db.collection("publicOrganizations").doc(organizationId).delete(),
+          db.collection("exchangeMemberships").doc(organizationId).delete(),
+          db.collection("exchangeCreditAccounts").doc(organizationId).delete(),
+        ]);
+      }
       await Promise.all([
         db.collection("publicProfiles").doc(record.uid).delete(),
         db.collection("profiles").doc(record.uid).delete(),
         db.collection("users").doc(record.uid).delete(),
+        db.collection("exchangeWorkspacePreferences").doc(record.uid).delete(),
       ]);
     }
   }

@@ -18,6 +18,16 @@ describe("business registration and map activation", () => {
     expect(`${registration}\n${onboarding}`).not.toMatch(/Browse as individual|Skip for now|continue using the Exchange without one/i);
   });
 
+  it("permits a governed claim against an existing claimed organization without granting pending authority", () => {
+    const organizations = source("apps/functions/src/exchange/organizations.ts");
+    const activation = source("apps/functions/src/exchange/businessActivation.ts");
+    expect(organizations).not.toContain('data.claimStatus !== "claimed"');
+    expect(organizations).not.toContain("This organization is already claimed.");
+    expect(organizations).toContain("A governed competing claim must not demote an already-claimed");
+    expect(activation).toContain('if (input.claimPending && !input.authorized) return "claim_pending"');
+    expect(activation).toContain('"organization_management"');
+  });
+
   it("lifts the one dimension control above workspace surfaces", () => {
     const map = source("apps/web/src/features/exchange/map/ExchangeMap.tsx");
     const workspace = source("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");

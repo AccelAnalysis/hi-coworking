@@ -58,7 +58,7 @@ function publicProjection(source) {
     county: source.county,
     state: source.state,
     territoryFips: source.territoryFips,
-    claimStatus: "unclaimed",
+    claimStatus: source.claimStatus || "unclaimed",
     verificationStatus: "unverified",
     organizationType: "",
     industries: [],
@@ -200,6 +200,8 @@ test("configured development completes the canonical organization lifecycle", {
   const rejectedOrganizationName = `Codex Rejected Claim ${suffix}`;
   const competingOrganizationId = `codex-org-competing-${suffix}`;
   const competingOrganizationName = `Codex Competing Claim ${suffix}`;
+  const claimedOrganizationId = `codex-org-claimed-${suffix}`;
+  const claimedOrganizationName = `Codex Existing Claimed Organization ${suffix}`;
   const restrictedCandidateId = `codex-restricted-${suffix}`;
   let createdOrganizationId = "";
 
@@ -250,6 +252,8 @@ test("configured development completes the canonical organization lifecycle", {
       deleteQueryDocuments(db, "organizationClaims", "requestedBy", knownUids),
       deleteQueryDocuments(db, "notifications", "uid", knownUids),
       deleteQueryDocuments(db, "organizationSearchRateLimits", "uid", knownUids),
+      deleteQueryDocuments(db, "users", "uid", knownUids),
+      deleteQueryDocuments(db, "profiles", "uid", knownUids),
     ]);
 
     const batch = db.batch();
@@ -302,12 +306,48 @@ test("configured development completes the canonical organization lifecycle", {
     competingOrganizationName,
     createdAt,
   );
+  const claimedOrganization = {
+    ...unclaimedOrganization(claimedOrganizationId, claimedOrganizationName, createdAt),
+    ownerUid: creator.uid,
+    claimStatus: "claimed",
+    exchangeVerificationStatus: "claimed",
+  };
   const fixtureBatch = db.batch();
-  for (const organization of [rejectedOrganization, competingOrganization]) {
+  for (const organization of [rejectedOrganization, competingOrganization, claimedOrganization]) {
     organizationRecords.set(organization.id, organization.name);
     fixtureBatch.create(db.collection("orgs").doc(organization.id), organization);
     fixtureBatch.create(db.collection("publicOrganizations").doc(organization.id), publicProjection(organization));
   }
+  fixtureBatch.create(db.collection("orgMembers").doc(`${claimedOrganizationId}_${creator.uid}`), {
+    id: `${claimedOrganizationId}_${creator.uid}`,
+    orgId: claimedOrganizationId,
+    uid: creator.uid,
+    role: "owner",
+    status: "active",
+    joinedAt: createdAt,
+    updatedAt: createdAt,
+  });
+  fixtureBatch.create(db.collection("users").doc(claimant.uid), {
+    uid: claimant.uid,
+    email: claimant.email,
+    role: "member",
+    membershipStatus: "none",
+    registrationVersion: 2,
+    accountInitializedAt: createdAt,
+    businessRepresentativeAttestedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  fixtureBatch.create(db.collection("profiles").doc(claimant.uid), {
+    uid: claimant.uid,
+    displayName: "Codex Claimed Organization Representative",
+    professionalTitle: "Owner",
+    preferredPrivateEmail: claimant.email,
+    preferredPrivatePhone: "+1 757 555 0199",
+    personEssentialsCompletedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  });
   fixtureBatch.create(db.collection("organizationSourceCandidates").doc(restrictedCandidateId), {
     id: restrictedCandidateId,
     name: `Codex Restricted Candidate ${suffix}`,
@@ -318,6 +358,58 @@ test("configured development completes the canonical organization lifecycle", {
     updatedAt: createdAt,
   });
   await fixtureBatch.commit();
+
+  const claimedSearch = await callFunction("exchange_organizationSearch", claimantToken, {
+    name: claimedOrganizationName,
+    city: "Windsor",
+    state: "VA",
+  });
+  const claimedCandidate = claimedSearch.candidates.find((candidate) => candidate.id === claimedOrganizationId);
+  assert.equal(claimedCandidate?.claimStatus, "claimed");
+  assert.equal(claimedCandidate?.canRequestClaim, true);
+  const existingClaim = await callFunction("exchange_organizationRequestClaim", claimantToken, {
+    organizationId: claimedOrganizationId,
+    reason: "I am the authorized synthetic representative requesting governed review.",
+  });
+  const [pendingExistingOrganization, pendingExistingMembership] = await Promise.all([
+    db.collection("orgs").doc(claimedOrganizationId).get(),
+    db.collection("orgMembers").doc(`${claimedOrganizationId}_${claimant.uid}`).get(),
+  ]);
+  assert.equal(pendingExistingOrganization.data()?.claimStatus, "claimed");
+  assert.equal(pendingExistingOrganization.data()?.ownerUid, creator.uid);
+  assert.equal(pendingExistingMembership.exists, false);
+  const pendingActivation = await callFunction("exchange_getBusinessActivationState", claimantToken, {
+    organizationId: claimedOrganizationId,
+  });
+  assert.equal(pendingActivation.claimState, "pending");
+  assert.equal(pendingActivation.currentStep, "organization_claim_pending");
+  assert.equal(pendingActivation.managementAuthorityActive, false);
+  assert.equal(pendingActivation.markerState, "claim_pending");
+  assert.deepEqual(
+    pendingActivation.blockedSteps,
+    ["organization_connected", "private_actor_marker", "organization_management"],
+  );
+  const resumedClaimantToken = await signIn(apiKey, claimant.email, password);
+  const resumedClaims = await callFunction("exchange_organizationListMyClaims", resumedClaimantToken, {});
+  assert.equal(resumedClaims.claims.some((claim) => claim.id === existingClaim.claimId && claim.status === "pending"), true);
+  const existingApproval = await callFunction("exchange_adminReviewOrganizationClaim", administratorToken, {
+    claimId: existingClaim.claimId,
+    decision: "approve",
+    reviewNote: "Synthetic configured existing-organization approval acceptance.",
+  });
+  assert.equal(existingApproval.status, "approved");
+  const approvedExistingActivation = await callFunction(
+    "exchange_getBusinessActivationState",
+    resumedClaimantToken,
+    { organizationId: claimedOrganizationId },
+  );
+  assert.equal(approvedExistingActivation.claimState, "approved");
+  assert.equal(approvedExistingActivation.managementAuthorityActive, true);
+  assert.equal(approvedExistingActivation.currentStep, "organization_enrichment");
+  assert.equal(
+    approvedExistingActivation.safeResumeRoute,
+    `/org/settings?id=${claimedOrganizationId}&tab=enrichment&onboarding=1`,
+  );
 
   const created = await callFunction("exchange_organizationCreate", creatorToken, {
     name: createdOrganizationName,
