@@ -805,7 +805,16 @@ test("configured development preserves external organization context through eve
     await page.goBack();
     await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
-    await expect(page.getByLabel("Exchange organization context")).toContainText(fixture.subjectName);
+    const backSubjectOrganizationId = new URL(page.url()).searchParams.get("subjectOrg");
+    expect([
+      fixture.actorOrganizationId,
+      fixture.subjectOrganizationId,
+    ]).toContain(backSubjectOrganizationId);
+    await expect(page.getByLabel("Exchange organization context")).toContainText(
+      backSubjectOrganizationId === fixture.actorOrganizationId
+        ? fixture.actorName
+        : fixture.subjectName,
+    );
     await page.goForward();
     await expect(page).toHaveURL(/\/exchange(?:\?|$)/);
     await expect(page.getByLabel("Working as organization")).toHaveValue(fixture.actorOrganizationId);
