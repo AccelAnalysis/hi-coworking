@@ -11,6 +11,9 @@ export function toServerSecondary(
   if (selection.entityType === "rfx" || selection.entityType === "opportunity") {
     return { type: "opportunity", id: selection.entityId };
   }
+  if (selection.entityType === "establishment") {
+    return { type: "establishment", id: selection.entityId };
+  }
   if (selection.entityType === "referral") {
     return { type: "referral", id: selection.entityId };
   }
