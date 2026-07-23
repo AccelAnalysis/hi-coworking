@@ -117,6 +117,37 @@ export const exchangeWorkspaceActions = {
   setOrganizationDrawerOpen(open: boolean): ExchangeWorkspaceAction {
     return { type: "SET_ORGANIZATION_DRAWER_OPEN", open };
   },
+  selectOrganization(organizationId: string): ExchangeWorkspaceAction {
+    return {
+      type: "HYDRATE_FROM_URL",
+      state: {
+        subjectOrganizationId: organizationId,
+        secondaryContext: null,
+        organizationDrawerOpen: true,
+        rightPanelOpen: false,
+      },
+    };
+  },
+  selectOrganizationEstablishment(
+    organizationId: string,
+    establishmentId: string,
+    viewport?: ExchangeViewport,
+  ): ExchangeWorkspaceAction {
+    return {
+      type: "HYDRATE_FROM_URL",
+      state: {
+        subjectOrganizationId: organizationId,
+        secondaryContext: {
+          entityType: "establishment",
+          entityId: establishmentId,
+          organizationId,
+        },
+        organizationDrawerOpen: true,
+        rightPanelOpen: true,
+        ...(viewport ? { viewport } : {}),
+      },
+    };
+  },
   setModeListScroll(
     scrollTop: number,
     mode?: ExchangeCanonicalMode,
