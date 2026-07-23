@@ -178,7 +178,7 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
   return (
     <div className={shellLayout.rootClassName}>
       {/* ── Top Nav ── */}
-      <nav className="bg-slate-900 text-white shadow-lg sticky top-0 z-50">
+      <nav className="bg-slate-900 text-white shadow-lg sticky top-0 z-[1300]">
         <div className="max-w-7xl mx-auto flex justify-between items-center w-full px-4 h-16">
           {/* Left: Logo + public links */}
           <div className="flex items-center gap-8">
@@ -242,7 +242,7 @@ export function AppShell({ children, fullWidth = false, variant = "site" }: AppS
                       </button>
 
                       {avatarOpen && (
-                        <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl ring-1 ring-slate-200 py-1 z-50 text-slate-900 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl ring-1 ring-slate-200 py-1 z-[1310] text-slate-900 animate-in fade-in slide-in-from-top-1 duration-150">
                           {/* User info */}
                           <div className="px-4 py-3 border-b border-slate-100">
                             <p className="text-sm font-bold truncate">{user.displayName || "User"}</p>

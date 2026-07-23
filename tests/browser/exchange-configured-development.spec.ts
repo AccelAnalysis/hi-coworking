@@ -229,6 +229,106 @@ test("configured development completes a disposable registration business-activa
     expect(publicProjection.data()?.publicationApproved).toBe(false);
     expect(opportunities.empty).toBe(true);
 
+    await page.getByRole("button", { name: "Complete enrichment review" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Enrichment review completed." })).toBeVisible();
+    await page.getByRole("tab", { name: "2. Profile" }).click();
+    await expect(page.getByLabel("UEI")).toHaveValue("");
+    await expect(page.getByLabel("CAGE")).toHaveValue("");
+    await page.getByLabel("Description").fill("Synthetic configured-development business registration acceptance.");
+    await page.getByLabel("Industries").fill("Professional services");
+    await page.getByLabel("Capabilities").fill("Configured acceptance");
+    await page.getByRole("button", { name: "Save organization profile" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Organization profile saved." })).toBeVisible();
+
+    await page.getByRole("tab", { name: "3. Establishments" }).click();
+    await page.getByLabel("Address line 1").fill("4600 Silver Hill Road");
+    await page.getByLabel("City").fill("Washington");
+    await page.getByLabel("State / region").fill("DC");
+    await page.getByLabel("Postal code").fill("20233");
+    await page.getByLabel("County").fill("Prince George's");
+    await expect(page.getByLabel("Primary active establishment")).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Headquarters", exact: true })).toBeChecked();
+    await expect(page.getByLabel("Use this establishment for Exchange orientation")).toBeChecked();
+    await expect(page.getByLabel("Publish street address")).not.toBeChecked();
+    await expect(page.getByLabel("Publish exact map coordinate")).not.toBeChecked();
+    const geocodeResponse = page.waitForResponse((response) =>
+      response.url().includes("/exchange_searchOrganizationGeocodes")
+      && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Search standardized addresses" }).click();
+    expect((await geocodeResponse).status()).toBe(200);
+    const geocodeCandidate = page.getByRole("radio", { name: /4600 SILVER HILL/i }).first();
+    await expect(geocodeCandidate).toBeVisible({ timeout: 30_000 });
+    await geocodeCandidate.check();
+    await expect(page.getByRole("img", { name: /Map coordinate preview/ })).toBeVisible();
+    await page.getByRole("button", { name: "Add establishment" }).last().click();
+    await expect(page.getByRole("status").filter({ hasText: "Establishment added." })).toBeVisible();
+
+    await expect.poll(async () => {
+      const locations = await db.collection("organizationLocations")
+        .where("organizationId", "==", organizationId!)
+        .get();
+      return locations.docs.some((document) => document.get("isHeadquarters") === true);
+    }).toBe(true);
+    const locationSnapshot = await db.collection("organizationLocations")
+      .where("organizationId", "==", organizationId!)
+      .get();
+    const locationDocument = locationSnapshot.docs.find((document) => document.get("isHeadquarters") === true);
+    expect(locationDocument?.data()).toMatchObject({
+      isPrimary: true,
+      isHeadquarters: true,
+      addressPublicationApproved: false,
+      coordinatePublicationApproved: false,
+      geocode: { provider: "census", source: "owner_confirmed" },
+    });
+    expect(locationDocument).toBeTruthy();
+
+    await page.getByRole("tab", { name: "Contact & Routing" }).click();
+    const contactSection = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Contact points" }),
+    });
+    const routeSection = page.locator("section").filter({
+      has: page.getByRole("heading", { name: "Communication routes" }),
+    });
+    const privateOperationalEmail = `operations-${suffix}@example.test`;
+    await contactSection.getByLabel("Contact type").selectOption("email");
+    await contactSection.getByLabel("Contact value").fill(privateOperationalEmail);
+    await contactSection.getByLabel(/^Purpose/).selectOption("general");
+    await contactSection.getByLabel("Visibility").selectOption("private_operational");
+    await contactSection.getByRole("button", { name: "Add contact" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Contact point added." })).toBeVisible();
+    await contactSection.getByLabel("Contact type").selectOption("phone");
+    await contactSection.getByLabel("Contact value").fill("+1 202 555 0188");
+    await contactSection.getByRole("button", { name: "Add contact" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Contact point added." })).toBeVisible();
+    await routeSection.getByLabel("Route purpose").selectOption("referrals");
+    await routeSection.getByLabel("Primary contact").selectOption({ label: privateOperationalEmail });
+    await routeSection.getByRole("button", { name: "Add route" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Communication route saved." })).toBeVisible();
+    await routeSection.getByLabel("Route purpose").selectOption("opportunities");
+    await routeSection.getByLabel("Primary contact").selectOption({ label: privateOperationalEmail });
+    await routeSection.getByRole("button", { name: "Add route" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Communication route saved." })).toBeVisible();
+
+    const completeActivation = page.getByRole("link", { name: "Complete onboarding in the Exchange" });
+    await expect(completeActivation).toBeVisible();
+    await completeActivation.click();
+    await expect(page).toHaveURL(/\/exchange\?/);
+    await expect(page.getByLabel("Working as organization")).toHaveValue(organizationId!);
+    await expect(page.getByLabel("Organization context drawer")).toContainText(/self/i);
+    await expect(page.getByLabel("Organization context drawer")).toContainText(organizationName);
+    const dimensionControl = page.getByRole("group", { name: "Map dimension" });
+    await expect(dimensionControl.getByRole("button", { name: "3D" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[data-map-dimension="3d"]')).toBeVisible();
+    const activationUrl = new URL(page.url());
+    expect(activationUrl.searchParams.get("secondarySelected")).toBe(locationDocument!.id);
+    expect(Number(activationUrl.searchParams.get("z"))).toBeCloseTo(16.5, 1);
+    expect(Number(activationUrl.searchParams.get("p"))).toBeCloseTo(55, 1);
+    expect((await db.collection("rfx").where("issuerOrganizationId", "==", organizationId!).get()).empty).toBe(true);
+    await expect.poll(async () => (
+      (await db.collection("users").doc(uid!).get()).data()?.mapActivationCompletedOrganizationIds ?? []
+    )).toContain(organizationId);
+
     await page.getByRole("button", { name: "Open account menu" }).click();
     await page.getByRole("button", { name: "Sign Out" }).click();
     await expect(page).toHaveURL(/\/login$/);

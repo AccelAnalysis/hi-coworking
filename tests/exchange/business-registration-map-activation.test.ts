@@ -34,12 +34,15 @@ describe("business registration and map activation", () => {
     const map = source("apps/web/src/features/exchange/map/ExchangeMap.tsx");
     const workspace = source("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx");
     const controls = source("apps/web/src/features/exchange/components/ExchangeMapControls.tsx");
+    const shell = source("apps/web/src/components/AppShell.tsx");
     expect(map).not.toContain('aria-label="Map dimension"');
     expect(workspace).toContain("<ExchangeMapControls");
     expect(controls).toContain('data-exchange-map-control-layer');
     expect(controls).toContain('role="group"');
     expect(controls).toContain('aria-label="Map dimension"');
     expect(controls).toContain("z-[1200]");
+    expect(shell).toContain("z-[1300]");
+    expect(shell).toContain("z-[1310]");
   });
 
   it("allows a server-authorized private actor point without weakening public gates", () => {
