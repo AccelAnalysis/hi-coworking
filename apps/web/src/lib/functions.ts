@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 import { app, auth, functions } from "./firebase";
+import { normalizeBusinessReferralListMineInput } from "./callableReadPayloads";
 import type {
   EvaluationCriterion,
   ReferralDoc,
@@ -859,15 +860,23 @@ export interface BusinessReferralListMineInput {
   cursor?: { createdAt: number; id: string };
 }
 
-export const listBusinessReferralsFn = httpsCallable<
+type BusinessReferralListMineResult = {
+  referrals: unknown[];
+  scope: { organizations: Array<{ id: string; role: string; name?: string }> };
+  truncated: boolean;
+  nextCursor?: { createdAt: number; id: string };
+};
+
+const listBusinessReferralsCallable = httpsCallable<
   BusinessReferralListMineInput,
-  {
-    referrals: unknown[];
-    scope: { organizations: Array<{ id: string; role: string; name?: string }> };
-    truncated: boolean;
-    nextCursor?: { createdAt: number; id: string };
-  }
+  BusinessReferralListMineResult
 >(functions, "businessReferral_listMine");
+
+export function listBusinessReferralsFn(input: BusinessReferralListMineInput) {
+  return listBusinessReferralsCallable(
+    normalizeBusinessReferralListMineInput(input),
+  );
+}
 
 export const getBusinessReferralDetailFn = httpsCallable<
   { referralId: string; actorOrganizationId?: string },

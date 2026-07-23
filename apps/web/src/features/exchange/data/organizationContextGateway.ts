@@ -7,6 +7,10 @@ import type {
   ExchangeSecondaryContext,
 } from "@hi/shared/exchange-organization-context";
 import { functions } from "@/lib/firebase";
+import {
+  normalizeActorOrganizationRequest,
+  normalizeOrganizationDirectoryRequest,
+} from "@/lib/callableReadPayloads";
 
 export const EXCHANGE_ORGANIZATION_CONTEXT_VERSION = 1 as const;
 
@@ -138,10 +142,9 @@ export async function listActorOrganizations(input: {
   requestedActorOrganizationId?: string;
   persistSelection?: boolean;
 } = {}): Promise<ExchangeActorOrganizationResult> {
-  const result = await listActorOrganizationsCallable({
-    contractVersion: EXCHANGE_ORGANIZATION_CONTEXT_VERSION,
-    ...input,
-  });
+  const result = await listActorOrganizationsCallable(
+    normalizeActorOrganizationRequest(input),
+  );
   return result.data;
 }
 
@@ -170,10 +173,9 @@ export async function listOrganizationDirectory(input: {
   pageSize?: number;
   cursor?: ExchangeOrganizationDirectoryCursor;
 } = {}): Promise<ExchangeOrganizationDirectoryResult> {
-  const result = await organizationDirectoryCallable({
-    contractVersion: EXCHANGE_ORGANIZATION_CONTEXT_VERSION,
-    ...input,
-  });
+  const result = await organizationDirectoryCallable(
+    normalizeOrganizationDirectoryRequest(input),
+  );
   return result.data;
 }
 
