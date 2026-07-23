@@ -29,10 +29,10 @@ jobs:
           set -o pipefail
           python3 - <<'PY' 2>&1 | tee publication-patch.log
           from pathlib import Path
-          from textwrap import dedent
           source = Path(".github/workflows/pr23-publication-diagnostic-runner.yml").read_text()
-          script = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-          exec(compile(dedent(script), "pr23-publication-diagnostic-runner", "exec"))
+          raw = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in raw.splitlines())
+          exec(compile(script, "pr23-publication-diagnostic-runner", "exec"))
           PY
       - name: Upload publication patch diagnostic
         if: always()
