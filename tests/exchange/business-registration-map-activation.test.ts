@@ -41,8 +41,8 @@ describe("business registration and map activation", () => {
     expect(controls).toContain('role="group"');
     expect(controls).toContain('aria-label="Map dimension"');
     expect(controls).toContain("z-[1200]");
-    expect(shell).toContain("z-[1300]");
-    expect(shell).toContain("z-[1310]");
+    expect(shell).toContain("z-[1400]");
+    expect(shell).toContain("z-[1410]");
   });
 
   it("allows a server-authorized private actor point without weakening public gates", () => {
