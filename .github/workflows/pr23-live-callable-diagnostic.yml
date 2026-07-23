@@ -6,6 +6,11 @@ on:
       - codex/exchange-business-registration-map-activation
     paths:
       - .github/workflows/pr23-live-callable-diagnostic.yml
+  pull_request:
+    branches:
+      - codex/exchange-establishments-contact-routing
+    paths:
+      - .github/workflows/pr23-live-callable-diagnostic.yml
 
 permissions:
   contents: read
