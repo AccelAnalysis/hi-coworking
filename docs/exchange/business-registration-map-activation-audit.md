@@ -28,4 +28,29 @@ Hosting release `1784740769213000` finalized at 2026-07-22T17:19:29Z. Firebase H
 
 Registration v2 requires representative attestation and person essentials, then routes to mandatory organization onboarding. `exchange_getBusinessActivationState` derives progress from authoritative records. Private actor locations are returned only after exact-active membership validation and contain no address/contact/provider payload. A workspace-level control layer now owns the sole 2D/3D control. Activation uses zoom 16.5, pitch 55, bearing -20, drawer-aware padding, an unclustered selected marker, and a 16px selected radius.
 
-Configured deployment and post-deployment browser evidence are recorded in `organization-configured-acceptance.md`; until that section is completed, the code is implemented and locally verified but not represented as live.
+## Final configured-development result
+
+The implementation was deployed only to Firebase project
+`hi-coworking-plat`. The final Hosting release
+`1784781980447000`/version `e5113d664b69a225` was finalized from exact commit
+`53e71732f950bc01b763bd502693869b6de63c6a`; all 89 regional Functions are
+`ACTIVE` and all 93 composite indexes are `READY`.
+
+The guarded disposable registration journey passed 1/1, the canonical
+organization lifecycle passed 1/1 (including governed takeover of an existing
+claimed organization), and the final Chromium/Firefox/desktop WebKit/mobile
+WebKit matrix passed 7/7. The matrix verified the connected control, exact
+logical bounding boxes, center-point hit testing, 2D/3D transitions, selected
+marker presentation, history/reload restoration, privacy, overflow, and
+automated Axe gates. Native Safari/VoiceOver remains a manual gate.
+
+Two earlier failed lifecycle attempts had left synthetic state. Exact
+purpose/prefix/timestamp guards identified those two runs, Auth was already
+empty, and 96 dependent documents were removed. The independent final audit
+reported zero marked fixture documents, prefixed fixture organizations,
+fixture Auth users, claims, source candidates, seed imports, and human-approved
+source candidates. No production action or real organization seed action was
+performed.
+
+Full post-deployment evidence, commands, test totals, control bounds, and
+screenshot paths are recorded in `organization-configured-acceptance.md`.

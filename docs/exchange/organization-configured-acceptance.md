@@ -1,22 +1,88 @@
 # Organization establishment and contact-routing configured acceptance
 
-## Business-registration/map-activation extension (pending live rerun)
+## Business-registration/map-activation extension
 
-The extension begins at PR #22 head `a368d4d0b33df0d1382c0d107623f04d33ae0e04`. Local shared, Functions, and 59-page web builds pass after adding business-only registration, authoritative activation state, private actor location projections, exact issuer filtering, the workspace control layer, and the close 3D activation camera.
+This extension began at PR #22 head
+`a368d4d0b33df0d1382c0d107623f04d33ae0e04`. Its final application code was
+deployed from exact commit `53e71732f950bc01b763bd502693869b6de63c6a`
+only to Firebase project `hi-coworking-plat`.
 
-The configured Playwright matrix now additionally asserts one connected Map dimension group, in-viewport 2D/3D bounding boxes, successful center-point hit testing, 3D/2D state transitions, control-node continuity through all four views, no horizontal overflow, and a screenshot per project:
+The final Hosting release is
+`projects/hi-coworking-plat/sites/hi-coworking-plat/channels/live/releases/1784781980447000`
+with version `e5113d664b69a225`, finalized at
+2026-07-23T04:46:20.447Z. Its release message contains that exact deployed-code
+SHA, and the release contains 608 files / 2,461,567 bytes. The exact bounded
+organization package contains 29 endpoints and 19 compiled Function files.
+The final claim correction selected only organization search, claim request,
+and admin claim review. Post-deployment inventory is 89/89 regional Functions
+`ACTIVE` on Gen 2 Node.js 20 and 93/93 composite indexes `READY`.
 
-| Project | Viewport | Expected control position |
-| --- | --- | --- |
-| Chromium | 1280×800 | top/right safe-area inset; drawer-aware desktop right offset |
-| Chromium | 1440×900 | top/right safe-area inset; drawer-aware desktop right offset |
-| Firefox | 1280×800 | top/right safe-area inset; drawer-aware desktop right offset |
-| Desktop WebKit | 1440×900 | top/right safe-area inset; drawer-aware desktop right offset |
-| Mobile WebKit | 390×844 | top/right safe-area inset above bottom drawer |
-| Mobile WebKit | 393×852 | top/right safe-area inset above bottom drawer |
-| Mobile WebKit | 430×932 | top/right safe-area inset above bottom drawer |
+The disposable business-registration journey passed **1/1 in 33.4 seconds**.
+It proved required representative attestation, person-only profile essentials,
+mandatory organization connection, enrichment-first sequencing, organization
+profile editing, owner-confirmed Census establishment geocoding, independent
+address/coordinate privacy, private operational contacts, referral and
+opportunity routes, close 3D organization activation, issuer zero-state, and
+secure sign-out/sign-in resume.
 
-Do not read the historical 7/7 result below as evidence for these new assertions. The extension’s live deployment, exact test totals, screenshot artifact paths, and post-run cleanup audit must be appended after the reviewed development deployment.
+The canonical organization lifecycle passed **1/1 in 19.8 seconds**. In
+addition to create/reject/competing-claim paths, it proved that a claim request
+against an already claimed organization leaves its owner and `claimed` status
+unchanged while pending, grants no membership or private marker, resumes after
+sign-in as `claim_pending`, and enters enrichment only after an administrator
+approves the governed transfer.
+
+The final post-deployment cross-mode matrix passed **7/7 in 3.8 minutes**. Each
+project asserted one connected Map dimension group, in-viewport bounding boxes,
+successful center-point hit testing, 3D/2D state transitions, control-node
+continuity through all four Exchange modes, no horizontal overflow, and a
+screenshot:
+
+| Project | Logical viewport | Control bounds (left, top, right, bottom) | Evidence |
+| --- | --- | --- | --- |
+| Chromium | 1280×800 | 743, 204, 840, 250 | `evidence/business-registration-map-activation/map-control-configured-development-chromium.png` |
+| Chromium large | 1440×900 | 903, 204, 1000, 250 | `evidence/business-registration-map-activation/map-control-configured-development-chromium-large.png` |
+| Firefox | 1280×800 | 743, 204, 840, 250 | `evidence/business-registration-map-activation/map-control-configured-development-firefox.png` |
+| Desktop WebKit | 1440×900 | 903, 204, 1000, 250 | `evidence/business-registration-map-activation/map-control-configured-development-safari.png` |
+| Mobile WebKit | 390×844 | 281, 61, 378, 107 | `evidence/business-registration-map-activation/map-control-configured-development-mobile-safari.png` |
+| Mobile WebKit | 393×852 | 284, 61, 381, 107 | `evidence/business-registration-map-activation/map-control-configured-development-mobile-safari-393.png` |
+| Mobile WebKit | 430×932 | 321, 61, 418, 107 | `evidence/business-registration-map-activation/map-control-configured-development-mobile-safari-430.png` |
+
+Final automated totals are 19 Exchange files / 137 tests, 14
+security/rules/functions/migration files / 121 tests, Run 3 7 files / 37 tests,
+Run 4 5 files / 34 tests, five focused activation tests, 16
+establishment/geocode/contact/route tests, and 31 development-readiness/seed
+tests, all passing. Lint has zero errors and five unrelated pre-existing
+warnings; the production build generated 59/59 static pages. Automated Axe
+reported no critical or serious WCAG 2 A/AA/2.1 AA violations in the
+seven-project matrix. Native Safari/VoiceOver remains a manual gate.
+
+The production dependency audit still reports three known vulnerabilities:
+one moderate PostCSS issue and two high Sharp issues through Next.js. The
+offered automatic fix would force an unsafe semver-major downgrade to Next
+9.3.3, so no dependency mutation is included in this bounded workstream.
+
+Two failed lifecycle attempts had left exact marked synthetic state. After
+Auth-first validation showed all eight fixture identities were already absent,
+purpose/prefix/time guards deleted 96 dependent documents from only those two
+runs. The independent final audit returned:
+
+```json
+{
+  "markedFixtureDocuments": 0,
+  "prefixedFixtureOrganizations": 0,
+  "fixtureAuthUsers": 0,
+  "organizationClaims": 0,
+  "organizationSourceCandidates": 0,
+  "organizationSeedImports": 0,
+  "humanApprovedSourceCandidates": 0
+}
+```
+
+No production, real organization seed, Stripe, mail, social, PR #3, or `main`
+action occurred. This section supersedes the older extension totals below only
+where they overlap; the establishment/contact-routing evidence remains
+historically valid for its deployed SHA.
 
 ## Establishment/contact-routing extension
 

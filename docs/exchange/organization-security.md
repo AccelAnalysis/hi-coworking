@@ -4,6 +4,12 @@
 
 Representative attestation is policy evidence, not organization authority. Activation state derives connection and management authority only from active `orgs` plus exact-active composite `orgMembers`. A pending claim is explicitly blocked from private actor markers, organization mutation, opportunity issuance, and private contact routing.
 
+An already claimed organization remains discoverable as a governed claim
+candidate. Submitting that claim preserves the existing owner and `claimed`
+status and creates no claimant membership; only platform-admin review may
+transfer authority. The configured lifecycle proved pending resume,
+non-authority, approval, and subsequent enrichment routing for this path.
+
 The actor location callable returns only organization/location IDs, safe labels, type/designation flags, coordinate, visibility classification, and marker state. It omits street addresses, contacts, billing, provider data, notes, claim evidence, and verification evidence. The client may admit unpublished coordinates only when `privateActorVisible` came from this membership-gated response and only into the unclustered actor-context source. Public repositories and GeoJSON retain explicit publication gates.
 
 The activation callable is read-only with respect to authority. Progress recording revalidates membership on every action and requires owner/admin for enrichment and orientation preference. Map completion requires active membership. `issuerOrganizationId` narrows results but never bypasses Opportunity Discovery visibility rules.
@@ -116,12 +122,15 @@ Source and emulator suites cover or define coverage for:
 
 ## Remaining risk and acceptance
 
-Configured development acceptance passed on `hi-coworking-plat`: the exact 21
-selected endpoints are active Gen 2 Node.js 20, all 93 indexes are ready, the
-Firestore rules are deployed, 120 emulator security/function/rule/migration
-tests pass, and the seven-project browser matrix passed external-response/DOM
-inspection, revocation with an unsaved draft, cross-mode Secondary Subject
-continuity, and exact synthetic cleanup. Storage rules were unchanged.
+Configured development acceptance passed on `hi-coworking-plat`: all 89
+regional endpoints are active Gen 2 Node.js 20, all 93 indexes are ready, the
+Firestore rules are deployed, 14 security/rule/function/migration files with
+121 tests pass, and the final seven-project browser matrix passed
+external-response/DOM inspection, revocation with an unsaved draft, cross-mode
+Secondary Subject continuity, business activation, exact control hit testing,
+and exact synthetic cleanup. The independent final audit found zero marked
+fixtures, fixture Auth users, claims, candidates, or seed imports. Storage
+rules were unchanged.
 
 Native VoiceOver remains a manual release gate. Node.js 20 and the pinned
 Firebase Functions SDK require a later bounded runtime upgrade. The workstream

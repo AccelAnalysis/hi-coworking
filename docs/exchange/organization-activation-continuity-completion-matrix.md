@@ -4,19 +4,25 @@
 
 | Capability | Local implementation | Configured status |
 |---|---|---|
-| Business-only registration | v2 required attestation and person essentials; direct organization onboarding | Local build passed; live rerun pending |
-| Activation state | Server-derived current/completed/blocked/actions/resume and marker states | Functions build passed; deploy pending |
-| Claim pending | No actor authority or private marker | Implemented; configured rerun pending |
-| Enrichment order | Dedicated step before Organization Profile procurement fields | Implemented; configured rerun pending |
-| Orientation preference | Separate person preference; headquarters then primary fallback | Implemented; configured rerun pending |
-| Private actor marker | Membership-gated privacy-minimized context feature | Unit/source coverage added; live rerun pending |
-| Public marker | Explicit organization and coordinate publication checklist | Implemented; live rerun pending |
-| Issued opportunities | Canonical exact `issuerOrganizationId` filter | Build coverage; configured empty-state rerun pending |
-| 3D activation | zoom 16.5, pitch 55, bearing -20, drawer-aware padding | Local build passed; browser matrix pending |
-| Selected marker | Unclustered source, 16px point, 6px ring | Local source coverage; visual rerun pending |
-| 2D/3D control | One workspace-level group at z1200; responsive safe-area offsets | Local build/source coverage; 7-project rerun pending |
+| Business-only registration | v2 required attestation and person essentials; direct organization onboarding | Configured disposable journey passed 1/1 |
+| Activation state | Server-derived current/completed/blocked/actions/resume and marker states | Deployed; lifecycle and account-resume journeys passed |
+| Claim pending | No actor authority or private marker | Existing claimed owner preserved; configured lifecycle passed |
+| Enrichment order | Dedicated step before Organization Profile procurement fields | Configured owner journey passed |
+| Orientation preference | Separate person preference; headquarters then primary fallback | Configured headquarters activation passed |
+| Private actor marker | Membership-gated privacy-minimized context feature | Security suites and configured matrix passed |
+| Public marker | Explicit organization and coordinate publication checklist | Privacy and marker matrix passed |
+| Issued opportunities | Canonical exact `issuerOrganizationId` filter | Configured issuer zero-state passed |
+| 3D activation | zoom 16.5, pitch 55, bearing -20, drawer-aware padding | Configured account journey and 7/7 matrix passed |
+| Selected marker | Unclustered source, 16px point, 6px ring | Selected presentation passed with screenshot evidence |
+| 2D/3D control | One workspace-level group at z1200; responsive safe-area offsets | 7/7 bounds, hit-target, overflow, and transition matrix passed |
 
-These rows supersede only the matching historical status below. The prior workstream’s configured evidence remains valid for its deployed SHA, but cannot be counted as proof of the extension until the new branch is deployed and rerun.
+These rows supersede only the matching historical status below. The final
+application code at exact commit
+`53e71732f950bc01b763bd502693869b6de63c6a` is in Hosting release
+`1784781980447000`, with 89/89 Functions active, 93/93 indexes ready, the
+configured account journey 1/1, lifecycle 1/1, and browser matrix 7/7. Final
+cleanup is zero across synthetic fixtures, claims, candidates, and seed
+imports.
 
 ## Establishment/contact-routing continuation
 

@@ -1,5 +1,36 @@
 # Organization and context deployment
 
+## Business-registration/map-activation release
+
+The stacked business-registration/map-activation extension's final application
+code at exact commit `53e71732f950bc01b763bd502693869b6de63c6a` was
+deployed only to Firebase project `hi-coworking-plat`. The final Hosting release
+`1784781980447000`, version `e5113d664b69a225`, finalized at
+2026-07-23T04:46:20.447Z with an exact-SHA release message and 608 files /
+2,461,567 bytes.
+
+The bounded organization package contains 29 endpoints and 19 compiled
+Function files. The last corrective deployment selected only
+`exchange_organizationSearch`, `exchange_organizationRequestClaim`, and
+`exchange_adminReviewOrganizationClaim`. Post-deployment inventory found
+89/89 regional Functions `ACTIVE`, Gen 2 Node.js 20, and all 93 composite
+indexes `READY`. Firestore rules and Hosting are released; indexes, Storage,
+real seeds, and production were not changed by the final corrective pass.
+
+Configured verification passed the disposable business-registration journey
+1/1, canonical organization lifecycle 1/1, and final seven-project browser
+matrix 7/7. Exact guarded cleanup removed 96 dependent documents from two
+earlier failed synthetic lifecycle attempts. The independent final audit is
+zero for marked fixtures, fixture Auth users, claims, source candidates, seed
+imports, and human-approved source candidates.
+
+Node.js 20 is deprecated and is scheduled for decommission on 2026-10-30. The
+pinned Firebase Functions SDK remains behind the current release. The final
+production dependency audit also reports one moderate PostCSS and two high
+Sharp/Next.js-path vulnerabilities; the offered automatic fix is an unsafe
+semver-major downgrade, so runtime/dependency remediation remains a separate
+reviewed workstream.
+
 ## Recorded configured-development release
 
 The workstream was deployed only to Firebase project `hi-coworking-plat` in
