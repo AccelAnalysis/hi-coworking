@@ -24,14 +24,23 @@ jobs:
           node-version: 24
           cache: npm
       - name: Execute corrected publication diagnostic patch
+        shell: bash
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee publication-patch.log
           from pathlib import Path
           from textwrap import dedent
           source = Path(".github/workflows/pr23-publication-diagnostic-runner.yml").read_text()
           script = source.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
           exec(compile(dedent(script), "pr23-publication-diagnostic-runner", "exec"))
           PY
+      - name: Upload publication patch diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-publication-patch-log
+          path: publication-patch.log
+          if-no-files-found: error
       - run: npm ci
       - run: npm run build:shared
       - run: npm run build:functions
