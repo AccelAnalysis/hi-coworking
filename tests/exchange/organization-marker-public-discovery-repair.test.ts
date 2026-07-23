@@ -76,9 +76,9 @@ describe("organization marker selection contract", () => {
     expect(selected.mobileDetailOpen).toBe(true);
 
     const query = exchangeUrlStateToString(selected);
-    expect(query).toContain("subjectOrganizationId=org-a");
-    expect(query).toContain("secondaryType=establishment");
-    expect(query).toContain("secondaryId=location-a");
+    expect(query).toContain("subjectOrg=org-a");
+    expect(query).toContain("entity=establishment");
+    expect(query).toContain("selected=location-a");
   });
 
   it("selects a list-only organization without fabricating an establishment", () => {
