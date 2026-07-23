@@ -24,6 +24,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run build:shared
       - name: Run focused marker repair test
         shell: bash
         run: |
