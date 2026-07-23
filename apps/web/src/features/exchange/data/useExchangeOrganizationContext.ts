@@ -28,19 +28,31 @@ type ApplyExchangeAction = (
   history?: ExchangeHistoryMode,
 ) => ExchangeWorkspaceState;
 
+export type ExchangePerspectiveStatus =
+  | "idle"
+  | "loading"
+  | "resolved"
+  | "retryable_error"
+  | "unavailable"
+  | "forbidden";
+
 function canonicalMode(view: ExchangeWorkspaceState["view"]): ExchangeMode {
   if (view === "connections") return "referrals";
   if (view === "businesses" || view === "teaming") return "opportunities";
   return view;
 }
 
-function safeContextError(error: unknown): string {
-  const code = typeof error === "object" && error !== null && "code" in error
+function contextErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error
     ? String((error as { code?: unknown }).code ?? "")
     : "";
+}
+
+function safeContextError(error: unknown): string {
+  const code = contextErrorCode(error);
   if (code.includes("unauthenticated")) return "Sign in to choose an organization context.";
-  if (code.includes("permission-denied")) return "Your organization access changed. A safe context was restored.";
-  return "Organization context could not be refreshed. Private organization data is hidden until it can be verified.";
+  if (code.includes("permission-denied")) return "Your organization access changed. The last verified context remains selected while access is checked.";
+  return "Organization context could not be refreshed. The last verified public context remains selected; retry when connectivity is available.";
 }
 
 export interface ExchangeOrganizationContextState {
@@ -49,6 +61,7 @@ export interface ExchangeOrganizationContextState {
   actorFallbackApplied: boolean;
   perspective: ExchangeOrganizationPerspective | null;
   perspectiveLoading: boolean;
+  perspectiveStatus: ExchangePerspectiveStatus;
   error: string | null;
   requestActorOrganization: (organizationId: string) => void;
   refresh: () => void;
@@ -56,8 +69,9 @@ export interface ExchangeOrganizationContextState {
 
 /**
  * Resolves actor authority and viewer-relative organization data exclusively
- * through server callables. Perspective data is blanked synchronously whenever
- * actor, subject, or mode changes so private fields cannot cross contexts.
+ * through server callables. A pending or retryable request keeps the last
+ * projection for the same validated Actor/Subject pair so marker, drawer, and
+ * camera context do not disappear during a transient network transition.
  */
 export function useExchangeOrganizationContext(
   state: ExchangeWorkspaceState,
@@ -70,9 +84,15 @@ export function useExchangeOrganizationContext(
   const [actorFallbackApplied, setActorFallbackApplied] = useState(false);
   const [perspectiveResult, setPerspectiveResult] = useState<{
     key: string;
+    actorOrganizationId: string | null;
+    subjectOrganizationId: string;
     value: ExchangeOrganizationPerspective;
   } | null>(null);
   const [perspectiveLoadingKey, setPerspectiveLoadingKey] = useState<string | null>(null);
+  const [perspectiveFailure, setPerspectiveFailure] = useState<{
+    key: string;
+    forbidden: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const actorRequestGeneration = useRef(0);
@@ -98,8 +118,6 @@ export function useExchangeOrganizationContext(
     const persistSelection = persistActorRequestRef.current;
     persistActorRequestRef.current = false;
     setActorsLoading(true);
-    setPerspectiveResult(null);
-    perspectiveRequestGeneration.current += 1;
 
     if (demoMode) {
       const demoActor = {
@@ -125,6 +143,9 @@ export function useExchangeOrganizationContext(
       setActors([]);
       setActorFallbackApplied(false);
       setActorsLoading(false);
+      setPerspectiveResult(null);
+      setPerspectiveLoadingKey(null);
+      setPerspectiveFailure(null);
       if (state.actorOrganizationId) {
         applyAction(exchangeWorkspaceActions.setValidatedActorOrganization(undefined));
       }
@@ -173,15 +194,33 @@ export function useExchangeOrganizationContext(
     mode,
     secondary,
   });
-  const perspective = perspectiveKey && perspectiveResult?.key === perspectiveKey
-    ? perspectiveResult.value
-    : null;
+  const sameValidatedContext = Boolean(
+    perspectiveResult
+    && perspectiveResult.actorOrganizationId === (state.actorOrganizationId ?? null)
+    && perspectiveResult.subjectOrganizationId === state.subjectOrganizationId,
+  );
+  const perspective = perspectiveResult && (
+    perspectiveResult.key === perspectiveKey || sameValidatedContext
+  ) ? perspectiveResult.value : null;
   const perspectiveLoading = perspectiveKey !== null
     && perspectiveLoadingKey === perspectiveKey;
+  const perspectiveStatus: ExchangePerspectiveStatus = !perspectiveKey
+    ? "idle"
+    : perspectiveLoading
+      ? "loading"
+      : perspectiveFailure?.key === perspectiveKey
+        ? perspectiveFailure.forbidden ? "forbidden" : "retryable_error"
+        : perspectiveResult?.key === perspectiveKey
+          ? perspectiveResult.value.perspective.projectionLevel === "unavailable"
+            || !perspectiveResult.value.organization
+            ? "unavailable"
+            : "resolved"
+          : sameValidatedContext
+            ? "resolved"
+            : "idle";
 
   useEffect(() => {
     const generation = ++perspectiveRequestGeneration.current;
-    setPerspectiveResult(null);
     if (
       demoMode
       || !auth.currentUser
@@ -192,6 +231,7 @@ export function useExchangeOrganizationContext(
       setPerspectiveLoadingKey(null);
       return;
     }
+    setPerspectiveFailure(null);
     setPerspectiveLoadingKey(perspectiveKey);
 
     void resolveOrganizationPerspective({
@@ -208,18 +248,28 @@ export function useExchangeOrganizationContext(
         mode: result.perspective.mode,
         secondary: result.secondary,
       });
-      setPerspectiveResult(resultKey === perspectiveKey
-        ? { key: perspectiveKey, value: result }
+      setPerspectiveResult(resultKey
+        ? {
+            key: resultKey,
+            actorOrganizationId: resolvedActorId ?? null,
+            subjectOrganizationId: result.subject.organizationId,
+            value: result,
+          }
         : null);
       setPerspectiveLoadingKey(null);
+      setPerspectiveFailure(null);
       setError(null);
       if (state.actorOrganizationId !== resolvedActorId) {
         applyAction(exchangeWorkspaceActions.setValidatedActorOrganization(resolvedActorId));
       }
     }).catch((caught: unknown) => {
       if (generation !== perspectiveRequestGeneration.current) return;
-      setPerspectiveResult(null);
+      const code = contextErrorCode(caught);
       setPerspectiveLoadingKey(null);
+      setPerspectiveFailure({
+        key: perspectiveKey,
+        forbidden: code.includes("permission-denied") || code.includes("unauthenticated"),
+      });
       setError(safeContextError(caught));
     });
   }, [
@@ -239,6 +289,7 @@ export function useExchangeOrganizationContext(
     persistActorRequestRef.current = true;
     setPerspectiveResult(null);
     setPerspectiveLoadingKey(null);
+    setPerspectiveFailure(null);
     perspectiveRequestGeneration.current += 1;
     applyAction(exchangeWorkspaceActions.setValidatedActorOrganization(undefined));
     applyAction(
@@ -248,8 +299,8 @@ export function useExchangeOrganizationContext(
   }, [applyAction, onBeforeActorChange]);
 
   const refresh = useCallback(() => {
-    setPerspectiveResult(null);
     setPerspectiveLoadingKey(null);
+    setPerspectiveFailure(null);
     perspectiveRequestGeneration.current += 1;
     setRefreshGeneration((value) => value + 1);
   }, []);
@@ -260,6 +311,7 @@ export function useExchangeOrganizationContext(
     actorFallbackApplied,
     perspective,
     perspectiveLoading,
+    perspectiveStatus,
     error,
     requestActorOrganization,
     refresh,
