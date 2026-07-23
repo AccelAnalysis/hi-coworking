@@ -44,8 +44,25 @@ type GeocodeCandidate = {
   id: string; normalizedAddress: string; latitude: number; longitude: number;
   precision: string; confidence: string; attribution: string;
 };
+type PublicationDiagnostic = {
+  checkedAt: number;
+  organization: {
+    eligibleForPublicDirectory: boolean; reason: string; publicationStatus: string;
+    publicOrganizationExists: boolean; searchTokensPresent: boolean; normalizedNamePresent: boolean;
+  };
+  establishment: null | {
+    markerEligible: boolean; reason: string; physicalMarkerType: string;
+    publicEstablishmentExists: boolean; publicCoordinatesValid: boolean;
+  };
+  discovery: {
+    directoryCallableCanResolveOrganizationById: boolean;
+    directoryQueryCanLocateOrganizationName: boolean;
+    publicProjectionPassesFinalSanitizer: boolean;
+  };
+};
 
 const getManagement = httpsCallable<{ organizationId: string }, ManagementModel>(functions, "exchange_getOrganizationManagement");
+const getPublicationDiagnostic = httpsCallable<{ organizationId: string; establishmentId?: string }, PublicationDiagnostic>(functions, "exchange_getOrganizationPublicationDiagnostic");
 const updateProfile = httpsCallable<Record<string, unknown>, { recordVersion: number }>(functions, "exchange_updateOrganizationProfile");
 const searchGeocodes = httpsCallable<Record<string, unknown>, { requestId: string; candidates: GeocodeCandidate[] }>(functions, "exchange_searchOrganizationGeocodes");
 const upsertLocation = httpsCallable<Record<string, unknown>, { locationId: string; recordVersion: number }>(functions, "exchange_upsertOrganizationEstablishment");
@@ -80,6 +97,7 @@ function OrgSettingsContent() {
   const requestedTab = search.get("tab") as Tab | null;
   const [tab, setTab] = useState<Tab>(requestedTab && ["enrichment", "profile", "establishments", "contact", "members", "seats"].includes(requestedTab) ? requestedTab : "profile");
   const [model, setModel] = useState<ManagementModel | null>(null);
+  const [visibilityDiagnostic, setVisibilityDiagnostic] = useState<PublicationDiagnostic | null>(null);
   const [members, setMembers] = useState<OrgMemberDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -94,7 +112,14 @@ function OrgSettingsContent() {
       const [management, organizationMembers] = await Promise.all([
         getManagement({ organizationId }), getOrgMembers(organizationId),
       ]);
-      setModel(management.data); setMembers(organizationMembers);
+      const establishmentId = management.data.preferredOrientationEstablishmentId
+        ?? management.data.organization.primaryLocationId
+        ?? management.data.organization.headquartersLocationId
+        ?? undefined;
+      const diagnostic = await getPublicationDiagnostic({ organizationId, establishmentId })
+        .then((result) => result.data)
+        .catch(() => null);
+      setModel(management.data); setMembers(organizationMembers); setVisibilityDiagnostic(diagnostic);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Organization settings are unavailable.");
     } finally { setLoading(false); }
@@ -126,6 +151,7 @@ function OrgSettingsContent() {
     </div>
     {error && <div ref={errorRef} tabIndex={-1} role="alert" className="mb-5 rounded-xl border border-red-300 bg-red-50 p-4 text-sm font-semibold text-red-900"><p>Review this error:</p><p className="mt-1 font-normal">{error}</p></div>}
     {notice && <div role="status" className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-sm font-semibold text-emerald-900"><Check className="h-4 w-4" />{notice}</div>}
+    <ExchangeVisibilityStatus diagnostic={visibilityDiagnostic} onRefresh={load} busy={loading || busy} />
     <div role="tablist" aria-label="Organization settings" className="mb-7 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
       {tabs.map((item) => <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-bold ${tab === item.id ? "bg-white text-slate-950 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>{item.label}</button>)}
     </div>
@@ -136,6 +162,32 @@ function OrgSettingsContent() {
     {tab === "members" && <MembersPanel members={members} />}
     {tab === "seats" && <SeatsPanel organizationId={organizationId} busy={busy} run={run} />}
   </main></AppShell>;
+}
+
+
+
+function ExchangeVisibilityStatus({ diagnostic, onRefresh, busy }: { diagnostic: PublicationDiagnostic | null; onRefresh(): Promise<void>; busy: boolean }) {
+  const directoryActive = diagnostic?.organization.eligibleForPublicDirectory === true;
+  const markerActive = diagnostic?.establishment?.markerEligible === true;
+  const heading = !diagnostic ? "Server visibility not confirmed"
+    : directoryActive && markerActive ? "Public directory and marker active"
+      : directoryActive ? "Public directory active; marker not published"
+        : "Not publicly discoverable";
+  const detail = !diagnostic ? "Refresh to request the server-authoritative publication diagnostic."
+    : !directoryActive ? diagnostic.organization.reason
+      : diagnostic.establishment ? diagnostic.establishment.reason
+        : "The organization is searchable; no establishment was selected for marker validation.";
+  return <section aria-labelledby="exchange-visibility-heading" className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Exchange visibility status</p><h2 id="exchange-visibility-heading" className="mt-1 text-base font-black text-slate-950">{heading}</h2><p className="mt-1 max-w-3xl text-sm text-slate-600">{detail}</p></div>
+      <button type="button" disabled={busy} onClick={() => void onRefresh()} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Refresh status</button>
+    </div>
+    {diagnostic && <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
+      <div className="rounded-lg bg-slate-50 p-3"><dt className="font-bold text-slate-500">Directory projection</dt><dd className="mt-1 font-semibold text-slate-900">{diagnostic.discovery.publicProjectionPassesFinalSanitizer ? "Verified" : "Not verified"}</dd></div>
+      <div className="rounded-lg bg-slate-50 p-3"><dt className="font-bold text-slate-500">Name search</dt><dd className="mt-1 font-semibold text-slate-900">{diagnostic.discovery.directoryQueryCanLocateOrganizationName ? "Discoverable" : "Not discoverable"}</dd></div>
+      <div className="rounded-lg bg-slate-50 p-3"><dt className="font-bold text-slate-500">Marker projection</dt><dd className="mt-1 font-semibold text-slate-900">{markerActive ? "Verified" : "Not active"}</dd></div>
+    </dl>}
+  </section>;
 }
 
 function OrganizationProfileForm({ organization, busy, onSave }: { organization: OrganizationModel; busy: boolean; onSave(payload: Record<string, unknown>): Promise<void> }) {

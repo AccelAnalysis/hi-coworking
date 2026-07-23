@@ -184,6 +184,7 @@ import {
 import {
   exchange_getActorMapAnchor,
   exchange_getOrganizationManagement,
+  exchange_getOrganizationPublicationDiagnostic,
   exchange_reviewOrganizationEnrichmentProposal,
   exchange_resolveOrganizationCommunicationRoute,
   exchange_searchOrganizationGeocodes,
@@ -309,6 +310,7 @@ export {
   exchange_getOrganizationResourceStatus,
   exchange_getActorMapAnchor,
   exchange_getOrganizationManagement,
+  exchange_getOrganizationPublicationDiagnostic,
   exchange_reviewOrganizationEnrichmentProposal,
   exchange_resolveOrganizationCommunicationRoute,
   exchange_searchOrganizationGeocodes,

@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { FieldPath } from "firebase-admin/firestore";
 import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
+import * as logger from "firebase-functions/logger";
 import { z } from "zod";
 import type {
   ExchangeMode,
@@ -262,9 +263,40 @@ const perspectiveInputSchema = z.object({
 
 type PerspectiveInput = z.infer<typeof perspectiveInputSchema>;
 
+function viewerUidHash(uid: string): string {
+  return createHash("sha256").update(uid).digest("hex").slice(0, 16);
+}
+
+async function resolveValidatedSecondary(
+  database: FirebaseFirestore.Firestore,
+  secondary: PerspectiveInput["secondary"],
+  subjectOrganizationId: string,
+  privateAllowed: boolean,
+): Promise<ExchangeSecondaryContext | undefined> {
+  if (!secondary) return undefined;
+  if (secondary.type !== "establishment") return secondary as ExchangeSecondaryContext;
+  const collection = privateAllowed ? "organizationLocations" : "publicOrganizationLocations";
+  const snapshot = await database.collection(collection).doc(secondary.id).get();
+  const location = asRecord(snapshot.data());
+  const belongsToSubject = snapshot.exists && location.organizationId === subjectOrganizationId;
+  const privateProjectionValid = !privateAllowed || location.status === "active";
+  const publicProjectionValid = privateAllowed || (
+    location.coordinatePublicationApproved === true
+    && typeof location.latitude === "number"
+    && Number.isFinite(location.latitude)
+    && typeof location.longitude === "number"
+    && Number.isFinite(location.longitude)
+  );
+  if (!belongsToSubject || !privateProjectionValid || !publicProjectionValid) {
+    throw new HttpsError("not-found", "Organization establishment unavailable");
+  }
+  return secondary as ExchangeSecondaryContext;
+}
+
 async function resolvePerspective(
   request: CallableRequest<unknown>,
   input: PerspectiveInput,
+  requestId: string,
 ): Promise<RecordData> {
   const authorizedViewer = getAuthorizedActor(request);
   const db = getDb();
@@ -309,6 +341,12 @@ async function resolvePerspective(
   const self = selectedActor?.organizationId === input.subjectOrganizationId;
   const managed = subjectMembershipRole === "owner" || subjectMembershipRole === "admin";
   const privateAllowed = Boolean(self || managed);
+  const secondary = await resolveValidatedSecondary(
+    db,
+    input.secondary,
+    input.subjectOrganizationId,
+    privateAllowed,
+  );
   const subjectAvailable = Boolean(
     (privateAllowed && subjectOrgSnapshot.exists && subjectOrganization.status === "active")
     || publicProjection
@@ -375,6 +413,17 @@ async function resolvePerspective(
       ? "relationship_safe"
       : "indicator";
 
+  logger.info("Organization perspective resolved", {
+    requestId,
+    callable: "exchange_resolveOrganizationPerspective",
+    viewerUidHash: viewerUidHash(authorizedViewer.uid),
+    actorOrganizationId: selectedActor?.organizationId ?? null,
+    subjectOrganizationId: input.subjectOrganizationId,
+    secondaryType: secondary?.type ?? null,
+    secondaryId: secondary?.id ?? null,
+    projectionLevel: model.projectionLevel,
+  });
+
   return {
     contractVersion: CONTRACT_VERSION,
     viewer: {
@@ -410,15 +459,26 @@ async function resolvePerspective(
       contextMarkerOnly: model.contextMarkerOnly,
       heading: model.heading,
     },
-    ...(input.secondary ? { secondary: input.secondary as ExchangeSecondaryContext } : {}),
+    ...(secondary ? { secondary } : {}),
     organization,
     saved: isSaved,
   };
 }
 
 export const exchange_resolveOrganizationPerspective = onCall(async (request) => {
-  const input = parseInput(perspectiveInputSchema, request.data);
-  return resolvePerspective(request, input);
+  const requestId = randomUUID();
+  try {
+    const input = parseInput(perspectiveInputSchema, request.data);
+    return await resolvePerspective(request, input, requestId);
+  } catch (error) {
+    logger.warn("Organization perspective failed", {
+      requestId,
+      callable: "exchange_resolveOrganizationPerspective",
+      viewerUidHash: request.auth?.uid ? viewerUidHash(request.auth.uid) : null,
+      failureCode: error instanceof HttpsError ? error.code : "internal",
+    });
+    throw error;
+  }
 });
 
 const boundsSchema = z.object({
@@ -522,7 +582,7 @@ export const exchange_organizationDirectory = onCall(async (request) => {
         actorOrganizationId: input.actorOrganizationId,
         subjectOrganizationId: input.organizationId,
         mode: input.mode,
-      });
+      }, randomUUID());
       if (!perspective.organization) throw new HttpsError("not-found", "Organization is unavailable.");
       return {
         contractVersion: CONTRACT_VERSION,

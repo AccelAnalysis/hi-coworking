@@ -30,6 +30,7 @@ import {
   createSearchTokens,
   normalizeOrganizationName,
 } from "./organizationModel";
+import { projectApprovedPublicOrganization } from "./organizationPerspective";
 
 const ID = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.:@-]+$/);
 const VERSION = ORGANIZATION_ESTABLISHMENT_CONTRACT_VERSION;
@@ -151,6 +152,11 @@ const profileInputSchema = z.object({
     publicationStatus: z.enum(["draft", "approved", "suppressed"]),
   }).strict()).max(100).default([]),
   publicationStatus: z.enum(["draft", "approved", "suppressed"]),
+}).strict();
+
+const publicationDiagnosticInputSchema = z.object({
+  organizationId: ID,
+  establishmentId: ID.optional(),
 }).strict();
 
 function db(): Db { return admin.firestore(); }
@@ -664,6 +670,185 @@ export const exchange_updateOrganizationProfile = onCall(async (request) => {
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
+
+function booleanStatus(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : "missing";
+}
+
+function listPresent(value: unknown): boolean {
+  return Array.isArray(value) && value.some((item) => typeof item === "string" && item.trim().length > 0);
+}
+
+export function deriveOrganizationPublicationDiagnostic(input: {
+  organizationId: string;
+  privateOrganizationExists: boolean;
+  privateOrganization: Record<string, unknown>;
+  publicOrganizationExists: boolean;
+  publicOrganization: Record<string, unknown>;
+  establishmentId?: string;
+  privateEstablishmentExists: boolean;
+  privateEstablishment: Record<string, unknown>;
+  publicEstablishmentExists: boolean;
+  publicEstablishment: Record<string, unknown>;
+  directoryNameMatch: boolean;
+}) {
+  const privateOrganizationStatus = booleanStatus(input.privateOrganization.status);
+  const publicationStatus = booleanStatus(input.privateOrganization.publicationStatus);
+  const publicationApproved = input.privateOrganization.publicationApproved === true || publicationStatus === "approved";
+  const publicOrganizationStatus = booleanStatus(input.publicOrganization.status);
+  const publicOrganizationPublicationApproved = input.publicOrganization.publicationApproved === true;
+  const sanitizedPublicOrganization = input.publicOrganizationExists
+    ? projectApprovedPublicOrganization(input.organizationId, input.publicOrganization)
+    : null;
+  const organizationEligible = input.privateOrganizationExists
+    && privateOrganizationStatus === "active"
+    && publicationApproved
+    && input.publicOrganizationExists
+    && publicOrganizationStatus === "active"
+    && publicOrganizationPublicationApproved
+    && Boolean(sanitizedPublicOrganization);
+  const organizationReason = !input.privateOrganizationExists ? "Private organization record is missing."
+    : privateOrganizationStatus !== "active" ? "Organization is not active."
+      : !publicationApproved ? "Directory publication is not approved."
+        : !input.publicOrganizationExists ? "Public organization projection is missing."
+: publicOrganizationStatus !== "active" ? "Public organization projection is inactive."
+  : !publicOrganizationPublicationApproved ? "Public organization projection is not approved."
+    : !sanitizedPublicOrganization ? "Public organization projection failed the final sanitizer."
+      : "Eligible for the public directory.";
+
+  const privateLocation = input.privateEstablishment;
+  const publicLocation = input.publicEstablishment;
+  const geocode = record(privateLocation.geocode);
+  const locationType = booleanStatus(privateLocation.locationType);
+  const privateHome = privateLocation.privateHome === true;
+  const physicalMarkerType = privateHome ? "private_home"
+    : locationType === "mailing_only" || locationType === "virtual" ? "list_only"
+      : locationType;
+  const privateCoordinatesValid = validCoordinate(geocode.latitude, geocode.longitude);
+  const publicCoordinatesValid = validCoordinate(publicLocation.latitude, publicLocation.longitude);
+  const privateBelongs = input.privateEstablishmentExists && privateLocation.organizationId === input.organizationId;
+  const publicBelongs = input.publicEstablishmentExists && publicLocation.organizationId === input.organizationId;
+  const markerEligible = Boolean(input.establishmentId)
+    && organizationEligible
+    && privateBelongs
+    && privateLocation.status === "active"
+    && !privateHome
+    && physicalMarkerType !== "list_only"
+    && privateLocation.coordinatePublicationApproved === true
+    && privateCoordinatesValid
+    && Boolean(geocode.confirmedAt)
+    && publicBelongs
+    && publicLocation.coordinatePublicationApproved === true
+    && publicCoordinatesValid;
+  const markerReason = !input.establishmentId ? "No establishment was selected for diagnostic review."
+    : !input.privateEstablishmentExists ? "Private establishment record is missing."
+      : !privateBelongs ? "Establishment does not belong to the organization."
+        : privateLocation.status !== "active" ? "Establishment is not active."
+: privateHome ? "Private-home establishments cannot publish precise markers."
+  : physicalMarkerType === "list_only" ? "This establishment type is list-only."
+    : !privateCoordinatesValid || !geocode.confirmedAt ? "A confirmed valid geocode is required."
+      : privateLocation.coordinatePublicationApproved !== true ? "Coordinate publication is not approved."
+        : !input.publicEstablishmentExists ? "Public establishment projection is missing."
+          : !publicBelongs ? "Public establishment projection has an organization mismatch."
+            : publicLocation.coordinatePublicationApproved !== true || !publicCoordinatesValid
+              ? "Public establishment projection does not contain approved valid coordinates."
+              : !organizationEligible ? organizationReason
+                : "Eligible for a public marker.";
+
+  return {
+    contractVersion: 1,
+    organization: {
+      privateOrganizationExists: input.privateOrganizationExists,
+      status: privateOrganizationStatus,
+      publicationStatus,
+      publicationApproved,
+      publicOrganizationExists: input.publicOrganizationExists,
+      publicOrganizationStatus,
+      publicOrganizationPublicationApproved,
+      searchTokensPresent: listPresent(input.publicOrganization.searchTokens),
+      normalizedNamePresent: typeof input.publicOrganization.normalizedName === "string" && input.publicOrganization.normalizedName.trim().length > 0,
+      eligibleForPublicDirectory: organizationEligible,
+      reason: organizationReason,
+    },
+    establishment: input.establishmentId ? {
+      privateEstablishmentExists: input.privateEstablishmentExists,
+      belongsToOrganization: privateBelongs,
+      status: booleanStatus(privateLocation.status),
+      physicalMarkerType,
+      privateHome,
+      addressEntered: Boolean(record(privateLocation.physicalAddress).line1),
+      geocodeExists: Object.keys(geocode).length > 0,
+      geocodeConfirmed: Boolean(geocode.confirmedAt),
+      privateCoordinatesValid,
+      coordinatePublicationApproved: privateLocation.coordinatePublicationApproved === true,
+      publicEstablishmentExists: input.publicEstablishmentExists,
+      publicEstablishmentBelongsToOrganization: publicBelongs,
+      publicCoordinatePublicationApproved: publicLocation.coordinatePublicationApproved === true,
+      publicCoordinatesValid,
+      markerEligible,
+      reason: markerReason,
+    } : null,
+    discovery: {
+      directoryCallableCanResolveOrganizationById: Boolean(sanitizedPublicOrganization),
+      directoryQueryCanLocateOrganizationName: input.directoryNameMatch,
+      publicProjectionPassesFinalSanitizer: Boolean(sanitizedPublicOrganization),
+      publicEstablishmentCanJoinPublicOrganization: Boolean(sanitizedPublicOrganization) && publicBelongs,
+      expectedMarkerId: markerEligible ? input.establishmentId ?? null : null,
+      expectedOrganizationId: input.organizationId,
+      expectedLocationId: input.establishmentId ?? null,
+    },
+  };
+}
+
+export const exchange_getOrganizationPublicationDiagnostic = onCall(async (request) => {
+  const actor = getAuthorizedActor(request);
+  const input = parse(publicationDiagnosticInputSchema, request.data);
+  if (!actor.isAdmin) await managementAuthority(input.organizationId, actor.uid);
+  const database = db();
+  const privateOrganizationRef = database.collection("orgs").doc(input.organizationId);
+  const publicOrganizationRef = database.collection("publicOrganizations").doc(input.organizationId);
+  const privateEstablishmentRef = input.establishmentId
+    ? database.collection("organizationLocations").doc(input.establishmentId)
+    : null;
+  const publicEstablishmentRef = input.establishmentId
+    ? database.collection("publicOrganizationLocations").doc(input.establishmentId)
+    : null;
+  const [privateOrganizationSnapshot, publicOrganizationSnapshot, privateEstablishmentSnapshot, publicEstablishmentSnapshot] = await Promise.all([
+    privateOrganizationRef.get(),
+    publicOrganizationRef.get(),
+    privateEstablishmentRef?.get() ?? Promise.resolve(null),
+    publicEstablishmentRef?.get() ?? Promise.resolve(null),
+  ]);
+  const privateOrganization = record(privateOrganizationSnapshot.data());
+  const publicOrganization = record(publicOrganizationSnapshot.data());
+  const normalizedName = typeof publicOrganization.normalizedName === "string"
+    ? publicOrganization.normalizedName.trim().slice(0, 200)
+    : "";
+  const matchingOrganizations = normalizedName
+    ? await database.collection("publicOrganizations").where("normalizedName", "==", normalizedName).limit(20).get()
+    : null;
+  const directoryNameMatch = matchingOrganizations?.docs.some((document) => (
+    document.id === input.organizationId
+    && Boolean(projectApprovedPublicOrganization(document.id, record(document.data())))
+  )) ?? false;
+  return {
+    ...deriveOrganizationPublicationDiagnostic({
+      organizationId: input.organizationId,
+      privateOrganizationExists: privateOrganizationSnapshot.exists,
+      privateOrganization,
+      publicOrganizationExists: publicOrganizationSnapshot.exists,
+      publicOrganization,
+      establishmentId: input.establishmentId,
+      privateEstablishmentExists: privateEstablishmentSnapshot?.exists === true,
+      privateEstablishment: record(privateEstablishmentSnapshot?.data()),
+      publicEstablishmentExists: publicEstablishmentSnapshot?.exists === true,
+      publicEstablishment: record(publicEstablishmentSnapshot?.data()),
+      directoryNameMatch,
+    }),
+    checkedAt: Date.now(),
+  };
+});
+
 
 function ownerEnrichmentProposals(profile: FirebaseFirestore.DocumentSnapshot): Array<Record<string, unknown>> {
   const proposals = record(profile.get("enrichmentProposals"));
