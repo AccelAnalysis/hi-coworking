@@ -38,7 +38,18 @@ jobs:
       - run: npm run build:functions
       - run: npm run lint
       - run: npm run test:exchange
-      - run: npm run build
+      - name: Run production build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee dependency-build.log
+      - name: Upload dependency build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr23-dependency-build-log
+          path: dependency-build.log
+          if-no-files-found: error
       - run: git diff --check
       - name: Commit validated dependency repair
         run: |
