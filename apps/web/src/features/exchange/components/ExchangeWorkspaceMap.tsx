@@ -12,8 +12,8 @@ import {
   type ActorEstablishmentMapProjection,
 } from "../data/exchangeMapAnchor";
 import {
-  loadPublicOrganizationsForExchange,
-  subscribePublicOrganizationsForExchange,
+  watchPublicOrganizationsForExchange,
+  type PublicOrganizationRefreshStatus,
 } from "../data/publicOrganizationRepository";
 import {
   loadPublicOrganizationLocations,
@@ -116,6 +116,7 @@ export function ExchangeWorkspaceMap({
   const [organizations, setOrganizations] = useState<PublicOrganizationProjection[]>([]);
   const [locations, setLocations] = useState<PublicOrganizationEstablishment[]>([]);
   const [actorLocations, setActorLocations] = useState<ActorEstablishmentMapProjection[]>([]);
+  const [directoryStatus, setDirectoryStatus] = useState<PublicOrganizationRefreshStatus>("ready");
   const [compactViewport, setCompactViewport] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(844);
   const [fitRequest, setFitRequest] = useState(0);
@@ -206,32 +207,46 @@ export function ExchangeWorkspaceMap({
   useEffect(() => {
     if (demoMode) {
       setOrganizations([]);
+      setDirectoryStatus("ready");
       return;
     }
-    const cacheScope = viewerUid;
-    if (!cacheScope) {
+    if (!viewerUid) {
       setOrganizations([]);
+      setDirectoryStatus("ready");
       return;
     }
-    let active = true;
-    const unsubscribe = subscribePublicOrganizationsForExchange(
-      cacheScope,
-      (records) => {
-        if (active) setOrganizations(records);
+    return watchPublicOrganizationsForExchange(
+      {
+        cacheScope: viewerUid,
+        query: state.searchQuery,
+        filters: {
+          industries: state.industryFilters,
+          capabilities: state.capabilityFilters,
+          naicsCodes: state.naicsFilters,
+          certifications: state.certificationFilters,
+          locality: state.opportunityLocation?.label,
+          ...(activeView === "resources"
+            ? { resourceProviderStatus: "approved" as const }
+            : {}),
+        },
+        maxResults: 1_000,
+        ttlMs: 15_000,
+        refreshIntervalMs: 20_000,
       },
+      setOrganizations,
+      setDirectoryStatus,
     );
-    void loadPublicOrganizationsForExchange({ cacheScope })
-      .then((records) => {
-        if (active) setOrganizations(records);
-      })
-      .catch(() => {
-        if (active) setOrganizations([]);
-      });
-    return () => {
-      active = false;
-      unsubscribe();
-    };
-  }, [demoMode, viewerUid]);
+  }, [
+    activeView,
+    demoMode,
+    state.capabilityFilters,
+    state.certificationFilters,
+    state.industryFilters,
+    state.naicsFilters,
+    state.opportunityLocation?.label,
+    state.searchQuery,
+    viewerUid,
+  ]);
 
   useEffect(() => {
     if (demoMode || !viewerUid) { setLocations([]); return; }
@@ -286,10 +301,10 @@ export function ExchangeWorkspaceMap({
           : "actor",
       })),
       ...contextOrganizations(
-      organizations,
-      state.actorOrganizationId,
-      state.subjectOrganizationId,
-      perspective?.organization,
+        organizations,
+        state.actorOrganizationId,
+        state.subjectOrganizationId,
+        perspective?.organization,
       ).filter((organization) => !actorLocations.some((location) =>
         location.organizationId === organization.id)),
     ],
@@ -313,14 +328,14 @@ export function ExchangeWorkspaceMap({
         latitude: location.latitude,
         ...EXCHANGE_3D_ACTIVATION_VIEWPORT,
       };
-      applyAction(exchangeWorkspaceActions.setSubjectOrganization(organizationId));
-      applyAction(exchangeWorkspaceActions.setSecondaryContext({
-        entityType: "establishment",
-        entityId: location.locationId,
-        organizationId,
-      }));
-      applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
-      applyAction(exchangeWorkspaceActions.setViewport(viewport), "push");
+      applyAction(
+        exchangeWorkspaceActions.selectOrganizationEstablishment(
+          organizationId,
+          location.locationId,
+          viewport,
+        ),
+        "push",
+      );
     };
     window.addEventListener("hi-exchange-organization-home", returnHome);
     return () => window.removeEventListener("hi-exchange-organization-home", returnHome);
@@ -349,6 +364,17 @@ export function ExchangeWorkspaceMap({
       data-exchange-map-host="persistent"
       aria-label="Continuous Exchange map workspace"
     >
+      {directoryStatus !== "ready" && organizations.length > 0 ? (
+        <div
+          className="pointer-events-none absolute left-3 top-3 z-20 rounded-full border border-white/70 bg-white/85 px-3 py-1.5 text-[11px] font-bold text-slate-600 shadow-sm backdrop-blur"
+          role="status"
+          aria-live="polite"
+        >
+          {directoryStatus === "refreshing"
+            ? "Refreshing organizations…"
+            : "Organization refresh delayed; showing the last verified directory."}
+        </div>
+      ) : null}
       {initialViewport ? <ExchangeMap
         rfxList={activeView === "opportunities" ? rfx : []}
         organizations={modeMarkers}
@@ -372,14 +398,17 @@ export function ExchangeWorkspaceMap({
         onSelect={(selection) => {
           if (!selection) return;
           if (selection.entityType === "organization") {
-            applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
-            applyAction(exchangeWorkspaceActions.setSubjectOrganization(selection.entityId), "push");
+            applyAction(exchangeWorkspaceActions.selectOrganization(selection.entityId), "push");
             return;
           }
           if (selection.entityType === "establishment") {
-            applyAction(exchangeWorkspaceActions.setOrganizationDrawerOpen(true));
-            applyAction(exchangeWorkspaceActions.setSubjectOrganization(selection.organizationId), "push");
-            applyAction(exchangeWorkspaceActions.setSecondaryContext(selection), "push");
+            applyAction(
+              exchangeWorkspaceActions.selectOrganizationEstablishment(
+                selection.organizationId,
+                selection.entityId,
+              ),
+              "push",
+            );
             return;
           }
           applyAction(exchangeWorkspaceActions.setSecondaryContext(selection), "push");
