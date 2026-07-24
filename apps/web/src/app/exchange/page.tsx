@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { type ReactNode, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { httpsCallable } from "firebase/functions";
@@ -13,7 +13,10 @@ import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
 import { exchangeGetBusinessActivationStateFn } from "@/lib/functions";
 
-const recordActivationProgress = httpsCallable<Record<string, unknown>, { success: true }>(functions, "exchange_recordBusinessActivationProgress");
+const recordActivationProgress = httpsCallable<Record<string, unknown>, { success: true }>(
+  functions,
+  "exchange_recordBusinessActivationProgress",
+);
 
 function ExchangeRouteFallback() {
   return (
@@ -37,44 +40,52 @@ export default function ExchangePage() {
     : <RequireAuth><ExchangeActivationGate>{workspace}</ExchangeActivationGate></RequireAuth>;
 }
 
-function ExchangeActivationGate({ children }: { children: React.ReactNode }) {
+function ExchangeActivationGate({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);
+
   useEffect(() => {
     if (loading || !user) return;
     let active = true;
     void exchangeGetBusinessActivationStateFn({})
       .then((response) => {
         if (!active) return;
+        const params = new URLSearchParams(window.location.search);
         const connected = response.data.completedSteps.includes("organization_connected");
         const activationReady = response.data.currentStep === "map_activation" || response.data.currentStep === "completed";
-        const activationGateSatisfied = !response.data.guidedActivationRequired || (connected && activationReady);
-        if (activationGateSatisfied) {
-          setAuthorized(true);
-          const params = new URLSearchParams(window.location.search);
-          const establishmentId = params.get("secondarySelected");
-          if (
-            response.data.organizationId
-            && params.get("secondaryEntity") === "establishment"
-            && establishmentId
-            && Number(params.get("z")) >= 16
-            && Number(params.get("p")) > 0
-            && !response.data.completedSteps.includes("map_activation")
-          ) {
-            void recordActivationProgress({
-              action: "map_activated",
-              organizationId: response.data.organizationId,
-              establishmentId,
-            });
-          }
-        } else {
+        const pendingClaimPreview = params.get("claimPreview") === "1"
+          && response.data.currentStep === "organization_claim_pending";
+        const activationGateSatisfied = !response.data.guidedActivationRequired
+          || (connected && activationReady)
+          || pendingClaimPreview;
+
+        if (!activationGateSatisfied) {
           router.replace(response.data.safeResumeRoute);
+          return;
+        }
+
+        setAuthorized(true);
+        const establishmentId = params.get("secondarySelected");
+        if (
+          response.data.organizationId
+          && params.get("secondaryEntity") === "establishment"
+          && establishmentId
+          && Number(params.get("z")) >= 16
+          && Number(params.get("p")) > 0
+          && !response.data.completedSteps.includes("map_activation")
+        ) {
+          void recordActivationProgress({
+            action: "map_activated",
+            organizationId: response.data.organizationId,
+            establishmentId,
+          });
         }
       })
       .catch(() => router.replace("/exchange/onboarding"));
     return () => { active = false; };
   }, [loading, router, user]);
+
   return authorized ? children : <ExchangeRouteFallback />;
 }
 
