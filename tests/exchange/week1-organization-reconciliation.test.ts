@@ -35,13 +35,16 @@ describe("Week 1 organization reconciliation contract", () => {
     expect(rules).toContain("match /organizationSourceCandidates/{candidateId}");
   });
 
-  it("requires a claimant reason and prevents organization-free Exchange browsing", () => {
+  it("requires a claimant reason and limits pending users to public Exchange preview", () => {
     const onboarding = read("apps/web/src/app/exchange/onboarding/page.tsx");
-    expect(onboarding).toContain("Why are you authorized");
+    const exchangePage = read("apps/web/src/app/exchange/page.tsx");
+    expect(onboarding).toContain("How are you connected to this business?");
     expect(onboarding).toContain("reason.length < 10");
-    expect(onboarding).not.toContain('href="/exchange"');
+    expect(onboarding).toContain('href="/exchange?claimPreview=1"');
     expect(onboarding).not.toContain("Skip for now");
-    expect(onboarding).toContain("Required business activation");
+    expect(exchangePage).toContain('params.get("claimPreview") === "1"');
+    expect(exchangePage).toContain('response.data.currentStep === "organization_claim_pending"');
+    expect(exchangePage).not.toContain("claimPreviewGrantsOwnership");
   });
 
   it("publishes only the privacy-minimized organization projection", () => {
