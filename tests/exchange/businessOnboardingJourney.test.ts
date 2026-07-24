@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const registration = readFileSync("apps/web/src/app/register/page.tsx", "utf8");
+const login = readFileSync("apps/web/src/app/login/page.tsx", "utf8");
 const onboarding = readFileSync("apps/web/src/app/exchange/onboarding/page.tsx", "utf8");
 const activation = readFileSync("apps/functions/src/exchange/businessActivation.ts", "utf8");
 const founding = readFileSync("apps/web/src/app/exchange/founding/page.tsx", "utf8");
@@ -17,6 +18,14 @@ describe("RFxchange business onboarding journey", () => {
     expect(registration).not.toContain("UEI");
     expect(registration).not.toContain("Browse as an individual");
     expect(registration).not.toContain("professionalTitle");
+  });
+
+  it("recovers an authenticated account whose initialization was interrupted", () => {
+    expect(login).toContain('state.data.currentStep === "account"');
+    expect(login).toContain('"/register?resume=1"');
+    expect(registration).toContain('get("resume") === "1"');
+    expect(registration).toContain("Complete account setup");
+    expect(registration).toContain("readOnly={initializationPending}");
   });
 
   it("places geography and marker activation before optional enrichment", () => {
