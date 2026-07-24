@@ -15,6 +15,7 @@ The marker activation moment occurs before profile enrichment, full capability c
    - Password
    - Business-registration attestation
    - Terms and privacy acknowledgement
+   - `/register?resume=1` safely recovers an authenticated account whose initialization was interrupted
 2. `/exchange/onboarding`
    - Welcome and orientation
    - Geography selection
@@ -112,7 +113,7 @@ The operational address and owner-confirmed geocode are stored in the private or
 | Locality | Stored | No | Locality-level rounded coordinate | Yes |
 | Private | Stored | No | None | Yes |
 
-The public projection is written or removed server-side during marker activation. UI hiding is not the security boundary.
+The public projection is written or removed server-side during marker activation. UI hiding is not the security boundary. A private/home establishment is not marked as the preferred orientation during initial establishment validation; secure marker activation then assigns the authorized user's preferred organization and establishment without publishing the location.
 
 ## Marker activation transaction
 
@@ -165,6 +166,7 @@ Structured events are written without password, address, token, or sensitive ide
 - organization_claim_started
 - address_submitted
 - geocoding_succeeded
+- geocoding_failed
 - marker_activated
 - onboarding_completed
 - profile_completion_started
