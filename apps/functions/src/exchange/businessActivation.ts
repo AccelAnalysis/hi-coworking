@@ -269,6 +269,7 @@ function analyticsEvent(action: string): string | undefined {
     organization_created: "organization_created",
     address_confirmed: "address_submitted",
     geocoding_completed: "geocoding_succeeded",
+    geocoding_failed: "geocoding_failed",
     marker_activated: "marker_activated",
     profile_completion_offered: "profile_completion_started",
     enrichment_offered: "enrichment_started",
@@ -445,6 +446,7 @@ export const exchange_recordBusinessActivationProgress = onCall(async (request) 
     z.object({ action: z.literal("organization_claim_started"), organizationId: ID, claimId: ID.optional() }).strict(),
     z.object({ action: z.literal("address_confirmed"), organizationId: ID, establishmentId: ID }).strict(),
     z.object({ action: z.literal("geocoding_completed"), organizationId: ID, establishmentId: ID }).strict(),
+    z.object({ action: z.literal("geocoding_failed"), organizationId: ID }).strict(),
     z.object({ action: z.literal("marker_activated"), organizationId: ID, establishmentId: ID, visibility: visibilitySchema }).strict(),
     z.object({ action: z.literal("profile_completion_offered"), organizationId: ID }).strict(),
     z.object({ action: z.literal("enrichment_offered"), organizationId: ID }).strict(),
@@ -511,7 +513,7 @@ export const exchange_recordBusinessActivationProgress = onCall(async (request) 
       }, { merge: true });
       patch.enrichmentOfferedAt = state.enrichmentOfferedAt ?? now;
       eventName = undefined;
-    } else if (["profile_completion_offered", "enrichment_offered", "founding_membership_offered", "checkout_handoff_initiated", "onboarding_completed"].includes(input.data.action)) {
+    } else if (["geocoding_failed", "profile_completion_offered", "enrichment_offered", "founding_membership_offered", "checkout_handoff_initiated", "onboarding_completed"].includes(input.data.action)) {
       await loadOrgAuthority(transaction, store, input.data.organizationId, actor.uid, { managementRequired: false });
       if (input.data.action === "profile_completion_offered") patch.profileCompletionOfferedAt = state.profileCompletionOfferedAt ?? now;
       if (input.data.action === "enrichment_offered") patch.enrichmentOfferedAt = state.enrichmentOfferedAt ?? now;

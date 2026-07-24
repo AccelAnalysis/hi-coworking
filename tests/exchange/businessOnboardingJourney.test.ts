@@ -44,8 +44,11 @@ describe("RFxchange business onboarding journey", () => {
   it("enforces released geography and server-authoritative address matching", () => {
     expect(activation).toContain('state.geography.status !== "released"');
     expect(activation).toContain("addressMatchesGeography");
+    expect(onboarding).toContain('preferredOrientation: payload.visibility !== "private"');
     expect(activation).toContain("loadOrgAuthority");
     expect(activation).toContain("organizationClaims");
+    expect(activation).toContain('geocoding_failed: "geocoding_failed"');
+    expect(onboarding).toContain('action: "geocoding_failed"');
   });
 
   it("persists a marker with distinct public privacy modes", () => {

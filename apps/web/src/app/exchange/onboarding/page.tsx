@@ -210,7 +210,7 @@ function Onboarding() {
         },
         publicContactAvailable: false,
         privateHome: payload.visibility === "private",
-        preferredOrientation: true,
+        preferredOrientation: payload.visibility !== "private",
         geocodeSelection: {
           requestId: payload.requestId,
           candidateId: payload.candidate.id,
@@ -505,6 +505,7 @@ function LocationStep({ organizationId, organizationName, geography, busy, onBac
       }
     } catch (value) {
       console.warn("Business address confirmation failed", { code: (value as { code?: string }).code || "unknown" });
+      void recordProgress({ action: "geocoding_failed", organizationId }).catch(() => undefined);
       setLocalError("We could not confirm that address. Check the street, city, state, and ZIP code, then try again.");
     } finally {
       setSearching(false);
