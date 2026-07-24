@@ -1,0 +1,59 @@
+name: Exchange onboarding journey
+
+on:
+  pull_request:
+    paths:
+      - "apps/functions/src/accounts.ts"
+      - "apps/functions/src/exchange/businessActivation.ts"
+      - "apps/functions/src/exchange/businessActivation.test.ts"
+      - "apps/web/src/app/register/page.tsx"
+      - "apps/web/src/app/exchange/onboarding/page.tsx"
+      - "apps/web/src/app/exchange/page.tsx"
+      - "apps/web/src/app/exchange/founding/page.tsx"
+      - "tests/exchange/**"
+      - "docs/exchange/business-onboarding-journey.md"
+      - ".github/workflows/exchange-onboarding-journey.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run Exchange tests
+        id: exchange-tests
+        continue-on-error: true
+        run: npm run test:exchange -- --reporter=verbose 2>&1 | tee exchange-tests.log
+      - name: Upload Exchange test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exchange-onboarding-test-log
+          path: exchange-tests.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Fail when Exchange tests fail
+        if: steps.exchange-tests.outcome == 'failure'
+        run: exit 1
+      - name: Build shared package
+        run: npm run build:shared
+      - name: Build Functions
+        run: npm run build:functions
+      - name: Build web application
+        env:
+          SKIP_BOOKSTORE_SYNC: "true"
+          NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+        run: npm run build --workspace web
+      - run: git diff --check
