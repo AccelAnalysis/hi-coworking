@@ -8,26 +8,29 @@ const root = resolve(import.meta.dirname, "../..");
 const source = (path: string) => readFileSync(resolve(root, path), "utf8");
 
 describe("business registration and map activation", () => {
-  it("requires representative attestation and offers no individual bypass", () => {
+  it("requires business registration acknowledgement and offers no individual bypass", () => {
     const registration = source("apps/web/src/app/register/page.tsx");
     const onboarding = source("apps/web/src/app/exchange/onboarding/page.tsx");
-    expect(registration).toContain("authorized representative of a business or organization");
-    expect(registration).toContain("businessRepresentativeAttestation: attested");
-    expect(registration).toContain('registrationVersion: 2');
+    expect(registration).toContain("I am registering a business or organization");
+    expect(registration).toContain("businessRepresentativeAttestation: true");
+    expect(registration).toContain("termsAccepted: true");
+    expect(registration).toContain("privacyAccepted: true");
+    expect(registration).toContain("registrationVersion: 2");
     expect(registration).toContain('router.push("/exchange/onboarding")');
     expect(onboarding).toContain("listActorOrganizations()");
     expect(onboarding).not.toContain("getUserOrgs");
     expect(`${registration}\n${onboarding}`).not.toMatch(/Browse as individual|Skip for now|continue using the Exchange without one/i);
   });
 
-  it("permits a governed claim against an existing claimed organization without granting pending authority", () => {
+  it("permits a governed claim without granting pending authority", () => {
     const organizations = source("apps/functions/src/exchange/organizations.ts");
     const activation = source("apps/functions/src/exchange/businessActivation.ts");
     expect(organizations).not.toContain('data.claimStatus !== "claimed"');
     expect(organizations).not.toContain("This organization is already claimed.");
     expect(organizations).toContain("A governed competing claim must not demote an already-claimed");
     expect(activation).toContain('if (input.claimPending && !input.authorized) return "claim_pending"');
-    expect(activation).toContain('"organization_management"');
+    expect(activation).toContain('claimPending ? ["organization_connected", "business_location", "marker_activated"]');
+    expect(activation).toContain("loadOrgAuthority");
   });
 
   it("lifts the one dimension control above workspace surfaces", () => {
@@ -37,7 +40,7 @@ describe("business registration and map activation", () => {
     const shell = source("apps/web/src/components/AppShell.tsx");
     expect(map).not.toContain('aria-label="Map dimension"');
     expect(workspace).toContain("<ExchangeMapControls");
-    expect(controls).toContain('data-exchange-map-control-layer');
+    expect(controls).toContain("data-exchange-map-control-layer");
     expect(controls).toContain('role="group"');
     expect(controls).toContain('aria-label="Map dimension"');
     expect(controls).toContain("z-[1200]");
