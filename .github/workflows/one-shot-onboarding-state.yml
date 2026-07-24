@@ -1,3 +1,4 @@
+# Exact one-shot patch; this workflow removes itself after a successful commit.
 name: One-shot onboarding state hardening
 
 on:
