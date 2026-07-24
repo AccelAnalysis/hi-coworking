@@ -1,124 +1,162 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { httpsCallable } from "firebase/functions";
+import { ArrowLeft, Check, Crown, Loader2, MapPin, ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { getExchangePublicCommercialPolicyFn, type ExchangePublicCommercialConfiguration } from "@/lib/functions";
-import { ArrowRight, BadgeCheck, Building2, Coins, MapPinned, ShieldCheck, Sparkles } from "lucide-react";
+import { RequireAuth } from "@/components/RequireAuth";
+import { functions } from "@/lib/firebase";
+import {
+  createExchangeMembershipCheckoutFn,
+  getExchangePublicCommercialPolicyFn,
+  type ExchangePublicCommercialConfiguration,
+} from "@/lib/functions";
 
-const fallback: ExchangePublicCommercialConfiguration = {
-  policyVersion: "exchange-launch-v1",
-  featureFlags: { exchangeFoundingCampaignEnabled: true, exchangeFoundingCheckoutEnabled: false },
-  launchMarket: { enabled: true, publicLabel: "Isle of Wight County, Virginia", stateCode: "VA", countyOrLocalityName: "Isle of Wight County", countryCode: "US" },
-  foundingMembership: {
-    enabled: true,
-    checkoutReady: false,
-    publicLabel: "Exchange Founding Membership",
-    currency: "usd",
-    billingInterval: "month",
-    includedCreditsPerPeriod: 0,
-    retainRecognitionAfterCancellation: true,
-    pricingVersion: "founding-price-unapproved",
-    entitlementVersion: "founding-entitlements-v1",
-  },
-  creditDefinition: {
-    nominalDollarValuePerCredit: 1,
-    expirationCalendarMonths: 12,
-    transferable: false,
-    cashRedeemable: false,
-    generallyRefundable: false,
-    verifiedBusinessRequired: true,
-    spendingOrder: "earliest_expiration_first",
-  },
-  creditPacks: [],
-  actionCosts: {},
-  referralFinancialPolicy: {
-    enabled: false,
-    platformFeeBps: 1_000,
-    minimumPlatformServiceFeeCents: 500,
-    minimumAccumulatedPayoutCents: 10_000,
-    payoutHoldDays: 14,
-    automatedPayoutsEnabled: false,
-    policyVersion: "referral-finance-v1",
-  },
+const getActivationState = httpsCallable<
+  { organizationId?: string },
+  {
+    organizationId: string | null;
+    organizationName: string | null;
+    foundingMembershipHandoff: null | {
+      organizationId: string;
+      eligible: boolean;
+      onboardingCompleted: boolean;
+      membershipStatus: string;
+      membershipTier: string;
+      isFoundingMember: boolean;
+      founderReservation: null | { status: string };
+      selectedGeography: null | { name: string; state: string; status: string };
+    };
+  }
+>(functions, "exchange_getBusinessActivationState");
+const recordProgress = httpsCallable<Record<string, unknown>, { success: true }>(functions, "exchange_recordBusinessActivationProgress");
+
+type ActivationResponse = {
+  organizationId: string | null;
+  organizationName: string | null;
+  foundingMembershipHandoff: null | {
+    organizationId: string;
+    eligible: boolean;
+    onboardingCompleted: boolean;
+    membershipStatus: string;
+    membershipTier: string;
+    isFoundingMember: boolean;
+    founderReservation: null | { status: string };
+    selectedGeography: null | { name: string; state: string; status: string };
+  };
 };
 
-const capabilities = [
-  ["Available now", "Claimable business profiles, opportunity discovery, RFx, teaming, referrals, resources, and network intelligence."],
-  ["Founding access", "Organization recognition, included Exchange credits when configured, billing management, and early access to premium Exchange actions."],
-  ["In development", "Paid referral collection, reserve operations, and connected-account onboarding remain disabled behind protected launch gates."],
-  ["Planned later", "Bookstore, events commerce, and physical workspace scheduling follow the Exchange launch and are not included in Founding Membership."],
-];
+function money(amountCents?: number) {
+  if (typeof amountCents !== "number") return "Price pending";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amountCents / 100);
+}
 
-export default function ExchangeFoundingPage() {
-  const [configuration, setConfiguration] = useState(fallback);
+export default function FoundingMembershipPage() {
+  return <RequireAuth><FoundingMembership /></RequireAuth>;
+}
+
+function FoundingMembership() {
+  const params = useSearchParams();
+  const requestedOrganizationId = params.get("organizationId") || undefined;
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [configuration, setConfiguration] = useState<ExchangePublicCommercialConfiguration | null>(null);
+  const [state, setState] = useState<ActivationResponse | null>(null);
 
   useEffect(() => {
-    getExchangePublicCommercialPolicyFn({})
-      .then((result) => setConfiguration(result.data.configuration))
-      .catch(() => setConfiguration(fallback))
-      .finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    setLoading(true);
+    void Promise.all([
+      getActivationState({ ...(requestedOrganizationId ? { organizationId: requestedOrganizationId } : {}) }),
+      getExchangePublicCommercialPolicyFn({}),
+    ]).then(([activation, policy]) => {
+      if (!active) return;
+      setState(activation.data);
+      setConfiguration(policy.data.configuration);
+      if (activation.data.organizationId) {
+        void recordProgress({ action: "founding_membership_offered", organizationId: activation.data.organizationId });
+      }
+    }).catch(() => active && setError("Founding Membership information is temporarily unavailable."))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [requestedOrganizationId]);
 
-  const founding = configuration.foundingMembership;
+  if (loading) return <AppShell><main className="grid min-h-[70dvh] place-items-center bg-[#F7F3EA]"><div role="status" className="text-center"><Loader2 className="mx-auto h-9 w-9 animate-spin text-[#D6A23A]" /><p className="mt-3 font-semibold text-slate-700">Loading Founding Membership…</p></div></main></AppShell>;
+
+  const organizationId = state?.organizationId || requestedOrganizationId || "";
+  const handoff = state?.foundingMembershipHandoff;
+  const founding = configuration?.foundingMembership;
+  const checkoutOpen = Boolean(
+    configuration?.featureFlags.exchangeFoundingCheckoutEnabled
+    && founding?.enabled
+    && founding?.checkoutReady,
+  );
+  const eligible = Boolean(handoff?.eligible && handoff.onboardingCompleted);
+
+  const beginCheckout = async () => {
+    if (!organizationId || !checkoutOpen || !eligible) return;
+    setBusy(true);
+    setError("");
+    try {
+      await recordProgress({ action: "checkout_handoff_initiated", organizationId });
+      const returnPath = `/exchange/founding?organizationId=${encodeURIComponent(organizationId)}`;
+      const response = await createExchangeMembershipCheckoutFn({
+        organizationId,
+        key: "exchange_founding",
+        returnPath,
+      });
+      window.location.assign(response.data.url);
+    } catch (value) {
+      const message = String((value as { message?: string }).message || "");
+      setError(message.includes("not open")
+        ? "Founding enrollment is not open yet. Your business remains active on the Exchange."
+        : "We could not open checkout. No membership change was made.");
+      setBusy(false);
+    }
+  };
+
   return (
     <AppShell>
-      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-16">
-        <section className="overflow-hidden rounded-[2rem] border border-slate-200 bg-slate-950 text-white shadow-2xl shadow-slate-300/30">
-          <div className="grid gap-10 px-6 py-10 sm:px-10 lg:grid-cols-[1.25fr_.75fr] lg:px-14 lg:py-16">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-emerald-200">
-                <MapPinned className="h-4 w-4" /> Founding launch · {configuration.launchMarket.publicLabel}
-              </div>
-              <h1 className="mt-6 max-w-3xl text-4xl font-black tracking-tight sm:text-6xl">
-                Build the local business network businesses can actually use.
-              </h1>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-                Hi Exchange connects business discovery, opportunities, teaming, referrals, economic-development resources, and relationship intelligence in one map-based environment.
-              </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                {founding.checkoutReady ? (
-                  <Link href="/exchange/wallet" className="inline-flex items-center gap-2 rounded-full bg-emerald-300 px-6 py-3 font-bold text-slate-950 hover:bg-emerald-200">
-                    Manage founding enrollment <ArrowRight className="h-4 w-4" />
-                  </Link>
-                ) : (
-                  <>
-                    <Link href="/register" className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 font-bold text-slate-950 hover:bg-slate-100">Create a free account <ArrowRight className="h-4 w-4" /></Link>
-                    <Link href="/profile" className="inline-flex items-center gap-2 rounded-full border border-white/30 px-6 py-3 font-bold text-white hover:bg-white/10">Claim or complete a business profile</Link>
-                  </>
-                )}
-              </div>
-              {!loading && !founding.checkoutReady && (
-                <p className="mt-4 text-sm font-semibold text-amber-200">Founding enrollment is not yet open. No unapproved price or placeholder Stripe identifier will be submitted.</p>
-              )}
+      <main className="min-h-dvh bg-[#F7F3EA] px-4 py-8 sm:py-12">
+        <div className="mx-auto max-w-5xl">
+          <Link href={organizationId ? `/exchange?actorOrg=${encodeURIComponent(organizationId)}&subjectOrg=${encodeURIComponent(organizationId)}` : "/exchange"} className="inline-flex items-center gap-1 text-sm font-bold text-slate-600 hover:text-slate-950"><ArrowLeft className="h-4 w-4" /> Back to the Exchange</Link>
+          <div className="mt-5 overflow-hidden rounded-3xl border border-black/10 bg-white shadow-2xl shadow-black/10">
+            <div className="grid lg:grid-cols-[1.1fr_0.9fr]">
+              <section className="p-6 sm:p-10 lg:p-12">
+                <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-amber-800"><Crown className="h-3.5 w-3.5" /> Founding Membership</span>
+                <h1 className="mt-5 text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">Your business is on the Exchange. Help shape what comes next.</h1>
+                <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600">Become a Founding Member to unlock the full launch experience and help shape the network as it grows.</p>
+
+                {handoff?.selectedGeography && <div className="mt-6 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700"><MapPin className="h-4 w-4 text-[#D6A23A]" /> {handoff.selectedGeography.name}, {handoff.selectedGeography.state}</div>}
+
+                <ul className="mt-8 space-y-3 text-sm leading-6 text-slate-700">
+                  {["Founding organization recognition", "Early access to approved launch workflows", "Enhanced opportunity and partner discovery as benefits become active", "A structured feedback channel during the launch period"].map((benefit) => <li key={benefit} className="flex gap-3"><span className="mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"><Check className="h-3.5 w-3.5" /></span>{benefit}</li>)}
+                </ul>
+
+                {error && <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800">{error}</div>}
+              </section>
+
+              <aside className="bg-[#0B0B0D] p-6 text-white sm:p-10 lg:p-12">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-[#E7C56F]">{state?.organizationName || "Your organization"}</p>
+                <div className="mt-4 flex items-end gap-2"><strong className="text-4xl font-black">{money(founding?.amountCents)}</strong>{founding?.amountCents ? <span className="pb-1 text-sm text-white/60">/month</span> : null}</div>
+                {founding?.foundingCapacity ? <p className="mt-2 text-sm text-white/60">Planned capacity: {founding.foundingCapacity} Founding organizations.</p> : null}
+
+                <div className="mt-7 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/70">
+                  <div className="flex items-center gap-2 font-bold text-white"><ShieldCheck className="h-4 w-4 text-[#D6A23A]" /> Reliable handoff</div>
+                  <p className="mt-2">Checkout creates no duplicate business or membership record. Membership changes occur only after the payment provider confirms the subscription.</p>
+                </div>
+
+                {handoff?.isFoundingMember ? <div className="mt-6 rounded-2xl bg-emerald-400/10 p-4 font-bold text-emerald-300">This organization is already a Founding Member.</div> : !eligible ? <div className="mt-6 rounded-2xl bg-amber-400/10 p-4 text-sm leading-6 text-amber-200">Complete business marker activation with an owner or administrator account before enrollment.</div> : !checkoutOpen ? <div className="mt-6 rounded-2xl bg-blue-400/10 p-4 text-sm leading-6 text-blue-200">Founding enrollment is not open yet. The platform will not represent a membership as active until checkout and payment confirmation are available.</div> : null}
+
+                <button disabled={busy || !checkoutOpen || !eligible || handoff?.isFoundingMember} onClick={() => void beginCheckout()} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#D6A23A] px-5 py-3 font-black text-black transition hover:bg-[#e2b553] disabled:cursor-not-allowed disabled:opacity-45">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Crown className="h-4 w-4" />}{handoff?.isFoundingMember ? "Founding Membership active" : checkoutOpen ? "Continue to secure checkout" : "Enrollment opening soon"}</button>
+                <p className="mt-4 text-center text-xs leading-5 text-white/45">No premium permissions are activated without a valid membership state.</p>
+              </aside>
             </div>
-            <aside className="rounded-3xl border border-white/15 bg-white/5 p-6 backdrop-blur">
-              <Sparkles className="h-7 w-7 text-amber-300" />
-              <h2 className="mt-4 text-2xl font-black">{founding.publicLabel}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-300">An organization-level Exchange relationship, separate from physical coworking membership.</p>
-              <dl className="mt-6 space-y-4 text-sm">
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3"><dt className="text-slate-400">Price</dt><dd className="font-bold">{founding.amountCents ? `$${(founding.amountCents / 100).toFixed(2)}/month` : "Pending approval"}</dd></div>
-                <div className="flex justify-between gap-4 border-b border-white/10 pb-3"><dt className="text-slate-400">Included credits</dt><dd className="font-bold">{founding.includedCreditsPerPeriod || "Pending configuration"}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-400">Checkout</dt><dd className="font-bold">{founding.checkoutReady ? "Ready" : "Closed"}</dd></div>
-              </dl>
-            </aside>
           </div>
-        </section>
-
-        <section className="mt-10 grid gap-5 md:grid-cols-3">
-          <article className="rounded-3xl border border-slate-200 bg-white p-6"><Building2 className="h-7 w-7 text-indigo-600" /><h2 className="mt-4 text-lg font-black">Free participation matters</h2><p className="mt-2 text-sm leading-6 text-slate-600">Registered people can browse, discover profiles and public opportunities, request claims, save permitted items, receive authorized referrals, and understand which actions require verification, credits, or Founding access.</p></article>
-          <article className="rounded-3xl border border-slate-200 bg-white p-6"><Coins className="h-7 w-7 text-amber-600" /><h2 className="mt-4 text-lg font-black">Exchange credits, plainly stated</h2><p className="mt-2 text-sm leading-6 text-slate-600">One Exchange credit has a nominal value of one dollar. Credits are for eligible verified organizations, expire 12 calendar months after issuance, are nontransferable, generally nonrefundable, and have no cash-redemption value.</p></article>
-          <article className="rounded-3xl border border-slate-200 bg-white p-6"><ShieldCheck className="h-7 w-7 text-emerald-600" /><h2 className="mt-4 text-lg font-black">Protected by organization authority</h2><p className="mt-2 text-sm leading-6 text-slate-600">Billing, credit purchases, and protected actions are resolved on the server from verified organization membership and permissions. Browser-supplied prices, balances, and tiers are never authoritative.</p></article>
-        </section>
-
-        <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 sm:p-8">
-          <div className="flex items-center gap-3"><BadgeCheck className="h-7 w-7 text-indigo-600" /><div><h2 className="text-2xl font-black">What the launch includes</h2><p className="text-sm text-slate-500">Clear status labels keep the campaign honest.</p></div></div>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {capabilities.map(([status, body]) => <article key={status} className="rounded-2xl bg-slate-50 p-5"><p className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">{status}</p><p className="mt-2 text-sm leading-6 text-slate-700">{body}</p></article>)}
-          </div>
-          <p className="mt-6 text-sm leading-6 text-slate-600">Founding revenue supports continued Exchange development. It does not include desk hours or physical-space access unless a separate future product explicitly says so.</p>
-        </section>
+        </div>
       </main>
     </AppShell>
   );
