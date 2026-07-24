@@ -27,10 +27,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Build shared package
+        run: npm run build:shared
       - name: Run Exchange tests
         id: exchange-tests
         continue-on-error: true
-        run: npm run test:exchange -- --reporter=verbose 2>&1 | tee exchange-tests.log
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:exchange -- --reporter=verbose 2>&1 | tee exchange-tests.log
       - name: Upload Exchange test log
         if: always()
         uses: actions/upload-artifact@v4
@@ -42,8 +47,6 @@ jobs:
       - name: Fail when Exchange tests fail
         if: steps.exchange-tests.outcome == 'failure'
         run: exit 1
-      - name: Build shared package
-        run: npm run build:shared
       - name: Build Functions
         run: npm run build:functions
       - name: Build web application
