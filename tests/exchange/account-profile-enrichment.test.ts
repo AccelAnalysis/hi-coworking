@@ -114,14 +114,18 @@ describe("canonical profile model", () => {
 });
 
 describe("registration and profile source contracts", () => {
-  it("confirms authoritative business registration before mandatory organization onboarding", () => {
+  it("confirms lightweight business registration before mandatory organization onboarding", () => {
     const registration = read("apps/web/src/app/register/page.tsx");
-    expect(registration).toContain("accountInitializeFn");
+    expect(registration).toContain("initializeAccount");
     expect(registration).toContain('router.push("/exchange/onboarding")');
     expect(registration).not.toContain('router.push("/exchange")');
     expect(registration).not.toContain('router.push("/profile?onboarding=1")');
     expect(registration).toContain("businessRepresentativeAttestation");
+    expect(registration).toContain("termsAccepted: true");
+    expect(registration).toContain("privacyAccepted: true");
     expect(registration).toContain("Complete account setup");
+    expect(registration).not.toContain("professionalTitle");
+    expect(registration).not.toContain("preferredPrivatePhone");
   });
 
   it("requires profile versions, server-side search, and field-level enrichment approval", () => {
