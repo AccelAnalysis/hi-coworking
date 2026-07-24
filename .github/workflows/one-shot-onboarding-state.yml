@@ -2,9 +2,8 @@
 name: One-shot onboarding state hardening
 
 on:
-  push:
-    branches:
-      - codex/exchange-business-onboarding-journey
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
