@@ -3,16 +3,17 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CheckCircle2, Loader2, MapPin, Sparkles, X } from "lucide-react";
+import { httpsCallable } from "firebase/functions";
+import { CheckCircle2, MapPin, Sparkles, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ExchangeWorkspace } from "@/features/exchange/components/ExchangeWorkspace";
 import { isExchangeDemoMode } from "@/features/exchange/demo/exchangeDemoMode";
 import { useAuth } from "@/lib/authContext";
-import {
-  exchangeGetBusinessActivationStateFn,
-  exchangeRecordBusinessActivationProgressFn,
-} from "@/lib/functions";
+import { functions } from "@/lib/firebase";
+import { exchangeGetBusinessActivationStateFn } from "@/lib/functions";
+
+const recordActivationProgress = httpsCallable<Record<string, unknown>, { success: true }>(functions, "exchange_recordBusinessActivationProgress");
 
 function ExchangeRouteFallback() {
   return (
@@ -61,7 +62,7 @@ function ExchangeActivationGate({ children }: { children: React.ReactNode }) {
             && Number(params.get("p")) > 0
             && !response.data.completedSteps.includes("map_activation")
           ) {
-            void exchangeRecordBusinessActivationProgressFn({
+            void recordActivationProgress({
               action: "map_activated",
               organizationId: response.data.organizationId,
               establishmentId,
@@ -88,10 +89,10 @@ function OnboardingSuccess() {
     if (!visible || !organizationId || recorded) return;
     setRecorded(true);
     void Promise.allSettled([
-      exchangeRecordBusinessActivationProgressFn({ action: "profile_completion_offered", organizationId }),
-      exchangeRecordBusinessActivationProgressFn({ action: "enrichment_offered", organizationId }),
-      exchangeRecordBusinessActivationProgressFn({ action: "founding_membership_offered", organizationId }),
-      exchangeRecordBusinessActivationProgressFn({ action: "onboarding_completed", organizationId }),
+      recordActivationProgress({ action: "profile_completion_offered", organizationId }),
+      recordActivationProgress({ action: "enrichment_offered", organizationId }),
+      recordActivationProgress({ action: "founding_membership_offered", organizationId }),
+      recordActivationProgress({ action: "onboarding_completed", organizationId }),
     ]);
   }, [organizationId, recorded, visible]);
 
