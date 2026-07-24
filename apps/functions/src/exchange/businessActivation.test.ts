@@ -63,6 +63,11 @@ test("activation marker derivation rejects incomplete or excluded establishments
   }), "virtual_location");
   assert.equal(deriveBusinessActivationMarkerState({
     authorized: true,
+    organization: { publicationStatus: "draft" },
+    location: { ...confirmed, privateHome: true },
+  }), "private_actor_visible");
+  assert.equal(derivePublicBusinessMarkerState({
+    organization: { publicationStatus: "approved" },
     location: { ...confirmed, privateHome: true },
   }), "private_home_suppressed");
 });
