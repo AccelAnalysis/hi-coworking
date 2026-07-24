@@ -41,8 +41,8 @@ describe("RFxchange business onboarding journey", () => {
 
   it("persists a marker with distinct public privacy modes", () => {
     for (const mode of ["exact", "approximate", "locality", "private"]) {
-      expect(activation).toContain(`\"${mode}\"`);
-      expect(onboarding).toContain(`\"${mode}\"`);
+      expect(activation).toContain(`"${mode}"`);
+      expect(onboarding).toContain(`"${mode}"`);
     }
     expect(activation).toContain("publicOrganizationLocations");
     expect(activation).toContain("private_actor_visible");
@@ -56,6 +56,13 @@ describe("RFxchange business onboarding journey", () => {
     expect(exchangePage).toContain("Your business is now on The RFxchange.");
     expect(exchangePage).toContain("Complete My Profile");
     expect(exchangePage).toContain("Explore the Exchange");
+  });
+
+  it("allows public exploration while a governed claim remains pending", () => {
+    expect(onboarding).toContain('/exchange?claimPreview=1');
+    expect(exchangePage).toContain('params.get("claimPreview") === "1"');
+    expect(exchangePage).toContain('response.data.currentStep === "organization_claim_pending"');
+    expect(activation).toContain('claimPending ? ["view_claim_status", "explore_public_exchange"]');
   });
 
   it("fails the Founding Membership handoff closed", () => {
