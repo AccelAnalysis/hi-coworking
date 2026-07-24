@@ -25,15 +25,15 @@ const accountInitializeInputSchema = z.object({
     sms: z.boolean().default(false),
   }).strict().optional(),
   businessRepresentativeAttestation: z.boolean().optional(),
+  termsAccepted: z.boolean().optional(),
+  privacyAccepted: z.boolean().optional(),
   idempotencyKey: z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9_.:@-]+$/),
   registrationVersion: z.union([z.literal(1), z.literal(2)]).default(1),
 }).strict().superRefine((input, context) => {
   if (input.registrationVersion !== 2) return;
   for (const [value, path, message] of [
-    [input.displayName, "displayName", "Full name is required"],
-    [input.professionalTitle, "professionalTitle", "Professional title is required"],
-    [input.preferredPrivateEmail, "preferredPrivateEmail", "Preferred private email is required"],
-    [input.preferredPrivatePhone, "preferredPrivatePhone", "Preferred private telephone is required"],
+    [input.displayName, "displayName", "First and last name are required"],
+    [input.preferredPrivateEmail, "preferredPrivateEmail", "Email is required"],
   ] as const) {
     if (!value) context.addIssue({ code: "custom", path: [path], message });
   }
@@ -41,8 +41,14 @@ const accountInitializeInputSchema = z.object({
     context.addIssue({
       code: "custom",
       path: ["businessRepresentativeAttestation"],
-      message: "Business-representative attestation is required",
+      message: "Business registration is required",
     });
+  }
+  if (input.termsAccepted !== true) {
+    context.addIssue({ code: "custom", path: ["termsAccepted"], message: "Terms acceptance is required" });
+  }
+  if (input.privacyAccepted !== true) {
+    context.addIssue({ code: "custom", path: ["privacyAccepted"], message: "Privacy acknowledgement is required" });
   }
 });
 
@@ -62,6 +68,8 @@ type ProvisionAccountInput = {
     sms: boolean;
   };
   businessRepresentativeAttestation?: boolean;
+  termsAccepted?: boolean;
+  privacyAccepted?: boolean;
 };
 
 function normalizeEmail(email: string): string {
@@ -78,8 +86,8 @@ function keyHash(uid: string, key: string): string {
 
 /**
  * Idempotently creates or repairs the authoritative account and its private,
- * non-published profile shell. The role is accepted only from a trusted server
- * caller; browser input can never grant role, organization, or marketing state.
+ * non-published profile shell. Browser input can never grant role,
+ * organization authority, founder status, or premium access.
  */
 export async function provisionAccountDocuments(
   input: ProvisionAccountInput,
@@ -106,6 +114,7 @@ export async function provisionAccountDocuments(
     const profileVersion = Number.isInteger(previousProfile.profileVersion)
       ? Number(previousProfile.profileVersion)
       : 0;
+    const firstInitialization = !previousUser.accountInitializedAt;
 
     transaction.set(userRef, {
       uid: input.uid,
@@ -118,9 +127,20 @@ export async function provisionAccountDocuments(
       registrationVersion,
       ...(input.registrationVersion === 2 && input.businessRepresentativeAttestation === true
         ? {
-          businessRepresentativeAttestedAt:
-            previousUser.businessRepresentativeAttestedAt ?? now,
+          businessRepresentativeAttestedAt: previousUser.businessRepresentativeAttestedAt ?? now,
           businessRepresentativeAttestationVersion: 1,
+        }
+        : {}),
+      ...(input.registrationVersion === 2 && input.termsAccepted === true
+        ? {
+          termsAcceptedAt: previousUser.termsAcceptedAt ?? now,
+          termsVersion: previousUser.termsVersion ?? "current",
+        }
+        : {}),
+      ...(input.registrationVersion === 2 && input.privacyAccepted === true
+        ? {
+          privacyAcknowledgedAt: previousUser.privacyAcknowledgedAt ?? now,
+          privacyVersion: previousUser.privacyVersion ?? "current",
         }
         : {}),
       accountInitializedAt: previousUser.accountInitializedAt ?? now,
@@ -152,8 +172,20 @@ export async function provisionAccountDocuments(
       ...(profileSnapshot.exists ? {} : { profileSchemaVersion: PROFILE_SCHEMA_VERSION }),
       profileVersion,
       createdAt: previousProfile.createdAt ?? now,
-      updatedAt: previousProfile.updatedAt ?? now,
+      updatedAt: now,
     }, { merge: true });
+
+    if (firstInitialization) {
+      for (const event of ["registration_started", "registration_completed"]) {
+        const eventRef = db.collection("exchangeOnboardingEvents").doc();
+        transaction.set(eventRef, {
+          id: eventRef.id,
+          event,
+          uid: input.uid,
+          createdAt: now,
+        });
+      }
+    }
 
     return { idempotentReplay, role, profileVersion };
   });
@@ -211,6 +243,8 @@ export const account_initialize = onCall(async (request) => {
     preferredPrivatePhone: input.preferredPrivatePhone,
     communicationPreferences: input.communicationPreferences,
     businessRepresentativeAttestation: input.businessRepresentativeAttestation,
+    termsAccepted: input.termsAccepted,
+    privacyAccepted: input.privacyAccepted,
   });
 
   return {
