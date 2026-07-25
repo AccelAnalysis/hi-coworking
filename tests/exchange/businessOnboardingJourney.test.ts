@@ -8,6 +8,7 @@ const geographySearch = readFileSync("apps/web/src/features/exchange/onboarding/
 const activation = readFileSync("apps/functions/src/exchange/businessActivation.ts", "utf8");
 const founding = readFileSync("apps/web/src/app/exchange/founding/page.tsx", "utf8");
 const exchangePage = readFileSync("apps/web/src/app/exchange/page.tsx", "utf8");
+const enrichmentPage = readFileSync("apps/web/src/app/org/enrichment/page.tsx", "utf8");
 
 describe("RFxchange business onboarding journey", () => {
   it("keeps account registration lightweight and business-only", () => {
@@ -58,7 +59,7 @@ describe("RFxchange business onboarding journey", () => {
     expect(location).toBeGreaterThan(organization);
     expect(marker).toBeGreaterThan(location);
     expect(onboarding).toContain("Place My Business on the Exchange");
-    expect(onboarding).not.toContain("tab=enrichment");
+    expect(onboarding).not.toContain("enrichmentSearchFn");
   });
 
   it("completes organization search when a business is connected, created, or claimed", () => {
@@ -103,7 +104,17 @@ describe("RFxchange business onboarding journey", () => {
     expect(exchangePage).toContain("Enrich &amp; Complete Profile");
     expect(exchangePage).toContain("Explore the Exchange");
     expect(exchangePage).toContain("Founding Membership");
-    expect(exchangePage).toContain("tab=enrichment");
+    expect(exchangePage).toContain("/org/enrichment?organizationId=");
+  });
+
+  it("starts organization enrichment from trusted-source search and saves only selected identity suggestions", () => {
+    expect(enrichmentPage).toContain("enrichmentSearchFn");
+    expect(enrichmentPage).toContain("SAM.gov and USAspending");
+    expect(enrichmentPage).toContain("Select what to apply");
+    expect(enrichmentPage).toContain("selectedFields.includes");
+    expect(enrichmentPage).toContain("exchange_updateOrganizationProfile");
+    expect(enrichmentPage).toContain("does <strong>not</strong> verify your business");
+    expect(enrichmentPage).toContain("Continue to profile");
   });
 
   it("does not fire four progress writes merely because the success card rendered", () => {
