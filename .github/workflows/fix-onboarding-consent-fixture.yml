@@ -1,0 +1,54 @@
+name: One-shot onboarding consent fixture repair
+
+on:
+  push:
+    branches:
+      - codex/exchange-business-onboarding-journey
+
+permissions:
+  contents: write
+
+jobs:
+  patch-fixture:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-onboarding-journey
+          fetch-depth: 0
+
+      - name: Patch v2 consent fixture
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/functions/exchange-callables.test.ts')
+          text = path.read_text()
+          old = '''      communicationPreferences: { inApp: true, email: true, sms: false },
+                businessRepresentativeAttestation: true,
+                idempotencyKey: "business-registration-attempt-0001",
+          '''
+          new = '''      communicationPreferences: { inApp: true, email: true, sms: false },
+                businessRepresentativeAttestation: true,
+                termsAccepted: true,
+                privacyAccepted: true,
+                idempotencyKey: "business-registration-attempt-0001",
+          '''
+          if old not in text:
+              raise SystemExit('Expected registration fixture block was not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/fix-onboarding-consent-fixture.yml
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/functions/exchange-callables.test.ts .github/workflows/fix-onboarding-consent-fixture.yml
+          git commit -m "test(exchange): align registration repair fixture with v2 consent contract"
+          git push origin HEAD:codex/exchange-business-onboarding-journey
