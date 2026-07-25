@@ -1,0 +1,80 @@
+name: Apply account deletion integration
+
+on:
+  push:
+    branches:
+      - codex/exchange-business-onboarding-journey
+    paths:
+      - .github/workflows/apply-account-deletion.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/exchange-business-onboarding-journey
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Wire callable and account menu
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          index = Path("apps/functions/src/index.ts")
+          text = index.read_text()
+          anchor = 'import { account_initialize, provisionAccountDocuments } from "./accounts";'
+          replacement = anchor + '\nimport { account_delete } from "./accountDeletion";'
+          if 'from "./accountDeletion"' not in text:
+              if anchor not in text:
+                  raise SystemExit("account import anchor not found")
+              text = text.replace(anchor, replacement, 1)
+          export_anchor = '  account_initialize,\n  team_listMine,'
+          export_replacement = '  account_initialize,\n  account_delete,\n  team_listMine,'
+          if '  account_delete,\n  team_listMine,' not in text:
+              if export_anchor not in text:
+                  raise SystemExit("account export anchor not found")
+              text = text.replace(export_anchor, export_replacement, 1)
+          index.write_text(text)
+
+          shell = Path("apps/web/src/components/AppShell.tsx")
+          text = shell.read_text()
+          anchor = '''                          <Link href="/profile" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
+                            <Briefcase className="h-4 w-4 text-slate-400" /> Profile
+                          </Link>
+'''
+          addition = anchor + '''                          <Link href="/account" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
+                            <User className="h-4 w-4 text-slate-400" /> Account &amp; privacy
+                          </Link>
+'''
+          if 'href="/account"' not in text:
+              if anchor not in text:
+                  raise SystemExit("account menu anchor not found")
+              text = text.replace(anchor, addition, 1)
+          shell.write_text(text)
+
+          Path(".github/workflows/apply-account-deletion.yml").unlink()
+          PY
+
+      - run: npm ci
+      - run: npm run build:shared
+      - run: npm run build:functions
+      - run: npx vitest run tests/exchange/account-deletion-contract.test.ts
+      - run: SKIP_BOOKSTORE_SYNC=true npm run build --workspace web
+      - run: git diff --check
+
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/functions/src/index.ts apps/web/src/components/AppShell.tsx .github/workflows/apply-account-deletion.yml
+          git commit -m "feat(exchange): expose account deletion controls"
+          git push origin HEAD:codex/exchange-business-onboarding-journey
