@@ -17,7 +17,10 @@ describe("business registration and map activation", () => {
     expect(registration).toContain("privacyAccepted: true");
     expect(registration).toContain("registrationVersion: 2");
     expect(registration).toContain('router.replace("/exchange/onboarding")');
-    expect(registration).toContain("deleteUser(createdUser)");
+    expect(registration).toContain("rollbackNewAccount");
+    expect(registration).toContain('operation: "delete_account"');
+    expect(registration).toContain('reason: "automatic_registration_rollback"');
+    expect(registration).toContain("deleteUser(currentUser)");
     expect(registration).not.toContain("Complete account setup");
     expect(onboarding).toContain("listActorOrganizations()");
     expect(`${registration}\n${onboarding}`).not.toMatch(/Browse as individual|Skip for now|continue using the Exchange without one/i);
