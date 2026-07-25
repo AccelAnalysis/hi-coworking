@@ -337,7 +337,12 @@ export const exchange_getBusinessActivationState = onCall(async (request) => {
   setRecovered("locationId", orientation?.id);
   setRecovered("organizationSearchCompletedAt", Number(user.organizationSearchCompletedAt || 0) || undefined);
   setRecovered("addressConfirmedAt", location?.physicalAddress ? Date.now() : undefined);
-  setRecovered("geocodingCompletedAt", location?.geocode?.confirmedAt && validCoordinate(location.geocode.latitude, location.geocode.longitude) ? Number(location.geocode.confirmedAt) : undefined);
+  setRecovered(
+    "geocodingCompletedAt",
+    location?.geocode?.confirmedAt && validCoordinate(location.geocode.latitude, location.geocode.longitude)
+      ? Number(location.geocode.confirmedAt)
+      : undefined,
+  );
   if (organizationId && (user.mapActivationCompletedOrganizationIds as string[] | undefined)?.includes(organizationId)) {
     setRecovered("markerActivatedAt", Number(user.lastMapActivationCompletedAt || Date.now()));
     setRecovered("completedAt", Number(user.lastMapActivationCompletedAt || Date.now()));
@@ -477,7 +482,9 @@ export const exchange_recordBusinessActivationProgress = onCall(async (request) 
       if (!territory.exists) throw new HttpsError("not-found", "That community is not available on the Exchange");
       const status = territoryStatusSchema.safeParse(territory.get("status"));
       const type = territoryTypeSchema.safeParse(territory.get("type") ?? "county");
-      if (!status.success || !type.success) throw new HttpsError("failed-precondition", "That community is not configured for the Exchange");
+      if (!status.success || !type.success) {
+        throw new HttpsError("failed-precondition", "That community is not configured for the Exchange");
+      }
       patch.geography = {
         fips: input.data.fips,
         name: String(territory.get("name") || "Community"),
@@ -500,10 +507,12 @@ export const exchange_recordBusinessActivationProgress = onCall(async (request) 
       patch.organizationPath = "claim";
       patch.claimId = claimId;
       patch.claimStartedAt = Number(claim.get("createdAt") || now);
+      patch.organizationSearchCompletedAt = state.organizationSearchCompletedAt ?? now;
     } else if (input.data.action === "organization_selected" || input.data.action === "organization_created") {
       await loadOrgAuthority(transaction, store, input.data.organizationId, actor.uid, { managementRequired: false });
       patch.organizationId = input.data.organizationId;
       patch.organizationPath = input.data.action === "organization_created" ? "created" : "connected";
+      patch.organizationSearchCompletedAt = state.organizationSearchCompletedAt ?? now;
     } else if (input.data.action === "enrichment_reviewed") {
       await loadOrgAuthority(transaction, store, input.data.organizationId, actor.uid, { managementRequired: true });
       transaction.set(store.collection("orgs").doc(input.data.organizationId), {
@@ -513,14 +522,27 @@ export const exchange_recordBusinessActivationProgress = onCall(async (request) 
       }, { merge: true });
       patch.enrichmentOfferedAt = state.enrichmentOfferedAt ?? now;
       eventName = undefined;
-    } else if (["geocoding_failed", "profile_completion_offered", "enrichment_offered", "founding_membership_offered", "checkout_handoff_initiated", "onboarding_completed"].includes(input.data.action)) {
+    } else if ([
+      "geocoding_failed",
+      "profile_completion_offered",
+      "enrichment_offered",
+      "founding_membership_offered",
+      "checkout_handoff_initiated",
+      "onboarding_completed",
+    ].includes(input.data.action)) {
       await loadOrgAuthority(transaction, store, input.data.organizationId, actor.uid, { managementRequired: false });
-      if (input.data.action === "profile_completion_offered") patch.profileCompletionOfferedAt = state.profileCompletionOfferedAt ?? now;
+      if (input.data.action === "profile_completion_offered") {
+        patch.profileCompletionOfferedAt = state.profileCompletionOfferedAt ?? now;
+      }
       if (input.data.action === "enrichment_offered") patch.enrichmentOfferedAt = state.enrichmentOfferedAt ?? now;
-      if (input.data.action === "founding_membership_offered") patch.foundingMembershipOfferedAt = state.foundingMembershipOfferedAt ?? now;
+      if (input.data.action === "founding_membership_offered") {
+        patch.foundingMembershipOfferedAt = state.foundingMembershipOfferedAt ?? now;
+      }
       if (input.data.action === "checkout_handoff_initiated") patch.checkoutHandoffInitiatedAt = now;
       if (input.data.action === "onboarding_completed") {
-        if (!state.markerActivatedAt) throw new HttpsError("failed-precondition", "Activate the business marker before completing onboarding");
+        if (!state.markerActivatedAt) {
+          throw new HttpsError("failed-precondition", "Activate the business marker before completing onboarding");
+        }
         patch.completedAt = state.completedAt ?? now;
       }
     } else {
