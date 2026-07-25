@@ -1,11 +1,12 @@
 import * as admin from "firebase-admin";
 import { createHash, randomUUID } from "node:crypto";
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { type CallableRequest, HttpsError, onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { z } from "zod";
 import { parseCallableInput } from "./exchange/contracts";
 
 const deleteAccountInputSchema = z.object({
+  operation: z.literal("delete_account"),
   confirmation: z.literal("DELETE"),
   reason: z.string().trim().max(500).optional(),
 }).strict();
@@ -44,8 +45,6 @@ const USER_OWNED_QUERIES = [
   ["organizationSearchRateLimits", "uid"],
   ["organizationGeocodeRateLimits", "uid"],
 ] as const;
-
-type FirestoreData = FirebaseFirestore.DocumentData;
 
 function accountHash(uid: string): string {
   return createHash("sha256").update(`deleted-account:${uid}`).digest("hex");
@@ -148,7 +147,7 @@ async function deletePrivateStorage(uid: string, explicitPaths: Set<string>): Pr
   return deleted;
 }
 
-export const account_delete = onCall(async (request) => {
+export async function deleteAccountForRequest(request: CallableRequest<unknown>) {
   const requestId = randomUUID();
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required", {
@@ -216,8 +215,10 @@ export const account_delete = onCall(async (request) => {
   });
 
   return {
-    success: true,
+    success: true as const,
     firestoreRecordsDeleted,
     storageObjectsDeleted,
   };
-});
+}
+
+export const account_delete = onCall(deleteAccountForRequest);
