@@ -4,89 +4,25 @@ on:
   pull_request:
     paths:
       - "apps/functions/src/accounts.ts"
-      - "apps/functions/src/accountDeletion.ts"
-      - "apps/functions/src/index.ts"
       - "apps/functions/src/exchange/businessActivation.ts"
       - "apps/functions/src/exchange/businessActivation.test.ts"
-      - "apps/web/src/app/account/page.tsx"
       - "apps/web/src/app/login/page.tsx"
       - "apps/web/src/app/register/page.tsx"
       - "apps/web/src/app/exchange/onboarding/page.tsx"
       - "apps/web/src/app/exchange/page.tsx"
       - "apps/web/src/app/exchange/founding/page.tsx"
-      - "apps/web/src/components/AppShell.tsx"
       - "tests/exchange/**"
       - "docs/exchange/business-onboarding-journey.md"
-      - ".github/workflows/apply-account-deletion.yml"
       - ".github/workflows/exchange-onboarding-journey.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: codex/exchange-business-onboarding-journey
-          fetch-depth: 0
-
-      - name: Complete account deletion integration
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          index = Path("apps/functions/src/index.ts")
-          text = index.read_text()
-          import_anchor = 'import { account_initialize, provisionAccountDocuments } from "./accounts";'
-          if 'from "./accountDeletion"' not in text:
-              if import_anchor not in text:
-                  raise SystemExit("account import anchor not found")
-              text = text.replace(import_anchor, import_anchor + '\nimport { account_delete } from "./accountDeletion";', 1)
-          export_anchor = '  account_initialize,\n  team_listMine,'
-          if '  account_delete,\n  team_listMine,' not in text:
-              if export_anchor not in text:
-                  raise SystemExit("account export anchor not found")
-              text = text.replace(export_anchor, '  account_initialize,\n  account_delete,\n  team_listMine,', 1)
-          index.write_text(text)
-
-          shell = Path("apps/web/src/components/AppShell.tsx")
-          text = shell.read_text()
-          menu_anchor = '''                          <Link href="/profile" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
-                            <Briefcase className="h-4 w-4 text-slate-400" /> Profile
-                          </Link>
-'''
-          if 'href="/account"' not in text:
-              if menu_anchor not in text:
-                  raise SystemExit("account menu anchor not found")
-              text = text.replace(menu_anchor, menu_anchor + '''                          <Link href="/account" className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50 transition-colors">
-                            <User className="h-4 w-4 text-slate-400" /> Account &amp; privacy
-                          </Link>
-''', 1)
-          shell.write_text(text)
-
-          page = Path("apps/web/src/app/account/page.tsx")
-          text = page.read_text()
-          if '{ operation: "delete_account"; confirmation: "DELETE"; reason?: string },' not in text:
-              text = text.replace(
-                  '{ confirmation: "DELETE"; reason?: string },',
-                  '{ operation: "delete_account"; confirmation: "DELETE"; reason?: string },',
-                  1,
-              )
-          call_anchor = '''      await deleteAccount({
-        confirmation: "DELETE",
-'''
-          if '        operation: "delete_account",' not in text:
-              if call_anchor not in text:
-                  raise SystemExit("account deletion call anchor not found")
-              text = text.replace(call_anchor, '''      await deleteAccount({
-        operation: "delete_account",
-        confirmation: "DELETE",
-''', 1)
-          page.write_text(text)
-          PY
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -138,13 +74,3 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
         run: npm run build --workspace web
       - run: git diff --check
-
-      - name: Commit completed integration and restore CI
-        run: |
-          git checkout HEAD^ -- .github/workflows/exchange-onboarding-journey.yml
-          git rm -f .github/workflows/apply-account-deletion.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/functions/src/index.ts apps/web/src/components/AppShell.tsx apps/web/src/app/account/page.tsx .github/workflows/exchange-onboarding-journey.yml
-          git commit -m "feat(exchange): complete account deletion integration"
-          git push origin HEAD:codex/exchange-business-onboarding-journey
