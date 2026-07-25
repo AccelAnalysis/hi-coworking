@@ -9,7 +9,7 @@ import { auth, functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
 import { Loader2 } from "lucide-react";
 
-const getActivationState = httpsCallable<Record<string, never>, { currentStep: string }>(
+const getActivationState = httpsCallable<Record<string, never>, { currentStep: string; safeResumeRoute: string }>(
   functions,
   "exchange_getBusinessActivationState",
 );
@@ -41,18 +41,19 @@ export default function LoginPage() {
     try {
       await signIn(email.trim().toLowerCase(), password);
       try {
-        const state = await getActivationState({});
+        let state = await getActivationState({});
         if (state.data.currentStep === "account") {
           repairKey.current ??= `signin-repair-${crypto.randomUUID()}`;
           await repairAccount({ idempotencyKey: repairKey.current, registrationVersion: 1 });
           await auth.currentUser?.getIdToken(true);
-          router.replace("/exchange/onboarding");
-        } else {
-          router.replace("/exchange");
+          state = await getActivationState({});
         }
+        router.replace(state.data.safeResumeRoute || (state.data.currentStep === "completed" ? "/exchange" : "/exchange/onboarding"));
       } catch (routingError) {
         console.warn("Post-sign-in routing check failed", routingError);
-        router.replace("/exchange");
+        // Do not bounce through the Exchange workspace just to be redirected again.
+        // Onboarding can reconstruct progress from the authoritative server state.
+        router.replace("/exchange/onboarding");
       }
     } catch (value: unknown) {
       console.error(value);
