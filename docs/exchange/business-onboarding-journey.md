@@ -48,19 +48,20 @@ The browser should not expose extra workflow screens merely because several serv
      - Open Founding Membership
 
 4. Optional post-marker routes
-   - `/org/settings?id={organizationId}&tab=enrichment&onboarding=complete`
-   - `/org/settings?id={organizationId}&tab=profile`
+   - `/org/enrichment?organizationId={organizationId}`
+   - `/org/settings?id={organizationId}&tab=profile&onboarding=complete`
    - `/exchange/founding?organizationId={organizationId}`
 
 ## Sign-in and resume behavior
 
 A returning user signs in once and the server resolves the authoritative resume route.
 
-- Completed onboarding routes directly to the Exchange.
-- Incomplete onboarding routes directly to `/exchange/onboarding`.
+- Completed v2 onboarding routes directly to the Exchange.
+- Incomplete v2 onboarding routes directly to `/exchange/onboarding`.
+- Legacy pre-v2 accounts remain eligible to enter the Exchange without being unexpectedly forced through the new guided activation journey.
 - Legacy accounts missing account documents are repaired automatically with `account_initialize`, then re-evaluated.
 - There is no `/register?resume=1` or **Complete account setup** detour.
-- The application should not route an incomplete user through the Exchange workspace simply to redirect them back to onboarding.
+- The application should not route an incomplete v2 user through the Exchange workspace simply to redirect them back to onboarding.
 
 ## Authoritative state
 
@@ -100,7 +101,7 @@ The single onboarding state is `users/{uid}.exchangeOnboarding`:
 
 Canonical organization, membership, claim, establishment, geocode, payment, and public-projection records remain authoritative for their own domains. The state getter reconstructs missing onboarding milestones from those records rather than maintaining a competing browser workflow state.
 
-`welcomeAcknowledgedAt` is retained for backward compatibility and analytics. It is not a separate visible onboarding page.
+`welcomeAcknowledgedAt` is retained as a compatibility milestone, but it is not a separate visible onboarding page. New v2 accounts receive the milestone during authoritative account initialization so the first user decision is Community.
 
 ## Performance contract
 
@@ -203,13 +204,25 @@ It then:
 
 ## Post-marker enrichment
 
-The primary profile-completion CTA is **Enrich & Complete Profile** and opens the Enrichment tab first.
+The primary profile-completion CTA is **Enrich & Complete Profile** and opens `/org/enrichment?organizationId={organizationId}`.
 
-The intended sequence is:
+The guided sequence is:
 
-`search trusted enrichment sources → review proposed business data → accept selected fields → manually complete anything enrichment could not supply`
+`search trusted sources → review a candidate → select individual identity fields → apply selected fields to the organization → manually complete anything enrichment could not supply`
 
-UEI, CAGE, DUNS, capabilities, certifications, and richer organization identity are therefore not prerequisites for the first marker value moment.
+The organization enrichment page:
+
+- uses the existing protected `enrichment_search` callable and its SAM.gov/USAspending providers;
+- seeds the search from the already-confirmed organization name, location, domain, and known identifiers;
+- displays confidence and provider attribution as matching aids, not as verification;
+- allows the representative to accept or reject each available identity field;
+- saves accepted legal-name/UEI/CAGE/DUNS suggestions through the existing server-authoritative organization profile update callable;
+- preserves all unchecked organization values;
+- never grants verification, ownership, Founding status, or premium permissions.
+
+After enrichment, the user continues to the organization profile for description, industries, capabilities, certifications, media, documents, and any identity fields a source could not supply.
+
+UEI, CAGE, DUNS, capabilities, certifications, and richer organization identity are not prerequisites for the first marker value moment.
 
 ## Founding Membership boundary
 
@@ -224,13 +237,15 @@ The handoff carries:
 - Founding Member status;
 - founder reservation state when present.
 
-Founding checkout requires the actor to have organization billing authority and onboarding to be complete. Business verification is not a prerequisite to purchase Founding Membership itself; verification remains available to gate protected operational actions such as credit purchasing and other trust-sensitive workflows.
+Founding checkout requires organization billing authority and prior organization marker activation. The server checks marker completion from authoritative user activation records rather than trusting a client flag. Business verification is not a prerequisite to purchase Founding Membership itself; verification remains required for protected credit purchasing and other trust-sensitive workflows.
 
-Checkout uses `stripe_createExchangeMembershipCheckout`. The UI and server fail closed when policy, price, Stripe configuration, capacity, authority, or completed onboarding is unavailable. No premium permissions are activated until Stripe confirms the subscription through the webhook-backed membership state.
+The wallet does not bypass this post-marker handoff; nonmembers are routed through the Founding Membership page where current eligibility and pricing are evaluated before Stripe opens.
+
+Checkout uses `stripe_createExchangeMembershipCheckout`. The UI and server fail closed when policy, price, Stripe configuration, capacity, authority, or marker completion is unavailable. No premium permissions are activated until Stripe confirms the subscription through the webhook-backed membership state.
 
 ## Analytics
 
-Structured events are written without password, address, token, or sensitive identifier payloads. Events include registration, geography selection, organization search/selection/creation/claim, geocoding outcomes, marker activation, enrichment offer, Founding offer, and checkout handoff.
+Structured events are written without password, address, token, or sensitive identifier payloads. Events include registration, geography selection, organization search/selection/creation/claim, geocoding outcomes, marker activation, enrichment offer/review, Founding offer, and checkout handoff.
 
 Analytics must not add blocking network hops to the visible journey.
 
@@ -243,10 +258,13 @@ Source completion is not production completion. Before the journey is marked don
 3. record the deployed commit SHA;
 4. hard refresh and verify the current bundle;
 5. create a genuinely new account and complete the entire path through marker activation;
-6. test an existing incomplete account and confirm direct resume without redirect loops;
-7. test arbitrary geography search, released territory selection, scheduled territory handling, and an unmanaged location;
-8. execute two-account public, approximate, locality-only, and private visibility tests;
-9. execute mobile and desktop acceptance tests;
-10. inspect console and network logs for repeated HTTP 400 responses or unnecessary duplicate calls;
-11. verify Founding checkout from a newly created owner organization when checkout policy is open;
-12. capture required screenshots from the deployed environment.
+6. test an existing incomplete v2 account and confirm direct resume without redirect loops;
+7. confirm a legacy pre-v2 account can still enter the Exchange;
+8. test arbitrary geography search, released territory selection, scheduled territory handling, and an unmanaged location;
+9. execute two-account public, approximate, locality-only, and private visibility tests;
+10. test organization enrichment from trusted-source search through selected-field application and manual profile completion;
+11. execute mobile and desktop acceptance tests;
+12. inspect console and network logs for repeated HTTP 400 responses or unnecessary duplicate calls;
+13. verify Founding checkout from a newly created owner organization when checkout policy is open;
+14. confirm direct wallet access cannot bypass the marker prerequisite;
+15. capture required screenshots from the deployed environment.
