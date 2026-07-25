@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -13,6 +13,10 @@ const getActivationState = httpsCallable<Record<string, never>, { currentStep: s
   functions,
   "exchange_getBusinessActivationState",
 );
+const repairAccount = httpsCallable<
+  { idempotencyKey: string; registrationVersion: 1 },
+  { accountInitialized: boolean }
+>(functions, "account_initialize");
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,25 +27,39 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetSending, setResetSending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const repairKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    router.prefetch("/exchange");
+    router.prefetch("/exchange/onboarding");
+  }, [router]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await signIn(email, password);
+      await signIn(email.trim().toLowerCase(), password);
       try {
         const state = await getActivationState({});
-        router.push(state.data.currentStep === "account" ? "/register?resume=1" : "/exchange");
-      } catch {
-        router.push("/exchange");
+        if (state.data.currentStep === "account") {
+          repairKey.current ??= `signin-repair-${crypto.randomUUID()}`;
+          await repairAccount({ idempotencyKey: repairKey.current, registrationVersion: 1 });
+          await auth.currentUser?.getIdToken(true);
+          router.replace("/exchange/onboarding");
+        } else {
+          router.replace("/exchange");
+        }
+      } catch (routingError) {
+        console.warn("Post-sign-in routing check failed", routingError);
+        router.replace("/exchange");
       }
     } catch (value: unknown) {
       console.error(value);
       const firebaseError = value as { code?: string };
       setError(firebaseError.code === "auth/invalid-credential"
-        ? "Invalid email or password."
-        : "Failed to sign in. Please try again.");
+        ? "The email or password is incorrect."
+        : "Sign-in could not be completed. Try again.");
     } finally {
       setLoading(false);
     }
@@ -64,7 +82,7 @@ export default function LoginPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700" htmlFor="email">Email</label>
-              <input id="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900" placeholder="you@company.com" />
+              <input id="email" type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900" placeholder="you@company.com" />
             </div>
 
             <div className="space-y-1.5">
@@ -81,7 +99,7 @@ export default function LoginPage() {
                     setResetSending(true);
                     setError("");
                     try {
-                      await sendPasswordResetEmail(auth, email);
+                      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
                       setResetSent(true);
                     } catch {
                       setError("Failed to send reset email. Please check the address.");
@@ -94,7 +112,7 @@ export default function LoginPage() {
                   {resetSending ? "Sending..." : resetSent ? "Reset email sent!" : "Forgot password?"}
                 </button>
               </div>
-              <input id="password" type="password" required value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900" />
+              <input id="password" type="password" required autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900" />
             </div>
 
             <button type="submit" disabled={loading} className="flex h-10 w-full items-center justify-center rounded-full bg-slate-900 font-semibold text-white shadow-lg shadow-slate-900/20 transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70">
