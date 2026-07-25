@@ -89,6 +89,17 @@ export const stripe_createExchangeMembershipCheckout = onCall(
       actor,
       requiredPermission: "manage_billing",
     });
+    // Marker activation is an organization-level launch prerequisite. Any
+    // authorized owner/admin may purchase after any authorized representative
+    // has completed the organization's map activation; the checkout does not
+    // rely on a forgeable client-side onboarding flag.
+    const activation = await getDb().collection("users")
+      .where("mapActivationCompletedOrganizationIds", "array-contains", input.organizationId)
+      .limit(1)
+      .get();
+    if (activation.empty) {
+      throw new HttpsError("failed-precondition", "Complete business marker activation before Founding enrollment");
+    }
     if (founding.foundingCapacity) {
       const foundingCount = await getDb().collection("exchangeMemberships").where("isFoundingMember", "==", true).limit(founding.foundingCapacity).get();
       if (foundingCount.size >= founding.foundingCapacity) throw new HttpsError("resource-exhausted", "Founding capacity is full");
@@ -209,7 +220,7 @@ export const stripe_createExchangeCreditPackCheckout = onCall(
       organizationId: input.organizationId,
       purchaserUid: actor.uid,
       type: "credit_pack",
-      key: pack.key,
+      key: input.key,
       credits: pack.credits,
       amountCents: pack.amountCents,
       currency: pack.currency,
