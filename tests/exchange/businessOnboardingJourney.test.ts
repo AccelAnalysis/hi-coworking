@@ -8,6 +8,7 @@ const geographySearch = readFileSync("apps/web/src/features/exchange/onboarding/
 const activation = readFileSync("apps/functions/src/exchange/businessActivation.ts", "utf8");
 const founding = readFileSync("apps/web/src/app/exchange/founding/page.tsx", "utf8");
 const exchangePage = readFileSync("apps/web/src/app/exchange/page.tsx", "utf8");
+const exchangeWorkspace = readFileSync("apps/web/src/features/exchange/components/ExchangeWorkspace.tsx", "utf8");
 const enrichmentPage = readFileSync("apps/web/src/app/org/enrichment/page.tsx", "utf8");
 
 describe("RFxchange business onboarding journey", () => {
@@ -34,6 +35,14 @@ describe("RFxchange business onboarding journey", () => {
     expect(registration).toContain("deleteUser(currentUser)");
     expect(registration).toContain("No partial account was kept");
     expect(registration).not.toContain("Complete account setup");
+  });
+
+  it("does not retry a deterministic registration-contract rejection", () => {
+    expect(registration).toContain("shouldRetryInitialization");
+    expect(registration).toContain('diagnostic?.category === "validation"');
+    expect(registration).toContain("if (!shouldRetryInitialization(firstDiagnostic)) throw firstError");
+    expect(registration).toContain("serverCleanupRequired: !isRegistrationContractMismatch(diagnostic)");
+    expect(registration).toContain("account service is being updated");
   });
 
   it("starts the visible setup at Community rather than a separate welcome gate", () => {
@@ -108,6 +117,14 @@ describe("RFxchange business onboarding journey", () => {
     expect(exchangePage).toContain("Explore the Exchange");
     expect(exchangePage).toContain("Founding Membership");
     expect(exchangePage).toContain("/org/enrichment?organizationId=");
+  });
+
+  it("mounts only the active Exchange workspace", () => {
+    for (const view of ["opportunities", "referrals", "intelligence", "resources"]) {
+      expect(exchangeWorkspace).toContain(`activeView === "${view}" ? (`);
+    }
+    expect(exchangeWorkspace).not.toContain('activeView === "referrals" ? "h-full min-h-0" : "hidden"');
+    expect(exchangeWorkspace).not.toContain('aria-hidden={activeView !== "referrals"}');
   });
 
   it("starts organization enrichment from trusted-source search and saves only selected identity suggestions", () => {
