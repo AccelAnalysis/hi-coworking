@@ -20,25 +20,33 @@ describe("account deletion contract", () => {
       "profiles",
       "publicProfiles",
       "orgMembers",
+      "organizationClaims",
       "notifications",
       "savedExchangeItems",
+      "enrichmentRequests",
+      "enrichmentRateLimit",
       "verificationDocuments",
       "exchangeOnboardingEvents",
     ]) {
       expect(callable).toContain(`"${collection}"`);
     }
+    expect(callable).toContain('["organizationClaims", "requestedBy"]');
     expect(callable).not.toContain('db.collection("orgs").doc(orgId).delete');
   });
 
-  it("routes deletion through the existing account callable", async () => {
-    const [accounts, page] = await Promise.all([
+  it("routes deletion and automatic registration rollback through the existing account callable", async () => {
+    const [accounts, page, registration] = await Promise.all([
       source("apps/functions/src/accounts.ts"),
       source("apps/web/src/app/account/page.tsx"),
+      source("apps/web/src/app/register/page.tsx"),
     ]);
     expect(accounts).toContain('operation === "delete_account"');
     expect(accounts).toContain("deleteAccountForRequest(request)");
     expect(page).toContain('(functions, "account_initialize")');
     expect(page).toContain('operation: "delete_account"');
+    expect(registration).toContain("rollbackNewAccount");
+    expect(registration).toContain('reason: "automatic_registration_rollback"');
+    expect(registration).toContain('(functions, "account_initialize")');
   });
 
   it("exposes a destructive confirmation UI from the authenticated dashboard", async () => {
