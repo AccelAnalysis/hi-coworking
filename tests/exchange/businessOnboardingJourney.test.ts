@@ -20,12 +20,17 @@ describe("RFxchange business onboarding journey", () => {
     expect(registration).not.toContain("professionalTitle");
   });
 
-  it("recovers an authenticated account whose initialization was interrupted", () => {
+  it("repairs interrupted accounts automatically without a manual setup detour", () => {
     expect(login).toContain('state.data.currentStep === "account"');
-    expect(login).toContain('"/register?resume=1"');
-    expect(registration).toContain('get("resume") === "1"');
-    expect(registration).toContain("Complete account setup");
-    expect(registration).toContain("readOnly={initializationPending}");
+    expect(login).toContain("repairAccount");
+    expect(login).toContain("registrationVersion: 1");
+    expect(login).toContain('router.replace("/exchange/onboarding")');
+    expect(login).not.toContain('"/register?resume=1"');
+    expect(registration).toContain("deleteUser(createdUser)");
+    expect(registration).toContain("No partial account was kept");
+    expect(registration).not.toContain('get("resume") === "1"');
+    expect(registration).not.toContain("Complete account setup");
+    expect(registration).not.toContain("initializationPending");
   });
 
   it("places geography and marker activation before optional enrichment", () => {
