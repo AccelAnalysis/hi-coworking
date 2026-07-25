@@ -28,7 +28,10 @@ describe("RFxchange business onboarding journey", () => {
     expect(login).toContain("registrationVersion: 1");
     expect(login).toContain("state.data.safeResumeRoute");
     expect(login).not.toContain('"/register?resume=1"');
-    expect(registration).toContain("deleteUser(createdUser)");
+    expect(registration).toContain("rollbackNewAccount");
+    expect(registration).toContain('operation: "delete_account"');
+    expect(registration).toContain('reason: "automatic_registration_rollback"');
+    expect(registration).toContain("deleteUser(currentUser)");
     expect(registration).toContain("No partial account was kept");
     expect(registration).not.toContain("Complete account setup");
   });
