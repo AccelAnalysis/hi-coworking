@@ -503,6 +503,8 @@ describe("authoritative account initialization", () => {
       preferredPrivatePhone: "+1 757 555 0199",
       communicationPreferences: { inApp: true, email: true, sms: false },
       businessRepresentativeAttestation: true,
+      termsAccepted: true,
+      privacyAccepted: true,
       idempotencyKey: "business-registration-attempt-0001",
       registrationVersion: 2,
     });
