@@ -9,7 +9,6 @@ import { getOrg, getUserOrgs } from "@/lib/firestore";
 import {
   createExchangeBillingPortalSessionFn,
   createExchangeCreditPackCheckoutFn,
-  createExchangeMembershipCheckoutFn,
   getExchangeOrganizationWalletFn,
   getExchangePublicCommercialPolicyFn,
   type ExchangePublicCommercialConfiguration,
@@ -69,16 +68,14 @@ function WalletContent() {
 
   useEffect(() => { void loadWallet(); }, [loadWallet]);
 
-  const openCheckout = async (kind: "membership" | "pack" | "portal", key?: string) => {
+  const openCheckout = async (kind: "pack" | "portal", key?: string) => {
     if (!organizationId) return;
     setAction(`${kind}:${key ?? ""}`);
     setError(null);
     try {
-      const result = kind === "membership"
-        ? await createExchangeMembershipCheckoutFn({ organizationId, key: "exchange_founding", returnPath: "/exchange/wallet" })
-        : kind === "pack"
-          ? await createExchangeCreditPackCheckoutFn({ organizationId, key: key!, returnPath: "/exchange/wallet" })
-          : await createExchangeBillingPortalSessionFn({ organizationId, returnPath: "/exchange/wallet" });
+      const result = kind === "pack"
+        ? await createExchangeCreditPackCheckoutFn({ organizationId, key: key!, returnPath: "/exchange/wallet" })
+        : await createExchangeBillingPortalSessionFn({ organizationId, returnPath: "/exchange/wallet" });
       window.location.assign(result.data.url);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The billing action is unavailable.");
@@ -116,7 +113,7 @@ function WalletContent() {
                 </div>
               </div>
 
-              <aside className="rounded-3xl border border-slate-200 bg-white p-6"><h2 className="text-xl font-black">Membership</h2><p className="mt-2 text-sm leading-6 text-slate-600">Founding recognition and active paid entitlements are tracked separately. Physical coworking access is not included.</p>{wallet.entitlements.tier === "founding" ? <button disabled={!wallet.entitlements.permissions.includes("manage_billing") || action !== null} onClick={() => openCheckout("portal")} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"><CreditCard className="h-4 w-4" /> {action?.startsWith("portal") ? "Opening…" : "Manage billing"}</button> : <button disabled={!configuration.foundingMembership.checkoutReady || !wallet.entitlements.permissions.includes("manage_billing") || action !== null} onClick={() => openCheckout("membership")} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300">{action?.startsWith("membership") ? "Opening…" : configuration.foundingMembership.checkoutReady ? "Enroll as a Founding Member" : "Founding enrollment not open"}</button>}<Link href={`/exchange/founding?organizationId=${encodeURIComponent(organizationId)}`} className="mt-3 block text-center text-sm font-bold text-indigo-700">Review Founding Membership</Link></aside>
+              <aside className="rounded-3xl border border-slate-200 bg-white p-6"><h2 className="text-xl font-black">Membership</h2><p className="mt-2 text-sm leading-6 text-slate-600">Founding recognition and active paid entitlements are tracked separately. Physical coworking access is not included.</p>{wallet.entitlements.tier === "founding" ? <button disabled={!wallet.entitlements.permissions.includes("manage_billing") || action !== null} onClick={() => openCheckout("portal")} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"><CreditCard className="h-4 w-4" /> {action?.startsWith("portal") ? "Opening…" : "Manage billing"}</button> : <Link href={`/exchange/founding?organizationId=${encodeURIComponent(organizationId)}`} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white">Review Founding Membership <ArrowRight className="h-4 w-4" /></Link>}<p className="mt-3 text-center text-xs leading-5 text-slate-500">Founding enrollment is completed through the governed post-marker handoff so eligibility and current pricing are checked before Stripe opens.</p></aside>
             </section>
 
             <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6"><h2 className="text-xl font-black">Credit packs</h2><div className="mt-5 grid gap-4 sm:grid-cols-3">{wallet.packs.map((pack) => <article key={pack.key} className="rounded-2xl border border-slate-200 p-5"><p className="text-3xl font-black">{pack.credits}</p><p className="text-sm text-slate-500">Exchange credits</p><p className="mt-4 text-lg font-black">${(pack.amountCents / 100).toFixed(2)}</p><button disabled={!pack.checkoutReady || wallet.entitlements.verificationStatus !== "verified" || !wallet.entitlements.permissions.includes("purchase_credits") || action !== null} onClick={() => openCheckout("pack", pack.key)} className="mt-4 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400">{action === `pack:${pack.key}` ? "Opening…" : pack.checkoutReady ? "Purchase" : "Purchasing not open"}</button></article>)}</div></section>
