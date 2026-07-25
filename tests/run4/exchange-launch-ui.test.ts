@@ -17,14 +17,18 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(exchangeRoute).not.toContain('../rfx/page');
   });
 
-  it("sends new representatives into mandatory organization activation while preserving sign-in resume", () => {
+  it("sends new representatives into mandatory organization activation and repairs interrupted sign-ins automatically", () => {
     const login = read("apps/web/src/app/login/page.tsx");
     const register = read("apps/web/src/app/register/page.tsx");
     const exchange = read("apps/web/src/app/exchange/page.tsx");
-    expect(login).toContain('router.push("/exchange")');
-    expect(register).toContain('router.push("/exchange/onboarding")');
-    expect(register).toContain("accountInitializeFn");
+    expect(login).toContain('router.replace("/exchange")');
+    expect(login).toContain("repairAccount");
+    expect(login).toContain('router.replace("/exchange/onboarding")');
+    expect(register).toContain('router.replace("/exchange/onboarding")');
+    expect(register).toContain("initializeAccount");
+    expect(register).toContain("deleteUser(createdUser)");
     expect(register).toContain("businessRepresentativeAttestation");
+    expect(register).not.toContain("Complete account setup");
     expect(register).not.toMatch(/Connecting an organization remains optional/i);
     expect(exchange).toContain("guidedActivationRequired");
     expect(exchange).toContain("activationReady");
