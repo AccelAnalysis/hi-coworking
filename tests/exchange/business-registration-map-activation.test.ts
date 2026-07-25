@@ -10,7 +10,7 @@ const source = (path: string) => readFileSync(resolve(root, path), "utf8");
 describe("business registration and map activation", () => {
   it("requires business registration acknowledgement and offers no individual bypass", () => {
     const registration = source("apps/web/src/app/register/page.tsx");
-    const onboarding = source("apps/web/src/app/exchange/onboarding/page.tsx");
+    const onboarding = source("apps/web/src/features/exchange/onboarding/StreamlinedOnboarding.tsx");
     expect(registration).toContain("I am registering a business or organization");
     expect(registration).toContain("businessRepresentativeAttestation: true");
     expect(registration).toContain("termsAccepted: true");
@@ -20,8 +20,29 @@ describe("business registration and map activation", () => {
     expect(registration).toContain("deleteUser(createdUser)");
     expect(registration).not.toContain("Complete account setup");
     expect(onboarding).toContain("listActorOrganizations()");
-    expect(onboarding).not.toContain("getUserOrgs");
     expect(`${registration}\n${onboarding}`).not.toMatch(/Browse as individual|Skip for now|continue using the Exchange without one/i);
+  });
+
+  it("starts at community selection and searches beyond the initial released cards", () => {
+    const onboarding = source("apps/web/src/features/exchange/onboarding/StreamlinedOnboarding.tsx");
+    const geography = source("apps/web/src/features/exchange/onboarding/geographySearch.ts");
+    expect(onboarding).toContain("Step {Math.max(currentIndex + 1, 1)} of 3");
+    expect(onboarding).toContain("City, county, ZIP code, or locality");
+    expect(onboarding).not.toContain("Add My Business");
+    expect(geography).toContain("api.mapbox.com/search/geocode/v6/forward");
+    expect(geography).toContain('"postcode,place,district,region"');
+    expect(geography).toContain("community is not yet configured");
+  });
+
+  it("uses marker activation as the authoritative completion transaction", () => {
+    const onboarding = source("apps/web/src/features/exchange/onboarding/StreamlinedOnboarding.tsx");
+    expect(onboarding).toContain('action: "marker_activated"');
+    expect(onboarding).not.toContain('action: "address_confirmed"');
+    expect(onboarding).not.toContain('action: "geocoding_completed"');
+    expect(onboarding).toContain("Marker activation is the authoritative completion transaction");
+    expect(onboarding).toContain('z: "17.2"');
+    expect(onboarding).toContain('p: "52"');
+    expect(onboarding).toContain("Place My Business on the Exchange");
   });
 
   it("permits a governed claim without granting pending authority", () => {
