@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 
 const registration = readFileSync("apps/web/src/app/register/page.tsx", "utf8");
 const login = readFileSync("apps/web/src/app/login/page.tsx", "utf8");
-const onboarding = readFileSync("apps/web/src/app/exchange/onboarding/page.tsx", "utf8");
+const onboarding = readFileSync("apps/web/src/features/exchange/onboarding/StreamlinedOnboarding.tsx", "utf8");
+const geographySearch = readFileSync("apps/web/src/features/exchange/onboarding/geographySearch.ts", "utf8");
 const activation = readFileSync("apps/functions/src/exchange/businessActivation.ts", "utf8");
 const founding = readFileSync("apps/web/src/app/exchange/founding/page.tsx", "utf8");
 const exchangePage = readFileSync("apps/web/src/app/exchange/page.tsx", "utf8");
@@ -20,17 +21,31 @@ describe("RFxchange business onboarding journey", () => {
     expect(registration).not.toContain("professionalTitle");
   });
 
-  it("repairs interrupted accounts automatically without a manual setup detour", () => {
+  it("repairs interrupted accounts and routes directly to the authoritative resume target", () => {
     expect(login).toContain('state.data.currentStep === "account"');
     expect(login).toContain("repairAccount");
     expect(login).toContain("registrationVersion: 1");
-    expect(login).toContain('router.replace("/exchange/onboarding")');
+    expect(login).toContain("state.data.safeResumeRoute");
     expect(login).not.toContain('"/register?resume=1"');
     expect(registration).toContain("deleteUser(createdUser)");
     expect(registration).toContain("No partial account was kept");
-    expect(registration).not.toContain('get("resume") === "1"');
     expect(registration).not.toContain("Complete account setup");
-    expect(registration).not.toContain("initializationPending");
+  });
+
+  it("starts the visible setup at Community rather than a separate welcome gate", () => {
+    expect(onboarding).toContain('type Step = "geography" | "organization" | "claim" | "location"');
+    expect(onboarding).toContain("Step {Math.max(currentIndex + 1, 1)} of 3");
+    expect(onboarding).toContain("Welcome to The RFxchange");
+    expect(onboarding).not.toContain("Add My Business");
+    expect(onboarding).toContain('action: "welcome_acknowledged"');
+  });
+
+  it("supports unrestricted place search while retaining managed territory authority", () => {
+    expect(onboarding).toContain("Search any U.S. city, county, ZIP code, or locality");
+    expect(geographySearch).toContain("api.mapbox.com/search/geocode/v6/forward");
+    expect(geographySearch).toContain('"postcode,place,district,region"');
+    expect(geographySearch).toContain("matchManagedTerritory");
+    expect(onboarding).toContain('action: "geography_selected"');
   });
 
   it("places geography and marker activation before optional enrichment", () => {
@@ -63,6 +78,13 @@ describe("RFxchange business onboarding journey", () => {
     expect(onboarding).toContain('action: "geocoding_failed"');
   });
 
+  it("uses one marker progress call instead of serial address/geocode progress calls", () => {
+    expect(onboarding).toContain('action: "marker_activated"');
+    expect(onboarding).not.toContain('action: "address_confirmed"');
+    expect(onboarding).not.toContain('action: "geocoding_completed"');
+    expect(onboarding).toContain("authoritative completion transaction");
+  });
+
   it("persists a marker with distinct public privacy modes", () => {
     for (const mode of ["exact", "approximate", "locality", "private"]) {
       expect(activation).toContain(`"${mode}"`);
@@ -73,13 +95,21 @@ describe("RFxchange business onboarding journey", () => {
     expect(activation).toContain("private_home_suppressed");
   });
 
-  it("opens the map in 3D before profile or membership conversion", () => {
+  it("opens the map in 3D before enrichment or membership conversion", () => {
     expect(onboarding).toContain('z: "17.2"');
     expect(onboarding).toContain('p: "52"');
     expect(onboarding).toContain('onboardingSuccess: "1"');
     expect(exchangePage).toContain("Your business is now on The RFxchange.");
-    expect(exchangePage).toContain("Complete My Profile");
+    expect(exchangePage).toContain("Enrich &amp; Complete Profile");
     expect(exchangePage).toContain("Explore the Exchange");
+    expect(exchangePage).toContain("Founding Membership");
+    expect(exchangePage).toContain("tab=enrichment");
+  });
+
+  it("does not fire four progress writes merely because the success card rendered", () => {
+    expect(exchangePage).not.toContain("Promise.allSettled");
+    expect(exchangePage).not.toContain('action: "onboarding_completed"');
+    expect(exchangePage).toContain("recordOffer");
   });
 
   it("allows public exploration while a governed claim remains pending", () => {
