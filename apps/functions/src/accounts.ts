@@ -4,6 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { parseCallableInput } from "./exchange/contracts";
 import { PROFILE_SCHEMA_VERSION } from "./profileModel";
+import { deleteAccountForRequest } from "./accountDeletion";
 
 const PLATFORM_ROLES = new Set([
   "master",
@@ -192,6 +193,14 @@ export async function provisionAccountDocuments(
 }
 
 export const account_initialize = onCall(async (request) => {
+  if (
+    request.data
+    && typeof request.data === "object"
+    && (request.data as { operation?: unknown }).operation === "delete_account"
+  ) {
+    return deleteAccountForRequest(request);
+  }
+
   const requestId = randomUUID();
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Authentication is required", {
