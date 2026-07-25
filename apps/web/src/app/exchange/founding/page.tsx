@@ -77,14 +77,14 @@ function FoundingMembership() {
       setState(activation.data);
       setConfiguration(policy.data.configuration);
       if (activation.data.organizationId) {
-        void recordProgress({ action: "founding_membership_offered", organizationId: activation.data.organizationId });
+        void recordProgress({ action: "founding_membership_offered", organizationId: activation.data.organizationId }).catch(() => undefined);
       }
     }).catch(() => active && setError("Founding Membership information is temporarily unavailable."))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [requestedOrganizationId]);
 
-  if (loading) return <AppShell><main className="grid min-h-[70dvh] place-items-center bg-[#F7F3EA]"><div role="status" className="text-center"><Loader2 className="mx-auto h-9 w-9 animate-spin text-[#D6A23A]" /><p className="mt-3 font-semibold text-slate-700">Loading Founding Membership…</p></div></main></AppShell>;
+  if (loading) return <AppShell><main className="grid min-h-[55dvh] place-items-center bg-[#F7F3EA]"><div role="status" className="text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-[#D6A23A]" /><p className="mt-3 text-sm font-semibold text-slate-700">Loading Founding Membership…</p></div></main></AppShell>;
 
   const organizationId = state?.organizationId || requestedOrganizationId || "";
   const handoff = state?.foundingMembershipHandoff;
@@ -112,7 +112,7 @@ function FoundingMembership() {
     } catch (value) {
       const message = String((value as { message?: string }).message || "");
       setError(message.includes("not open")
-        ? "Founding enrollment is not open yet. Your business remains active on the Exchange."
+        ? "Founding enrollment is not yet open. Your business remains active on the Exchange."
         : "We could not open checkout. No membership change was made.");
       setBusy(false);
     }
@@ -128,13 +128,19 @@ function FoundingMembership() {
               <section className="p-6 sm:p-10 lg:p-12">
                 <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-black uppercase tracking-[0.14em] text-amber-800"><Crown className="h-3.5 w-3.5" /> Founding Membership</span>
                 <h1 className="mt-5 text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">Your business is on the Exchange. Help shape what comes next.</h1>
-                <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600">Become a Founding Member to unlock the full launch experience and help shape the network as it grows.</p>
+                <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600">Become a Founding Member after placing your business on the map. Enrollment does not require business verification first; verification remains part of trust-sensitive Exchange actions such as purchasing and spending credits.</p>
 
                 {handoff?.selectedGeography && <div className="mt-6 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700"><MapPin className="h-4 w-4 text-[#D6A23A]" /> {handoff.selectedGeography.name}, {handoff.selectedGeography.state}</div>}
 
                 <ul className="mt-8 space-y-3 text-sm leading-6 text-slate-700">
                   {["Founding organization recognition", "Early access to approved launch workflows", "Enhanced opportunity and partner discovery as benefits become active", "A structured feedback channel during the launch period"].map((benefit) => <li key={benefit} className="flex gap-3"><span className="mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700"><Check className="h-3.5 w-3.5" /></span>{benefit}</li>)}
                 </ul>
+
+                <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm leading-6 text-slate-600">
+                  <p className="font-black text-slate-900">What Founding Membership does—and does not—include</p>
+                  <p className="mt-2">Founding Membership is an organization-level digital RFxchange membership. It does not include desk hours or physical coworking access.</p>
+                  <p className="mt-2">Where Exchange credits are included or purchased, one Exchange credit has a nominal value of one dollar for configured in-platform actions. Credits have no cash-redemption value, are nontransferable, generally nonrefundable, and expire 12 calendar months after issuance.</p>
+                </div>
 
                 {error && <div role="alert" className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800">{error}</div>}
               </section>
@@ -146,10 +152,10 @@ function FoundingMembership() {
 
                 <div className="mt-7 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/70">
                   <div className="flex items-center gap-2 font-bold text-white"><ShieldCheck className="h-4 w-4 text-[#D6A23A]" /> Reliable handoff</div>
-                  <p className="mt-2">Checkout creates no duplicate business or membership record. Membership changes occur only after the payment provider confirms the subscription.</p>
+                  <p className="mt-2">Checkout creates no duplicate business or membership record. Membership changes occur only after Stripe confirms the subscription.</p>
                 </div>
 
-                {handoff?.isFoundingMember ? <div className="mt-6 rounded-2xl bg-emerald-400/10 p-4 font-bold text-emerald-300">This organization is already a Founding Member.</div> : !eligible ? <div className="mt-6 rounded-2xl bg-amber-400/10 p-4 text-sm leading-6 text-amber-200">Complete business marker activation with an owner or administrator account before enrollment.</div> : !checkoutOpen ? <div className="mt-6 rounded-2xl bg-blue-400/10 p-4 text-sm leading-6 text-blue-200">Founding enrollment is not open yet. The platform will not represent a membership as active until checkout and payment confirmation are available.</div> : null}
+                {handoff?.isFoundingMember ? <div className="mt-6 rounded-2xl bg-emerald-400/10 p-4 font-bold text-emerald-300">This organization is already a Founding Member.</div> : !eligible ? <div className="mt-6 rounded-2xl bg-amber-400/10 p-4 text-sm leading-6 text-amber-200">Complete business marker activation with an owner or administrator account before enrollment.</div> : !checkoutOpen ? <div className="mt-6 rounded-2xl bg-blue-400/10 p-4 text-sm leading-6 text-blue-200"><strong>Founding enrollment is not yet open.</strong> No unapproved price or placeholder Stripe identifier will be used. Your business remains active on the Exchange while enrollment is closed.</div> : null}
 
                 <button disabled={busy || !checkoutOpen || !eligible || handoff?.isFoundingMember} onClick={() => void beginCheckout()} className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#D6A23A] px-5 py-3 font-black text-black transition hover:bg-[#e2b553] disabled:cursor-not-allowed disabled:opacity-45">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Crown className="h-4 w-4" />}{handoff?.isFoundingMember ? "Founding Membership active" : checkoutOpen ? "Continue to secure checkout" : "Enrollment opening soon"}</button>
                 <p className="mt-4 text-center text-xs leading-5 text-white/45">No premium permissions are activated without a valid membership state.</p>
