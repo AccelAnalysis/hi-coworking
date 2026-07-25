@@ -11,9 +11,9 @@ import { useAuth } from "@/lib/authContext";
 import { auth, functions } from "@/lib/firebase";
 
 const deleteAccount = httpsCallable<
-  { confirmation: "DELETE"; reason?: string },
+  { operation: "delete_account"; confirmation: "DELETE"; reason?: string },
   { success: true; firestoreRecordsDeleted: number; storageObjectsDeleted: number }
->(functions, "account_delete");
+>(functions, "account_initialize");
 
 function friendlyDeletionError(value: unknown): string {
   const error = value as { code?: string; message?: string; details?: { diagnosticCode?: string; organizations?: Array<{ name?: string }> } };
@@ -59,6 +59,7 @@ function AccountContent() {
       await reauthenticateWithCredential(user, credential);
       await user.getIdToken(true);
       await deleteAccount({
+        operation: "delete_account",
         confirmation: "DELETE",
         ...(reason.trim() ? { reason: reason.trim() } : {}),
       });
