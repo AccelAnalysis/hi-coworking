@@ -17,11 +17,11 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(exchangeRoute).not.toContain('../rfx/page');
   });
 
-  it("sends new representatives into mandatory organization activation and repairs interrupted sign-ins automatically", () => {
+  it("routes new representatives directly to authoritative onboarding and repairs interrupted sign-ins automatically", () => {
     const login = read("apps/web/src/app/login/page.tsx");
     const register = read("apps/web/src/app/register/page.tsx");
     const exchange = read("apps/web/src/app/exchange/page.tsx");
-    expect(login).toContain('router.replace("/exchange")');
+    expect(login).toContain("state.data.safeResumeRoute");
     expect(login).toContain("repairAccount");
     expect(login).toContain('router.replace("/exchange/onboarding")');
     expect(register).toContain('router.replace("/exchange/onboarding")');
