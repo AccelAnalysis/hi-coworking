@@ -12,7 +12,10 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { Building2, Loader2 } from "lucide-react";
 import { auth, functions } from "@/lib/firebase";
-import { serializeCallableError } from "@/lib/callableDiagnostics";
+import {
+  serializeCallableError,
+  type SafeCallableError,
+} from "@/lib/callableDiagnostics";
 
 const initializeAccount = httpsCallable<
   {
@@ -32,6 +35,24 @@ const rollbackNewAccount = httpsCallable<
   { operation: "delete_account"; confirmation: "DELETE"; reason: string },
   { success: boolean; firestoreRecordsDeleted: number; storageObjectsDeleted: number }
 >(functions, "account_initialize");
+
+function accountInitializationDiagnostic(error: unknown): SafeCallableError {
+  return serializeCallableError(error, {
+    functionName: "account_initialize",
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    region: "us-central1",
+  });
+}
+
+function shouldRetryInitialization(diagnostic: SafeCallableError): boolean {
+  return diagnostic.retryable
+    && ["authentication", "network", "timeout", "transaction"].includes(diagnostic.category);
+}
+
+function isRegistrationContractMismatch(diagnostic: SafeCallableError | null): boolean {
+  return diagnostic?.diagnosticCode === "INVALID_ACCOUNT_DATA"
+    || diagnostic?.category === "validation";
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -71,15 +92,14 @@ export default function RegisterPage() {
     try {
       result = await initializeAccount(payload);
     } catch (firstError) {
+      const firstDiagnostic = accountInitializationDiagnostic(firstError);
+      if (!shouldRetryInitialization(firstDiagnostic)) throw firstError;
+
       await currentUser.getIdToken(true);
       try {
         result = await initializeAccount(payload);
       } catch (retryError) {
-        console.warn("Account initialization failed after retry", serializeCallableError(retryError, {
-          functionName: "account_initialize",
-          projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-          region: "us-central1",
-        }));
+        console.warn("Account initialization failed after a retryable failure", accountInitializationDiagnostic(retryError));
         throw retryError ?? firstError;
       }
     }
@@ -91,17 +111,25 @@ export default function RegisterPage() {
     router.replace("/exchange/onboarding");
   };
 
-  const rollbackRegistration = async (currentUser: User) => {
-    try {
-      await currentUser.getIdToken(true);
-      await rollbackNewAccount({
-        operation: "delete_account",
-        confirmation: "DELETE",
-        reason: "automatic_registration_rollback",
-      });
-      return;
-    } catch (cleanupError) {
-      console.warn("Server cleanup could not complete registration rollback", cleanupError);
+  const rollbackRegistration = async (
+    currentUser: User,
+    options: { serverCleanupRequired: boolean },
+  ) => {
+    // A deterministic validation rejection occurs before account documents are
+    // written. Delete Auth directly instead of sending an account-delete payload
+    // to the same incompatible callable and creating another avoidable 400.
+    if (options.serverCleanupRequired) {
+      try {
+        await currentUser.getIdToken(true);
+        await rollbackNewAccount({
+          operation: "delete_account",
+          confirmation: "DELETE",
+          reason: "automatic_registration_rollback",
+        });
+        return;
+      } catch (cleanupError) {
+        console.warn("Server cleanup could not complete registration rollback", cleanupError);
+      }
     }
 
     try {
@@ -129,7 +157,12 @@ export default function RegisterPage() {
       await finishAccountInitialization(credential.user);
     } catch (value: unknown) {
       const firebaseError = value as { code?: string };
-      if (createdUser) await rollbackRegistration(createdUser);
+      const diagnostic = createdUser ? accountInitializationDiagnostic(value) : null;
+      if (createdUser) {
+        await rollbackRegistration(createdUser, {
+          serverCleanupRequired: !isRegistrationContractMismatch(diagnostic),
+        });
+      }
 
       if (firebaseError.code === "auth/email-already-in-use") {
         setError("This email is already registered. Sign in to continue.");
@@ -137,12 +170,11 @@ export default function RegisterPage() {
         setError("Choose a password with at least six characters.");
       } else if (firebaseError.code === "auth/invalid-email") {
         setError("Enter a valid email address.");
+      } else if (isRegistrationContractMismatch(diagnostic)) {
+        console.warn("Registration website and account service are on incompatible releases", diagnostic);
+        setError("Registration is temporarily unavailable while the account service is being updated. No partial account was kept.");
       } else {
-        console.warn("Registration did not complete", serializeCallableError(value, {
-          functionName: "account_initialize",
-          projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-          region: "us-central1",
-        }));
+        console.warn("Registration did not complete", diagnostic ?? accountInitializationDiagnostic(value));
         setError("Registration could not be completed. No partial account was kept. Try again.");
       }
     } finally {
