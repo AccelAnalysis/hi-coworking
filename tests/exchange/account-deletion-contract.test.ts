@@ -25,19 +25,31 @@ describe("account deletion contract", () => {
       "verificationDocuments",
       "exchangeOnboardingEvents",
     ]) {
-      expect(callable).toContain(`\"${collection}\"`);
+      expect(callable).toContain(`"${collection}"`);
     }
     expect(callable).not.toContain('db.collection("orgs").doc(orgId).delete');
   });
 
-  it("exposes a destructive confirmation UI from the account menu", async () => {
-    const [page, shell] = await Promise.all([
+  it("routes deletion through the existing account callable", async () => {
+    const [accounts, page] = await Promise.all([
+      source("apps/functions/src/accounts.ts"),
       source("apps/web/src/app/account/page.tsx"),
-      source("apps/web/src/components/AppShell.tsx"),
+    ]);
+    expect(accounts).toContain('operation === "delete_account"');
+    expect(accounts).toContain("deleteAccountForRequest(request)");
+    expect(page).toContain('(functions, "account_initialize")');
+    expect(page).toContain('operation: "delete_account"');
+  });
+
+  it("exposes a destructive confirmation UI from the authenticated dashboard", async () => {
+    const [page, dashboard] = await Promise.all([
+      source("apps/web/src/app/account/page.tsx"),
+      source("apps/web/src/app/dashboard/page.tsx"),
     ]);
     expect(page).toContain('confirmation === "DELETE"');
     expect(page).toContain("reauthenticateWithCredential");
     expect(page).toContain("Permanently delete account");
-    expect(shell).toContain('href="/account"');
+    expect(dashboard).toContain('href="/account"');
+    expect(dashboard).toContain("Account & privacy");
   });
 });
