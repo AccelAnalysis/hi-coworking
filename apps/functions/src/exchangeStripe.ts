@@ -80,11 +80,14 @@ export const stripe_createExchangeMembershipCheckout = onCall(
     if (founding.foundingEnrollmentClosesAt && Date.now() >= founding.foundingEnrollmentClosesAt) {
       throw new HttpsError("failed-precondition", "Founding enrollment has closed");
     }
+    // Founding enrollment is part of the onboarding conversion path. The actor
+    // must control billing for the organization, but business verification is
+    // not a prerequisite to purchase the membership itself. Verification still
+    // gates protected commercial actions such as purchasing/spending credits.
     const entitlements = await resolveExchangeEntitlements({
       organizationId: input.organizationId,
       actor,
       requiredPermission: "manage_billing",
-      requireVerified: true,
     });
     if (founding.foundingCapacity) {
       const foundingCount = await getDb().collection("exchangeMemberships").where("isFoundingMember", "==", true).limit(founding.foundingCapacity).get();
