@@ -107,14 +107,17 @@ function OrganizationEnrichment() {
       ?? model.locations.find((item) => item.status === "active")
       ?? null;
   }, [model]);
-  const selected = candidates.find((candidate) => candidate.matchId === selectedMatchId) ?? null;
+  const selected = useMemo(
+    () => candidates.find((candidate) => candidate.matchId === selectedMatchId) ?? null,
+    [candidates, selectedMatchId],
+  );
   const availableFields = useMemo(() => selected ? (["legalName", "uei", "cage", "duns"] as AcceptedField[])
     .filter((field) => Boolean(fieldValue(selected, field))) : [], [selected]);
 
   useEffect(() => {
     if (!selected) { setSelectedFields([]); return; }
     setSelectedFields((["legalName", "uei", "cage", "duns"] as AcceptedField[]).filter((field) => Boolean(fieldValue(selected, field))));
-  }, [selectedMatchId]);
+  }, [selected]);
 
   const search = async () => {
     if (!organization) return;
