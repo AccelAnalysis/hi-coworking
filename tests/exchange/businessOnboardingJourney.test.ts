@@ -41,6 +41,13 @@ describe("RFxchange business onboarding journey", () => {
     expect(onboarding).not.toContain("tab=enrichment");
   });
 
+  it("completes organization search when a business is connected, created, or claimed", () => {
+    const milestone = "patch.organizationSearchCompletedAt = state.organizationSearchCompletedAt ?? now";
+    expect(activation.split(milestone).length - 1).toBeGreaterThanOrEqual(2);
+    expect(activation).toContain('input.data.action === "organization_selected" || input.data.action === "organization_created"');
+    expect(activation).toContain('input.data.action === "organization_claim_started"');
+  });
+
   it("enforces released geography and server-authoritative address matching", () => {
     expect(activation).toContain('state.geography.status !== "released"');
     expect(activation).toContain("addressMatchesGeography");
