@@ -9,7 +9,11 @@ import { auth, functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
 import { Loader2 } from "lucide-react";
 
-const getActivationState = httpsCallable<Record<string, never>, { currentStep: string; safeResumeRoute: string }>(
+const getActivationState = httpsCallable<Record<string, never>, {
+  currentStep: string;
+  safeResumeRoute: string;
+  guidedActivationRequired: boolean;
+}>(
   functions,
   "exchange_getBusinessActivationState",
 );
@@ -48,11 +52,15 @@ export default function LoginPage() {
           await auth.currentUser?.getIdToken(true);
           state = await getActivationState({});
         }
+        if (!state.data.guidedActivationRequired) {
+          router.replace("/exchange");
+          return;
+        }
         router.replace(state.data.safeResumeRoute || (state.data.currentStep === "completed" ? "/exchange" : "/exchange/onboarding"));
       } catch (routingError) {
         console.warn("Post-sign-in routing check failed", routingError);
-        // Do not bounce through the Exchange workspace just to be redirected again.
-        // Onboarding can reconstruct progress from the authoritative server state.
+        // New v2 accounts can resume safely from authoritative onboarding. Legacy
+        // accounts are still accepted by the Exchange activation gate if needed.
         router.replace("/exchange/onboarding");
       }
     } catch (value: unknown) {
