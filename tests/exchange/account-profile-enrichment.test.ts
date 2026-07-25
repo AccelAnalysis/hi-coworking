@@ -123,7 +123,9 @@ describe("registration and profile source contracts", () => {
     expect(registration).toContain("businessRepresentativeAttestation");
     expect(registration).toContain("termsAccepted: true");
     expect(registration).toContain("privacyAccepted: true");
-    expect(registration).toContain("deleteUser(createdUser)");
+    expect(registration).toContain("rollbackNewAccount");
+    expect(registration).toContain('operation: "delete_account"');
+    expect(registration).toContain("deleteUser(currentUser)");
     expect(registration).toContain("No partial account was kept");
     expect(registration).not.toContain("Complete account setup");
     expect(registration).not.toContain("professionalTitle");
