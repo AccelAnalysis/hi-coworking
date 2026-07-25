@@ -85,6 +85,12 @@ function keyHash(uid: string, key: string): string {
   return createHash("sha256").update(`${uid}:${key}`).digest("hex");
 }
 
+function onboardingState(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 /**
  * Idempotently creates or repairs the authoritative account and its private,
  * non-published profile shell. Browser input can never grant role,
@@ -107,6 +113,7 @@ export async function provisionAccountDocuments(
     ]);
     const previousUser = userSnapshot.data() ?? {};
     const previousProfile = profileSnapshot.data() ?? {};
+    const previousOnboarding = onboardingState(previousUser.exchangeOnboarding);
     const registrationVersion = previousUser.registrationVersion === 2
       || input.registrationVersion === 2
       ? 2
@@ -142,6 +149,18 @@ export async function provisionAccountDocuments(
         ? {
           privacyAcknowledgedAt: previousUser.privacyAcknowledgedAt ?? now,
           privacyVersion: previousUser.privacyVersion ?? "current",
+        }
+        : {}),
+      ...(registrationVersion === 2
+        ? {
+          exchangeOnboarding: {
+            ...previousOnboarding,
+            version: 2,
+            // Welcome is now orientation copy on the Community screen rather than
+            // a separate user action, so v2 accounts begin at the first decision.
+            welcomeAcknowledgedAt: previousOnboarding.welcomeAcknowledgedAt ?? now,
+            updatedAt: now,
+          },
         }
         : {}),
       accountInitializedAt: previousUser.accountInitializedAt ?? now,
