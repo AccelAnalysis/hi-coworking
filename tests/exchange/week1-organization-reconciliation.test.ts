@@ -36,7 +36,7 @@ describe("Week 1 organization reconciliation contract", () => {
   });
 
   it("requires a claimant reason and limits pending users to public Exchange preview", () => {
-    const onboarding = read("apps/web/src/app/exchange/onboarding/page.tsx");
+    const onboarding = read("apps/web/src/features/exchange/onboarding/StreamlinedOnboarding.tsx");
     const exchangePage = read("apps/web/src/app/exchange/page.tsx");
     expect(onboarding).toContain("How are you connected to this business?");
     expect(onboarding).toContain("reason.length < 10");
