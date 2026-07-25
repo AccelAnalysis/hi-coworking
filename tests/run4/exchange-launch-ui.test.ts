@@ -99,6 +99,18 @@ describe("Run 4 Exchange launch navigation", () => {
     expect(dashboard).toContain("physicalWorkspaceEnabled");
   });
 
+  it("allows onboarding-complete owners into Founding checkout without weakening credit verification", () => {
+    const stripe = read("apps/functions/src/exchangeStripe.ts");
+    const foundingStart = stripe.indexOf("stripe_createExchangeMembershipCheckout");
+    const creditStart = stripe.indexOf("stripe_createExchangeCreditPackCheckout");
+    const foundingCheckout = stripe.slice(foundingStart, creditStart);
+    const creditCheckout = stripe.slice(creditStart);
+    expect(foundingCheckout).toContain('requiredPermission: "manage_billing"');
+    expect(foundingCheckout).not.toContain("requireVerified: true");
+    expect(creditCheckout).toContain('requiredPermission: "purchase_credits"');
+    expect(creditCheckout).toContain("requireVerified: true");
+  });
+
   it("shows enrollment as closed when protected price configuration is incomplete", () => {
     const founding = read("apps/web/src/app/exchange/founding/page.tsx");
     expect(founding).toContain("Founding enrollment is not yet open");
