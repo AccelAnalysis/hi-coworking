@@ -2,9 +2,15 @@
 
 ## Product success condition
 
-The onboarding journey is successful when the authenticated business representative sees the organization's persisted marker on the Exchange map and the organization summary is selected.
+The onboarding journey is successful when an authenticated business representative sees the organization's persisted marker selected on the 3D Exchange map.
 
-The marker activation moment occurs before profile enrichment, full capability completion, or Founding Membership checkout.
+The marker is the first value moment. Profile enrichment, capability completion, verification workflows, and Founding Membership conversion occur after the marker is active.
+
+## Canonical experience
+
+`Create account → choose community → identify business → confirm location and privacy → see business on the 3D Exchange → explore, enrich profile, or become a Founding Member`
+
+The browser should not expose extra workflow screens merely because several server records must be created or reconciled.
 
 ## Canonical route sequence
 
@@ -13,30 +19,52 @@ The marker activation moment occurs before profile enrichment, full capability c
    - Last name
    - Email
    - Password
-   - Business-registration attestation
+   - Business/organization attestation
    - Terms and privacy acknowledgement
-   - `/register?resume=1` safely recovers an authenticated account whose initialization was interrupted
+   - Creates Firebase Authentication sign-in and automatically initializes the RFxchange account
+   - Retries initialization after an auth-token refresh when necessary
+   - Rolls back the newly created sign-in when initialization cannot complete, rather than intentionally keeping a partial registration
+
 2. `/exchange/onboarding`
-   - Welcome and orientation
-   - Geography selection
-   - Organization search
-   - Connect, governed claim, or duplicate-safe creation
-   - Operational address confirmation
-   - Server-side geocoding and candidate selection
-   - Address visibility selection
-   - Persisted marker activation
+   - Opens directly at Community; there is no separate user-action Welcome gate
+   - Community search accepts U.S. city, county, ZIP code, or locality text
+   - Search may discover places beyond currently configured Exchange territories, but only a server-managed territory record can authorize participation
+   - Released communities permit full onboarding
+   - Scheduled communities may be selected but cannot activate a marker before release
+   - Paused, archived, or not-yet-configured communities cannot grant full participation
+   - Business search follows geography selection
+   - User connects an already-authorized business, submits a governed claim, or creates a duplicate-safe new organization
+   - User confirms the operational address through the server-side geocoder
+   - User selects exact, approximate, locality-only, or private visibility
+   - User selects **Place My Business on the Exchange**
+
 3. `/exchange?...&onboardingSuccess=1`
-   - 3D camera centered on the confirmed business coordinates
-   - Selected establishment and organization context
-   - “Your business is now on The RFxchange.” success card
+   - 3D camera centers on the confirmed business coordinates
+   - Organization and establishment context are selected
+   - Success card states: `Your business is now on The RFxchange.`
+   - User may immediately:
+     - Explore the Exchange
+     - Enrich & Complete Profile
+     - Open Founding Membership
+
 4. Optional post-marker routes
-   - `/org/settings?id={organizationId}&tab=profile&onboarding=complete`
-   - `/org/settings?id={organizationId}&tab=enrichment`
+   - `/org/settings?id={organizationId}&tab=enrichment&onboarding=complete`
+   - `/org/settings?id={organizationId}&tab=profile`
    - `/exchange/founding?organizationId={organizationId}`
+
+## Sign-in and resume behavior
+
+A returning user signs in once and the server resolves the authoritative resume route.
+
+- Completed onboarding routes directly to the Exchange.
+- Incomplete onboarding routes directly to `/exchange/onboarding`.
+- Legacy accounts missing account documents are repaired automatically with `account_initialize`, then re-evaluated.
+- There is no `/register?resume=1` or **Complete account setup** detour.
+- The application should not route an incomplete user through the Exchange workspace simply to redirect them back to onboarding.
 
 ## Authoritative state
 
-The single authoritative onboarding state is `users/{uid}.exchangeOnboarding`.
+The single onboarding state is `users/{uid}.exchangeOnboarding`:
 
 ```ts
 {
@@ -70,17 +98,52 @@ The single authoritative onboarding state is `users/{uid}.exchangeOnboarding`.
 }
 ```
 
-Canonical organization, membership, claim, establishment, geocode, and public-projection records remain authoritative for their domains. The state getter reconciles missing onboarding milestones from those records without maintaining a competing workflow state collection.
+Canonical organization, membership, claim, establishment, geocode, payment, and public-projection records remain authoritative for their own domains. The state getter reconstructs missing onboarding milestones from those records rather than maintaining a competing browser workflow state.
+
+`welcomeAcknowledgedAt` is retained for backward compatibility and analytics. It is not a separate visible onboarding page.
+
+## Performance contract
+
+The onboarding interface should feel like three decisions, not a series of backend jobs.
+
+### Initial load
+
+Initial onboarding loads only:
+
+- authoritative activation state;
+- territory availability.
+
+Organization memberships and claims are loaded only when the user reaches the Business step.
+
+### Step progression
+
+Completed steps update local UI immediately after the authoritative write succeeds. The browser does not reload the full activation, territory, organization, and claim model after every action.
+
+### Marker completion
+
+The browser performs:
+
+1. one establishment upsert that consumes the owner-confirmed geocode candidate;
+2. one `marker_activated` progress call.
+
+The marker activation transaction derives the address-confirmed and geocoding-completed milestones from the persisted establishment, validates the full state, activates projections, and records onboarding completion. Separate serial client calls for `address_confirmed` and `geocoding_completed` are not required.
+
+### Success card
+
+Rendering the success card does not fire multiple progress writes. Enrichment and Founding offer events are recorded only when the relevant CTA is selected.
 
 ## Geography enforcement
 
-- Territory selection is resolved from the server-managed `territories` collection.
+- The search UI may use Mapbox place search to resolve user-entered city, county, ZIP, locality, or region text.
+- Mapbox search is discovery only; it cannot grant territory access.
+- A selectable community must map to a server-managed `territories/{fips}` record.
+- Territory selection is written server-side from that record.
 - Released territories permit full onboarding.
-- Scheduled territories may be selected for preview but cannot activate a marker.
+- Scheduled territories can be saved but cannot activate a marker.
 - Paused and archived territories are unavailable for full participation.
-- Marker activation rechecks the stored territory status server-side.
+- Marker activation rechecks territory status server-side.
 - The confirmed address state and locality/county must correspond to the selected territory.
-- Client-supplied FIPS values do not independently grant territory access.
+- Editing client state, query parameters, coordinates, or FIPS values cannot bypass these checks.
 
 ## Organization paths
 
@@ -95,12 +158,12 @@ A claim creates or reuses a governed `organizationClaims` record. Pending claims
 - preserve the existing public organization record;
 - do not grant owner or administrator permissions;
 - do not permit address or marker changes;
-- remain routed to the existing review administration workflow;
+- remain routed to the review administration workflow;
 - allow public Exchange preview while review is pending.
 
 ### New organization
 
-Creation uses the existing duplicate scoring, identity reservation, idempotency, owner-membership, free-membership, and workspace-preference behavior. Enrichment is not required to create the organization.
+Creation uses duplicate scoring, identity reservation, idempotency, owner membership, free Exchange membership, and workspace preference behavior. Enrichment is not required before organization creation or marker activation.
 
 ## Address and privacy model
 
@@ -113,7 +176,7 @@ The operational address and owner-confirmed geocode are stored in the private or
 | Locality | Stored | No | Locality-level rounded coordinate | Yes |
 | Private | Stored | No | None | Yes |
 
-The public projection is written or removed server-side during marker activation. UI hiding is not the security boundary. A private/home establishment is not marked as the preferred orientation during initial establishment validation; secure marker activation then assigns the authorized user's preferred organization and establishment without publishing the location.
+The public projection is written or removed server-side during marker activation. UI hiding is not the security boundary.
 
 ## Marker activation transaction
 
@@ -124,7 +187,7 @@ The activation function verifies:
 - active establishment ownership;
 - released territory;
 - confirmed physical address;
-- confirmed nonzero geocode;
+- confirmed nonzero owner-selected geocode;
 - selected geography and address match;
 - supported visibility value.
 
@@ -133,10 +196,20 @@ It then:
 1. updates organization publication settings when public visibility is selected;
 2. writes the sanitized public organization projection;
 3. writes or deletes the public location projection;
-4. stores the preferred organization and establishment orientation;
-5. records marker activation and onboarding completion;
+4. stores preferred organization and establishment orientation;
+5. records address/geocode milestones, marker activation, and onboarding completion;
 6. writes an organization audit event;
-7. returns the user to the map using the confirmed coordinates, close zoom, bearing, and pitch.
+7. returns the user to the Exchange at the confirmed coordinates with close zoom, bearing, and 3D pitch.
+
+## Post-marker enrichment
+
+The primary profile-completion CTA is **Enrich & Complete Profile** and opens the Enrichment tab first.
+
+The intended sequence is:
+
+`search trusted enrichment sources → review proposed business data → accept selected fields → manually complete anything enrichment could not supply`
+
+UEI, CAGE, DUNS, capabilities, certifications, and richer organization identity are therefore not prerequisites for the first marker value moment.
 
 ## Founding Membership boundary
 
@@ -145,44 +218,35 @@ The handoff carries:
 - authenticated user identity;
 - organization ID;
 - selected geography;
-- organization authority and eligibility;
+- organization authority;
 - onboarding completion;
 - current membership tier and status;
 - Founding Member status;
-- founder reservation status when present.
+- founder reservation state when present.
 
-Checkout uses the existing `stripe_createExchangeMembershipCheckout` callable and organization membership record. The UI fails closed when policy, price, Stripe configuration, authority, or completed onboarding is unavailable. It never creates a simulated membership state.
+Founding checkout requires the actor to have organization billing authority and onboarding to be complete. Business verification is not a prerequisite to purchase Founding Membership itself; verification remains available to gate protected operational actions such as credit purchasing and other trust-sensitive workflows.
+
+Checkout uses `stripe_createExchangeMembershipCheckout`. The UI and server fail closed when policy, price, Stripe configuration, capacity, authority, or completed onboarding is unavailable. No premium permissions are activated until Stripe confirms the subscription through the webhook-backed membership state.
 
 ## Analytics
 
-Structured events are written without password, address, token, or sensitive identifier payloads:
+Structured events are written without password, address, token, or sensitive identifier payloads. Events include registration, geography selection, organization search/selection/creation/claim, geocoding outcomes, marker activation, enrichment offer, Founding offer, and checkout handoff.
 
-- registration_started
-- registration_completed
-- geography_selected
-- organization_search_performed
-- organization_found
-- organization_created
-- organization_claim_started
-- address_submitted
-- geocoding_succeeded
-- geocoding_failed
-- marker_activated
-- onboarding_completed
-- profile_completion_started
-- enrichment_started
-- founding_membership_viewed
-- checkout_handoff_initiated
+Analytics must not add blocking network hops to the visible journey.
 
 ## Deployment acceptance gate
 
-Source completion is not production completion. Before the task can be marked done:
+Source completion is not production completion. Before the journey is marked done:
 
 1. merge through the canonical Exchange branch chain;
 2. deploy Functions, Firestore rules/indexes when changed, and Hosting to the intended Firebase project;
 3. record the deployed commit SHA;
 4. hard refresh and verify the current bundle;
-5. execute the two-account public and private visibility tests;
-6. execute mobile and desktop acceptance tests;
-7. inspect console and network logs for repeated HTTP 400 responses;
-8. capture the required screenshots from the deployed environment.
+5. create a genuinely new account and complete the entire path through marker activation;
+6. test an existing incomplete account and confirm direct resume without redirect loops;
+7. test arbitrary geography search, released territory selection, scheduled territory handling, and an unmanaged location;
+8. execute two-account public, approximate, locality-only, and private visibility tests;
+9. execute mobile and desktop acceptance tests;
+10. inspect console and network logs for repeated HTTP 400 responses or unnecessary duplicate calls;
+11. verify Founding checkout from a newly created owner organization when checkout policy is open;
+12. capture required screenshots from the deployed environment.
