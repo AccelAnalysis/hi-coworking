@@ -107,6 +107,8 @@ describe("Run 4 Exchange launch navigation", () => {
     const creditCheckout = stripe.slice(creditStart);
     expect(foundingCheckout).toContain('requiredPermission: "manage_billing"');
     expect(foundingCheckout).not.toContain("requireVerified: true");
+    expect(foundingCheckout).toContain("mapActivationCompletedOrganizationIds");
+    expect(foundingCheckout).toContain("Complete business marker activation before Founding enrollment");
     expect(creditCheckout).toContain('requiredPermission: "purchase_credits"');
     expect(creditCheckout).toContain("requireVerified: true");
   });
