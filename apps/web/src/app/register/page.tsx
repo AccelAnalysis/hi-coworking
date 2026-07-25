@@ -28,6 +28,11 @@ const initializeAccount = httpsCallable<
   { accountInitialized: boolean }
 >(functions, "account_initialize");
 
+const rollbackNewAccount = httpsCallable<
+  { operation: "delete_account"; confirmation: "DELETE"; reason: string },
+  { success: boolean; firestoreRecordsDeleted: number; storageObjectsDeleted: number }
+>(functions, "account_initialize");
+
 export default function RegisterPage() {
   const router = useRouter();
   const [firstName, setFirstName] = useState("");
@@ -86,6 +91,26 @@ export default function RegisterPage() {
     router.replace("/exchange/onboarding");
   };
 
+  const rollbackRegistration = async (currentUser: User) => {
+    try {
+      await currentUser.getIdToken(true);
+      await rollbackNewAccount({
+        operation: "delete_account",
+        confirmation: "DELETE",
+        reason: "automatic_registration_rollback",
+      });
+      return;
+    } catch (cleanupError) {
+      console.warn("Server cleanup could not complete registration rollback", cleanupError);
+    }
+
+    try {
+      await deleteUser(currentUser);
+    } catch (authRollbackError) {
+      console.warn("Firebase Auth rollback also failed", authRollbackError);
+    }
+  };
+
   const handleRegister = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
@@ -104,13 +129,7 @@ export default function RegisterPage() {
       await finishAccountInitialization(credential.user);
     } catch (value: unknown) {
       const firebaseError = value as { code?: string };
-      if (createdUser) {
-        try {
-          await deleteUser(createdUser);
-        } catch (rollbackError) {
-          console.warn("Could not roll back incomplete registration", rollbackError);
-        }
-      }
+      if (createdUser) await rollbackRegistration(createdUser);
 
       if (firebaseError.code === "auth/email-already-in-use") {
         setError("This email is already registered. Sign in to continue.");
