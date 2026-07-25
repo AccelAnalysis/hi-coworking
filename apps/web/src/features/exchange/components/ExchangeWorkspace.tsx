@@ -363,37 +363,45 @@ function ExchangeWorkspaceIdentityBoundary({
           "relative z-10 h-full min-h-0 pointer-events-none [&_header]:pointer-events-auto [&_aside]:pointer-events-auto [&_main]:pointer-events-auto [&_section]:pointer-events-auto [&_button]:pointer-events-auto [&_a]:pointer-events-auto [&_input]:pointer-events-auto [&_select]:pointer-events-auto [&_textarea]:pointer-events-auto",
           "lg:[&>div]:bg-transparent lg:[&_aside]:border-white/60 lg:[&_aside]:bg-white/70 lg:[&_aside]:shadow-2xl lg:[&_aside]:backdrop-blur-2xl lg:[&_main]:bg-white/25 lg:[&_main]:backdrop-blur-sm lg:[_.bg-white]:bg-white/60 lg:[_.bg-slate-50]:bg-white/40 lg:[_.bg-slate-100]:bg-white/30 lg:[_.border-slate-200]:border-white/60",
         )}>
-          <div className={activeView === "opportunities" ? "h-full min-h-0" : "hidden"} aria-hidden={activeView !== "opportunities"}>
-            <ExchangeOpportunitiesView
-              {...shared}
-              state={stateForMode("opportunities")}
-              demoMode={demoMode}
-              workspaceMap
-            />
-          </div>
-          <div className={activeView === "referrals" ? "h-full min-h-0" : "hidden"} aria-hidden={activeView !== "referrals"}>
-            <ConnectionsWorkspace
-              {...shared}
-              state={stateForMode("referrals")}
-              gateway={gateway}
-              actorOrganizationName={actorOrganizationName}
-            />
-          </div>
-          <div className={activeView === "intelligence" ? "h-full min-h-0" : "hidden"} aria-hidden={activeView !== "intelligence"}>
-            <IntelligenceWorkspace
-              {...shared}
-              state={stateForMode("intelligence")}
-              gateway={gateway}
-            />
-          </div>
-          <div className={activeView === "resources" ? "h-full min-h-0" : "hidden"} aria-hidden={activeView !== "resources"}>
-            <ExchangeResourcesView
-              {...shared}
-              state={stateForMode("resources")}
-              demoMode={demoMode}
-              workspaceMap
-            />
-          </div>
+          {activeView === "opportunities" ? (
+            <div className="h-full min-h-0">
+              <ExchangeOpportunitiesView
+                {...shared}
+                state={stateForMode("opportunities")}
+                demoMode={demoMode}
+                workspaceMap
+              />
+            </div>
+          ) : null}
+          {activeView === "referrals" ? (
+            <div className="h-full min-h-0">
+              <ConnectionsWorkspace
+                {...shared}
+                state={stateForMode("referrals")}
+                gateway={gateway}
+                actorOrganizationName={actorOrganizationName}
+              />
+            </div>
+          ) : null}
+          {activeView === "intelligence" ? (
+            <div className="h-full min-h-0">
+              <IntelligenceWorkspace
+                {...shared}
+                state={stateForMode("intelligence")}
+                gateway={gateway}
+              />
+            </div>
+          ) : null}
+          {activeView === "resources" ? (
+            <div className="h-full min-h-0">
+              <ExchangeResourcesView
+                {...shared}
+                state={stateForMode("resources")}
+                demoMode={demoMode}
+                workspaceMap
+              />
+            </div>
+          ) : null}
         </div>
         <ExchangeOrganizationContextDrawer
           state={sharedState}
