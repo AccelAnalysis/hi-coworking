@@ -35,7 +35,24 @@ jobs:
       - run: npm run test:exchange
       - run: npm run test:security
       - run: npm run test:run3
-      - run: npm run test:run4
+      - name: Run 4 validation
+        id: run4
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:run4 2>&1 | tee exchange-run4.log
+      - name: Upload Run 4 log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exchange-run4-log
+          path: exchange-run4.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Fail when Run 4 fails
+        if: steps.run4.outcome == 'failure'
+        run: exit 1
       - name: Run production build
         shell: bash
         run: |
