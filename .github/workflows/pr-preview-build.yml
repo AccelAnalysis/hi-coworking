@@ -2,7 +2,7 @@ name: Hi Coworking PR preview build
 run-name: PR #${{ github.event.pull_request.number }} visual preview
 
 on:
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - synchronize
