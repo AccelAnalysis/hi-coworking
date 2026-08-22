@@ -1,0 +1,229 @@
+name: Hi Coworking Firebase PR preview publish
+
+on:
+  workflow_run:
+    workflows:
+      - Hi Coworking PR preview build
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: hi-coworking-firebase-preview-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-preview:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - name: Resolve source pull request
+        id: target
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            let prNumber = run.pull_requests?.[0]?.number;
+            if (!prNumber) {
+              const match = String(run.display_title || '').match(/PR #(\d+)/);
+              prNumber = match ? Number(match[1]) : undefined;
+            }
+            if (!prNumber) {
+              core.setFailed('Could not resolve a pull request number from the preview build run.');
+              return;
+            }
+            core.setOutput('pr-number', String(prNumber));
+
+      - name: Download unprivileged preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hi-coworking-firebase-preview
+          path: incoming
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate artifact against current PR head
+        id: validate
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr-number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const prNumber = Number(process.env.PR_NUMBER);
+            const metadata = JSON.parse(fs.readFileSync('incoming/preview-meta.json', 'utf8'));
+            const current = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            if (current.data.state !== 'open') {
+              core.info(`PR #${prNumber} is no longer open; skipping preview publication.`);
+              core.setOutput('publish', 'false');
+              return;
+            }
+
+            if (current.data.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              core.info(`PR #${prNumber} comes from a fork; preview publication is disabled.`);
+              core.setOutput('publish', 'false');
+              return;
+            }
+
+            if (
+              metadata.prNumber !== prNumber ||
+              metadata.headSha !== current.data.head.sha ||
+              metadata.headRepository !== current.data.head.repo.full_name
+            ) {
+              core.info(`Artifact for PR #${prNumber} is stale; a newer build must publish instead.`);
+              core.setOutput('publish', 'false');
+              return;
+            }
+
+            core.setOutput('publish', 'true');
+            core.setOutput('head-sha', metadata.headSha);
+
+      - name: Check Firebase deployment credential
+        if: steps.validate.outputs.publish == 'true'
+        id: auth
+        shell: bash
+        run: |
+          if [[ -n "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare Hosting-only deployment root
+        if: steps.validate.outputs.publish == 'true' && steps.auth.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deploy-root/public
+          rm -f incoming/preview-meta.json
+          cp -a incoming/. deploy-root/public/
+          cat > deploy-root/firebase.json <<'JSON'
+          {
+            "hosting": {
+              "public": "public",
+              "ignore": [
+                "firebase.json",
+                "**/.*",
+                "**/node_modules/**"
+              ],
+              "cleanUrls": true,
+              "rewrites": [
+                {
+                  "source": "**",
+                  "destination": "/index.html"
+                }
+              ]
+            }
+          }
+          JSON
+
+      - name: Deploy isolated Firebase Hosting preview channel
+        if: steps.validate.outputs.publish == 'true' && steps.auth.outputs.available == 'true'
+        id: deploy
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ env.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: hi-coworking-plat
+          channelId: pr-${{ steps.target.outputs.pr-number }}
+          expires: 7d
+          entryPoint: deploy-root
+          disableComment: true
+
+      - name: Post or update Firebase preview link
+        if: steps.validate.outputs.publish == 'true' && steps.auth.outputs.available == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr-number }}
+          PREVIEW_URL: ${{ steps.deploy.outputs.details_url }}
+          HEAD_SHA: ${{ steps.validate.outputs.head-sha }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const marker = '<!-- hi-coworking-firebase-pr-preview -->';
+            const credentialMarker = '<!-- hi-coworking-firebase-preview-credential -->';
+            const prNumber = Number(process.env.PR_NUMBER);
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.SOURCE_RUN_ID}`;
+            const body = `${marker}\n## Hi Coworking Firebase PR Preview\n\n✅ **Preview ready:** [Open PR #${prNumber} preview](${process.env.PREVIEW_URL})\n\nBuilt from exact head \`${process.env.HEAD_SHA}\`. This is Firebase Hosting preview channel \`pr-${prNumber}\`, not the live Hosting channel. The frontend was built with non-production Firebase browser placeholders so server-backed actions fail closed rather than mutating live data. The channel expires seven days after its most recent deployment.\n\n[Preview build run](${runUrl})`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+            const credentialWarning = comments.find((comment) => comment.body?.includes(credentialMarker));
+            if (credentialWarning) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: credentialWarning.id,
+              });
+            }
+
+      - name: Surface one-time Firebase credential requirement
+        if: steps.validate.outputs.publish == 'true' && steps.auth.outputs.available != 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr-number }}
+        with:
+          script: |
+            const marker = '<!-- hi-coworking-firebase-preview-credential -->';
+            const prNumber = Number(process.env.PR_NUMBER);
+            const body = `${marker}\n## Hi Coworking Firebase PR Preview\n\n⚠️ The isolated preview artifact built successfully, but Firebase could not publish a preview channel because this repository does not yet expose a Firebase Hosting deployment credential to the trusted publisher.\n\nAdd repository secret \`FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT\` (recommended) or \`FIREBASE_SERVICE_ACCOUNT\`, containing the Hosting service-account JSON generated by \`firebase init hosting:github\`. Then push or re-run the PR preview build.\n\nNo live Hosting channel or \`hi-coworking.com\` content was changed.`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

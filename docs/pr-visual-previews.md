@@ -2,62 +2,92 @@
 
 ## Purpose
 
-Every same-repository pull request can produce a tappable static visual preview without deploying the PR to the live Firebase Hosting site.
+Same-repository pull requests build an isolated static visual-review artifact and, when the Firebase Hosting deployment credential is configured, publish that artifact to a Firebase Hosting preview channel.
 
-The preview system is intentionally separate from `www.hi-coworking.com` and from the `hi-coworking-plat` Firebase Hosting release path.
+The preview workflow never targets the Firebase `live` channel and must never use this repository's `gh-pages` branch for PR previews.
+
+## Important legacy-site boundary
+
+`gh-pages` is production-sensitive legacy infrastructure. Its `CNAME` is `hi-coworking.com`, so adding a GitHub Pages PR publisher to this repository would share a publication surface with the public site.
+
+PR previews therefore use Firebase Hosting preview channels instead. Do not repurpose `gh-pages`, its `CNAME`, or the public site's root files for previews.
+
+## Architecture
+
+The workflow is intentionally split in two:
+
+1. **Unprivileged PR build** — `.github/workflows/pr-preview-build.yml`
+   - runs on same-repository pull requests;
+   - checks out the exact PR head SHA using a read-only Git fetch that does not traverse the repository's malformed legacy gitlinks;
+   - runs `npm ci` and the normal static Next.js export;
+   - builds with demo Firebase browser configuration so preview UI cannot use the live Firestore, Functions, Storage, or Authentication project through the compiled client settings;
+   - optionally embeds the repository Actions variable `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` for map rendering;
+   - writes a preview-only `robots.txt` that disallows indexing;
+   - uploads `apps/web/out` plus exact PR/SHA metadata as a short-lived GitHub Actions artifact;
+   - receives no Firebase deployment credential.
+
+2. **Trusted Firebase publisher** — `.github/workflows/firebase-pr-preview-publish.yml`
+   - runs only after a successful PR-preview build;
+   - executes from the workflow definition on the default branch rather than executing PR code with deployment credentials;
+   - downloads the artifact and verifies PR number, repository, open state, and exact current head SHA;
+   - rejects stale or fork artifacts;
+   - constructs a Hosting-only `firebase.json` around the already-built static files;
+   - deploys only to Firebase project `hi-coworking-plat`, channel `pr-<number>`;
+   - never specifies `channelId: live`;
+   - posts or updates the tappable Firebase preview URL on the PR;
+   - sets each channel to expire seven days after its most recent deployment.
 
 ## Preview URL
 
-For pull request `N`, the published preview is:
+Firebase assigns the actual Hosting preview URL. The trusted publisher posts it on the PR after deployment succeeds. The channel ID is deterministic:
 
 ```text
-https://accelanalysis.github.io/hi-coworking/pr-N/
+pr-<pull-request-number>
 ```
 
-The Exchange view is:
+The URL remains stable for that PR as new commits are deployed to the same channel.
+
+## One-time Firebase credential
+
+The trusted publisher requires a Hosting service-account JSON stored as one of these GitHub repository secrets:
 
 ```text
-https://accelanalysis.github.io/hi-coworking/pr-N/exchange/
+FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT
 ```
 
-The publisher posts or updates the preview link on the pull request after deployment succeeds.
+Preferred, or the fallback:
 
-## Safety boundary
+```text
+FIREBASE_SERVICE_ACCOUNT
+```
 
-The build workflow:
+Firebase's supported setup path is to authenticate locally with the Firebase CLI and run:
 
-- runs only for PRs whose head branch belongs to `AccelAnalysis/hi-coworking`;
-- checks out the exact PR head SHA without persisting Git credentials;
-- has read-only repository permissions;
-- uses demo Firebase public configuration values;
-- does not deploy Firebase Hosting, Functions, Firestore rules, indexes, Storage rules, or data;
-- does not receive Firebase service-account credentials;
-- uploads only the static Next.js export as an artifact.
+```text
+firebase init hosting:github
+```
 
-A separate trusted workflow downloads the successful artifact, verifies that its PR number and head SHA still match the open PR, publishes it under the PR-specific GitHub Pages path, and posts the URL on the PR.
+for Firebase project `hi-coworking-plat`, then store the generated Hosting service-account JSON under the preferred repository-secret name above.
 
-Fork PRs are not published.
+Until that secret exists, PR builds remain safe and green, but the trusted publisher posts a clear PR notice that the deployment credential is the missing one-time prerequisite. No live Hosting channel or legacy Pages content is changed.
 
-## Runtime behavior
+## Security properties
 
-This is a visual-review surface, not a production-like backend environment. Authentication, Firestore writes, Functions, Storage, Stripe, and other server-backed operations intentionally fail closed because the preview uses non-production Firebase placeholders.
+- PR code never receives the Firebase Hosting deployment credential.
+- The privileged publisher does not check out or execute PR source code.
+- Only a successful static artifact matching the current exact PR head can be deployed.
+- Fork PRs are not deployed.
+- Compiled preview JavaScript uses non-production Firebase browser placeholders.
+- Hosting deployment is scoped to a named preview channel, not `live`.
+- Preview channels automatically expire after seven days.
+- `gh-pages` and `hi-coworking.com` are outside the preview publication path.
 
-The map renders when the repository Actions variable `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is configured with a public token authorized for the GitHub Pages preview origin. If that variable is absent, the rest of the static interface still builds and the map component remains inactive.
+## Map rendering
+
+The map renders when repository Actions variable `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` is configured with a public Mapbox token whose allowed origins include the Firebase preview domains. If the variable is absent or its origin restrictions exclude the preview URL, the static preview still builds but the Mapbox surface will remain inactive.
 
 ## Merge-quality checks
 
-The preview workflow is not a substitute for application verification. `.github/workflows/exchange-security.yml` remains the merge-quality build, lint, emulator-security, and production-build signal.
+PR preview publication is a visual-review aid, not production acceptance. `.github/workflows/exchange-security.yml` remains the repository's build, lint, emulator-security, and merge-quality signal.
 
-The preview-specific Next.js settings are enabled only when `HI_COWORKING_PAGES_PREVIEW=1`; normal Firebase builds keep the existing production export behavior.
-
-## Lifecycle
-
-- Opening, reopening, marking ready, or pushing a new commit to a same-repository PR requests a new preview build.
-- Newer PR commits cancel older in-progress preview builds.
-- The publisher rejects stale artifacts if the PR head changed before publication.
-- Closing or merging the PR removes its `pr-N` directory and updates the PR comment to show that the preview was removed.
-- `robots.txt` and preview HTML request `noindex,nofollow` so the review surface is not intended for search indexing.
-
-## One-time GitHub Pages requirement
-
-The repository must have GitHub Pages enabled with **Build and deployment → Source: GitHub Actions**. Private repositories require a GitHub plan that supports Pages. Once enabled, the workflows manage publication and cleanup automatically.
+Normal production builds continue to use the repository's unchanged static-export Next.js configuration and existing Firebase release path.
