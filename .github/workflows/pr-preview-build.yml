@@ -45,6 +45,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify current Firebase-hosted baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://hi-coworking-plat.web.app"
+          curl --fail --silent --show-error --location --retry 3 \
+            "${base}/__/firebase/init.json" \
+            --output /tmp/hi-live-firebase.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "${base}/" \
+            --output /tmp/hi-live-home.html
+          for route in spaces pricing events bookstore about contact book; do
+            curl --fail --silent --show-error --location --retry 3 \
+              "${base}/${route}" \
+              --output "/tmp/hi-live-${route}.html"
+          done
+          node <<'NODE'
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('/tmp/hi-live-firebase.json', 'utf8'));
+          if (config.projectId !== 'hi-coworking-plat') {
+            throw new Error(`Live Firebase project mismatch: ${config.projectId}`);
+          }
+          const home = fs.readFileSync('/tmp/hi-live-home.html', 'utf8');
+          const requiredNavigation = ['Spaces', 'Pricing', 'Events', 'Bookstore', 'About', 'Contact'];
+          for (const label of requiredNavigation) {
+            if (!home.includes(label)) {
+              throw new Error(`Live home page is missing public navigation label: ${label}`);
+            }
+          }
+          const book = fs.readFileSync('/tmp/hi-live-book.html', 'utf8');
+          if (!book.includes('Book')) {
+            throw new Error('Live booking route did not return the Hi Coworking booking surface.');
+          }
+          NODE
+          echo "Verified ${base}: Firebase project, six-link public navigation, and public booking route are reachable." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build isolated static visual preview
         run: npm run build
         env:
@@ -85,5 +121,6 @@ jobs:
         run: |
           echo "### Firebase PR preview artifact ready" >> "$GITHUB_STEP_SUMMARY"
           echo "Built exact PR head ${{ github.event.pull_request.head.sha }} with demo Firebase browser configuration." >> "$GITHUB_STEP_SUMMARY"
+          echo "Compared the build against the actual Firebase-hosted hi-coworking-plat.web.app baseline." >> "$GITHUB_STEP_SUMMARY"
           echo "A separate trusted workflow on main is responsible for deploying this artifact to an isolated Firebase Hosting preview channel." >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow cannot deploy the live channel and receives no Firebase deployment credential." >> "$GITHUB_STEP_SUMMARY"
