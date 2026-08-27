@@ -1,0 +1,13 @@
+{
+  "name": "hi-coworking-booking-transaction-functions",
+  "private": true,
+  "main": "lib/firebase/booking-transaction-functions/src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^7.2.5",
+    "stripe": "^20.3.1"
+  }
+}
