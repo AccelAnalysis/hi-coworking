@@ -1,0 +1,67 @@
+name: Hi Coworking Firebase booking functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/functions/src/bookingJourney.ts"
+      - "apps/functions/src/bookingManagement.ts"
+      - "apps/functions/src/bookingPolicy.ts"
+      - "apps/functions/src/access.ts"
+      - "apps/functions/src/payments/**"
+      - "apps/functions/package.json"
+      - "packages/shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - "firebase.json"
+      - ".firebaserc"
+      - ".github/workflows/firebase-live-booking-functions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-booking-functions
+  cancel-in-progress: false
+
+jobs:
+  deploy-booking-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            echo "Add a Firebase/Google Cloud service-account JSON with permission to deploy Gen 2 Functions, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy corrected booking functions
+        run: npm run deploy:booking -- --non-interactive
