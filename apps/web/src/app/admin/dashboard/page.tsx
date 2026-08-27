@@ -1,6 +1,23 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  ArrowRight,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Calendar,
+  CreditCard,
+  DollarSign,
+  Hammer,
+  KeyRound,
+  LayoutDashboard,
+  Loader2,
+  Rocket,
+  Users,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
@@ -9,33 +26,7 @@ import {
   setPublicSiteSettings,
   type PublicSiteSettingsDoc,
 } from "@/lib/firestore";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import Link from "next/link";
-import {
-  LayoutDashboard,
-  Loader2,
-  Users,
-  Building2,
-  CreditCard,
-  Calendar,
-  ClipboardList,
-  BarChart3,
-  UserPlus,
-  Bell,
-  DollarSign,
-  ArrowRight,
-  Rocket,
-  Hammer,
-  MapPin,
-  ShieldCheck,
-  KeyRound,
-} from "lucide-react";
 
 export default function AdminDashboardPage() {
   return (
@@ -47,7 +38,6 @@ export default function AdminDashboardPage() {
 
 function AdminDashboardContent() {
   const { user } = useAuth();
-
   const [stats, setStats] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [siteSettings, setSiteSettings] = useState<PublicSiteSettingsDoc>({
@@ -58,37 +48,33 @@ function AdminDashboardContent() {
   const [savingComingSoon, setSavingComingSoon] = useState(false);
   const [comingSoonError, setComingSoonError] = useState<string | null>(null);
 
-  // TODO: Replace with a server-side admin_getStats callable once data volume grows.
-  // These full-collection reads are fine for a micro-coworking space but won't scale.
   const fetchStats = useCallback(async () => {
     setLoading(true);
     try {
-      const [users, activeMembers, orgs, rfx, events, payments, paidPayments, referrals] = await Promise.all([
+      const [users, activeMembers, bookings, events, payments, paidPayments] = await Promise.all([
         getDocs(collection(db, "users")),
         getDocs(query(collection(db, "users"), where("membershipStatus", "==", "active"))),
-        getDocs(collection(db, "orgs")),
-        getDocs(collection(db, "rfx")),
+        getDocs(collection(db, "bookings")),
         getDocs(collection(db, "events")),
         getDocs(collection(db, "payments")),
         getDocs(query(collection(db, "payments"), where("status", "==", "paid"))),
-        getDocs(collection(db, "referrals")),
       ]);
 
       let revenue = 0;
-      paidPayments.docs.forEach((d) => { revenue += (d.data().amount || 0); });
+      paidPayments.docs.forEach((doc) => {
+        revenue += doc.data().amount || 0;
+      });
 
       setStats({
         users: users.size,
         activeMembers: activeMembers.size,
-        orgs: orgs.size,
-        rfx: rfx.size,
+        bookings: bookings.size,
         events: events.size,
         payments: payments.size,
         revenue,
-        referrals: referrals.size,
       });
     } catch (err) {
-      console.error("Failed to fetch stats:", err);
+      console.error("Failed to fetch coworking stats:", err);
     } finally {
       setLoading(false);
     }
@@ -100,16 +86,14 @@ function AdminDashboardContent() {
         fetchStats(),
         (async () => {
           try {
-            const settings = await getPublicSiteSettings();
-            setSiteSettings(settings);
+            setSiteSettings(await getPublicSiteSettings());
           } catch (err) {
             console.error("Failed to fetch public site settings:", err);
           }
         })(),
       ]);
     };
-
-    load();
+    void load();
   }, [fetchStats]);
 
   const toggleComingSoon = useCallback(async () => {
@@ -129,12 +113,11 @@ function AdminDashboardContent() {
         updatedBy: user.uid,
       }));
     } catch (err: unknown) {
-      console.error("Failed to update coming soon setting:", err);
       const fbErr = err as { code?: string; message?: string };
       setComingSoonError(
         fbErr.code === "permission-denied"
-          ? "Permission denied. Ensure your account has admin/master custom claims (re-run set-admin.js and sign out/in)."
-          : `Failed to save: ${fbErr.message ?? "Unknown error"}`
+          ? "Permission denied. Ensure your account has admin/master custom claims and sign in again."
+          : `Failed to save: ${fbErr.message ?? "Unknown error"}`,
       );
     } finally {
       setSavingComingSoon(false);
@@ -154,25 +137,18 @@ function AdminDashboardContent() {
   const cards = [
     { label: "Total Users", value: stats.users || 0, icon: Users, color: "text-slate-600 bg-slate-100" },
     { label: "Active Members", value: stats.activeMembers || 0, icon: Users, color: "text-emerald-600 bg-emerald-50" },
+    { label: "Bookings", value: stats.bookings || 0, icon: Calendar, color: "text-blue-600 bg-blue-50" },
     { label: "Revenue", value: `$${((stats.revenue || 0) / 100).toFixed(0)}`, icon: DollarSign, color: "text-emerald-600 bg-emerald-50" },
-    { label: "Organizations", value: stats.orgs || 0, icon: Building2, color: "text-indigo-600 bg-indigo-50" },
-    { label: "RFx Opportunities", value: stats.rfx || 0, icon: ClipboardList, color: "text-blue-600 bg-blue-50" },
     { label: "Events", value: stats.events || 0, icon: Calendar, color: "text-purple-600 bg-purple-50" },
     { label: "Payments", value: stats.payments || 0, icon: CreditCard, color: "text-amber-600 bg-amber-50" },
-    { label: "Referrals", value: stats.referrals || 0, icon: UserPlus, color: "text-pink-600 bg-pink-50" },
   ];
 
   const quickLinks = [
     { href: "/admin/members", label: "Member Management", icon: Users },
-    { href: "/admin/rfx", label: "RFx Moderation", icon: ClipboardList },
-    { href: "/admin/territories", label: "Territory Manager", icon: MapPin },
-    { href: "/admin/verification", label: "Verification Ops", icon: ShieldCheck },
     { href: "/admin/events", label: "Event Management", icon: Calendar },
-    { href: "/admin/events/campaigns", label: "Event Campaigns", icon: Bell },
-    { href: "/admin/events/social", label: "Event Social", icon: Rocket },
-    { href: "/admin/orgs", label: "Org Management", icon: Building2 },
+    { href: "/admin/bookstore", label: "Bookstore", icon: BookOpen },
     { href: "/admin/payments", label: "Payments Ledger", icon: CreditCard },
-    { href: "/admin/analytics", label: "Platform Analytics", icon: BarChart3 },
+    { href: "/admin/analytics", label: "Coworking Analytics", icon: BarChart3 },
     { href: "/admin/leads", label: "Leads", icon: Bell },
     { href: "/admin/products", label: "Products", icon: DollarSign },
     { href: "/admin/builder", label: "Space Builder", icon: Hammer },
@@ -184,14 +160,12 @@ function AdminDashboardContent() {
       <div className="max-w-5xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <LayoutDashboard className="h-8 w-8 text-slate-400" />
-            Admin Overview
+            <LayoutDashboard className="h-8 w-8 text-slate-400" /> Admin Overview
           </h1>
-          <p className="text-slate-500 mt-1">Real-time platform snapshot.</p>
+          <p className="text-slate-500 mt-1">Coworking operations at a glance.</p>
         </div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
           {cards.map((card) => (
             <div key={card.label} className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
               <div className="flex items-center gap-2 mb-2">
@@ -205,9 +179,8 @@ function AdminDashboardContent() {
           ))}
         </div>
 
-        {/* Quick links */}
         <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-4">Quick Links</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {quickLinks.map((link) => (
             <Link
               key={link.href}
@@ -221,7 +194,6 @@ function AdminDashboardContent() {
           ))}
         </div>
 
-        {/* Public site control */}
         <div className="mt-8 p-5 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -229,7 +201,7 @@ function AdminDashboardContent() {
                 <Rocket className="h-4 w-4 text-slate-400" /> Public Site Mode
               </h2>
               <p className="text-sm text-slate-500 mt-1">
-                Toggle marketing pages between normal mode and Coming Soon mode while keeping ecosystem routes live.
+                Toggle public marketing pages between normal mode and Coming Soon while member and staff routes remain available.
               </p>
               {siteSettings.updatedAt > 0 && (
                 <p className="text-xs text-slate-400 mt-2">
@@ -267,6 +239,10 @@ function AdminDashboardContent() {
             </div>
           )}
         </div>
+
+        <p className="mt-5 text-xs text-slate-400">
+          The historical integrated RFxchange implementation remains preserved in the repository and Firebase backend, but its Hi Coworking customer/admin entry points are hidden.
+        </p>
       </div>
     </AppShell>
   );
