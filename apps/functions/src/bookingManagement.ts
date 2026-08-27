@@ -35,8 +35,7 @@ function db() { return admin.firestore(); }
 function resourceType(resourceId: string): ResourceType { return resourceId.startsWith("mode-") ? "MODE" : "SEAT"; }
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) { return aStart < bEnd && aEnd > bStart; }
 function monthKey(timestamp: number) {
-  const parts = new Intl.DateTimeFormat("en-US", { timeZone: LOCATION_TIME_ZONE, year: "numeric", month: "2-digit" })
-    .formatToParts(new Date(timestamp));
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: LOCATION_TIME_ZONE, year: "numeric", month: "2-digit" }).formatToParts(new Date(timestamp));
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}`;
 }
@@ -85,13 +84,26 @@ async function restoreIncludedHours(booking: BookingData, percent: number) {
   if (!applied || percent <= 0) return 0;
   const restored = applied * percent / 100;
   const usageRef = db().collection("membershipUsage").doc(`${booking.userId}_${monthKey(booking.start)}`);
+  const adjustmentRef = db().collection("membershipHourAdjustments").doc(`booking_cancel_${booking.id}`);
+  let appliedNow = false;
   await db().runTransaction(async (tx) => {
-    const snap = await tx.get(usageRef);
-    if (!snap.exists) return;
-    const usedHours = Math.max(0, Number(snap.data()?.usedHours || 0));
-    tx.update(usageRef, { usedHours: Math.max(0, usedHours - restored), updatedAt: Date.now() });
+    const [usageSnap, adjustmentSnap] = await Promise.all([tx.get(usageRef), tx.get(adjustmentRef)]);
+    if (adjustmentSnap.exists) return;
+    tx.set(adjustmentRef, {
+      id: adjustmentRef.id,
+      userId: booking.userId,
+      bookingId: booking.id,
+      hours: restored,
+      reason: "booking_cancellation",
+      createdAt: Date.now(),
+    });
+    if (usageSnap.exists) {
+      const usedHours = Math.max(0, Number(usageSnap.data()?.usedHours || 0));
+      tx.update(usageRef, { usedHours: Math.max(0, usedHours - restored), updatedAt: Date.now() });
+    }
+    appliedNow = true;
   });
-  return restored;
+  return appliedNow ? restored : restored;
 }
 async function issueAccountCredit(booking: BookingData, amountCents: number) {
   if (amountCents <= 0) return;
