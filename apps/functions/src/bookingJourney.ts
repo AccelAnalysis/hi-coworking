@@ -15,6 +15,7 @@ const HOLD_MS = 15 * 60 * 1000;
 const OPEN_HOUR = 8;
 const CLOSE_HOUR = 20;
 const INCREMENT_MS = 30 * 60 * 1000;
+const LOCATION_TIME_ZONE = "America/New_York";
 
 const RESOURCE_CONFIG: Record<string, {
   name: string;
@@ -41,8 +42,47 @@ type BusyRecord = {
 
 type GuestDetails = { name?: string; email?: string; phone?: string };
 
+type LocalClock = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+};
+
 function db() {
   return admin.firestore();
+}
+
+function localClock(timestamp: number): LocalClock {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: LOCATION_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    year: Number(values.year),
+    month: Number(values.month),
+    day: Number(values.day),
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+  };
+}
+
+function localDayKey(timestamp: number) {
+  const value = localClock(timestamp);
+  return `${value.year}-${String(value.month).padStart(2, "0")}-${String(value.day).padStart(2, "0")}`;
+}
+
+function localMonthKey(timestamp: number) {
+  const value = localClock(timestamp);
+  return `${value.year}-${String(value.month).padStart(2, "0")}`;
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number) {
@@ -56,13 +96,14 @@ function validateWindow(start: number, end: number) {
   if (start % INCREMENT_MS !== 0 || end % INCREMENT_MS !== 0) {
     throw new HttpsError("invalid-argument", "Bookings must use 30-minute increments.");
   }
-  const startDate = new Date(start);
-  const endDate = new Date(end);
-  if (startDate.toDateString() !== endDate.toDateString()) {
+  if (localDayKey(start) !== localDayKey(end - 1)) {
     throw new HttpsError("invalid-argument", "Bookings must start and end on the same day.");
   }
-  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
-  if (startDate.getHours() < OPEN_HOUR || endMinutes > CLOSE_HOUR * 60) {
+  const startClock = localClock(start);
+  const endClock = localClock(end);
+  const startMinutes = startClock.hour * 60 + startClock.minute;
+  const endMinutes = endClock.hour * 60 + endClock.minute;
+  if (startMinutes < OPEN_HOUR * 60 || endMinutes > CLOSE_HOUR * 60) {
     throw new HttpsError("failed-precondition", "That time is outside current operating hours.");
   }
   if (start < Date.now() - 60_000) {
@@ -147,13 +188,11 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
       if (tier) {
         membershipName = tier.name;
         hourlyRateCents = tier.extraHourlyRateCents;
-        const month = new Date(start);
-        const monthStart = new Date(month.getFullYear(), month.getMonth(), 1).getTime();
-        const monthEnd = new Date(month.getFullYear(), month.getMonth() + 1, 1).getTime();
+        const targetMonth = localMonthKey(start);
         const usedSnap = await db().collection("bookings").where("userId", "==", uid).get();
         const usedHours = usedSnap.docs.reduce((sum, doc) => {
           const booking = doc.data();
-          if (booking.status === "CANCELLED" || booking.start < monthStart || booking.start >= monthEnd) return sum;
+          if (booking.status === "CANCELLED" || localMonthKey(booking.start) !== targetMonth) return sum;
           if (RESOURCE_CONFIG[booking.resourceId]?.type !== "SEAT") return sum;
           return sum + Math.max(0, (booking.end - booking.start) / 3_600_000);
         }, 0);
@@ -228,7 +267,7 @@ export const booking_getAvailability = onCall(async (request) => {
   return {
     start,
     end,
-    operatingHours: { openHour: OPEN_HOUR, closeHour: CLOSE_HOUR },
+    operatingHours: { openHour: OPEN_HOUR, closeHour: CLOSE_HOUR, timeZone: LOCATION_TIME_ZONE },
     options: Object.entries(RESOURCE_CONFIG).map(([resourceId, resource]) => ({
       resourceId,
       name: resource.name,
