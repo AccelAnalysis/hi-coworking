@@ -5,7 +5,13 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { createPayment } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
-import { getTierById } from "./payments/stripeConfig";
+import {
+  CONFERENCE_ROOM_HOURLY_RATE_CENTS,
+  GUEST_BOOKING_WINDOW_DAYS,
+  GUEST_DAILY_CAP_CENTS,
+  GUEST_HOURLY_RATE_CENTS,
+  getTierById,
+} from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
@@ -16,6 +22,7 @@ const OPEN_HOUR = 8;
 const CLOSE_HOUR = 20;
 const INCREMENT_MS = 30 * 60 * 1000;
 const LOCATION_TIME_ZONE = "America/New_York";
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const RESOURCE_CONFIG: Record<string, {
   name: string;
@@ -23,13 +30,13 @@ const RESOURCE_CONFIG: Record<string, {
   guestRateHourlyCents: number;
   exclusiveGroupId: string;
 }> = {
-  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: 1750, exclusiveGroupId: "main_space" },
-  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: 7500, exclusiveGroupId: "main_space" },
+  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: CONFERENCE_ROOM_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
 };
 
 type BusyRecord = {
@@ -111,6 +118,24 @@ function validateWindow(start: number, end: number) {
   }
 }
 
+async function bookingWindowDaysFor(uid?: string) {
+  if (!uid) return GUEST_BOOKING_WINDOW_DAYS;
+  const userSnap = await db().collection("users").doc(uid).get();
+  const user = userSnap.data();
+  if (user?.membershipStatus !== "active" || !user?.plan) return GUEST_BOOKING_WINDOW_DAYS;
+  return getTierById(user.plan)?.bookingWindowDays ?? GUEST_BOOKING_WINDOW_DAYS;
+}
+
+async function enforceBookingHorizon(start: number, uid?: string) {
+  const days = await bookingWindowDaysFor(uid);
+  if (start > Date.now() + days * DAY_MS) {
+    throw new HttpsError(
+      "failed-precondition",
+      `That date is outside your current ${days}-day booking window.`,
+    );
+  }
+}
+
 function resourceConflicts(resourceId: string, start: number, end: number, busy: BusyRecord[]) {
   const target = RESOURCE_CONFIG[resourceId];
   if (!target) return true;
@@ -172,6 +197,7 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
   const resource = RESOURCE_CONFIG[resourceId];
   if (!resource) throw new HttpsError("not-found", "Space not found.");
   validateWindow(start, end);
+  await enforceBookingHorizon(start, uid);
 
   const durationHours = (end - start) / 3_600_000;
   let includedHoursRemaining = 0;
@@ -203,6 +229,11 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     }
   }
 
+  let totalCents = Math.round(billableHours * hourlyRateCents);
+  if (resource.type === "SEAT" && !membershipName) {
+    totalCents = Math.min(totalCents, GUEST_DAILY_CAP_CENTS);
+  }
+
   return {
     resourceId,
     resourceName: resource.name,
@@ -215,7 +246,8 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     includedHoursApplied,
     billableHours,
     hourlyRateCents,
-    totalCents: Math.round(billableHours * hourlyRateCents),
+    totalCents,
+    dailyCapApplied: resource.type === "SEAT" && !membershipName && totalCents === GUEST_DAILY_CAP_CENTS,
     currency: "usd",
   };
 }
@@ -263,6 +295,7 @@ async function issueAccessSafely(bookingId: string, resourceId: string, userId: 
 export const booking_getAvailability = onCall(async (request) => {
   const { start, end } = request.data as { start: number; end: number };
   validateWindow(start, end);
+  await enforceBookingHorizon(start, request.auth?.uid);
   const busy = await getBusy(start, end);
   return {
     start,
@@ -305,6 +338,7 @@ export const booking_beginCheckout = onCall(
     }
 
     validateWindow(start, end);
+    await enforceBookingHorizon(start, request.auth?.uid);
     const quote = await quoteFor(resourceId, start, end, request.auth?.uid);
     const holdRef = db().collection("bookingHolds").doc();
     const holdSecret = randomBytes(24).toString("hex");
