@@ -30,3 +30,5 @@ Any included membership hours applied to the booking are fully restored.
 Late-cancellation value is issued as Hi Coworking account credit rather than a partial Stripe refund. Full timely refunds and Hi Coworking-caused cancellations use the original payment method unless the customer chooses full account credit for a Hi Coworking-caused cancellation.
 
 The executable policy source is `apps/functions/src/bookingPolicy.ts`, with boundary tests in `tests/functions/booking-policy.test.ts`.
+
+This PR establishes and tests the policy source of truth. The customer-facing cancellation/reschedule transaction must apply this module when it writes refunds, account credits, membership-hour restoration, booking state, and access revocation.
