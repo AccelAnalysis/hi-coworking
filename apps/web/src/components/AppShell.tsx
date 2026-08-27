@@ -13,10 +13,38 @@ import {
   Menu,
   X,
   ChevronDown,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import { useEffect, useState, useRef } from "react";
 import { subscribeToUnreadCount } from "@/lib/firestore";
+
+function integratedRfxchangeRedirect(pathname: string): string | null {
+  if (
+    pathname === "/admin/rfx" || pathname.startsWith("/admin/rfx/") ||
+    pathname === "/admin/territories" || pathname.startsWith("/admin/territories/") ||
+    pathname === "/admin/verification" || pathname.startsWith("/admin/verification/") ||
+    pathname === "/admin/orgs" || pathname.startsWith("/admin/orgs/")
+  ) {
+    return "/admin/dashboard";
+  }
+
+  if (pathname === "/platform" || pathname === "/exchange" || pathname.startsWith("/exchange/")) {
+    return "/";
+  }
+
+  if (
+    pathname === "/dashboard" ||
+    pathname === "/rfx" || pathname.startsWith("/rfx/") ||
+    pathname === "/directory" || pathname.startsWith("/directory/") ||
+    pathname === "/referrals" || pathname.startsWith("/referrals/") ||
+    pathname === "/org" || pathname.startsWith("/org/")
+  ) {
+    return "/my-hi";
+  }
+
+  return null;
+}
 
 export function AppShell({ children, fullWidth = false }: { children: React.ReactNode; fullWidth?: boolean }) {
   const pathname = usePathname();
@@ -26,6 +54,7 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
+  const hiddenRouteDestination = integratedRfxchangeRedirect(pathname);
 
   useEffect(() => {
     if (!user) return;
@@ -48,6 +77,12 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
     setAvatarOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (hiddenRouteDestination) {
+      router.replace(hiddenRouteDestination);
+    }
+  }, [hiddenRouteDestination, router]);
+
   const handleSignOut = async () => {
     setAvatarOpen(false);
     setDrawerOpen(false);
@@ -65,8 +100,8 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
     { href: "/contact", label: "Contact" },
   ];
 
-  // RFxchange remains preserved in the repository, but its customer entry points
-  // are intentionally hidden while Hi Coworking operates as a coworking-first product.
+  // The integrated RFxchange implementation remains preserved in source and
+  // backend data, but its Hi Coworking navigation and routes are soft-hidden.
   const memberLinks = [
     { href: "/my-hi", label: "My Hi", icon: LayoutDashboard },
     { href: "/book", label: "Book Space", icon: Calendar },
@@ -95,6 +130,17 @@ export function AppShell({ children, fullWidth = false }: { children: React.Reac
       {label}
     </Link>
   );
+
+  if (hiddenRouteDestination) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center bg-slate-50" role="status" aria-live="polite">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
+          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+          Returning to Hi Coworking…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh flex flex-col">
