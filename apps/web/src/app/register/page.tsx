@@ -22,9 +22,8 @@ export default function RegisterPage() {
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      // Update display name immediately
       await updateProfile(userCredential.user, { displayName: name });
-      router.push("/dashboard");
+      router.push("/my-hi");
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
