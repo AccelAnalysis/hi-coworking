@@ -11,6 +11,7 @@ import {
   GUEST_DAILY_CAP_CENTS,
   GUEST_HOURLY_RATE_CENTS,
   getTierById,
+  type MembershipTier,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
 
@@ -57,6 +58,19 @@ type LocalClock = {
   minute: number;
 };
 
+type UsageReservation = {
+  hours: number;
+  expiresAt: number;
+};
+
+type MembershipUsage = {
+  uid: string;
+  monthKey: string;
+  usedHours: number;
+  reservations: Record<string, UsageReservation>;
+  updatedAt: number;
+};
+
 function db() {
   return admin.firestore();
 }
@@ -90,6 +104,23 @@ function localDayKey(timestamp: number) {
 function localMonthKey(timestamp: number) {
   const value = localClock(timestamp);
   return `${value.year}-${String(value.month).padStart(2, "0")}`;
+}
+
+function usageDocumentId(uid: string, monthKey: string) {
+  return `${uid}_${monthKey}`;
+}
+
+function activeReservations(
+  reservations: Record<string, UsageReservation> | undefined,
+  now = Date.now(),
+) {
+  return Object.fromEntries(
+    Object.entries(reservations || {}).filter(([, reservation]) => reservation.expiresAt > now),
+  );
+}
+
+function reservedHours(reservations: Record<string, UsageReservation>) {
+  return Object.values(reservations).reduce((sum, reservation) => sum + Math.max(0, reservation.hours), 0);
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number) {
@@ -174,23 +205,35 @@ async function getBusy(start: number, end: number, excludeHoldId?: string) {
   return busyFromSnapshots(bookingSnap, holdSnap, end, excludeHoldId);
 }
 
-async function createHoldAtomically(
-  holdRef: FirebaseFirestore.DocumentReference,
-  hold: Record<string, unknown>,
-  resourceId: string,
-  start: number,
-  end: number,
+function hoursFromBookingDocs(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  monthKey: string,
 ) {
-  await db().runTransaction(async (tx) => {
-    const bookingQuery = db().collection("bookings").where("end", ">", start);
-    const holdQuery = db().collection("bookingHolds").where("end", ">", start);
-    const [bookingSnap, holdSnap] = await Promise.all([tx.get(bookingQuery), tx.get(holdQuery)]);
-    const busy = busyFromSnapshots(bookingSnap, holdSnap, end);
-    if (resourceConflicts(resourceId, start, end, busy)) {
-      throw new HttpsError("failed-precondition", "That option was just booked. Choose another available space.");
-    }
-    tx.set(holdRef, hold);
-  });
+  return docs.reduce((sum, doc) => {
+    const booking = doc.data();
+    if (booking.status === "CANCELLED" || localMonthKey(booking.start) !== monthKey) return sum;
+    if (RESOURCE_CONFIG[booking.resourceId]?.type !== "SEAT") return sum;
+    return sum + Math.max(0, (booking.end - booking.start) / 3_600_000);
+  }, 0);
+}
+
+async function getMembershipUsageState(uid: string, monthKey: string) {
+  const usageRef = db().collection("membershipUsage").doc(usageDocumentId(uid, monthKey));
+  const usageSnap = await usageRef.get();
+  if (usageSnap.exists) {
+    const usage = usageSnap.data() as MembershipUsage;
+    const reservations = activeReservations(usage.reservations);
+    return {
+      usedHours: Math.max(0, usage.usedHours || 0),
+      reservations,
+    };
+  }
+
+  const bookingSnap = await db().collection("bookings").where("userId", "==", uid).get();
+  return {
+    usedHours: hoursFromBookingDocs(bookingSnap.docs, monthKey),
+    reservations: {} as Record<string, UsageReservation>,
+  };
 }
 
 async function quoteFor(resourceId: string, start: number, end: number, uid?: string) {
@@ -214,16 +257,14 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
       if (tier) {
         membershipName = tier.name;
         hourlyRateCents = tier.extraHourlyRateCents;
-        const targetMonth = localMonthKey(start);
-        const usedSnap = await db().collection("bookings").where("userId", "==", uid).get();
-        const usedHours = usedSnap.docs.reduce((sum, doc) => {
-          const booking = doc.data();
-          if (booking.status === "CANCELLED" || localMonthKey(booking.start) !== targetMonth) return sum;
-          if (RESOURCE_CONFIG[booking.resourceId]?.type !== "SEAT") return sum;
-          return sum + Math.max(0, (booking.end - booking.start) / 3_600_000);
-        }, 0);
-        includedHoursRemaining = Math.max(0, tier.includedHoursPerMonth - usedHours);
-        includedHoursApplied = Math.min(durationHours, includedHoursRemaining);
+        const monthKey = localMonthKey(start);
+        const usage = await getMembershipUsageState(uid, monthKey);
+        const remaining = Math.max(
+          0,
+          tier.includedHoursPerMonth - usage.usedHours - reservedHours(usage.reservations),
+        );
+        includedHoursRemaining = remaining;
+        includedHoursApplied = Math.min(durationHours, remaining);
         billableHours = Math.max(0, durationHours - includedHoursApplied);
       }
     }
@@ -250,6 +291,142 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     dailyCapApplied: resource.type === "SEAT" && !membershipName && totalCents === GUEST_DAILY_CAP_CENTS,
     currency: "usd",
   };
+}
+
+function guestSeatQuote(baseQuote: any) {
+  const durationHours = baseQuote.durationHours as number;
+  return {
+    ...baseQuote,
+    membershipName: null,
+    includedHoursRemaining: 0,
+    includedHoursApplied: 0,
+    billableHours: durationHours,
+    hourlyRateCents: GUEST_HOURLY_RATE_CENTS,
+    totalCents: Math.min(Math.round(durationHours * GUEST_HOURLY_RATE_CENTS), GUEST_DAILY_CAP_CENTS),
+    dailyCapApplied: Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= GUEST_DAILY_CAP_CENTS,
+  };
+}
+
+async function createHoldAtomically(
+  holdRef: FirebaseFirestore.DocumentReference,
+  hold: Record<string, any>,
+  resourceId: string,
+  start: number,
+  end: number,
+  authenticatedUid?: string,
+) {
+  return db().runTransaction(async (tx) => {
+    const bookingQuery = db().collection("bookings").where("end", ">", start);
+    const holdQuery = db().collection("bookingHolds").where("end", ">", start);
+    const resource = RESOURCE_CONFIG[resourceId];
+    if (!resource) throw new HttpsError("not-found", "Space not found.");
+
+    const readPromises: Array<Promise<any>> = [tx.get(bookingQuery), tx.get(holdQuery)];
+    let userRef: FirebaseFirestore.DocumentReference | null = null;
+    if (authenticatedUid && resource.type === "SEAT") {
+      userRef = db().collection("users").doc(authenticatedUid);
+      readPromises.push(tx.get(userRef));
+    }
+    const initialReads = await Promise.all(readPromises);
+    const bookingSnap = initialReads[0] as FirebaseFirestore.QuerySnapshot;
+    const holdSnap = initialReads[1] as FirebaseFirestore.QuerySnapshot;
+    const userSnap = userRef ? initialReads[2] as FirebaseFirestore.DocumentSnapshot : null;
+
+    const busy = busyFromSnapshots(bookingSnap, holdSnap, end);
+    if (resourceConflicts(resourceId, start, end, busy)) {
+      throw new HttpsError("failed-precondition", "That option was just booked. Choose another available space.");
+    }
+
+    let adjustedQuote = { ...hold.quote };
+    let usageRef: FirebaseFirestore.DocumentReference | null = null;
+    let usageData: MembershipUsage | null = null;
+
+    if (authenticatedUid && resource.type === "SEAT") {
+      const user = userSnap?.data();
+      const tier = user?.membershipStatus === "active" && user?.plan
+        ? getTierById(user.plan) : undefined;
+
+      if (tier) {
+        const monthKey = localMonthKey(start);
+        usageRef = db().collection("membershipUsage").doc(usageDocumentId(authenticatedUid, monthKey));
+        const usageSnap = await tx.get(usageRef);
+        let usedHours = 0;
+        let reservations: Record<string, UsageReservation> = {};
+
+        if (usageSnap.exists) {
+          const existing = usageSnap.data() as MembershipUsage;
+          usedHours = Math.max(0, existing.usedHours || 0);
+          reservations = activeReservations(existing.reservations);
+        } else {
+          const memberBookings = await tx.get(
+            db().collection("bookings").where("userId", "==", authenticatedUid),
+          );
+          usedHours = hoursFromBookingDocs(memberBookings.docs, monthKey);
+        }
+
+        const remaining = Math.max(
+          0,
+          tier.includedHoursPerMonth - usedHours - reservedHours(reservations),
+        );
+        const includedHoursApplied = Math.min(adjustedQuote.durationHours, remaining);
+        const billableHours = Math.max(0, adjustedQuote.durationHours - includedHoursApplied);
+        adjustedQuote = {
+          ...adjustedQuote,
+          membershipName: tier.name,
+          includedHoursRemaining: remaining,
+          includedHoursApplied,
+          billableHours,
+          hourlyRateCents: tier.extraHourlyRateCents,
+          totalCents: Math.round(billableHours * tier.extraHourlyRateCents),
+          dailyCapApplied: false,
+        };
+
+        if (includedHoursApplied > 0) {
+          reservations[holdRef.id] = {
+            hours: includedHoursApplied,
+            expiresAt: hold.expiresAt,
+          };
+        }
+        usageData = {
+          uid: authenticatedUid,
+          monthKey,
+          usedHours,
+          reservations,
+          updatedAt: Date.now(),
+        };
+      } else {
+        adjustedQuote = guestSeatQuote(adjustedQuote);
+      }
+    }
+
+    if (usageRef && usageData) tx.set(usageRef, usageData, { merge: true });
+    tx.set(holdRef, {
+      ...hold,
+      quote: adjustedQuote,
+      membershipUsageId: usageRef?.id || null,
+    });
+    return adjustedQuote;
+  });
+}
+
+function consumeMembershipReservation(
+  tx: FirebaseFirestore.Transaction,
+  usageRef: FirebaseFirestore.DocumentReference,
+  usageSnap: FirebaseFirestore.DocumentSnapshot,
+  holdId: string,
+) {
+  if (!usageSnap.exists) return;
+  const usage = usageSnap.data() as MembershipUsage;
+  const reservations = activeReservations(usage.reservations);
+  const reservation = reservations[holdId];
+  if (!reservation) return;
+  delete reservations[holdId];
+  tx.set(usageRef, {
+    ...usage,
+    usedHours: Math.max(0, usage.usedHours || 0) + Math.max(0, reservation.hours),
+    reservations,
+    updatedAt: Date.now(),
+  }, { merge: true });
 }
 
 async function ensureGuestAccount(guest?: GuestDetails) {
@@ -339,7 +516,7 @@ export const booking_beginCheckout = onCall(
 
     validateWindow(start, end);
     await enforceBookingHorizon(start, request.auth?.uid);
-    const quote = await quoteFor(resourceId, start, end, request.auth?.uid);
+    let quote = await quoteFor(resourceId, start, end, request.auth?.uid);
     const holdRef = db().collection("bookingHolds").doc();
     const holdSecret = randomBytes(24).toString("hex");
     const now = Date.now();
@@ -363,7 +540,14 @@ export const booking_beginCheckout = onCall(
       expiresAt: now + HOLD_MS,
     };
 
-    await createHoldAtomically(holdRef, hold, resourceId, start, end);
+    quote = await createHoldAtomically(
+      holdRef,
+      hold,
+      resourceId,
+      start,
+      end,
+      request.auth?.uid,
+    );
 
     if (quote.totalCents === 0 && request.auth) {
       const bookingRef = db().collection("bookings").doc();
@@ -372,6 +556,12 @@ export const booking_beginCheckout = onCall(
         if (!latest.exists || latest.data()?.expiresAt <= Date.now()) {
           throw new HttpsError("deadline-exceeded", "Your hold expired. Please choose the space again.");
         }
+        const latestHold = latest.data() as any;
+        const usageRef = latestHold.membershipUsageId
+          ? db().collection("membershipUsage").doc(latestHold.membershipUsageId)
+          : null;
+        const usageSnap = usageRef ? await tx.get(usageRef) : null;
+
         tx.set(bookingRef, {
           id: bookingRef.id,
           resourceId,
@@ -388,6 +578,9 @@ export const booking_beginCheckout = onCall(
           createdAt: Date.now(),
         });
         tx.update(holdRef, { status: "CONSUMED", consumedAt: Date.now(), bookingId: bookingRef.id });
+        if (usageRef && usageSnap) {
+          consumeMembershipReservation(tx, usageRef, usageSnap, holdRef.id);
+        }
       });
       await issueAccessSafely(bookingRef.id, resourceId, request.auth.uid, start, end);
       return { kind: "confirmed", bookingId: bookingRef.id, quote };
@@ -472,13 +665,23 @@ export const booking_finalizeCheckout = onCall(
     const bookingRef = db().collection("bookings").doc();
 
     await db().runTransaction(async (tx) => {
-      const latestHold = await tx.get(holdRef);
-      if (!latestHold.exists) throw new HttpsError("not-found", "Booking hold not found.");
-      if (latestHold.data()?.status === "CONSUMED") return;
+      const latestHoldSnap = await tx.get(holdRef);
+      if (!latestHoldSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
+      const latestHold = latestHoldSnap.data() as any;
+      if (latestHold.status === "CONSUMED") return;
 
       const bookingQuery = db().collection("bookings").where("end", ">", hold.start);
       const holdQuery = db().collection("bookingHolds").where("end", ">", hold.start);
-      const [bookingSnap, holdRangeSnap] = await Promise.all([tx.get(bookingQuery), tx.get(holdQuery)]);
+      const usageRef = latestHold.membershipUsageId
+        ? db().collection("membershipUsage").doc(latestHold.membershipUsageId)
+        : null;
+      const reads: Array<Promise<any>> = [tx.get(bookingQuery), tx.get(holdQuery)];
+      if (usageRef) reads.push(tx.get(usageRef));
+      const results = await Promise.all(reads);
+      const bookingSnap = results[0] as FirebaseFirestore.QuerySnapshot;
+      const holdRangeSnap = results[1] as FirebaseFirestore.QuerySnapshot;
+      const usageSnap = usageRef ? results[2] as FirebaseFirestore.DocumentSnapshot : null;
+
       const busy = busyFromSnapshots(bookingSnap, holdRangeSnap, hold.end, holdId);
       if (resourceConflicts(hold.resourceId, hold.start, hold.end, busy)) {
         logger.error("Paid hold encountered conflict during finalization", { holdId, paymentId: hold.paymentId });
@@ -509,6 +712,9 @@ export const booking_finalizeCheckout = onCall(
         bookingId: bookingRef.id,
         userId: finalUserId,
       });
+      if (usageRef && usageSnap) {
+        consumeMembershipReservation(tx, usageRef, usageSnap, holdId);
+      }
     });
 
     await issueAccessSafely(bookingRef.id, hold.resourceId, finalUserId, hold.start, hold.end);
