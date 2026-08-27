@@ -1,8 +1,8 @@
 {
   "name": "functions",
   "private": true,
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "lib/main.js",
+  "types": "lib/main.d.ts",
   "engines": {
     "node": "20"
   },
