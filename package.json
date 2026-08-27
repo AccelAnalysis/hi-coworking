@@ -13,6 +13,7 @@
     "build:functions": "npm run build --workspace functions",
     "lint": "npm run lint --workspace web",
     "emulators": "firebase emulators:start",
+    "deploy:booking": "firebase deploy --project hi-coworking-plat --only functions:booking_getAvailability,functions:booking_createQuote,functions:booking_beginCheckout,functions:booking_finalizeCheckout,functions:booking_getCancellationPreview,functions:booking_cancel,functions:booking_reschedule",
     "test": "npm run test:security",
     "test:rules": "firebase emulators:exec --project demo-hi-coworking --only firestore,storage \"vitest run tests/rules\"",
     "test:functions": "npm run build:shared && npm run build:functions && firebase emulators:exec --project demo-hi-coworking --only auth,firestore,functions,storage \"vitest run tests/functions\"",
