@@ -27,7 +27,9 @@ function MyHiContent() {
     let active = true;
     void getUserBookingsFromFirestore(user.uid)
       .then((next) => {
-        if (active) setBookings(next);
+        if (!active) return;
+        const now = Date.now();
+        setBookings(next.filter((booking) => booking.status === "CONFIRMED" && booking.end > now));
       })
       .catch((error) => console.error("Failed to load bookings", error))
       .finally(() => {
@@ -39,10 +41,7 @@ function MyHiContent() {
   }, [user]);
 
   const upcomingBookings = useMemo(
-    () =>
-      bookings
-        .filter((booking) => booking.status === "CONFIRMED" && booking.end > Date.now())
-        .sort((a, b) => a.start - b.start),
+    () => [...bookings].sort((a, b) => a.start - b.start),
     [bookings],
   );
 
