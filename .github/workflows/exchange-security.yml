@@ -29,6 +29,15 @@ jobs:
       - run: npm ci
       - run: npm run build:shared
       - run: npm run build:functions
+      - run: npm run build:booking-deploy
+      - name: Verify public booking deploy has no external secret bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R -E "SENDGRID_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SEAM_API_KEY|SEAM_WEBHOOK_SECRET" firebase/booking-public-functions/lib; then
+            echo "Public booking deploy bundle unexpectedly contains an external API secret identifier." >&2
+            exit 1
+          fi
       - run: npm run lint
       - run: npm run test:security
       - run: npm run build

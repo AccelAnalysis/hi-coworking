@@ -11,10 +11,11 @@ on:
       - "apps/functions/src/access.ts"
       - "apps/functions/src/payments/**"
       - "apps/functions/package.json"
-      - "packages/shared/**"
+      - "firebase/booking-public-functions/**"
+      - "firebase/booking-transaction-functions/**"
+      - "firebase.booking.json"
       - "package.json"
       - "package-lock.json"
-      - "firebase.json"
       - ".firebaserc"
       - ".github/workflows/firebase-live-booking-functions.yml"
   workflow_dispatch:
@@ -63,5 +64,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Deploy corrected booking functions
-        run: npm run deploy:booking -- --non-interactive
+      - name: Deploy secret-free public booking functions
+        run: npm run deploy:booking:public -- --non-interactive
+
+      - name: Deploy booking transaction functions
+        run: npm run deploy:booking:transactions -- --non-interactive
