@@ -12,6 +12,9 @@ out/
 build/
 dist/
 
+# Firebase Functions build output
+apps/functions/lib/
+
 # Production
 *.log
 npm-debug.log*
