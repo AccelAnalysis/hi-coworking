@@ -19,6 +19,8 @@
     ],
     "redirects": [
       { "source": "/dashboard", "destination": "/my-hi", "type": 302 },
+      { "source": "/profile", "destination": "/my-hi", "type": 302 },
+      { "source": "/profile/**", "destination": "/my-hi", "type": 302 },
       { "source": "/platform", "destination": "/", "type": 302 },
       { "source": "/exchange", "destination": "/", "type": 302 },
       { "source": "/exchange/**", "destination": "/", "type": 302 },
@@ -37,7 +39,9 @@
       { "source": "/admin/verification", "destination": "/admin/dashboard", "type": 302 },
       { "source": "/admin/verification/**", "destination": "/admin/dashboard", "type": 302 },
       { "source": "/admin/orgs", "destination": "/admin/dashboard", "type": 302 },
-      { "source": "/admin/orgs/**", "destination": "/admin/dashboard", "type": 302 }
+      { "source": "/admin/orgs/**", "destination": "/admin/dashboard", "type": 302 },
+      { "source": "/admin/analytics", "destination": "/admin/dashboard", "type": 302 },
+      { "source": "/admin/analytics/**", "destination": "/admin/dashboard", "type": 302 }
     ],
     "rewrites": [
       {
