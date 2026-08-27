@@ -6,7 +6,7 @@ import * as logger from "firebase-functions/logger";
 import { createPayment } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import { getTierById } from "./payments/stripeConfig";
-import { createAccessGrant } from "./access";
+import { createAccessGrant, seamApiKey } from "./access";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -14,7 +14,7 @@ const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 const HOLD_MS = 15 * 60 * 1000;
 const OPEN_HOUR = 8;
 const CLOSE_HOUR = 20;
-const MIN_INCREMENT_MS = 30 * 60 * 1000;
+const INCREMENT_MS = 30 * 60 * 1000;
 
 const RESOURCE_CONFIG: Record<string, {
   name: string;
@@ -36,7 +36,10 @@ type BusyRecord = {
   start: number;
   end: number;
   status?: string;
+  expiresAt?: number;
 };
+
+type GuestDetails = { name?: string; email?: string; phone?: string };
 
 function db() {
   return admin.firestore();
@@ -50,7 +53,7 @@ function validateWindow(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     throw new HttpsError("invalid-argument", "Choose a valid start and end time.");
   }
-  if (start % MIN_INCREMENT_MS !== 0 || end % MIN_INCREMENT_MS !== 0) {
+  if (start % INCREMENT_MS !== 0 || end % INCREMENT_MS !== 0) {
     throw new HttpsError("invalid-argument", "Bookings must use 30-minute increments.");
   }
   const startDate = new Date(start);
@@ -58,7 +61,8 @@ function validateWindow(start: number, end: number) {
   if (startDate.toDateString() !== endDate.toDateString()) {
     throw new HttpsError("invalid-argument", "Bookings must start and end on the same day.");
   }
-  if (startDate.getHours() < OPEN_HOUR || endDate.getHours() > CLOSE_HOUR || (endDate.getHours() === CLOSE_HOUR && endDate.getMinutes() > 0)) {
+  const endMinutes = endDate.getHours() * 60 + endDate.getMinutes();
+  if (startDate.getHours() < OPEN_HOUR || endMinutes > CLOSE_HOUR * 60) {
     throw new HttpsError("failed-precondition", "That time is outside current operating hours.");
   }
   if (start < Date.now() - 60_000) {
@@ -66,39 +70,61 @@ function validateWindow(start: number, end: number) {
   }
 }
 
-function conflicts(targetResourceId: string, start: number, end: number, busy: BusyRecord[]) {
-  const target = RESOURCE_CONFIG[targetResourceId];
+function resourceConflicts(resourceId: string, start: number, end: number, busy: BusyRecord[]) {
+  const target = RESOURCE_CONFIG[resourceId];
   if (!target) return true;
   return busy.some((record) => {
     if (!overlaps(start, end, record.start, record.end)) return false;
     if (record.status === "CANCELLED" || record.status === "EXPIRED") return false;
-    if (record.resourceId === targetResourceId) return true;
+    if (record.resourceId === resourceId) return true;
     const other = RESOURCE_CONFIG[record.resourceId];
     if (!other || other.exclusiveGroupId !== target.exclusiveGroupId) return false;
     return target.type === "MODE" || other.type === "MODE";
   });
 }
 
-async function getBusy(start: number, end: number, excludeHoldId?: string): Promise<BusyRecord[]> {
-  const bookingSnap = await db().collection("bookings").where("end", ">", start).get();
-  const holdSnap = await db().collection("bookingHolds").where("end", ">", start).get();
+function busyFromSnapshots(
+  bookingSnap: FirebaseFirestore.QuerySnapshot,
+  holdSnap: FirebaseFirestore.QuerySnapshot,
+  end: number,
+  excludeHoldId?: string,
+) {
   const now = Date.now();
   const bookings = bookingSnap.docs
     .map((doc) => doc.data() as BusyRecord)
-    .filter((b) => b.start < end && b.status !== "CANCELLED");
+    .filter((item) => item.start < end && item.status !== "CANCELLED");
   const holds = holdSnap.docs
     .filter((doc) => doc.id !== excludeHoldId)
-    .map((doc) => doc.data() as BusyRecord & { expiresAt?: number })
-    .filter((h) => h.start < end && (h.expiresAt || 0) > now && h.status !== "EXPIRED");
+    .map((doc) => doc.data() as BusyRecord)
+    .filter((item) => item.start < end && (item.expiresAt || 0) > now && item.status !== "EXPIRED" && item.status !== "CONSUMED");
   return [...bookings, ...holds];
 }
 
-function monthBounds(timestamp: number) {
-  const d = new Date(timestamp);
-  return {
-    start: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
-    end: new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime(),
-  };
+async function getBusy(start: number, end: number, excludeHoldId?: string) {
+  const [bookingSnap, holdSnap] = await Promise.all([
+    db().collection("bookings").where("end", ">", start).get(),
+    db().collection("bookingHolds").where("end", ">", start).get(),
+  ]);
+  return busyFromSnapshots(bookingSnap, holdSnap, end, excludeHoldId);
+}
+
+async function createHoldAtomically(
+  holdRef: FirebaseFirestore.DocumentReference,
+  hold: Record<string, unknown>,
+  resourceId: string,
+  start: number,
+  end: number,
+) {
+  await db().runTransaction(async (tx) => {
+    const bookingQuery = db().collection("bookings").where("end", ">", start);
+    const holdQuery = db().collection("bookingHolds").where("end", ">", start);
+    const [bookingSnap, holdSnap] = await Promise.all([tx.get(bookingQuery), tx.get(holdQuery)]);
+    const busy = busyFromSnapshots(bookingSnap, holdSnap, end);
+    if (resourceConflicts(resourceId, start, end, busy)) {
+      throw new HttpsError("failed-precondition", "That option was just booked. Choose another available space.");
+    }
+    tx.set(holdRef, hold);
+  });
 }
 
 async function quoteFor(resourceId: string, start: number, end: number, uid?: string) {
@@ -121,17 +147,14 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
       if (tier) {
         membershipName = tier.name;
         hourlyRateCents = tier.extraHourlyRateCents;
-        const bounds = monthBounds(start);
-        const usedSnap = await db().collection("bookings")
-          .where("userId", "==", uid)
-          .where("start", ">=", bounds.start)
-          .where("start", "<", bounds.end)
-          .get();
+        const month = new Date(start);
+        const monthStart = new Date(month.getFullYear(), month.getMonth(), 1).getTime();
+        const monthEnd = new Date(month.getFullYear(), month.getMonth() + 1, 1).getTime();
+        const usedSnap = await db().collection("bookings").where("userId", "==", uid).get();
         const usedHours = usedSnap.docs.reduce((sum, doc) => {
           const booking = doc.data();
-          if (booking.status === "CANCELLED") return sum;
-          const bookedResource = RESOURCE_CONFIG[booking.resourceId];
-          if (!bookedResource || bookedResource.type !== "SEAT") return sum;
+          if (booking.status === "CANCELLED" || booking.start < monthStart || booking.start >= monthEnd) return sum;
+          if (RESOURCE_CONFIG[booking.resourceId]?.type !== "SEAT") return sum;
           return sum + Math.max(0, (booking.end - booking.start) / 3_600_000);
         }, 0);
         includedHoursRemaining = Math.max(0, tier.includedHoursPerMonth - usedHours);
@@ -141,7 +164,6 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     }
   }
 
-  const totalCents = Math.round(billableHours * hourlyRateCents);
   return {
     resourceId,
     resourceName: resource.name,
@@ -154,9 +176,49 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     includedHoursApplied,
     billableHours,
     hourlyRateCents,
-    totalCents,
+    totalCents: Math.round(billableHours * hourlyRateCents),
     currency: "usd",
   };
+}
+
+async function ensureGuestAccount(guest?: GuestDetails) {
+  const email = guest?.email?.trim().toLowerCase();
+  if (!email) throw new HttpsError("failed-precondition", "Guest email is missing.");
+  let userRecord: admin.auth.UserRecord;
+  try {
+    userRecord = await admin.auth().getUserByEmail(email);
+  } catch (error: any) {
+    if (error?.code !== "auth/user-not-found") throw error;
+    userRecord = await admin.auth().createUser({
+      email,
+      displayName: guest?.name?.trim() || undefined,
+      emailVerified: false,
+    });
+  }
+  const userRef = db().collection("users").doc(userRecord.uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    await userRef.set({
+      uid: userRecord.uid,
+      email,
+      displayName: guest?.name?.trim() || "",
+      role: "member",
+      membershipStatus: "none",
+      createdAt: Date.now(),
+    });
+  }
+  return userRecord.uid;
+}
+
+async function issueAccessSafely(bookingId: string, resourceId: string, userId: string, start: number, end: number) {
+  try {
+    await createAccessGrant(bookingId, resourceId, userId, start, end);
+  } catch (error) {
+    logger.error("Access grant failed after booking confirmation", {
+      bookingId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export const booking_getAvailability = onCall(async (request) => {
@@ -171,7 +233,7 @@ export const booking_getAvailability = onCall(async (request) => {
       resourceId,
       name: resource.name,
       type: resource.type,
-      available: !conflicts(resourceId, start, end, busy),
+      available: !resourceConflicts(resourceId, start, end, busy),
     })),
   };
 });
@@ -179,14 +241,14 @@ export const booking_getAvailability = onCall(async (request) => {
 export const booking_createQuote = onCall(async (request) => {
   const { resourceId, start, end } = request.data as { resourceId: string; start: number; end: number };
   const busy = await getBusy(start, end);
-  if (conflicts(resourceId, start, end, busy)) {
+  if (resourceConflicts(resourceId, start, end, busy)) {
     throw new HttpsError("failed-precondition", "That option is no longer available.");
   }
   return quoteFor(resourceId, start, end, request.auth?.uid);
 });
 
 export const booking_beginCheckout = onCall(
-  { secrets: [stripeSecretKey, stripeWebhookSecret] },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
   async (request) => {
     const { resourceId, start, end, successUrl, cancelUrl, guest } = request.data as {
       resourceId: string;
@@ -194,48 +256,47 @@ export const booking_beginCheckout = onCall(
       end: number;
       successUrl: string;
       cancelUrl: string;
-      guest?: { name?: string; email?: string; phone?: string };
+      guest?: GuestDetails;
     };
     if (!resourceId || !successUrl || !cancelUrl) {
       throw new HttpsError("invalid-argument", "Space and return URLs are required.");
     }
-    if (!request.auth && (!guest?.name || !guest?.email)) {
+    if (!request.auth && (!guest?.name?.trim() || !guest?.email?.trim())) {
       throw new HttpsError("invalid-argument", "Name and email are required for guest checkout.");
     }
 
     validateWindow(start, end);
-    const busy = await getBusy(start, end);
-    if (conflicts(resourceId, start, end, busy)) {
-      throw new HttpsError("failed-precondition", "That option was just booked. Choose another available space.");
-    }
-
     const quote = await quoteFor(resourceId, start, end, request.auth?.uid);
     const holdRef = db().collection("bookingHolds").doc();
     const holdSecret = randomBytes(24).toString("hex");
-    const secretHash = createHash("sha256").update(holdSecret).digest("hex");
     const now = Date.now();
-    const uid = request.auth?.uid || `guest:${holdRef.id}`;
+    const userId = request.auth?.uid || `guest:${holdRef.id}`;
     const hold = {
       id: holdRef.id,
       resourceId,
       resourceName: quote.resourceName,
       start,
       end,
-      userId: uid,
-      guest: request.auth ? null : { name: guest?.name, email: guest?.email, phone: guest?.phone || "" },
+      userId,
+      guest: request.auth ? null : {
+        name: guest?.name?.trim(),
+        email: guest?.email?.trim().toLowerCase(),
+        phone: guest?.phone?.trim() || "",
+      },
       quote,
       status: "HELD",
-      secretHash,
+      secretHash: createHash("sha256").update(holdSecret).digest("hex"),
       createdAt: now,
       expiresAt: now + HOLD_MS,
     };
-    await holdRef.set(hold);
+
+    await createHoldAtomically(holdRef, hold, resourceId, start, end);
 
     if (quote.totalCents === 0 && request.auth) {
       const bookingRef = db().collection("bookings").doc();
       await db().runTransaction(async (tx) => {
-        const holdSnap = await tx.get(holdRef);
-        if (!holdSnap.exists || holdSnap.data()?.expiresAt <= Date.now()) {
+        const latest = await tx.get(holdRef);
+        if (!latest.exists || latest.data()?.expiresAt <= Date.now()) {
           throw new HttpsError("deadline-exceeded", "Your hold expired. Please choose the space again.");
         }
         tx.set(bookingRef, {
@@ -253,14 +314,14 @@ export const booking_beginCheckout = onCall(
           includedHoursApplied: quote.includedHoursApplied,
           createdAt: Date.now(),
         });
-        tx.update(holdRef, { status: "CONSUMED", consumedAt: Date.now() });
+        tx.update(holdRef, { status: "CONSUMED", consumedAt: Date.now(), bookingId: bookingRef.id });
       });
-      await createAccessGrant(bookingRef.id, resourceId, request.auth.uid, start, end);
+      await issueAccessSafely(bookingRef.id, resourceId, request.auth.uid, start, end);
       return { kind: "confirmed", bookingId: bookingRef.id, quote };
     }
 
     const payment = await createPayment({
-      uid,
+      uid: userId,
       provider: "stripe",
       amount: quote.totalCents,
       currency: quote.currency,
@@ -269,11 +330,11 @@ export const booking_beginCheckout = onCall(
       status: "pending",
       providerRefs: { holdId: holdRef.id },
     });
-
     await holdRef.update({ paymentId: payment.id });
+
     const provider = new StripeProvider(stripeSecretKey.value(), stripeWebhookSecret.value());
     const session = await provider.createCheckoutSession({
-      uid,
+      uid: userId,
       amount: quote.totalCents,
       currency: quote.currency,
       purpose: "booking",
@@ -287,7 +348,7 @@ export const booking_beginCheckout = onCall(
         holdId: holdRef.id,
         purpose: "booking",
         purposeRefId: holdRef.id,
-        uid,
+        uid: userId,
       },
     });
 
@@ -300,76 +361,84 @@ export const booking_beginCheckout = onCall(
       checkoutUrl: session.url,
       quote,
     };
-  }
+  },
 );
 
-export const booking_finalizeCheckout = onCall(async (request) => {
-  const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
-  if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
-  const holdRef = db().collection("bookingHolds").doc(holdId);
-  const holdSnap = await holdRef.get();
-  if (!holdSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
-  const hold = holdSnap.data() as any;
+export const booking_finalizeCheckout = onCall(
+  { secrets: [seamApiKey] },
+  async (request) => {
+    const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
+    if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
+    const holdRef = db().collection("bookingHolds").doc(holdId);
+    const holdSnap = await holdRef.get();
+    if (!holdSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
+    const hold = holdSnap.data() as any;
 
-  const authOwnsHold = Boolean(request.auth && hold.userId === request.auth.uid);
-  const secretMatches = Boolean(holdSecret && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"));
-  if (!authOwnsHold && !secretMatches) {
-    throw new HttpsError("permission-denied", "This booking hold does not belong to you.");
-  }
-  if (hold.status === "CONSUMED" && hold.bookingId) {
-    return { success: true, bookingId: hold.bookingId, alreadyFinalized: true };
-  }
-  if (hold.expiresAt <= Date.now()) {
-    await holdRef.update({ status: "EXPIRED", expiredAt: Date.now() });
-    throw new HttpsError("deadline-exceeded", "Your booking hold expired before payment completed.");
-  }
-  if (!hold.paymentId) throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
-  const paymentSnap = await db().collection("payments").doc(hold.paymentId).get();
-  if (!paymentSnap.exists || paymentSnap.data()?.status !== "paid") {
-    throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
-  }
+    const authOwns = Boolean(request.auth && hold.userId === request.auth.uid);
+    const secretMatches = Boolean(
+      holdSecret && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"),
+    );
+    if (!authOwns && !secretMatches) {
+      throw new HttpsError("permission-denied", "This booking hold does not belong to you.");
+    }
+    if (hold.status === "CONSUMED" && hold.bookingId) {
+      return { success: true, bookingId: hold.bookingId, alreadyFinalized: true };
+    }
+    if (hold.expiresAt <= Date.now()) {
+      await holdRef.update({ status: "EXPIRED", expiredAt: Date.now() });
+      throw new HttpsError("deadline-exceeded", "Your booking hold expired before payment completed.");
+    }
+    if (!hold.paymentId) throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
 
-  const busy = await getBusy(hold.start, hold.end, holdId);
-  if (conflicts(hold.resourceId, hold.start, hold.end, busy)) {
-    logger.error("Paid hold encountered conflict during finalization", { holdId, paymentId: hold.paymentId });
-    throw new HttpsError("aborted", "We received payment but the held space cannot be finalized automatically. Staff has been alerted.");
-  }
+    const paymentSnap = await db().collection("payments").doc(hold.paymentId).get();
+    if (!paymentSnap.exists || paymentSnap.data()?.status !== "paid") {
+      throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
+    }
 
-  const bookingRef = db().collection("bookings").doc();
-  await db().runTransaction(async (tx) => {
-    const latestHold = await tx.get(holdRef);
-    if (!latestHold.exists) throw new HttpsError("not-found", "Booking hold not found.");
-    if (latestHold.data()?.status === "CONSUMED") return;
-    tx.set(bookingRef, {
-      id: bookingRef.id,
-      resourceId: hold.resourceId,
-      resourceName: hold.resourceName,
-      userId: hold.userId,
-      userName: hold.guest?.name || request.auth?.token.name || request.auth?.token.email || "Guest",
-      guestEmail: hold.guest?.email || null,
-      guestPhone: hold.guest?.phone || null,
-      start: hold.start,
-      end: hold.end,
-      status: "CONFIRMED",
-      totalPrice: (hold.quote?.totalCents || 0) / 100,
-      totalCents: hold.quote?.totalCents || 0,
-      paymentMethod: "STRIPE",
-      paymentId: hold.paymentId,
-      includedHoursApplied: hold.quote?.includedHoursApplied || 0,
-      createdAt: Date.now(),
+    const finalUserId = request.auth?.uid || await ensureGuestAccount(hold.guest || undefined);
+    const bookingRef = db().collection("bookings").doc();
+
+    await db().runTransaction(async (tx) => {
+      const latestHold = await tx.get(holdRef);
+      if (!latestHold.exists) throw new HttpsError("not-found", "Booking hold not found.");
+      if (latestHold.data()?.status === "CONSUMED") return;
+
+      const bookingQuery = db().collection("bookings").where("end", ">", hold.start);
+      const holdQuery = db().collection("bookingHolds").where("end", ">", hold.start);
+      const [bookingSnap, holdRangeSnap] = await Promise.all([tx.get(bookingQuery), tx.get(holdQuery)]);
+      const busy = busyFromSnapshots(bookingSnap, holdRangeSnap, hold.end, holdId);
+      if (resourceConflicts(hold.resourceId, hold.start, hold.end, busy)) {
+        logger.error("Paid hold encountered conflict during finalization", { holdId, paymentId: hold.paymentId });
+        throw new HttpsError("aborted", "We received payment but the held space cannot be finalized automatically. Staff has been alerted.");
+      }
+
+      tx.set(bookingRef, {
+        id: bookingRef.id,
+        resourceId: hold.resourceId,
+        resourceName: hold.resourceName,
+        userId: finalUserId,
+        userName: hold.guest?.name || request.auth?.token.name || request.auth?.token.email || "Guest",
+        guestEmail: hold.guest?.email || null,
+        guestPhone: hold.guest?.phone || null,
+        start: hold.start,
+        end: hold.end,
+        status: "CONFIRMED",
+        totalPrice: (hold.quote?.totalCents || 0) / 100,
+        totalCents: hold.quote?.totalCents || 0,
+        paymentMethod: "STRIPE",
+        paymentId: hold.paymentId,
+        includedHoursApplied: hold.quote?.includedHoursApplied || 0,
+        createdAt: Date.now(),
+      });
+      tx.update(holdRef, {
+        status: "CONSUMED",
+        consumedAt: Date.now(),
+        bookingId: bookingRef.id,
+        userId: finalUserId,
+      });
     });
-    tx.update(holdRef, { status: "CONSUMED", consumedAt: Date.now(), bookingId: bookingRef.id });
-  });
 
-  try {
-    await createAccessGrant(bookingRef.id, hold.resourceId, hold.userId, hold.start, hold.end);
-  } catch (error) {
-    logger.error("Access grant failed after paid booking confirmation", {
-      bookingId: bookingRef.id,
-      holdId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  return { success: true, bookingId: bookingRef.id };
-});
+    await issueAccessSafely(bookingRef.id, hold.resourceId, finalUserId, hold.start, hold.end);
+    return { success: true, bookingId: bookingRef.id };
+  },
+);
