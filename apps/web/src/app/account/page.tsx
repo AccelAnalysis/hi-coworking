@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function LegacyMyHiPage() {
+export default function AccountPage() {
   redirect("/account/bookings");
 }

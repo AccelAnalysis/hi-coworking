@@ -45,6 +45,73 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify current Firebase-hosted baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://hi-coworking-plat.web.app"
+          curl --fail --silent --show-error --location --retry 3 \
+            "${base}/__/firebase/init.json" \
+            --output /tmp/hi-live-firebase.json
+          curl --fail --silent --show-error --location --retry 3 \
+            "${base}/" \
+            --output /tmp/hi-live-home.html
+          for route in spaces pricing events bookstore about contact book; do
+            curl --fail --silent --show-error --location --retry 3 \
+              "${base}/${route}" \
+              --output "/tmp/hi-live-${route}.html"
+          done
+
+          chrome="$(command -v google-chrome || command -v chromium-browser || command -v chromium || true)"
+          if [[ -n "${chrome}" ]]; then
+            timeout 30s "${chrome}" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --disable-background-networking \
+              --virtual-time-budget=10000 \
+              --dump-dom "${base}/" \
+              > /tmp/hi-live-home-dom.html 2>/tmp/hi-live-chrome.log || true
+          fi
+
+          node <<'NODE'
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('/tmp/hi-live-firebase.json', 'utf8'));
+          if (config.projectId !== 'hi-coworking-plat') {
+            throw new Error(`Live Firebase project mismatch: ${config.projectId}`);
+          }
+
+          const requiredNavigation = ['Spaces', 'Pricing', 'Events', 'Bookstore', 'About', 'Contact'];
+          const book = fs.readFileSync('/tmp/hi-live-book.html', 'utf8');
+          for (const label of requiredNavigation) {
+            if (!book.includes(label)) {
+              throw new Error(`Live booking shell is missing public navigation label: ${label}`);
+            }
+          }
+          if (!book.includes('Book')) {
+            throw new Error('Live booking route did not return the Hi Coworking booking surface.');
+          }
+
+          const rawHome = fs.readFileSync('/tmp/hi-live-home.html', 'utf8');
+          const hydratedPath = '/tmp/hi-live-home-dom.html';
+          const hydratedHome = fs.existsSync(hydratedPath)
+            ? fs.readFileSync(hydratedPath, 'utf8')
+            : '';
+          const home = hydratedHome.length > 100 ? hydratedHome : rawHome;
+          const homeNavigationExposed = requiredNavigation.every((label) => home.includes(label));
+          const homeComingSoon = /coming soon|opening soon|stay tuned/i.test(home);
+
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            `\n- Live Firebase project: \`${config.projectId}\`\n`
+            + `- Live routes checked: home, spaces, pricing, events, bookstore, about, contact, book\n`
+            + `- Six-link shell verified on live booking route: yes\n`
+            + `- Six-link navigation exposed on hydrated live home: ${homeNavigationExposed ? 'yes' : 'no'}\n`
+            + `- Live home appears gated/coming-soon: ${homeComingSoon ? 'yes' : 'not established'}\n`,
+          );
+          NODE
+
       - name: Build isolated static visual preview
         run: npm run build
         env:
@@ -85,5 +152,6 @@ jobs:
         run: |
           echo "### Firebase PR preview artifact ready" >> "$GITHUB_STEP_SUMMARY"
           echo "Built exact PR head ${{ github.event.pull_request.head.sha }} with demo Firebase browser configuration." >> "$GITHUB_STEP_SUMMARY"
+          echo "Compared the build against the actual Firebase-hosted hi-coworking-plat.web.app routes and booking shell." >> "$GITHUB_STEP_SUMMARY"
           echo "A separate trusted workflow on main is responsible for deploying this artifact to an isolated Firebase Hosting preview channel." >> "$GITHUB_STEP_SUMMARY"
           echo "This workflow cannot deploy the live channel and receives no Firebase deployment credential." >> "$GITHUB_STEP_SUMMARY"

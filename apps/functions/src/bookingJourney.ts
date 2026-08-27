@@ -3,7 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
-import { createPayment } from "./payments/ledger";
+import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import {
   CONFERENCE_ROOM_HOURLY_RATE_CENTS,
@@ -11,7 +11,6 @@ import {
   GUEST_DAILY_CAP_CENTS,
   GUEST_HOURLY_RATE_CENTS,
   getTierById,
-  type MembershipTier,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
 
@@ -71,6 +70,31 @@ type MembershipUsage = {
   updatedAt: number;
 };
 
+type CreditReservation = {
+  amountCents: number;
+  expiresAt: number;
+};
+
+type BookingQuote = {
+  resourceId: string;
+  resourceName: string;
+  resourceType: "SEAT" | "MODE";
+  start: number;
+  end: number;
+  durationHours: number;
+  membershipName: string | null;
+  includedHoursRemaining: number;
+  includedHoursApplied: number;
+  billableHours: number;
+  hourlyRateCents: number;
+  subtotalCents: number;
+  accountCreditAvailableCents: number;
+  accountCreditAppliedCents: number;
+  totalCents: number;
+  dailyCapApplied: boolean;
+  currency: string;
+};
+
 function db() {
   return admin.firestore();
 }
@@ -110,17 +134,36 @@ function usageDocumentId(uid: string, monthKey: string) {
   return `${uid}_${monthKey}`;
 }
 
-function activeReservations(
+function activeUsageReservations(
   reservations: Record<string, UsageReservation> | undefined,
   now = Date.now(),
 ) {
   return Object.fromEntries(
     Object.entries(reservations || {}).filter(([, reservation]) => reservation.expiresAt > now),
-  );
+  ) as Record<string, UsageReservation>;
+}
+
+function activeCreditReservations(
+  reservations: Record<string, CreditReservation> | undefined,
+  now = Date.now(),
+) {
+  return Object.fromEntries(
+    Object.entries(reservations || {}).filter(([, reservation]) => reservation.expiresAt > now),
+  ) as Record<string, CreditReservation>;
 }
 
 function reservedHours(reservations: Record<string, UsageReservation>) {
-  return Object.values(reservations).reduce((sum, reservation) => sum + Math.max(0, reservation.hours), 0);
+  return Object.values(reservations).reduce(
+    (sum, reservation) => sum + Math.max(0, reservation.hours),
+    0,
+  );
+}
+
+function reservedCreditCents(reservations: Record<string, CreditReservation>) {
+  return Object.values(reservations).reduce(
+    (sum, reservation) => sum + Math.max(0, Math.round(reservation.amountCents)),
+    0,
+  );
 }
 
 function overlaps(startA: number, endA: number, startB: number, endB: number) {
@@ -172,7 +215,9 @@ function resourceConflicts(resourceId: string, start: number, end: number, busy:
   if (!target) return true;
   return busy.some((record) => {
     if (!overlaps(start, end, record.start, record.end)) return false;
-    if (record.status === "CANCELLED" || record.status === "EXPIRED") return false;
+    if (record.status === "CANCELLED" || record.status === "EXPIRED" || record.status === "CONSUMED") {
+      return false;
+    }
     if (record.resourceId === resourceId) return true;
     const other = RESOURCE_CONFIG[record.resourceId];
     if (!other || other.exclusiveGroupId !== target.exclusiveGroupId) return false;
@@ -193,7 +238,12 @@ function busyFromSnapshots(
   const holds = holdSnap.docs
     .filter((doc) => doc.id !== excludeHoldId)
     .map((doc) => doc.data() as BusyRecord)
-    .filter((item) => item.start < end && (item.expiresAt || 0) > now && item.status !== "EXPIRED" && item.status !== "CONSUMED");
+    .filter((item) => (
+      item.start < end
+      && (item.expiresAt || 0) > now
+      && item.status !== "EXPIRED"
+      && item.status !== "CONSUMED"
+    ));
   return [...bookings, ...holds];
 }
 
@@ -213,6 +263,8 @@ function hoursFromBookingDocs(
     const booking = doc.data();
     if (booking.status === "CANCELLED" || localMonthKey(booking.start) !== monthKey) return sum;
     if (RESOURCE_CONFIG[booking.resourceId]?.type !== "SEAT") return sum;
+    const explicitlyApplied = Number(booking.includedHoursApplied);
+    if (Number.isFinite(explicitlyApplied)) return sum + Math.max(0, explicitlyApplied);
     return sum + Math.max(0, (booking.end - booking.start) / 3_600_000);
   }, 0);
 }
@@ -222,10 +274,9 @@ async function getMembershipUsageState(uid: string, monthKey: string) {
   const usageSnap = await usageRef.get();
   if (usageSnap.exists) {
     const usage = usageSnap.data() as MembershipUsage;
-    const reservations = activeReservations(usage.reservations);
     return {
       usedHours: Math.max(0, usage.usedHours || 0),
-      reservations,
+      reservations: activeUsageReservations(usage.reservations),
     };
   }
 
@@ -236,7 +287,14 @@ async function getMembershipUsageState(uid: string, monthKey: string) {
   };
 }
 
-async function quoteFor(resourceId: string, start: number, end: number, uid?: string) {
+function guestSeatSubtotal(durationHours: number) {
+  return Math.min(
+    Math.round(durationHours * GUEST_HOURLY_RATE_CENTS),
+    GUEST_DAILY_CAP_CENTS,
+  );
+}
+
+async function quoteFor(resourceId: string, start: number, end: number, uid?: string): Promise<BookingQuote> {
   const resource = RESOURCE_CONFIG[resourceId];
   if (!resource) throw new HttpsError("not-found", "Space not found.");
   validateWindow(start, end);
@@ -248,32 +306,48 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
   let billableHours = durationHours;
   let hourlyRateCents = resource.guestRateHourlyCents;
   let membershipName: string | null = null;
+  let user: FirebaseFirestore.DocumentData | undefined;
 
-  if (uid && resource.type === "SEAT") {
-    const userSnap = await db().collection("users").doc(uid).get();
-    const user = userSnap.data();
-    if (user?.membershipStatus === "active" && user?.plan) {
-      const tier = getTierById(user.plan);
-      if (tier) {
-        membershipName = tier.name;
-        hourlyRateCents = tier.extraHourlyRateCents;
-        const monthKey = localMonthKey(start);
-        const usage = await getMembershipUsageState(uid, monthKey);
-        const remaining = Math.max(
-          0,
-          tier.includedHoursPerMonth - usage.usedHours - reservedHours(usage.reservations),
-        );
-        includedHoursRemaining = remaining;
-        includedHoursApplied = Math.min(durationHours, remaining);
-        billableHours = Math.max(0, durationHours - includedHoursApplied);
-      }
+  if (uid) {
+    user = (await db().collection("users").doc(uid).get()).data();
+  }
+
+  if (uid && user && resource.type === "SEAT" && user.membershipStatus === "active" && user.plan) {
+    const tier = getTierById(user.plan);
+    if (tier) {
+      membershipName = tier.name;
+      hourlyRateCents = tier.extraHourlyRateCents;
+      const monthKey = localMonthKey(start);
+      const usage = await getMembershipUsageState(uid, monthKey);
+      const remaining = Math.max(
+        0,
+        tier.includedHoursPerMonth - usage.usedHours - reservedHours(usage.reservations),
+      );
+      includedHoursRemaining = remaining;
+      includedHoursApplied = Math.min(durationHours, remaining);
+      billableHours = Math.max(0, durationHours - includedHoursApplied);
     }
   }
 
-  let totalCents = Math.round(billableHours * hourlyRateCents);
+  let subtotalCents = Math.round(billableHours * hourlyRateCents);
+  let dailyCapApplied = false;
   if (resource.type === "SEAT" && !membershipName) {
-    totalCents = Math.min(totalCents, GUEST_DAILY_CAP_CENTS);
+    const uncapped = Math.round(durationHours * GUEST_HOURLY_RATE_CENTS);
+    subtotalCents = Math.min(uncapped, GUEST_DAILY_CAP_CENTS);
+    hourlyRateCents = GUEST_HOURLY_RATE_CENTS;
+    billableHours = durationHours;
+    dailyCapApplied = uncapped >= GUEST_DAILY_CAP_CENTS;
   }
+
+  const creditReservations = activeCreditReservations(user?.accountCreditReservations);
+  const accountCreditAvailableCents = uid
+    ? Math.max(
+        0,
+        Math.round(Number(user?.accountCreditCents || 0)) - reservedCreditCents(creditReservations),
+      )
+    : 0;
+  const accountCreditAppliedCents = Math.min(subtotalCents, accountCreditAvailableCents);
+  const totalCents = Math.max(0, subtotalCents - accountCreditAppliedCents);
 
   return {
     resourceId,
@@ -287,29 +361,18 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
     includedHoursApplied,
     billableHours,
     hourlyRateCents,
+    subtotalCents,
+    accountCreditAvailableCents,
+    accountCreditAppliedCents,
     totalCents,
-    dailyCapApplied: resource.type === "SEAT" && !membershipName && totalCents === GUEST_DAILY_CAP_CENTS,
+    dailyCapApplied,
     currency: "usd",
-  };
-}
-
-function guestSeatQuote(baseQuote: any) {
-  const durationHours = baseQuote.durationHours as number;
-  return {
-    ...baseQuote,
-    membershipName: null,
-    includedHoursRemaining: 0,
-    includedHoursApplied: 0,
-    billableHours: durationHours,
-    hourlyRateCents: GUEST_HOURLY_RATE_CENTS,
-    totalCents: Math.min(Math.round(durationHours * GUEST_HOURLY_RATE_CENTS), GUEST_DAILY_CAP_CENTS),
-    dailyCapApplied: Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= GUEST_DAILY_CAP_CENTS,
   };
 }
 
 async function createHoldAtomically(
   holdRef: FirebaseFirestore.DocumentReference,
-  hold: Record<string, any>,
+  hold: Record<string, unknown>,
   resourceId: string,
   start: number,
   end: number,
@@ -321,30 +384,37 @@ async function createHoldAtomically(
     const resource = RESOURCE_CONFIG[resourceId];
     if (!resource) throw new HttpsError("not-found", "Space not found.");
 
-    const readPromises: Array<Promise<any>> = [tx.get(bookingQuery), tx.get(holdQuery)];
-    let userRef: FirebaseFirestore.DocumentReference | null = null;
-    if (authenticatedUid && resource.type === "SEAT") {
-      userRef = db().collection("users").doc(authenticatedUid);
-      readPromises.push(tx.get(userRef));
-    }
-    const initialReads = await Promise.all(readPromises);
+    const reads: Array<Promise<FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QuerySnapshot>> = [
+      tx.get(bookingQuery),
+      tx.get(holdQuery),
+    ];
+    const userRef = authenticatedUid ? db().collection("users").doc(authenticatedUid) : null;
+    if (userRef) reads.push(tx.get(userRef));
+
+    const initialReads = await Promise.all(reads);
     const bookingSnap = initialReads[0] as FirebaseFirestore.QuerySnapshot;
     const holdSnap = initialReads[1] as FirebaseFirestore.QuerySnapshot;
     const userSnap = userRef ? initialReads[2] as FirebaseFirestore.DocumentSnapshot : null;
 
     const busy = busyFromSnapshots(bookingSnap, holdSnap, end);
     if (resourceConflicts(resourceId, start, end, busy)) {
-      throw new HttpsError("failed-precondition", "That option was just booked. Choose another available space.");
+      throw new HttpsError(
+        "failed-precondition",
+        "That option was just booked. Choose another available space.",
+      );
     }
 
-    let adjustedQuote = { ...hold.quote };
+    const baseQuote = hold.quote as BookingQuote;
+    const durationHours = baseQuote.durationHours;
+    const user = userSnap?.data();
+    let adjustedQuote: BookingQuote = { ...baseQuote };
     let usageRef: FirebaseFirestore.DocumentReference | null = null;
     let usageData: MembershipUsage | null = null;
 
     if (authenticatedUid && resource.type === "SEAT") {
-      const user = userSnap?.data();
       const tier = user?.membershipStatus === "active" && user?.plan
-        ? getTierById(user.plan) : undefined;
+        ? getTierById(user.plan)
+        : undefined;
 
       if (tier) {
         const monthKey = localMonthKey(start);
@@ -356,7 +426,7 @@ async function createHoldAtomically(
         if (usageSnap.exists) {
           const existing = usageSnap.data() as MembershipUsage;
           usedHours = Math.max(0, existing.usedHours || 0);
-          reservations = activeReservations(existing.reservations);
+          reservations = activeUsageReservations(existing.reservations);
         } else {
           const memberBookings = await tx.get(
             db().collection("bookings").where("userId", "==", authenticatedUid),
@@ -368,8 +438,10 @@ async function createHoldAtomically(
           0,
           tier.includedHoursPerMonth - usedHours - reservedHours(reservations),
         );
-        const includedHoursApplied = Math.min(adjustedQuote.durationHours, remaining);
-        const billableHours = Math.max(0, adjustedQuote.durationHours - includedHoursApplied);
+        const includedHoursApplied = Math.min(durationHours, remaining);
+        const billableHours = Math.max(0, durationHours - includedHoursApplied);
+        const subtotalCents = Math.round(billableHours * tier.extraHourlyRateCents);
+
         adjustedQuote = {
           ...adjustedQuote,
           membershipName: tier.name,
@@ -377,14 +449,14 @@ async function createHoldAtomically(
           includedHoursApplied,
           billableHours,
           hourlyRateCents: tier.extraHourlyRateCents,
-          totalCents: Math.round(billableHours * tier.extraHourlyRateCents),
+          subtotalCents,
           dailyCapApplied: false,
         };
 
         if (includedHoursApplied > 0) {
           reservations[holdRef.id] = {
             hours: includedHoursApplied,
-            expiresAt: hold.expiresAt,
+            expiresAt: Number(hold.expiresAt),
           };
         }
         usageData = {
@@ -395,15 +467,61 @@ async function createHoldAtomically(
           updatedAt: Date.now(),
         };
       } else {
-        adjustedQuote = guestSeatQuote(adjustedQuote);
+        const subtotalCents = guestSeatSubtotal(durationHours);
+        adjustedQuote = {
+          ...adjustedQuote,
+          membershipName: null,
+          includedHoursRemaining: 0,
+          includedHoursApplied: 0,
+          billableHours: durationHours,
+          hourlyRateCents: GUEST_HOURLY_RATE_CENTS,
+          subtotalCents,
+          dailyCapApplied: Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= GUEST_DAILY_CAP_CENTS,
+        };
       }
     }
 
+    let creditReservations: Record<string, CreditReservation> = {};
+    if (userRef && userSnap) {
+      creditReservations = activeCreditReservations(user?.accountCreditReservations);
+      const availableCredit = Math.max(
+        0,
+        Math.round(Number(user?.accountCreditCents || 0)) - reservedCreditCents(creditReservations),
+      );
+      const accountCreditAppliedCents = Math.min(adjustedQuote.subtotalCents, availableCredit);
+      if (accountCreditAppliedCents > 0) {
+        creditReservations[holdRef.id] = {
+          amountCents: accountCreditAppliedCents,
+          expiresAt: Number(hold.expiresAt),
+        };
+      }
+      adjustedQuote = {
+        ...adjustedQuote,
+        accountCreditAvailableCents: availableCredit,
+        accountCreditAppliedCents,
+        totalCents: Math.max(0, adjustedQuote.subtotalCents - accountCreditAppliedCents),
+      };
+    } else {
+      adjustedQuote = {
+        ...adjustedQuote,
+        accountCreditAvailableCents: 0,
+        accountCreditAppliedCents: 0,
+        totalCents: adjustedQuote.subtotalCents,
+      };
+    }
+
     if (usageRef && usageData) tx.set(usageRef, usageData, { merge: true });
+    if (userRef && userSnap) {
+      tx.set(userRef, {
+        accountCreditReservations: creditReservations,
+        updatedAt: Date.now(),
+      }, { merge: true });
+    }
     tx.set(holdRef, {
       ...hold,
       quote: adjustedQuote,
       membershipUsageId: usageRef?.id || null,
+      accountCreditReservationCents: adjustedQuote.accountCreditAppliedCents,
     });
     return adjustedQuote;
   });
@@ -417,7 +535,7 @@ function consumeMembershipReservation(
 ) {
   if (!usageSnap.exists) return;
   const usage = usageSnap.data() as MembershipUsage;
-  const reservations = activeReservations(usage.reservations);
+  const reservations = activeUsageReservations(usage.reservations);
   const reservation = reservations[holdId];
   if (!reservation) return;
   delete reservations[holdId];
@@ -429,36 +547,81 @@ function consumeMembershipReservation(
   }, { merge: true });
 }
 
+function consumeAccountCreditReservation(
+  tx: FirebaseFirestore.Transaction,
+  userRef: FirebaseFirestore.DocumentReference,
+  userSnap: FirebaseFirestore.DocumentSnapshot,
+  holdId: string,
+  expectedAmountCents: number,
+) {
+  if (!userSnap.exists || expectedAmountCents <= 0) return;
+  const user = userSnap.data() || {};
+  const reservations = activeCreditReservations(user.accountCreditReservations);
+  const reserved = Math.max(
+    0,
+    Math.round(Number(reservations[holdId]?.amountCents ?? expectedAmountCents)),
+  );
+  delete reservations[holdId];
+  const amountCents = Math.min(
+    Math.max(0, Math.round(Number(user.accountCreditCents || 0))),
+    reserved,
+  );
+  tx.set(userRef, {
+    accountCreditCents: Math.max(0, Math.round(Number(user.accountCreditCents || 0)) - amountCents),
+    accountCreditReservations: reservations,
+    updatedAt: Date.now(),
+  }, { merge: true });
+  tx.set(db().collection("accountCreditRedemptions").doc(`booking_hold_${holdId}`), {
+    id: `booking_hold_${holdId}`,
+    userId: userRef.id,
+    holdId,
+    amountCents,
+    reason: "booking_checkout",
+    createdAt: Date.now(),
+  }, { merge: true });
+}
+
 async function ensureGuestAccount(guest?: GuestDetails) {
   const email = guest?.email?.trim().toLowerCase();
   if (!email) throw new HttpsError("failed-precondition", "Guest email is missing.");
+
   let userRecord: admin.auth.UserRecord;
+  let created = false;
   try {
     userRecord = await admin.auth().getUserByEmail(email);
-  } catch (error: any) {
-    if (error?.code !== "auth/user-not-found") throw error;
+  } catch (error: unknown) {
+    const coded = error as { code?: string };
+    if (coded.code !== "auth/user-not-found") throw error;
     userRecord = await admin.auth().createUser({
       email,
       displayName: guest?.name?.trim() || undefined,
       emailVerified: false,
     });
+    created = true;
   }
+
   const userRef = db().collection("users").doc(userRecord.uid);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists) {
-    await userRef.set({
-      uid: userRecord.uid,
-      email,
-      displayName: guest?.name?.trim() || "",
-      role: "member",
-      membershipStatus: "none",
-      createdAt: Date.now(),
-    });
-  }
-  return userRecord.uid;
+  await userRef.set({
+    uid: userRecord.uid,
+    email,
+    displayName: guest?.name?.trim() || userRecord.displayName || "",
+    phone: guest?.phone?.trim() || "",
+    role: "member",
+    membershipStatus: "none",
+    ...(created ? { createdAt: Date.now() } : {}),
+    updatedAt: Date.now(),
+  }, { merge: true });
+
+  return { uid: userRecord.uid, created };
 }
 
-async function issueAccessSafely(bookingId: string, resourceId: string, userId: string, start: number, end: number) {
+async function issueAccessSafely(
+  bookingId: string,
+  resourceId: string,
+  userId: string,
+  start: number,
+  end: number,
+) {
   try {
     await createAccessGrant(bookingId, resourceId, userId, start, end);
   } catch (error) {
@@ -477,7 +640,11 @@ export const booking_getAvailability = onCall(async (request) => {
   return {
     start,
     end,
-    operatingHours: { openHour: OPEN_HOUR, closeHour: CLOSE_HOUR, timeZone: LOCATION_TIME_ZONE },
+    operatingHours: {
+      openHour: OPEN_HOUR,
+      closeHour: CLOSE_HOUR,
+      timeZone: LOCATION_TIME_ZONE,
+    },
     options: Object.entries(RESOURCE_CONFIG).map(([resourceId, resource]) => ({
       resourceId,
       name: resource.name,
@@ -488,7 +655,11 @@ export const booking_getAvailability = onCall(async (request) => {
 });
 
 export const booking_createQuote = onCall(async (request) => {
-  const { resourceId, start, end } = request.data as { resourceId: string; start: number; end: number };
+  const { resourceId, start, end } = request.data as {
+    resourceId: string;
+    start: number;
+    end: number;
+  };
   const busy = await getBusy(start, end);
   if (resourceConflicts(resourceId, start, end, busy)) {
     throw new HttpsError("failed-precondition", "That option is no longer available.");
@@ -553,14 +724,19 @@ export const booking_beginCheckout = onCall(
       const bookingRef = db().collection("bookings").doc();
       await db().runTransaction(async (tx) => {
         const latest = await tx.get(holdRef);
-        if (!latest.exists || latest.data()?.expiresAt <= Date.now()) {
+        if (!latest.exists || Number(latest.data()?.expiresAt || 0) <= Date.now()) {
           throw new HttpsError("deadline-exceeded", "Your hold expired. Please choose the space again.");
         }
-        const latestHold = latest.data() as any;
+        const latestHold = latest.data() as Record<string, unknown>;
         const usageRef = latestHold.membershipUsageId
-          ? db().collection("membershipUsage").doc(latestHold.membershipUsageId)
+          ? db().collection("membershipUsage").doc(String(latestHold.membershipUsageId))
           : null;
-        const usageSnap = usageRef ? await tx.get(usageRef) : null;
+        const userRef = db().collection("users").doc(request.auth!.uid);
+        const reads: Array<Promise<FirebaseFirestore.DocumentSnapshot>> = [tx.get(userRef)];
+        if (usageRef) reads.push(tx.get(usageRef));
+        const results = await Promise.all(reads);
+        const userSnap = results[0];
+        const usageSnap = usageRef ? results[1] : null;
 
         tx.set(bookingRef, {
           id: bookingRef.id,
@@ -573,14 +749,29 @@ export const booking_beginCheckout = onCall(
           status: "CONFIRMED",
           totalPrice: 0,
           totalCents: 0,
-          paymentMethod: "MEMBERSHIP_HOURS",
+          subtotalCents: quote.subtotalCents,
+          accountCreditAppliedCents: quote.accountCreditAppliedCents,
+          paymentMethod: quote.accountCreditAppliedCents > 0
+            ? "ACCOUNT_CREDIT"
+            : "MEMBERSHIP_HOURS",
           includedHoursApplied: quote.includedHoursApplied,
           createdAt: Date.now(),
         });
-        tx.update(holdRef, { status: "CONSUMED", consumedAt: Date.now(), bookingId: bookingRef.id });
+        tx.update(holdRef, {
+          status: "CONSUMED",
+          consumedAt: Date.now(),
+          bookingId: bookingRef.id,
+        });
         if (usageRef && usageSnap) {
           consumeMembershipReservation(tx, usageRef, usageSnap, holdRef.id);
         }
+        consumeAccountCreditReservation(
+          tx,
+          userRef,
+          userSnap,
+          holdRef.id,
+          quote.accountCreditAppliedCents,
+        );
       });
       await issueAccessSafely(bookingRef.id, resourceId, request.auth.uid, start, end);
       return { kind: "confirmed", bookingId: bookingRef.id, quote };
@@ -615,8 +806,18 @@ export const booking_beginCheckout = onCall(
         purpose: "booking",
         purposeRefId: holdRef.id,
         uid: userId,
+        ...(guest?.email ? { email: guest.email.trim().toLowerCase() } : {}),
       },
     });
+    await Promise.all([
+      updatePaymentStatus(payment.id, "pending", {
+        providerRefs: {
+          holdId: holdRef.id,
+          stripeCheckoutSessionId: session.sessionId,
+        },
+      }),
+      holdRef.update({ stripeCheckoutSessionId: session.sessionId }),
+    ]);
 
     return {
       kind: "checkout",
@@ -633,77 +834,141 @@ export const booking_beginCheckout = onCall(
 export const booking_finalizeCheckout = onCall(
   { secrets: [seamApiKey] },
   async (request) => {
-    const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
+    const { holdId, holdSecret } = request.data as {
+      holdId: string;
+      holdSecret?: string;
+    };
     if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
     const holdRef = db().collection("bookingHolds").doc(holdId);
     const holdSnap = await holdRef.get();
     if (!holdSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
-    const hold = holdSnap.data() as any;
+    const hold = holdSnap.data() as Record<string, unknown>;
 
     const authOwns = Boolean(request.auth && hold.userId === request.auth.uid);
     const secretMatches = Boolean(
-      holdSecret && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"),
+      holdSecret
+      && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"),
     );
     if (!authOwns && !secretMatches) {
       throw new HttpsError("permission-denied", "This booking hold does not belong to you.");
     }
-    if (hold.status === "CONSUMED" && hold.bookingId) {
-      return { success: true, bookingId: hold.bookingId, alreadyFinalized: true };
-    }
-    if (hold.expiresAt <= Date.now()) {
-      await holdRef.update({ status: "EXPIRED", expiredAt: Date.now() });
-      throw new HttpsError("deadline-exceeded", "Your booking hold expired before payment completed.");
-    }
-    if (!hold.paymentId) throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
 
-    const paymentSnap = await db().collection("payments").doc(hold.paymentId).get();
+    if (hold.status === "CONSUMED" && hold.bookingId) {
+      let customToken: string | undefined;
+      if (
+        !request.auth
+        && secretMatches
+        && hold.guestAccountCreated === true
+        && typeof hold.userId === "string"
+        && !hold.userId.startsWith("guest:")
+      ) {
+        customToken = await admin.auth().createCustomToken(hold.userId, {
+          bookingCheckout: true,
+        });
+      }
+      return {
+        success: true,
+        bookingId: String(hold.bookingId),
+        alreadyFinalized: true,
+        customToken,
+      };
+    }
+
+    if (Number(hold.expiresAt || 0) <= Date.now()) {
+      await holdRef.update({ status: "EXPIRED", expiredAt: Date.now() });
+      throw new HttpsError(
+        "deadline-exceeded",
+        "Your booking hold expired before payment completed.",
+      );
+    }
+    if (!hold.paymentId) {
+      throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
+    }
+
+    const paymentSnap = await db().collection("payments").doc(String(hold.paymentId)).get();
     if (!paymentSnap.exists || paymentSnap.data()?.status !== "paid") {
       throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
     }
 
-    const finalUserId = request.auth?.uid || await ensureGuestAccount(hold.guest || undefined);
+    const guestAccount = request.auth
+      ? { uid: request.auth.uid, created: false }
+      : await ensureGuestAccount(hold.guest as GuestDetails | undefined);
+    const finalUserId = guestAccount.uid;
     const bookingRef = db().collection("bookings").doc();
 
-    await db().runTransaction(async (tx) => {
+    const result = await db().runTransaction(async (tx) => {
       const latestHoldSnap = await tx.get(holdRef);
-      if (!latestHoldSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
-      const latestHold = latestHoldSnap.data() as any;
-      if (latestHold.status === "CONSUMED") return;
+      if (!latestHoldSnap.exists) {
+        throw new HttpsError("not-found", "Booking hold not found.");
+      }
+      const latestHold = latestHoldSnap.data() as Record<string, unknown>;
+      if (latestHold.status === "CONSUMED" && latestHold.bookingId) {
+        return { bookingId: String(latestHold.bookingId), createdNow: false };
+      }
 
-      const bookingQuery = db().collection("bookings").where("end", ">", hold.start);
-      const holdQuery = db().collection("bookingHolds").where("end", ">", hold.start);
+      const bookingQuery = db().collection("bookings").where("end", ">", Number(hold.start));
+      const holdQuery = db().collection("bookingHolds").where("end", ">", Number(hold.start));
       const usageRef = latestHold.membershipUsageId
-        ? db().collection("membershipUsage").doc(latestHold.membershipUsageId)
+        ? db().collection("membershipUsage").doc(String(latestHold.membershipUsageId))
         : null;
-      const reads: Array<Promise<any>> = [tx.get(bookingQuery), tx.get(holdQuery)];
+      const userRef = db().collection("users").doc(finalUserId);
+      const reads: Array<Promise<FirebaseFirestore.DocumentSnapshot | FirebaseFirestore.QuerySnapshot>> = [
+        tx.get(bookingQuery),
+        tx.get(holdQuery),
+        tx.get(userRef),
+      ];
       if (usageRef) reads.push(tx.get(usageRef));
       const results = await Promise.all(reads);
       const bookingSnap = results[0] as FirebaseFirestore.QuerySnapshot;
       const holdRangeSnap = results[1] as FirebaseFirestore.QuerySnapshot;
-      const usageSnap = usageRef ? results[2] as FirebaseFirestore.DocumentSnapshot : null;
+      const userSnap = results[2] as FirebaseFirestore.DocumentSnapshot;
+      const usageSnap = usageRef ? results[3] as FirebaseFirestore.DocumentSnapshot : null;
 
-      const busy = busyFromSnapshots(bookingSnap, holdRangeSnap, hold.end, holdId);
-      if (resourceConflicts(hold.resourceId, hold.start, hold.end, busy)) {
-        logger.error("Paid hold encountered conflict during finalization", { holdId, paymentId: hold.paymentId });
-        throw new HttpsError("aborted", "We received payment but the held space cannot be finalized automatically. Staff has been alerted.");
+      const busy = busyFromSnapshots(
+        bookingSnap,
+        holdRangeSnap,
+        Number(hold.end),
+        holdId,
+      );
+      if (resourceConflicts(
+        String(hold.resourceId),
+        Number(hold.start),
+        Number(hold.end),
+        busy,
+      )) {
+        logger.error("Paid hold encountered conflict during finalization", {
+          holdId,
+          paymentId: hold.paymentId,
+        });
+        throw new HttpsError(
+          "aborted",
+          "We received payment but the held space cannot be finalized automatically. Staff has been alerted.",
+        );
       }
 
+      const quote = hold.quote as BookingQuote;
+      const guest = hold.guest as GuestDetails | null | undefined;
       tx.set(bookingRef, {
         id: bookingRef.id,
         resourceId: hold.resourceId,
         resourceName: hold.resourceName,
         userId: finalUserId,
-        userName: hold.guest?.name || request.auth?.token.name || request.auth?.token.email || "Guest",
-        guestEmail: hold.guest?.email || null,
-        guestPhone: hold.guest?.phone || null,
+        userName: guest?.name
+          || request.auth?.token.name
+          || request.auth?.token.email
+          || "Guest",
+        guestEmail: guest?.email || null,
+        guestPhone: guest?.phone || null,
         start: hold.start,
         end: hold.end,
         status: "CONFIRMED",
-        totalPrice: (hold.quote?.totalCents || 0) / 100,
-        totalCents: hold.quote?.totalCents || 0,
+        totalPrice: (quote.totalCents || 0) / 100,
+        totalCents: quote.totalCents || 0,
+        subtotalCents: quote.subtotalCents || quote.totalCents || 0,
+        accountCreditAppliedCents: quote.accountCreditAppliedCents || 0,
         paymentMethod: "STRIPE",
         paymentId: hold.paymentId,
-        includedHoursApplied: hold.quote?.includedHoursApplied || 0,
+        includedHoursApplied: quote.includedHoursApplied || 0,
         createdAt: Date.now(),
       });
       tx.update(holdRef, {
@@ -711,13 +976,40 @@ export const booking_finalizeCheckout = onCall(
         consumedAt: Date.now(),
         bookingId: bookingRef.id,
         userId: finalUserId,
+        guestAccountCreated: guestAccount.created,
       });
       if (usageRef && usageSnap) {
         consumeMembershipReservation(tx, usageRef, usageSnap, holdId);
       }
+      consumeAccountCreditReservation(
+        tx,
+        userRef,
+        userSnap,
+        holdId,
+        quote.accountCreditAppliedCents || 0,
+      );
+
+      return { bookingId: bookingRef.id, createdNow: true };
     });
 
-    await issueAccessSafely(bookingRef.id, hold.resourceId, finalUserId, hold.start, hold.end);
-    return { success: true, bookingId: bookingRef.id };
+    if (result.createdNow) {
+      await issueAccessSafely(
+        result.bookingId,
+        String(hold.resourceId),
+        finalUserId,
+        Number(hold.start),
+        Number(hold.end),
+      );
+    }
+
+    const customToken = !request.auth && guestAccount.created
+      ? await admin.auth().createCustomToken(finalUserId, { bookingCheckout: true })
+      : undefined;
+
+    return {
+      success: true,
+      bookingId: result.bookingId,
+      customToken,
+    };
   },
 );

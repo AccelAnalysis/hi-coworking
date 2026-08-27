@@ -2,11 +2,8 @@
  * Stripe Provider Adapter (PR-10)
  *
  * Implements the PaymentProvider interface for Stripe.
- * Handles checkout session creation, webhook parsing, and status reconciliation.
- *
- * Requires:
- *   - STRIPE_SECRET_KEY secret (set via firebase functions:secrets:set)
- *   - STRIPE_WEBHOOK_SECRET secret
+ * Handles checkout session creation, webhook parsing, status reconciliation,
+ * and idempotent booking refunds.
  */
 
 import Stripe from "stripe";
@@ -19,6 +16,15 @@ import type {
   PaymentStatus,
 } from "./types";
 
+function safeMetadataValue(value?: string) {
+  return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
+}
+
+function paymentIntentIdFromSession(session: Stripe.Checkout.Session) {
+  if (typeof session.payment_intent === "string") return session.payment_intent;
+  return session.payment_intent?.id || "";
+}
+
 export class StripeProvider implements PaymentProvider {
   readonly name = "stripe" as const;
   private stripe: Stripe;
@@ -30,23 +36,23 @@ export class StripeProvider implements PaymentProvider {
   }
 
   async createCheckoutSession(
-    input: CheckoutSessionInput
+    input: CheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const isSubscription = input.mode !== "payment";
-    
-    // Construct line item
+    const checkoutMetadata = {
+      ...(input.metadata || {}),
+      uid: input.uid,
+      paymentId: input.metadata?.paymentId || "",
+      purpose: input.purpose,
+      purposeRefId: input.purposeRefId || "",
+    };
     const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = isSubscription
-      ? {
-          price: input.metadata?.stripePriceId,
-          quantity: 1,
-        }
+      ? { price: input.metadata?.stripePriceId, quantity: 1 }
       : {
           price_data: {
             currency: input.currency,
-            product_data: {
-              name: input.lineItemLabel || "Payment",
-            },
-            unit_amount: input.amount, // amount in cents
+            product_data: { name: input.lineItemLabel || "Payment" },
+            unit_amount: input.amount,
           },
           quantity: 1,
         };
@@ -57,13 +63,7 @@ export class StripeProvider implements PaymentProvider {
       line_items: [lineItem],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
-      metadata: {
-        ...(input.metadata || {}),
-        uid: input.uid,
-        paymentId: input.metadata?.paymentId || "",
-        purpose: input.purpose,
-        purposeRefId: input.purposeRefId || "",
-      },
+      metadata: checkoutMetadata,
     };
 
     if (isSubscription) {
@@ -73,16 +73,18 @@ export class StripeProvider implements PaymentProvider {
           plan: input.metadata?.plan || "",
         },
       };
+    } else {
+      sessionConfig.payment_intent_data = {
+        metadata: checkoutMetadata,
+      };
     }
 
     const session = await this.stripe.checkout.sessions.create(sessionConfig);
-
     logger.info("Stripe checkout session created", {
       sessionId: session.id,
       uid: input.uid,
       mode: sessionConfig.mode,
     });
-
     return {
       sessionId: session.id,
       url: session.url || "",
@@ -90,24 +92,158 @@ export class StripeProvider implements PaymentProvider {
     };
   }
 
+  private async findPaymentIntent(input: {
+    paymentIntentId?: string;
+    checkoutSessionId?: string;
+    ledgerPaymentId?: string;
+    holdId?: string;
+  }) {
+    if (input.paymentIntentId) {
+      return {
+        paymentIntentId: input.paymentIntentId,
+        checkoutSessionId: input.checkoutSessionId,
+      };
+    }
+
+    if (input.checkoutSessionId) {
+      const session = await this.stripe.checkout.sessions.retrieve(
+        input.checkoutSessionId,
+      );
+      const paymentIntentId = paymentIntentIdFromSession(session);
+      if (paymentIntentId) {
+        return {
+          paymentIntentId,
+          checkoutSessionId: session.id,
+        };
+      }
+    }
+
+    const metadataCandidates = [
+      ["paymentId", input.ledgerPaymentId],
+      ["holdId", input.holdId],
+      ["purposeRefId", input.holdId],
+    ] as const;
+
+    for (const [key, rawValue] of metadataCandidates) {
+      const value = safeMetadataValue(rawValue);
+      if (!value) continue;
+      try {
+        const found = await this.stripe.paymentIntents.search({
+          query: `metadata['${key}']:'${value}'`,
+          limit: 1,
+        });
+        if (found.data[0]?.id) {
+          return {
+            paymentIntentId: found.data[0].id,
+            checkoutSessionId: input.checkoutSessionId,
+          };
+        }
+      } catch (error) {
+        logger.warn("Stripe PaymentIntent metadata search failed", {
+          key,
+          value,
+          error,
+        });
+      }
+    }
+
+    // Older booking checkouts stored the identifying metadata on the Checkout
+    // Session but not on the PaymentIntent or payment ledger. Scan recent
+    // sessions so those already-paid bookings remain refundable.
+    let startingAfter: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const sessions = await this.stripe.checkout.sessions.list({
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      const match = sessions.data.find((session) => {
+        const metadata = session.metadata || {};
+        return Boolean(
+          (input.ledgerPaymentId && metadata.paymentId === input.ledgerPaymentId)
+          || (
+            input.holdId
+            && (
+              metadata.holdId === input.holdId
+              || metadata.purposeRefId === input.holdId
+            )
+          )
+        );
+      });
+      if (match) {
+        const paymentIntentId = paymentIntentIdFromSession(match);
+        if (paymentIntentId) {
+          return {
+            paymentIntentId,
+            checkoutSessionId: match.id,
+          };
+        }
+      }
+      if (!sessions.has_more || sessions.data.length === 0) break;
+      startingAfter = sessions.data[sessions.data.length - 1]?.id;
+      if (!startingAfter) break;
+    }
+
+    return {
+      paymentIntentId: "",
+      checkoutSessionId: input.checkoutSessionId,
+    };
+  }
+
+  async refundCheckoutPayment(input: {
+    paymentIntentId?: string;
+    checkoutSessionId?: string;
+    ledgerPaymentId?: string;
+    holdId?: string;
+    amountCents?: number;
+    idempotencyKey: string;
+    metadata?: Record<string, string>;
+  }): Promise<{
+    refundId: string;
+    paymentIntentId: string;
+    checkoutSessionId?: string;
+    amountCents: number;
+  }> {
+    const resolved = await this.findPaymentIntent(input);
+    if (!resolved.paymentIntentId) {
+      throw new Error(
+        "Stripe payment intent is unavailable for this booking payment.",
+      );
+    }
+
+    const refund = await this.stripe.refunds.create({
+      payment_intent: resolved.paymentIntentId,
+      ...(typeof input.amountCents === "number"
+        ? { amount: input.amountCents }
+        : {}),
+      metadata: input.metadata,
+    }, {
+      idempotencyKey: input.idempotencyKey,
+    });
+
+    return {
+      refundId: refund.id,
+      paymentIntentId: resolved.paymentIntentId,
+      checkoutSessionId: resolved.checkoutSessionId,
+      amountCents: refund.amount,
+    };
+  }
+
   async handleWebhook(
     rawBody: Buffer,
-    headers: Record<string, string>
+    headers: Record<string, string>,
   ): Promise<WebhookResult> {
-    const sig = headers["stripe-signature"];
-    if (!sig) {
-      throw new Error("Missing stripe-signature header");
-    }
+    const signature = headers["stripe-signature"];
+    if (!signature) throw new Error("Missing stripe-signature header");
 
     let event: Stripe.Event;
     try {
       event = this.stripe.webhooks.constructEvent(
         rawBody,
-        sig,
-        this.webhookSecret
+        signature,
+        this.webhookSecret,
       );
-    } catch (err) {
-      logger.error("Stripe webhook signature verification failed", { err });
+    } catch (error) {
+      logger.error("Stripe webhook signature verification failed", { error });
       throw new Error("Invalid webhook signature");
     }
 
@@ -124,6 +260,8 @@ export class StripeProvider implements PaymentProvider {
             ...sessionMetadata,
             uid: sessionMetadata.uid || "",
             plan: sessionMetadata.plan || "",
+            checkoutSessionId: session.id,
+            paymentIntentId: paymentIntentIdFromSession(session),
             subscriptionId:
               typeof session.subscription === "string"
                 ? session.subscription
@@ -135,7 +273,6 @@ export class StripeProvider implements PaymentProvider {
           },
         };
       }
-
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
         return {
@@ -143,7 +280,9 @@ export class StripeProvider implements PaymentProvider {
           action: "payment_succeeded",
           status: "paid",
           metadata: {
-            subscriptionId: (invoice as unknown as Record<string, unknown>).subscription as string || "",
+            subscriptionId:
+              (invoice as unknown as Record<string, unknown>).subscription as string
+              || "",
             customerId:
               typeof invoice.customer === "string"
                 ? invoice.customer
@@ -151,33 +290,32 @@ export class StripeProvider implements PaymentProvider {
           },
         };
       }
-
       case "invoice.payment_failed": {
-        const failedInvoice = event.data.object as Stripe.Invoice;
+        const invoice = event.data.object as Stripe.Invoice;
         return {
           eventId: event.id,
           action: "payment_failed",
           status: "failed",
           metadata: {
-            subscriptionId: (failedInvoice as unknown as Record<string, unknown>).subscription as string || "",
+            subscriptionId:
+              (invoice as unknown as Record<string, unknown>).subscription as string
+              || "",
           },
         };
       }
-
       case "customer.subscription.deleted": {
-        const deletedSub = event.data.object as Stripe.Subscription;
+        const subscription = event.data.object as Stripe.Subscription;
         return {
           eventId: event.id,
           action: "payment_failed",
           status: "failed",
           metadata: {
-            subscriptionId: deletedSub.id,
-            uid: deletedSub.metadata?.uid || "",
+            subscriptionId: subscription.id,
+            uid: subscription.metadata?.uid || "",
             reason: "subscription_cancelled",
           },
         };
       }
-
       default:
         logger.info("Unhandled Stripe event type", { type: event.type });
         return {
@@ -188,33 +326,31 @@ export class StripeProvider implements PaymentProvider {
   }
 
   async reconcileStatus(
-    providerRefs: Record<string, string>
+    providerRefs: Record<string, string>,
   ): Promise<PaymentStatus> {
     const subscriptionId = providerRefs.subscriptionId;
-    if (!subscriptionId) {
-      logger.warn("No subscriptionId in providerRefs for reconciliation");
-      return "pending";
-    }
-
+    if (!subscriptionId) return "pending";
     try {
-      const sub = await this.stripe.subscriptions.retrieve(subscriptionId);
-      switch (sub.status) {
-        case "active":
-        case "trialing":
-          return "paid";
-        case "past_due":
-        case "unpaid":
-          return "pending";
-        case "canceled":
-        case "incomplete_expired":
-          return "failed";
-        default:
-          return "pending";
+      const subscription = await this.stripe.subscriptions.retrieve(
+        subscriptionId,
+      );
+      if (
+        subscription.status === "active"
+        || subscription.status === "trialing"
+      ) {
+        return "paid";
       }
-    } catch (err) {
+      if (
+        subscription.status === "canceled"
+        || subscription.status === "incomplete_expired"
+      ) {
+        return "failed";
+      }
+      return "pending";
+    } catch (error) {
       logger.error("Failed to reconcile Stripe subscription", {
         subscriptionId,
-        err,
+        error,
       });
       return "pending";
     }
