@@ -17,6 +17,10 @@ type State =
   | { kind: "success"; bookingId: string }
   | { kind: "error"; message: string };
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function BookingCompletePage() {
   const [state, setState] = useState<State>({ kind: "loading" });
 
@@ -43,16 +47,24 @@ export default function BookingCompletePage() {
 
     let cancelled = false;
     async function finalize() {
-      try {
-        const result = await finalizeCheckout({ holdId: stored!.holdId!, holdSecret: stored!.holdSecret });
-        if (cancelled) return;
-        window.localStorage.removeItem("hi-coworking-booking-hold");
-        setState({ kind: "success", bookingId: result.data.bookingId });
-      } catch (error) {
-        console.error(error);
-        if (cancelled) return;
-        setState({ kind: "error", message: "Payment returned, but confirmation is still pending. Please refresh once. If it remains pending, contact Hi Coworking before making another payment." });
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        try {
+          const result = await finalizeCheckout({ holdId: stored!.holdId!, holdSecret: stored!.holdSecret });
+          if (cancelled) return;
+          window.localStorage.removeItem("hi-coworking-booking-hold");
+          setState({ kind: "success", bookingId: result.data.bookingId });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (cancelled) return;
+          if (attempt < 5) await sleep(1_500);
+        }
       }
+
+      console.error(lastError);
+      if (cancelled) return;
+      setState({ kind: "error", message: "Payment returned, but confirmation is still pending. Please refresh once. If it remains pending, contact Hi Coworking before making another payment." });
     }
     void finalize();
     return () => { cancelled = true; };
