@@ -1,0 +1,96 @@
+name: Hi Coworking Firebase live hosting
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/web/**"
+      - "packages/shared/**"
+      - "firebase.json"
+      - ".firebaserc"
+      - ".github/workflows/firebase-live-hosting.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-live-hosting
+  cancel-in-progress: false
+
+jobs:
+  deploy-hosting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify Firebase Hosting credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            echo "Add the Firebase Hosting service-account JSON as a repository Actions secret, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read live Firebase public configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://hi-coworking-plat.web.app/__/firebase/init.json \
+            --output /tmp/firebase-init.json
+          node <<'NODE'
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('/tmp/firebase-init.json', 'utf8'));
+          const required = {
+            NEXT_PUBLIC_FIREBASE_API_KEY: config.apiKey,
+            NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: config.authDomain,
+            NEXT_PUBLIC_FIREBASE_PROJECT_ID: config.projectId,
+            NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: config.storageBucket,
+            NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: config.messagingSenderId,
+            NEXT_PUBLIC_FIREBASE_APP_ID: config.appId,
+          };
+          for (const [key, value] of Object.entries(required)) {
+            if (!value) throw new Error(`Live Firebase config is missing ${key}`);
+            fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          }
+          if (config.projectId !== 'hi-coworking-plat') {
+            throw new Error(`Refusing to deploy: reserved Hosting config resolved project ${config.projectId}`);
+          }
+          NODE
+
+      - name: Build shared contracts
+        run: npm run build:shared
+
+      - name: Lint web application
+        run: npm run lint
+
+      - name: Build live static site
+        run: npm run build
+        env:
+          SKIP_BOOKSTORE_SYNC: "true"
+          NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "false"
+
+      - name: Deploy Hosting live only
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ env.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: hi-coworking-plat
+          channelId: live
+          entryPoint: .
+          disableComment: true
