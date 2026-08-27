@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { httpsCallable } from "firebase/functions";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -19,11 +18,11 @@ type State =
   | { kind: "error"; message: string };
 
 export default function BookingCompletePage() {
-  const searchParams = useSearchParams();
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
-    const alreadyConfirmed = searchParams.get("bookingId");
+    const params = new URLSearchParams(window.location.search);
+    const alreadyConfirmed = params.get("bookingId");
     if (alreadyConfirmed) {
       setState({ kind: "success", bookingId: alreadyConfirmed });
       return;
@@ -57,7 +56,7 @@ export default function BookingCompletePage() {
     }
     void finalize();
     return () => { cancelled = true; };
-  }, [searchParams]);
+  }, []);
 
   return (
     <AppShell>
