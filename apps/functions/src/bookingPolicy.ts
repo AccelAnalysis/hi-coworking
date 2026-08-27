@@ -1,5 +1,5 @@
 export type BookingPolicyResourceType = "SEAT" | "MODE";
-export type CancellationOutcome = "FULL_REFUND" | "ACCOUNT_CREDIT_50" | "NO_REFUND";
+export type CancellationOutcome = "FULL_REFUND" | "ACCOUNT_CREDIT_50" | "ACCOUNT_CREDIT_100" | "NO_REFUND";
 
 export interface CancellationPolicyDecision {
   outcome: CancellationOutcome;
@@ -103,7 +103,7 @@ export function operatorCancellationDecision(
   preferAccountCredit = false,
 ): CancellationPolicyDecision {
   return {
-    outcome: preferAccountCredit ? "ACCOUNT_CREDIT_50" : "FULL_REFUND",
+    outcome: preferAccountCredit ? "ACCOUNT_CREDIT_100" : "FULL_REFUND",
     refundPercent: preferAccountCredit ? 0 : 100,
     accountCreditPercent: preferAccountCredit ? 100 : 0,
     restoreIncludedHoursPercent: 100,
