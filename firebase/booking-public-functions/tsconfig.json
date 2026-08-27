@@ -9,7 +9,8 @@
     "esModuleInterop": true,
     "moduleResolution": "node16",
     "types": ["node"],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "removeComments": true
   },
   "files": ["src/index.ts"]
 }
