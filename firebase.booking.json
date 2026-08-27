@@ -1,0 +1,20 @@
+{
+  "functions": [
+    {
+      "source": "firebase/booking-public-functions",
+      "codebase": "booking-public",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:booking-public-deploy"
+      ]
+    },
+    {
+      "source": "firebase/booking-transaction-functions",
+      "codebase": "booking-transactions",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:booking-transaction-deploy"
+      ]
+    }
+  ]
+}
