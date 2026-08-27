@@ -8,6 +8,8 @@ import { AppShell } from "@/components/AppShell";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
 
+const FACILITY_TIME_ZONE = "America/New_York";
+
 const getAvailability = httpsCallable<
   { start: number; end: number },
   {
@@ -58,11 +60,15 @@ type AvailabilityOption = {
 
 const DURATIONS = [1, 1.5, 2, 3, 4, 6, 8];
 
-function localDateValue(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function facilityDateValue(timestamp = Date.now()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: FACILITY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function startTimes() {
@@ -74,12 +80,59 @@ function startTimes() {
   return values;
 }
 
-function toWindow(dateValue: string, timeValue: string, durationHours: number) {
+function facilityWallTimeToTimestamp(dateValue: string, timeValue: string) {
   const [year, month, day] = dateValue.split("-").map(Number);
   const [hour, minute] = timeValue.split(":").map(Number);
-  const start = new Date(year, month - 1, day, hour, minute, 0, 0);
-  const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000);
-  return { start: start.getTime(), end: end.getTime(), startDate: start, endDate: end };
+  const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let guess = targetAsUtc;
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: FACILITY_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(guess));
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const observedAsUtc = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      0,
+      0,
+    );
+    guess += targetAsUtc - observedAsUtc;
+  }
+
+  return guess;
+}
+
+function toWindow(dateValue: string, timeValue: string, durationHours: number) {
+  const start = facilityWallTimeToTimestamp(dateValue, timeValue);
+  const end = start + durationHours * 60 * 60 * 1000;
+  return { start, end };
+}
+
+function formatFacilityTime(timestamp: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: FACILITY_TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+function formatFacilityDate(timestamp: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: FACILITY_TIME_ZONE,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(new Date(timestamp));
 }
 
 function money(cents: number) {
@@ -88,8 +141,8 @@ function money(cents: number) {
 
 export default function BookPage() {
   const { user, loading: authLoading } = useAuth();
-  const today = useMemo(() => new Date(), []);
-  const [dateValue, setDateValue] = useState(() => localDateValue(today));
+  const todayAtFacility = useMemo(() => facilityDateValue(), []);
+  const [dateValue, setDateValue] = useState(todayAtFacility);
   const [timeValue, setTimeValue] = useState("09:00");
   const [duration, setDuration] = useState(2);
   const [options, setOptions] = useState<AvailabilityOption[]>([]);
@@ -104,11 +157,14 @@ export default function BookPage() {
   const [guestPhone, setGuestPhone] = useState("");
 
   const bookingWindow = useMemo(() => toWindow(dateValue, timeValue, duration), [dateValue, timeValue, duration]);
-  const validEnd = bookingWindow.endDate.getHours() < 20 || (bookingWindow.endDate.getHours() === 20 && bookingWindow.endDate.getMinutes() === 0);
+  const [startHour, startMinute] = timeValue.split(":").map(Number);
+  const endWallMinutes = startHour * 60 + startMinute + duration * 60;
+  const validEnd = endWallMinutes <= 20 * 60;
 
   useEffect(() => {
     setSelectedResourceId(null);
     setQuote(null);
+    setOptions([]);
   }, [dateValue, timeValue, duration]);
 
   async function checkAvailability() {
@@ -213,7 +269,7 @@ export default function BookPage() {
             <span className="mb-2 flex items-center gap-2"><CalendarDays className="h-4 w-4" /> Date</span>
             <input
               type="date"
-              min={localDateValue(today)}
+              min={todayAtFacility}
               value={dateValue}
               onChange={(event) => setDateValue(event.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950"
@@ -228,7 +284,7 @@ export default function BookPage() {
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950"
             >
               {startTimes().map((value) => (
-                <option key={value} value={value}>{new Date(`2000-01-01T${value}`).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</option>
+                <option key={value} value={value}>{new Date(`2000-01-01T${value}`).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })}</option>
               ))}
             </select>
           </label>
@@ -244,6 +300,8 @@ export default function BookPage() {
             </select>
           </label>
         </section>
+
+        <p className="mt-3 text-sm text-slate-500">Times shown are local to Hi Coworking in Carrollton, Virginia.</p>
 
         <button
           type="button"
@@ -285,7 +343,7 @@ export default function BookPage() {
                           {option.name}
                         </div>
                         <p className={`mt-2 text-sm ${selected ? "text-slate-300" : "text-slate-500"}`}>
-                          {option.available ? `${bookingWindow.startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–${bookingWindow.endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} available` : "Unavailable for this stay"}
+                          {option.available ? `${formatFacilityTime(bookingWindow.start)}–${formatFacilityTime(bookingWindow.end)} available` : "Unavailable for this stay"}
                         </p>
                       </div>
                       {selected ? <Check className="h-5 w-5" /> : null}
@@ -308,7 +366,7 @@ export default function BookPage() {
               <div className="mt-4 grid gap-8 lg:grid-cols-[1fr_320px]">
                 <div>
                   <h2 className="text-2xl font-semibold text-slate-950">{quote.resourceName}</h2>
-                  <p className="mt-2 text-slate-600">{bookingWindow.startDate.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })} · {bookingWindow.startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}–{bookingWindow.endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</p>
+                  <p className="mt-2 text-slate-600">{formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}</p>
 
                   {!user ? (
                     <div className="mt-6 grid gap-3 sm:grid-cols-2">
