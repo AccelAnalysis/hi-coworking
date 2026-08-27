@@ -28,6 +28,13 @@ export class StripeProvider implements PaymentProvider {
 
   async createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSessionResult> {
     const isSubscription = input.mode !== "payment";
+    const checkoutMetadata = {
+      ...(input.metadata || {}),
+      uid: input.uid,
+      paymentId: input.metadata?.paymentId || "",
+      purpose: input.purpose,
+      purposeRefId: input.purposeRefId || "",
+    };
     const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = isSubscription
       ? { price: input.metadata?.stripePriceId, quantity: 1 }
       : {
@@ -45,19 +52,15 @@ export class StripeProvider implements PaymentProvider {
       line_items: [lineItem],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
-      metadata: {
-        ...(input.metadata || {}),
-        uid: input.uid,
-        paymentId: input.metadata?.paymentId || "",
-        purpose: input.purpose,
-        purposeRefId: input.purposeRefId || "",
-      },
+      metadata: checkoutMetadata,
     };
 
     if (isSubscription) {
       sessionConfig.subscription_data = {
         metadata: { uid: input.uid, plan: input.metadata?.plan || "" },
       };
+    } else {
+      sessionConfig.payment_intent_data = { metadata: checkoutMetadata };
     }
 
     const session = await this.stripe.checkout.sessions.create(sessionConfig);
@@ -68,6 +71,7 @@ export class StripeProvider implements PaymentProvider {
   async refundCheckoutPayment(input: {
     paymentIntentId?: string;
     checkoutSessionId?: string;
+    ledgerPaymentId?: string;
     amountCents?: number;
     idempotencyKey: string;
     metadata?: Record<string, string>;
@@ -77,6 +81,13 @@ export class StripeProvider implements PaymentProvider {
       const session = await this.stripe.checkout.sessions.retrieve(input.checkoutSessionId);
       paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : "";
     }
+    if (!paymentIntentId && input.ledgerPaymentId) {
+      const found = await this.stripe.paymentIntents.search({
+        query: `metadata['paymentId']:'${input.ledgerPaymentId.replace(/'/g, "")}'`,
+        limit: 1,
+      });
+      paymentIntentId = found.data[0]?.id || "";
+    }
     if (!paymentIntentId) throw new Error("Stripe payment intent is unavailable for this booking payment.");
 
     const refund = await this.stripe.refunds.create({
@@ -85,11 +96,7 @@ export class StripeProvider implements PaymentProvider {
       metadata: input.metadata,
     }, { idempotencyKey: input.idempotencyKey });
 
-    return {
-      refundId: refund.id,
-      paymentIntentId,
-      amountCents: refund.amount,
-    };
+    return { refundId: refund.id, paymentIntentId, amountCents: refund.amount };
   }
 
   async handleWebhook(rawBody: Buffer, headers: Record<string, string>): Promise<WebhookResult> {
