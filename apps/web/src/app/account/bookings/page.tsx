@@ -101,6 +101,7 @@ function AccountBookingsContent() {
   const [accessGrants, setAccessGrants] = useState<AccessGrantSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessLoading, setAccessLoading] = useState(true);
+  const [now, setNow] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -140,7 +141,12 @@ function AccountBookingsContent() {
     };
   }, [user]);
 
-  const now = Date.now();
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const upcomingBookings = useMemo(
     () => bookings
       .filter((booking) => booking.status === "CONFIRMED" && booking.end > now)
