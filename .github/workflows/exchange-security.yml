@@ -29,6 +29,7 @@ jobs:
       - run: npm ci
       - run: npm run build:shared
       - run: npm run build:functions
+      - run: npm run build:booking-deploy
       - run: npm run lint
       - run: npm run test:security
       - run: npm run build
