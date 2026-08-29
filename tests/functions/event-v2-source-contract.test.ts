@@ -2,29 +2,58 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const eventV2 = readFileSync(resolve(process.cwd(), "apps/functions/src/eventV2.ts"), "utf8");
-const detail = readFileSync(resolve(process.cwd(), "apps/web/src/app/events/detail/page.tsx"), "utf8");
-const webhook = readFileSync(resolve(process.cwd(), "apps/functions/src/payments/stripeWebhook.ts"), "utf8");
+const registration = readFileSync(
+  resolve(process.cwd(), "apps/functions/src/eventsV2/registration.ts"),
+  "utf8",
+);
+const clientApi = readFileSync(
+  resolve(process.cwd(), "apps/web/src/lib/eventsV2.ts"),
+  "utf8",
+);
+const registrationPanel = readFileSync(
+  resolve(process.cwd(), "apps/web/src/components/events/EventRegistrationPanel.tsx"),
+  "utf8",
+);
+const main = readFileSync(
+  resolve(process.cwd(), "apps/functions/src/main.ts"),
+  "utf8",
+);
+const webhook = readFileSync(
+  resolve(process.cwd(), "apps/functions/src/payments/stripeWebhook.ts"),
+  "utf8",
+);
 
-describe("Events v2 transaction boundaries", () => {
-  it("routes public registration through the authoritative v2 endpoint", () => {
-    expect(detail).toContain("beginEventRegistrationV2");
-    expect(detail).not.toContain("registerFreeEventFn");
-    expect(detail).not.toContain("createTicketCheckoutFn");
+describe("reconciled Events v2 transaction boundaries", () => {
+  it("routes public registration through the canonical Events v2 client", () => {
+    expect(registrationPanel).toContain("beginEventRegistration");
+    expect(clientApi).toContain('"events_v2BeginRegistration"');
+    expect(registrationPanel).not.toContain("registerFreeEventFn");
+    expect(registrationPanel).not.toContain("createTicketCheckoutFn");
   });
 
-  it("reserves held quantity before paid checkout", () => {
-    expect(eventV2).toContain("heldQuantity");
-    expect(eventV2).toContain("createCapacityHold");
-    expect(eventV2).toContain("runTransaction");
+  it("reserves aggregate and ticket-type capacity before paid checkout", () => {
+    expect(registration).toContain("heldQuantity");
+    expect(registration).toContain("reserveTicketInventory");
+    expect(registration).toContain("createHoldForIdentity");
+    expect(registration).toContain("runTransaction");
   });
 
-  it("does not determine free registration from the event base price alone", () => {
-    expect(eventV2).toContain("resolveEventPrice");
-    expect(eventV2).toContain("ticket.priceCents");
+  it("reconciles paid checkouts that arrive after hold expiry", () => {
+    expect(registration).toContain('hold.status !== "HELD" && hold.status !== "EXPIRED"');
+    expect(registration).toContain("capacity_conflict_after_payment");
+    expect(registration).toContain("eventRefundJobs");
   });
 
-  it("prevents a v2 Stripe payment from falling through to legacy finalization", () => {
+  it("provides a claimable waitlist offer rather than a stranded status", () => {
+    expect(registration).toContain("events_v2ClaimWaitlistOffer");
+    expect(registration).toContain("offerHoldId");
+    expect(registration).toContain("WAITLIST_CLAIM_MS");
+  });
+
+  it("keeps old transaction endpoints fail-closed and avoids legacy Stripe finalization", () => {
+    expect(main).toContain("retiredEventEndpoint");
+    expect(main).toContain('export * from "./eventsV2/registration"');
+    expect(registration).toContain('purpose: "other"');
     expect(webhook).toContain("handledByEventV2");
     expect(webhook).toContain("!handledByEventV2");
   });
