@@ -16,6 +16,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import {
   cancelBookstoreOrderFn,
   listBookstoreOrdersFn,
+  refundBookstoreOrderFn,
   setBookstorePickupStatusFn,
   type BookstoreOrder,
 } from "@/lib/bookstoreFunctions";
@@ -95,23 +96,33 @@ function OrdersContent() {
     }
   }
 
-  async function cancel(order: BookstoreOrder) {
-    const wording = order.status === "paid"
-      ? "Refund this order and return unpicked-up physical inventory to stock?"
+  async function cancelOrRefund(order: BookstoreOrder) {
+    const isPaid = order.status === "paid";
+    const wording = isPaid
+      ? order.fulfillmentStatus === "inventory_exception"
+        ? "Refund this paid order? No inventory will be added because no physical sale was committed."
+        : "Refund this order and return the unpicked-up physical copy to stock?"
       : "Cancel this pending checkout and release its inventory reservation?";
     if (!window.confirm(wording)) return;
     setWorking(order.id);
     setError("");
     try {
-      await cancelBookstoreOrderFn({
-        orderId: order.id,
-        reason: order.status === "paid"
-          ? "Cancelled and refunded by bookstore staff"
-          : "Pending bookstore checkout cancelled by staff",
-      });
+      if (isPaid) {
+        await refundBookstoreOrderFn({
+          orderId: order.id,
+          reason: order.fulfillmentStatus === "inventory_exception"
+            ? "Inventory unavailable after late bookstore payment"
+            : "Cancelled and refunded by bookstore staff",
+        });
+      } else {
+        await cancelBookstoreOrderFn({
+          orderId: order.id,
+          reason: "Pending bookstore checkout cancelled by staff",
+        });
+      }
       await load();
     } catch (cancelError) {
-      console.error("Bookstore cancellation failed", cancelError);
+      console.error("Bookstore cancellation/refund failed", cancelError);
       setError("The order could not be cancelled or refunded. Picked-up orders require the return workflow.");
     } finally {
       setWorking("");
@@ -197,7 +208,7 @@ function OrdersContent() {
                       </button>
                     )}
                     {(order.status === "pending_payment" || (order.status === "paid" && order.fulfillmentStatus !== "picked_up")) && (
-                      <button type="button" disabled={working === order.id} onClick={() => cancel(order)} className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:opacity-50">
+                      <button type="button" disabled={working === order.id} onClick={() => cancelOrRefund(order)} className="inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:opacity-50">
                         <RotateCcw className="h-4 w-4" /> {order.status === "paid" ? "Refund" : "Cancel checkout"}
                       </button>
                     )}
