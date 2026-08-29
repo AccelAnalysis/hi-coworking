@@ -1,471 +1,191 @@
 "use client";
 
-import { Suspense, useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
-import { useAuth } from "@/lib/authContext";
-import { AddToCalendar } from "@/components/AddToCalendar";
-import {
-  getEvent,
-  getUserRegistration,
-} from "@/lib/firestore";
-import {
-  cancelEventRegistrationFn,
-  createTicketCheckoutFn,
-  createSponsorshipCheckoutFn,
-  registerFreeEventFn,
-  joinEventWaitlistFn,
-} from "@/lib/functions";
-import type { EventDoc, EventRegistrationDoc } from "@hi/shared";
+import Image from "next/image";
 import Link from "next/link";
-import {
-  Calendar,
-  MapPin,
-  Video,
-  Users,
-  Loader2,
-  Clock,
-  DollarSign,
-  ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  Play,
-  ExternalLink,
-  LinkIcon,
-  Shield,
-} from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { ArrowLeft, CalendarDays, Clock3, Loader2, MapPin, Play, Video } from "lucide-react";
+import { AddToCalendar } from "@/components/AddToCalendar";
+import { AppShell } from "@/components/AppShell";
+import { EventRegistrationPanel } from "@/components/events/EventRegistrationPanel";
+import { eventPrimaryImage, getPublicEvent, type EventPublic } from "@/lib/eventsV2";
 
-export default function EventDetailPage() {
-  return (
-    <Suspense fallback={<AppShell><div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div></AppShell>}>
-      <EventDetailContent />
-    </Suspense>
-  );
+function dateLabel(event: EventPublic) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: event.timezone || "America/New_York",
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(event.startTime));
+}
+
+function timeLabel(event: EventPublic) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: event.timezone || "America/New_York",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${formatter.format(new Date(event.startTime))} – ${formatter.format(new Date(event.endTime))}`;
 }
 
 function EventDetailContent() {
   const searchParams = useSearchParams();
-  const eventId = searchParams.get("id");
-  const { user, userDoc } = useAuth();
-
-  const [event, setEvent] = useState<EventDoc | null>(null);
+  const identifier = searchParams.get("event") || searchParams.get("id");
+  const [event, setEvent] = useState<EventPublic | null>(null);
   const [loading, setLoading] = useState(true);
-  const [registration, setRegistration] = useState<EventRegistrationDoc | null>(null);
-  const [registering, setRegistering] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const [joiningWaitlist, setJoiningWaitlist] = useState(false);
-  const [selectedTicketId, setSelectedTicketId] = useState<string>("");
-  const [sponsoring, setSponsoring] = useState(false);
-
-  const fetchData = useCallback(async () => {
-    if (!eventId) return;
-    setLoading(true);
-    try {
-      const [ev, reg] = await Promise.all([
-        getEvent(eventId),
-        user ? getUserRegistration(eventId, user.uid) : null,
-      ]);
-      setEvent(ev);
-      setRegistration(reg);
-      // Default to first ticket type if available
-      if (ev?.ticketTypes && ev.ticketTypes.length > 0) {
-        setSelectedTicketId(ev.ticketTypes[0].id);
-      }
-    } catch (err) {
-      console.error("Failed to fetch event:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [eventId, user]);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const handleRegister = async () => {
-    if (!event || !user) return;
-
-    // Determine effective price
-    let priceCents = event.price || 0;
-    let ticketTypeId: string | undefined = undefined;
-
-    if (event.ticketTypes && event.ticketTypes.length > 0) {
-      const selected = event.ticketTypes.find(t => t.id === selectedTicketId);
-      if (selected) {
-        priceCents = selected.priceCents;
-        ticketTypeId = selected.id;
+    let active = true;
+    async function load() {
+      if (!identifier) {
+        setLoading(false);
+        setError(true);
+        return;
       }
-    }
-
-    // For paid events, redirect to payment
-    if (priceCents > 0) {
-      setRegistering(true);
+      setLoading(true);
       try {
-        const result = await createTicketCheckoutFn({
-          eventId: event.id,
-          ticketTypeId,
-          quantity: 1,
-          successUrl: `${window.location.origin}/events/detail?id=${event.id}&registered=true`,
-          cancelUrl: window.location.href,
-        });
-        window.location.href = result.data.url;
+        const result = await getPublicEvent(identifier);
+        if (!active) return;
+        setEvent(result);
+        setError(!result);
       } catch (err) {
-        console.error("Payment failed:", err);
-        setRegistering(false);
+        console.error("Failed to load event", err);
+        if (active) setError(true);
+      } finally {
+        if (active) setLoading(false);
       }
-      return;
     }
-
-    // Free event — register via callable (server-authoritative)
-    setRegistering(true);
-    try {
-      await registerFreeEventFn({
-        eventId: event.id,
-        displayName: userDoc?.displayName || user.displayName || "",
-        email: userDoc?.email || user.email || "",
-      });
-      await fetchData();
-    } catch (err) {
-      console.error("Registration failed:", err);
-    } finally {
-      setRegistering(false);
-    }
-  };
-
-  const handleJoinWaitlist = async () => {
-    if (!event || !user) return;
-    setJoiningWaitlist(true);
-    try {
-      await joinEventWaitlistFn({
-        eventId: event.id,
-        displayName: userDoc?.displayName || user.displayName || "",
-        email: userDoc?.email || user.email || "",
-      });
-      alert("You have been added to the waitlist.");
-    } catch (err) {
-      console.error("Waitlist join failed:", err);
-    } finally {
-      setJoiningWaitlist(false);
-    }
-  };
-
-  const handleCancel = async () => {
-    if (!event || !user) return;
-    setCancelling(true);
-    try {
-      await cancelEventRegistrationFn({ eventId: event.id });
-      await fetchData();
-    } catch (err) {
-      console.error("Cancellation failed:", err);
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const handleSponsor = async (tierId: string) => {
-    if (!event || !user) return;
-    setSponsoring(true);
-    try {
-      const result = await createSponsorshipCheckoutFn({
-        eventId: event.id,
-        sponsorshipTierId: tierId,
-        successUrl: `${window.location.origin}/events/detail?id=${event.id}&sponsored=true`,
-        cancelUrl: window.location.href,
-      });
-      window.location.href = result.data.url;
-    } catch (err) {
-      console.error("Sponsorship failed:", err);
-      alert("Failed to initiate sponsorship. Please try again.");
-      setSponsoring(false);
-    }
-  };
+    void load();
+    return () => { active = false; };
+  }, [identifier]);
 
   if (loading) {
     return (
       <AppShell>
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+        <div className="flex min-h-[60vh] items-center justify-center" role="status">
+          <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
         </div>
       </AppShell>
     );
   }
 
-  if (!event) {
+  if (error || !event) {
     return (
       <AppShell>
-        <div className="text-center py-24">
-          <h2 className="text-lg font-semibold text-slate-700">Event not found</h2>
-          <Link href="/events" className="text-sm text-indigo-600 hover:text-indigo-700 mt-2 inline-block">
-            Back to events
-          </Link>
-        </div>
+        <main className="mx-auto w-full max-w-4xl px-4 py-20 text-center sm:px-6">
+          <CalendarDays className="mx-auto h-9 w-9 text-slate-300" />
+          <h1 className="mt-4 text-3xl font-semibold text-slate-950">We couldn&apos;t find that event.</h1>
+          <Link href="/events" className="mt-6 inline-flex rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white">See events</Link>
+        </main>
       </AppShell>
     );
   }
 
-  const isFree = !event.price || event.price === 0;
-  const isFull = event.seatCap ? event.registrationCount >= event.seatCap : false;
-  const startDate = new Date(event.startTime);
-  const endDate = new Date(event.endTime);
-  const isRegistered = !!registration;
+  const hero = eventPrimaryImage(event);
+  const completed = event.status === "completed" || event.endTime < Date.now();
 
   return (
     <AppShell>
-      <div className="max-w-3xl mx-auto">
-        {/* Back link */}
-        <Link
-          href="/events"
-          className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to events
-        </Link>
-
-        {/* Event header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border inline-flex items-center gap-1 ${
-              event.format === "in-person" ? "bg-blue-50 text-blue-700 border-blue-200" :
-              event.format === "virtual" ? "bg-purple-50 text-purple-700 border-purple-200" :
-              "bg-amber-50 text-amber-700 border-amber-200"
-            }`}>
-              {event.format === "in-person" ? <MapPin className="h-3 w-3" /> :
-               event.format === "virtual" ? <Video className="h-3 w-3" /> :
-               <Users className="h-3 w-3" />}
-              {event.format}
-            </span>
-            {event.status === "cancelled" && (
-              <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
-                Cancelled
-              </span>
-            )}
-          </div>
-
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            {event.title}
-          </h1>
+      <main>
+        <div className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-10">
+          <Link href="/events" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-950">
+            <ArrowLeft className="h-4 w-4" /> Events
+          </Link>
         </div>
 
-        {/* Info grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <span className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
-              <Calendar className="h-3 w-3" /> Date & Time
-            </span>
-            <div className="mt-1 text-sm font-semibold text-slate-900">
-              {startDate.toLocaleDateString("en-US", {
-                weekday: "long",
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}
+        <section className="mx-auto mt-6 grid w-full max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[1.45fr_0.8fr] lg:gap-10">
+          <div>
+            <div className="relative aspect-[16/10] overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-100 via-sky-50 to-slate-200">
+              {hero?.downloadUrl && (
+                <Image
+                  src={hero.downloadUrl}
+                  alt={hero.alt || event.title}
+                  fill
+                  priority
+                  className="object-cover"
+                  sizes="(max-width: 1024px) 100vw, 65vw"
+                />
+              )}
             </div>
-            <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-              <Clock className="h-3 w-3" />
-              {startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} –{" "}
-              {endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-            </div>
-          </div>
 
-          <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <span className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
-              <DollarSign className="h-3 w-3" /> Price
-            </span>
-            <div className="mt-1 text-sm font-semibold text-slate-900">
-              {isFree ? "Free" : `$${(event.price / 100).toFixed(2)} ${event.currency}`}
-            </div>
-            {event.seatCap && (
-              <div className={`text-xs mt-0.5 ${isFull ? "text-red-500 font-medium" : "text-slate-500"}`}>
-                {event.registrationCount}/{event.seatCap} seats filled
+            <div className="py-8 sm:py-10">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+                {completed ? "Past event" : "At Hi Coworking"}
+              </p>
+              <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">{event.title}</h1>
+
+              <div className="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-600">
+                <span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4" /> {dateLabel(event)}</span>
+                <span className="inline-flex items-center gap-2"><Clock3 className="h-4 w-4" /> {timeLabel(event)}</span>
+                {event.location && <span className="inline-flex items-center gap-2"><MapPin className="h-4 w-4" /> {event.location}</span>}
+                {event.format !== "in-person" && <span className="inline-flex items-center gap-2"><Video className="h-4 w-4" /> {event.format === "virtual" ? "Online" : "In person + online"}</span>}
               </div>
-            )}
-          </div>
 
-          {event.location && (
-            <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-              <span className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> Location
-              </span>
-              <div className="mt-1 text-sm font-semibold text-slate-900">
-                {event.location}
-              </div>
-            </div>
-          )}
+              <div className="mt-8 max-w-3xl whitespace-pre-wrap text-base leading-8 text-slate-650">{event.description}</div>
 
-          {event.virtualUrl && isRegistered && (
-            <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-              <span className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1">
-                <Video className="h-3 w-3" /> Virtual Link
-              </span>
-              <a
-                href={event.virtualUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 text-sm font-semibold text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1"
-              >
-                Join Virtual Event <ExternalLink className="h-3 w-3" />
-              </a>
-            </div>
-          )}
-        </div>
+              {!completed && (
+                <div className="mt-8">
+                  <AddToCalendar event={event} />
+                </div>
+              )}
 
-        {/* Description */}
-        <div className="mb-8">
-          <h2 className="text-sm font-bold text-slate-900 mb-2">About This Event</h2>
-          <div className="prose prose-sm prose-slate max-w-none">
-            <p className="text-sm text-slate-600 whitespace-pre-wrap">
-              {event.description}
-            </p>
-          </div>
-        </div>
-
-        <div className="mb-8">
-          <AddToCalendar event={event} />
-        </div>
-
-        {/* Recording */}
-        {event.recordingUrl && (
-          <div className="mb-8 p-4 rounded-xl bg-indigo-50 border border-indigo-200">
-            <div className="flex items-center gap-2">
-              <Play className="h-5 w-5 text-indigo-600" />
-              <div>
-                <span className="text-sm font-bold text-indigo-900">Recording Available</span>
+              {completed && event.recordingUrl && (
                 <a
                   href={event.recordingUrl}
                   target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-indigo-600 hover:text-indigo-700 mt-0.5 inline-flex items-center gap-1"
+                  rel="noreferrer"
+                  className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white"
                 >
-                  Watch recording <ExternalLink className="h-3 w-3" />
+                  <Play className="h-4 w-4" /> Watch the recording
                 </a>
-              </div>
+              )}
             </div>
-          </div>
-        )}
 
-        {/* Linked RFx */}
-        {event.linkedRfxId && (
-          <div className="mb-8 p-4 rounded-xl bg-amber-50 border border-amber-200">
-            <div className="flex items-center gap-2">
-              <LinkIcon className="h-5 w-5 text-amber-600" />
-              <div>
-                <span className="text-sm font-bold text-amber-900">Related RFx Opportunity</span>
-                <Link
-                  href={`/rfx/detail?id=${event.linkedRfxId}`}
-                  className="block text-xs text-amber-700 hover:text-amber-800 mt-0.5"
-                >
-                  View RFx →
-                </Link>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Registration CTA */}
-        {event.status === "published" && (
-          <div className="p-6 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            {!user ? (
-              <div className="text-center">
-                <p className="text-sm text-slate-600 mb-3">Log in to register for this event.</p>
-                <Link
-                  href="/login"
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
-                >
-                  Log In to Register
-                </Link>
-              </div>
-            ) : isRegistered ? (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                  <span className="text-sm font-bold text-emerald-700">You&apos;re registered!</span>
+            {event.gallery?.length > 0 && (
+              <section className="border-t border-slate-200 py-10">
+                <h2 className="text-2xl font-semibold text-slate-950">From the event</h2>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  {event.gallery.filter((image) => image.downloadUrl).map((image, index) => (
+                    <div key={`${image.storagePath}-${index}`} className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-100">
+                      <Image
+                        src={image.downloadUrl!}
+                        alt={image.alt || `${event.title} photo ${index + 1}`}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 100vw, 50vw"
+                      />
+                    </div>
+                  ))}
                 </div>
-                <button
-                  onClick={handleCancel}
-                  disabled={cancelling}
-                  className="px-4 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-60 inline-flex items-center gap-1.5"
-                >
-                  {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
-                  Cancel Registration
-                </button>
-              </div>
-            ) : isFull ? (
-              <div className="text-center">
-                <p className="text-sm font-medium text-red-600">This event is full.</p>
-                {user && (
-                  <button
-                    onClick={handleJoinWaitlist}
-                    disabled={joiningWaitlist}
-                    className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors disabled:opacity-60"
-                  >
-                    {joiningWaitlist ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
-                    Join Waitlist
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="text-center">
-                <button
-                  onClick={handleRegister}
-                  disabled={registering}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors disabled:opacity-60"
-                >
-                  {registering ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  {isFree ? "Register (Free)" : `Register — $${(event.price / 100).toFixed(2)}`}
-                </button>
-              </div>
+              </section>
             )}
           </div>
-        )}
 
-        {/* Sponsorships */}
-        {event.sponsorships && event.sponsorships.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Shield className="h-5 w-5 text-indigo-600" /> Sponsorship Opportunities
-            </h2>
-            <div className="grid gap-4 md:grid-cols-2">
-              {event.sponsorships.map((tier) => {
-                const isSoldOut = tier.soldCount >= tier.slots;
-                return (
-                  <div key={tier.id} className="p-5 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 flex flex-col">
-                    <div className="flex justify-between items-start mb-2">
-                      <h3 className="font-bold text-slate-900">{tier.name}</h3>
-                      <span className="font-bold text-slate-900">${(tier.priceCents / 100).toFixed(0)}</span>
-                    </div>
-                    <div className="text-xs text-slate-500 mb-4">
-                      {tier.soldCount} / {tier.slots} spots taken
-                    </div>
-                    
-                    <div className="mt-auto">
-                      {isSoldOut ? (
-                        <button disabled className="w-full py-2 rounded-lg bg-slate-100 text-slate-400 text-sm font-medium cursor-not-allowed">
-                          Sold Out
-                        </button>
-                      ) : !user ? (
-                        <Link href="/login" className="block w-full text-center py-2 rounded-lg bg-indigo-50 text-indigo-600 text-sm font-medium hover:bg-indigo-100">
-                          Log in to Sponsor
-                        </Link>
-                      ) : (
-                        <button
-                          onClick={() => handleSponsor(tier.id)}
-                          disabled={sponsoring}
-                          className="w-full py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
-                        >
-                          {sponsoring ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "Sponsor Now"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+          <aside className="lg:pt-2">
+            <div className="lg:sticky lg:top-24">
+              {!completed && event.status === "published" ? (
+                <EventRegistrationPanel event={event} />
+              ) : (
+                <div className="rounded-3xl bg-slate-100 p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">This event has ended</p>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">See what&apos;s coming up next at Hi Coworking.</p>
+                  <Link href="/events" className="mt-5 inline-flex rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Upcoming events</Link>
+                </div>
+              )}
             </div>
-          </div>
-        )}
-      </div>
+          </aside>
+        </section>
+      </main>
     </AppShell>
+  );
+}
+
+export default function EventDetailPage() {
+  return (
+    <Suspense fallback={<AppShell><div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div></AppShell>}>
+      <EventDetailContent />
+    </Suspense>
   );
 }
