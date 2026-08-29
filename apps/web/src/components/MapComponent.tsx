@@ -46,6 +46,7 @@ export function MapComponent() {
     } catch (error) {
       console.error("Hi Coworking map could not be initialized", error);
       map?.remove();
+      map = null;
       mapInstanceRef.current = null;
       setMapFailed(true);
     }
