@@ -8,7 +8,9 @@ on:
       - "apps/web/**"
       - "packages/shared/**"
       - "firebase/admin-member-functions/**"
+      - "firebase/payment-status-guard-functions/**"
       - "firebase.admin.json"
+      - "firebase.payment-status-guard.json"
       - "tests/functions/**"
       - "tests/rules/**"
       - "firestore.rules"
@@ -63,6 +65,9 @@ jobs:
 
       - name: Build isolated Admin member deploy bundle
         run: npm run build:admin-member-deploy
+
+      - name: Build isolated payment-status guard bundle
+        run: npm run build:payment-status-guard-deploy
 
       - name: Lint web application
         run: npm run lint
