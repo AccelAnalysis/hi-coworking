@@ -124,5 +124,18 @@ export const createBooking = onCall(async () => {
 
 export * from "./bookingJourney";
 export * from "./bookingManagement";
-export * from "./bookstoreCommerce";
-export * from "./bookstoreRefund";
+export {
+  bookstore_getPublicStock,
+  bookstore_createCheckoutSession,
+  bookstore_onPaymentUpdated,
+  bookstore_releaseExpiredReservations,
+  bookstore_getOrder,
+  bookstore_getMyOrders,
+  bookstore_listOrders,
+  bookstore_listInventory,
+  bookstore_adjustInventory,
+  bookstore_setPickupStatus,
+  bookstore_getDownloadLink,
+} from "./bookstoreCommerce";
+export { bookstore_cancelOrder } from "./bookstoreCancel";
+export { bookstore_refundOrder } from "./bookstoreRefund";
