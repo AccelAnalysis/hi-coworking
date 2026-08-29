@@ -12,8 +12,11 @@ import {
   type RegistrationDocV2,
 } from "./types";
 
+const firestore = admin.firestore();
+firestore.settings({ ignoreUndefinedProperties: true });
+
 export function db() {
-  return admin.firestore();
+  return firestore;
 }
 
 export function hashSecret(value: string) {
