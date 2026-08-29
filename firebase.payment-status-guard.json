@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "source": "firebase/payment-status-guard-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "npm run build:payment-status-guard-deploy"
+    ]
+  }
+}
