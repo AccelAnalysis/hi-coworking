@@ -15,9 +15,17 @@ type CheckoutState = {
   expiresAt: number;
 };
 
+const RECONCILE_ATTEMPTS = 8;
+const RECONCILE_DELAY_MS = 1200;
+
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 function CompletionContent() {
   const searchParams = useSearchParams();
-  const eventIdentifier = searchParams.get("event") || "";
+  const queryEventIdentifier = searchParams.get("event") || "";
+  const [eventIdentifier, setEventIdentifier] = useState(queryEventIdentifier);
   const [status, setStatus] = useState<"checking" | "confirmed" | "pending" | "failed">("checking");
   const [registrationId, setRegistrationId] = useState<string | null>(null);
 
@@ -29,30 +37,45 @@ function CompletionContent() {
         if (active) setStatus("pending");
         return;
       }
+
+      let checkout: CheckoutState;
       try {
-        const checkout = JSON.parse(raw) as CheckoutState;
-        const result = await finalizeEventRegistration({
-          holdId: checkout.holdId,
-          holdSecret: checkout.holdSecret,
-        });
-        if (!active) return;
-        if (result.data.status === "confirmed") {
-          sessionStorage.removeItem("hi:eventCheckout");
-          setRegistrationId(result.data.registrationId || null);
-          setStatus("confirmed");
-        } else if (result.data.status === "failed") {
-          setStatus("failed");
-        } else {
-          setStatus("pending");
-        }
-      } catch (error) {
-        console.error("Event checkout finalization failed", error);
+        checkout = JSON.parse(raw) as CheckoutState;
+        if (!queryEventIdentifier && checkout.eventSlug) setEventIdentifier(checkout.eventSlug);
+      } catch {
         if (active) setStatus("pending");
+        return;
       }
+
+      for (let attempt = 0; attempt < RECONCILE_ATTEMPTS && active; attempt += 1) {
+        try {
+          const result = await finalizeEventRegistration({
+            holdId: checkout.holdId,
+            holdSecret: checkout.holdSecret,
+          });
+          if (!active) return;
+          if (result.data.status === "confirmed") {
+            sessionStorage.removeItem("hi:eventCheckout");
+            setRegistrationId(result.data.registrationId || null);
+            setStatus("confirmed");
+            return;
+          }
+          if (result.data.status === "failed") {
+            setStatus("failed");
+            return;
+          }
+        } catch (error) {
+          console.error("Event checkout reconciliation failed", error);
+        }
+        if (attempt < RECONCILE_ATTEMPTS - 1) await sleep(RECONCILE_DELAY_MS);
+      }
+
+      if (active) setStatus("pending");
     }
+
     void finalize();
     return () => { active = false; };
-  }, []);
+  }, [queryEventIdentifier]);
 
   return (
     <AppShell>
@@ -62,6 +85,7 @@ function CompletionContent() {
             <>
               <Loader2 className="mx-auto h-8 w-8 animate-spin text-slate-400" />
               <h1 className="mt-5 text-3xl font-semibold text-slate-950">Confirming your registration…</h1>
+              <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600">We&apos;re reconciling the completed payment with your reserved event spot.</p>
             </>
           )}
 
@@ -85,10 +109,10 @@ function CompletionContent() {
 
           {status === "pending" && (
             <>
-              <Loader2 className="mx-auto h-8 w-8 animate-spin text-sky-600" />
-              <h1 className="mt-5 text-3xl font-semibold text-slate-950">Payment received. We&apos;re finishing the registration.</h1>
+              <Loader2 className="mx-auto h-8 w-8 text-sky-600" />
+              <h1 className="mt-5 text-3xl font-semibold text-slate-950">Payment received. Registration confirmation is still processing.</h1>
               <p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-600">
-                You do not need to pay again. Your confirmation email will arrive once the payment webhook completes.
+                You do not need to pay again. The server will finish reconciling the payment and send your confirmation by email.
               </p>
               <Link href="/events" className="mt-7 inline-flex rounded-full bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white">Back to events</Link>
             </>
