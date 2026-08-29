@@ -126,3 +126,4 @@ export const createBooking = onCall(async () => {
 
 export * from "./bookingJourney";
 export * from "./bookingManagement";
+export * from "./eventJourney";
