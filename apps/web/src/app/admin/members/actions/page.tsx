@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { collection, doc, getDoc, getDocs, orderBy, query } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import {
@@ -194,8 +194,6 @@ function AdminMemberActionsContent() {
 
   useEffect(() => { if (selectedUid) void loadMember(selectedUid); }, [selectedUid, loadMember]);
 
-  const selectedTier = useMemo(() => MEMBERSHIP_TIERS.find((tier) => tier.id === membership?.planId || tier.id === member?.plan), [membership?.planId, member?.plan]);
-
   async function refreshSelected() {
     if (selectedUid) await loadMember(selectedUid);
   }
@@ -360,7 +358,7 @@ function AdminMemberActionsContent() {
           </section>}
 
           {tab === "booking" && <section>
-            <h2 className="text-xl font-semibold text-slate-950">Book for {member.displayName || member.email}</h2><p className="mt-1 text-sm text-slate-500">The member's plan, included hours, account credit, availability and booking window are applied on the server.</p>
+            <h2 className="text-xl font-semibold text-slate-950">Book for {member.displayName || member.email}</h2><p className="mt-1 text-sm text-slate-500">The member&apos;s plan, included hours, account credit, availability and booking window are applied on the server.</p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3"><input type="date" value={dateValue} min={todayEastern()} onChange={(event) => setDateValue(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3" /><select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(0, -1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select><select value={endTime} onChange={(event) => setEndTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select></div>
             <button type="button" disabled={actionLoading} onClick={() => void checkAvailability()} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white disabled:opacity-50">{actionLoading && <Loader2 className="h-4 w-4 animate-spin" />} Check availability</button>
             {spaces.length > 0 && <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{spaces.map((space) => <button key={space.resourceId} type="button" disabled={!space.available || actionLoading} onClick={() => void selectSpace(space.resourceId)} className={`rounded-2xl border p-4 text-left ${resourceId === space.resourceId ? "border-slate-900 bg-slate-50" : "border-slate-200 bg-white"} disabled:bg-slate-50 disabled:text-slate-400`}><p className="font-semibold">{space.name}</p><p className="mt-1 text-xs">{space.available ? "Available" : "Unavailable"}</p></button>)}</div>}
