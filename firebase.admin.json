@@ -1,0 +1,12 @@
+{
+  "functions": [
+    {
+      "source": "firebase/admin-member-functions",
+      "codebase": "admin-member-ops",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:admin-member-deploy"
+      ]
+    }
+  ]
+}
