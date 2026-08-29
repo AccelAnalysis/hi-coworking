@@ -129,6 +129,26 @@ describe("Admin member authoritative operations", () => {
     expect((await db.collection("accountCreditAdjustments").doc("credit_test_0001").get()).exists).toBe(true);
   });
 
+  it("rejects reuse of an idempotency request ID for a different adjustment", async () => {
+    const adminFunctions = await signedInClient("replay-admin", "admin");
+    await db.collection("users").doc("member-replay").set({
+      uid: "member-replay", email: "member-replay@example.test", role: "member",
+      membershipStatus: "active", accountCreditCents: 1000, createdAt: Date.now(),
+    });
+
+    await call(adminFunctions, "admin_accountCreditAdjust", {
+      uid: "member-replay", deltaCents: 500, reason: "service_adjustment",
+      note: "First adjustment", requestId: "credit_replay_0001",
+    });
+
+    await expect(call(adminFunctions, "admin_accountCreditAdjust", {
+      uid: "member-replay", deltaCents: 900, reason: "service_adjustment",
+      note: "Different adjustment", requestId: "credit_replay_0001",
+    })).rejects.toBeTruthy();
+
+    expect((await db.collection("users").doc("member-replay").get()).data()?.accountCreditCents).toBe(1500);
+  });
+
   it("rejects a deduction that would consume credit reserved for checkout", async () => {
     const adminFunctions = await signedInClient("deduct-admin", "admin");
     await db.collection("users").doc("member-2").set({
