@@ -1,38 +1,41 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  CreditCard,
+  DollarSign,
+  ExternalLink,
+  FileText,
+  Filter,
+  Loader2,
+  Receipt,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+  X,
+  XCircle,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   getPaymentsLedger,
   type PaymentLedgerFilters,
 } from "@/lib/firestore";
-import type { PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose } from "@hi/shared";
-import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
-import {
-  Search,
-  Loader2,
-  Filter,
-  X,
-  DollarSign,
-  ChevronRight,
-  CreditCard,
-  FileText,
-  Clock,
-  CheckCircle2,
-  XCircle,
-  RotateCcw,
-  MoreVertical,
-  ExternalLink,
-  Receipt,
-} from "lucide-react";
-
-const markPaymentStatus = httpsCallable<
-  { paymentId: string; newStatus: string; note?: string },
-  { success: boolean; paymentId: string; previousStatus: string; newStatus: string; auditId: string }
->(functions, "admin_markPaymentStatus");
+import type {
+  PaymentDoc,
+  PaymentProvider,
+  PaymentPurpose,
+  PaymentStatus,
+} from "@hi/shared";
 
 const syncToQBO = httpsCallable<
   { paymentId: string },
@@ -51,6 +54,13 @@ const PROVIDER_LABELS: Record<PaymentProvider, string> = {
   quickbooks_link: "QB Link",
   quickbooks_invoice: "QB Invoice",
   quickbooks_payments: "QB Payments",
+};
+
+const PROVIDER_AUTHORITY: Record<PaymentProvider, string> = {
+  stripe: "Stripe webhook / verified Stripe transaction",
+  quickbooks_link: "QuickBooks payment link",
+  quickbooks_invoice: "QuickBooks invoice reconciliation",
+  quickbooks_payments: "QuickBooks Payments webhook",
 };
 
 const STATUS_CONFIG: Record<
@@ -93,6 +103,49 @@ const PURPOSE_LABELS: Record<PaymentPurpose, string> = {
   other: "Other",
 };
 
+function purposeHref(payment: PaymentDoc) {
+  switch (payment.purpose) {
+    case "membership":
+      return `/admin/members/actions?uid=${encodeURIComponent(payment.uid)}`;
+    case "booking":
+      return `/admin/members`;
+    case "event":
+      return "/admin/events";
+    case "bookstore":
+      return "/admin/bookstore/orders";
+    default:
+      return null;
+  }
+}
+
+function purposeActionLabel(purpose: PaymentPurpose) {
+  switch (purpose) {
+    case "membership": return "Manage membership";
+    case "booking": return "Open member bookings";
+    case "event": return "Manage event";
+    case "bookstore": return "Manage order";
+    default: return "";
+  }
+}
+
+function money(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format((Number.isFinite(cents) ? cents : 0) / 100);
+}
+
+function formatDate(timestamp: number) {
+  if (!Number.isFinite(timestamp)) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
+
 export default function AdminPaymentsPageWrapper() {
   return (
     <RequireAuth requiredRole="admin">
@@ -108,576 +161,393 @@ function AdminPaymentsContent() {
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-
-  // Filters
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState<PaymentProvider | "">("");
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | "">("");
   const [purposeFilter, setPurposeFilter] = useState<PaymentPurpose | "">("");
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const buildFilters = useCallback((): PaymentLedgerFilters => {
-    const f: PaymentLedgerFilters = {};
-    if (search.trim()) f.search = search.trim();
-    if (providerFilter) f.provider = providerFilter;
-    if (statusFilter) f.status = statusFilter;
-    if (purposeFilter) f.purpose = purposeFilter;
-    return f;
+    const filters: PaymentLedgerFilters = {};
+    if (search.trim()) filters.search = search.trim();
+    if (providerFilter) filters.provider = providerFilter;
+    if (statusFilter) filters.status = statusFilter;
+    if (purposeFilter) filters.purpose = purposeFilter;
+    return filters;
   }, [search, providerFilter, statusFilter, purposeFilter]);
 
   const fetchPayments = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const result = await getPaymentsLedger(buildFilters(), PAGE_SIZE);
       setPayments(result.payments);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
-    } catch (err) {
-      console.error("Failed to fetch payments:", err);
+    } catch (caught) {
+      console.error("Failed to fetch payments:", caught);
+      setError("The payment ledger could not be loaded. Try again.");
     } finally {
       setLoading(false);
     }
   }, [buildFilters]);
 
   useEffect(() => {
-    fetchPayments();
+    void fetchPayments();
   }, [fetchPayments]);
 
-  const loadMore = async () => {
+  async function loadMore() {
     if (!hasMore || loadingMore) return;
     setLoadingMore(true);
+    setError(null);
     try {
-      const result = await getPaymentsLedger(buildFilters(), PAGE_SIZE, lastDoc);
-      setPayments((prev) => [...prev, ...result.payments]);
+      const result = await getPaymentsLedger(
+        buildFilters(),
+        PAGE_SIZE,
+        lastDoc,
+      );
+      setPayments((current) => [...current, ...result.payments]);
       setLastDoc(result.lastDoc);
       setHasMore(result.hasMore);
-    } catch (err) {
-      console.error("Failed to load more payments:", err);
+    } catch (caught) {
+      console.error("Failed to load more payments:", caught);
+      setError("More payment records could not be loaded.");
     } finally {
       setLoadingMore(false);
     }
-  };
+  }
 
-  const clearFilters = () => {
+  async function handleBackfillQBO() {
+    setBackfillLoading(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const result = await backfillQBO({ limit: 50 });
+      setMessage(
+        `QuickBooks accounting sync: ${result.data.synced} synced, ${result.data.skipped} already synced, ${result.data.failed} failed.`,
+      );
+      await fetchPayments();
+    } catch (caught) {
+      console.error("QBO backfill failed:", caught);
+      setError("QuickBooks accounting sync could not be completed.");
+    } finally {
+      setBackfillLoading(false);
+    }
+  }
+
+  function clearFilters() {
     setSearch("");
     setProviderFilter("");
     setStatusFilter("");
     setPurposeFilter("");
-  };
+  }
 
-  const hasActiveFilters =
-    !!search || !!providerFilter || !!statusFilter || !!purposeFilter;
+  const hasActiveFilters = Boolean(
+    search || providerFilter || statusFilter || purposeFilter,
+  );
 
-  const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<{ synced: number; skipped: number; failed: number } | null>(null);
-
-  const handleBackfillQBO = async () => {
-    setBackfillLoading(true);
-    setBackfillResult(null);
-    try {
-      const res = await backfillQBO({ limit: 50 });
-      setBackfillResult(res.data);
-      fetchPayments();
-    } catch (err) {
-      console.error("QBO backfill failed:", err);
-    } finally {
-      setBackfillLoading(false);
-    }
-  };
-
-  // Summary stats
-  const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-  const paidCount = payments.filter((p) => p.status === "paid").length;
-  const pendingCount = payments.filter((p) => p.status === "pending").length;
+  const summary = useMemo(() => ({
+    totalAmount: payments.reduce((sum, payment) => sum + payment.amount, 0),
+    paidCount: payments.filter((payment) => payment.status === "paid").length,
+    pendingCount: payments.filter((payment) => payment.status === "pending").length,
+  }), [payments]);
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-8">
+      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-              <DollarSign className="h-8 w-8 text-slate-400" />
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Admin</p>
+            <h1 className="mt-2 flex items-center gap-3 text-3xl font-semibold tracking-tight text-slate-950">
+              <DollarSign className="h-7 w-7 text-slate-400" />
               Payment Ledger
             </h1>
-            <p className="text-slate-500 mt-1">
-              Unified view of all payments across Stripe and QuickBooks.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              A unified record of provider-authoritative payments. Stripe and QuickBooks determine financial status; transaction changes happen in the workflow that created the charge.
             </p>
           </div>
-          <button
-            onClick={handleBackfillQBO}
-            disabled={backfillLoading}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-50 text-emerald-700 text-sm font-medium border border-emerald-200 hover:bg-emerald-100 transition-colors disabled:opacity-60"
-          >
-            {backfillLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Receipt className="h-4 w-4" />
-            )}
-            Sync to QuickBooks
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void fetchPayments()}
+              disabled={loading}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh ledger
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleBackfillQBO()}
+              disabled={backfillLoading}
+              className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {backfillLoading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Receipt className="h-4 w-4" />}
+              Sync accounting
+            </button>
+          </div>
         </div>
 
-        {backfillResult && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-800">
-            QBO sync complete: <strong>{backfillResult.synced}</strong> synced, {backfillResult.skipped} already synced, {backfillResult.failed} failed.
+        <div className="mt-6 flex items-start gap-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-950 ring-1 ring-sky-100">
+          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+          <p>
+            <strong>Financial state is read-only here.</strong> Admins can no longer mark a provider transaction paid, failed, or refunded from this ledger. Membership changes, booking refunds, event refunds, and bookstore refunds must use their authoritative transaction workflows.
+          </p>
+        </div>
+
+        {(error || message) && (
+          <div className={`mt-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>
+            {error
+              ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>{error || message}</span>
           </div>
         )}
 
-        {/* Summary cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              Total (this page)
-            </span>
-            <div className="text-2xl font-bold text-slate-900 mt-1">
-              ${(totalAmount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-            </div>
+        <div className="mt-7 grid gap-5 border-y border-slate-200 py-6 sm:grid-cols-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Value shown</p>
+            <p className="mt-1 text-2xl font-semibold text-slate-950">{money(summary.totalAmount)}</p>
+            <p className="mt-1 text-xs text-slate-500">Current loaded results</p>
           </div>
-          <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              Paid
-            </span>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">
-              {paidCount}
-            </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Paid</p>
+            <p className="mt-1 text-2xl font-semibold text-emerald-700">{summary.paidCount}</p>
+            <p className="mt-1 text-xs text-slate-500">Provider-confirmed ledger records</p>
           </div>
-          <div className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-              Pending
-            </span>
-            <div className="text-2xl font-bold text-amber-700 mt-1">
-              {pendingCount}
-            </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Pending</p>
+            <p className="mt-1 text-2xl font-semibold text-amber-700">{summary.pendingCount}</p>
+            <p className="mt-1 text-xs text-slate-500">Awaiting provider confirmation</p>
           </div>
         </div>
 
-        {/* Search + Filter bar */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
-              type="text"
+              type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by payment ID, user ID, or reference..."
-              className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all text-sm"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search payment ID, user ID, or reference"
+              className="w-full rounded-full border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100"
             />
           </div>
           <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`inline-flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-              showFilters || hasActiveFilters
-                ? "bg-slate-900 text-white border-slate-900"
-                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-            }`}
+            type="button"
+            onClick={() => setShowFilters((current) => !current)}
+            className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-5 text-sm font-semibold ${showFilters || hasActiveFilters ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}
           >
-            <Filter className="h-4 w-4" />
-            Filters
-            {hasActiveFilters && (
-              <span className="ml-1 h-5 w-5 rounded-full bg-white/20 text-[10px] font-bold flex items-center justify-center">
-                {(providerFilter ? 1 : 0) +
-                  (statusFilter ? 1 : 0) +
-                  (purposeFilter ? 1 : 0)}
-              </span>
-            )}
+            <Filter className="h-4 w-4" /> Filters
           </button>
         </div>
 
-        {/* Expandable filters */}
         {showFilters && (
-          <div className="p-5 mb-6 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-900">
-                Filter Payments
-              </h3>
-              {hasActiveFilters && (
-                <button
-                  onClick={clearFilters}
-                  className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1"
-                >
-                  <X className="h-3 w-3" /> Clear all
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Provider */}
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Provider
-                </label>
-                <select
-                  value={providerFilter}
-                  onChange={(e) =>
-                    setProviderFilter(e.target.value as PaymentProvider | "")
-                  }
-                  className="w-full rounded-lg px-3 py-2.5 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                >
-                  <option value="">All providers</option>
-                  {(
-                    Object.entries(PROVIDER_LABELS) as [
-                      PaymentProvider,
-                      string,
-                    ][]
-                  ).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Status */}
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Status
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) =>
-                    setStatusFilter(e.target.value as PaymentStatus | "")
-                  }
-                  className="w-full rounded-lg px-3 py-2.5 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                >
-                  <option value="">All statuses</option>
-                  {(
-                    Object.entries(STATUS_CONFIG) as [
-                      PaymentStatus,
-                      (typeof STATUS_CONFIG)[PaymentStatus],
-                    ][]
-                  ).map(([key, cfg]) => (
-                    <option key={key} value={key}>
-                      {cfg.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Purpose */}
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Purpose
-                </label>
-                <select
-                  value={purposeFilter}
-                  onChange={(e) =>
-                    setPurposeFilter(e.target.value as PaymentPurpose | "")
-                  }
-                  className="w-full rounded-lg px-3 py-2.5 border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                >
-                  <option value="">All purposes</option>
-                  {(
-                    Object.entries(PURPOSE_LABELS) as [
-                      PaymentPurpose,
-                      string,
-                    ][]
-                  ).map(([key, label]) => (
-                    <option key={key} value={key}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+          <div className="mt-4 grid gap-4 border-b border-slate-200 pb-6 sm:grid-cols-3">
+            <label className="text-sm font-semibold text-slate-700">
+              Provider
+              <select
+                value={providerFilter}
+                onChange={(event) => setProviderFilter(event.target.value as PaymentProvider | "")}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal"
+              >
+                <option value="">All providers</option>
+                {(Object.entries(PROVIDER_LABELS) as [PaymentProvider, string][]).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-slate-700">
+              Status
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as PaymentStatus | "")}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal"
+              >
+                <option value="">All statuses</option>
+                {(Object.entries(STATUS_CONFIG) as [PaymentStatus, (typeof STATUS_CONFIG)[PaymentStatus]][]).map(([key, config]) => (
+                  <option key={key} value={key}>{config.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-slate-700">
+              Purpose
+              <select
+                value={purposeFilter}
+                onChange={(event) => setPurposeFilter(event.target.value as PaymentPurpose | "")}
+                className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-normal"
+              >
+                <option value="">All purposes</option>
+                {(Object.entries(PURPOSE_LABELS) as [PaymentPurpose, string][]).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </label>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-2 text-sm font-semibold text-slate-500 sm:col-span-3 sm:justify-self-start"
+              >
+                <X className="h-4 w-4" /> Clear filters
+              </button>
+            )}
           </div>
         )}
 
-        {/* Results table */}
         {loading ? (
           <div className="flex items-center justify-center py-24">
             <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
           </div>
         ) : payments.length === 0 ? (
-          <div className="text-center py-24">
-            <DollarSign className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-slate-700 mb-1">
-              No payments found
-            </h2>
-            <p className="text-sm text-slate-500">
-              {hasActiveFilters
-                ? "Try adjusting your filters."
-                : "No payment transactions have been recorded yet."}
+          <div className="py-20 text-center">
+            <DollarSign className="mx-auto h-9 w-9 text-slate-300" />
+            <p className="mt-4 text-sm text-slate-500">
+              {hasActiveFilters ? "No payments match those filters." : "No payment transactions have been recorded yet."}
             </p>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="mt-4 text-sm font-medium text-indigo-600 hover:text-indigo-700"
-              >
-                Clear filters
-              </button>
-            )}
           </div>
         ) : (
-          <>
-            <div className="bg-white rounded-xl shadow-sm ring-1 ring-slate-200 overflow-hidden">
-              {/* Table header */}
-              <div className="hidden md:grid grid-cols-12 gap-4 px-5 py-3 border-b border-slate-100 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                <div className="col-span-2">ID</div>
-                <div className="col-span-2">Provider</div>
-                <div className="col-span-2">Amount</div>
-                <div className="col-span-1">Purpose</div>
-                <div className="col-span-2">Status</div>
-                <div className="col-span-2">Date</div>
-                <div className="col-span-1 text-right">Actions</div>
-              </div>
-
-              {/* Rows */}
-              <div className="divide-y divide-slate-100">
-                {payments.map((payment) => (
-                  <PaymentRow key={payment.id} payment={payment} onStatusChanged={fetchPayments} />
-                ))}
-              </div>
-            </div>
-
-            {/* Load more */}
-            {hasMore && (
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={loadMore}
-                  disabled={loadingMore}
-                  className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50 shadow-sm transition-all disabled:opacity-60"
-                >
-                  {loadingMore ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4" />
-                  )}
-                  Load more
-                </button>
-              </div>
-            )}
-          </>
+          <div className="mt-7 divide-y divide-slate-200 border-y border-slate-200">
+            {payments.map((payment) => (
+              <PaymentRow
+                key={payment.id}
+                payment={payment}
+                onSynced={fetchPayments}
+                onMessage={setMessage}
+                onError={setError}
+              />
+            ))}
+          </div>
         )}
-      </div>
+
+        {hasMore && (
+          <div className="mt-6 flex justify-center">
+            <button
+              type="button"
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+              className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 disabled:opacity-50"
+            >
+              {loadingMore
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <ChevronRight className="h-4 w-4" />}
+              Load more
+            </button>
+          </div>
+        )}
+      </main>
     </AppShell>
   );
 }
 
-function PaymentRow({ payment, onStatusChanged }: { payment: PaymentDoc; onStatusChanged: () => void }) {
-  const statusCfg = STATUS_CONFIG[payment.status];
-  const StatusIcon = statusCfg.icon;
-  const providerLabel = PROVIDER_LABELS[payment.provider] ?? payment.provider;
-  const purposeLabel = PURPOSE_LABELS[payment.purpose] ?? payment.purpose;
-  const isStripe = payment.provider === "stripe";
-
-  const [showActions, setShowActions] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [noteText, setNoteText] = useState("");
-  const [confirmAction, setConfirmAction] = useState<"paid" | "failed" | "refunded" | null>(null);
+function PaymentRow({
+  payment,
+  onSynced,
+  onMessage,
+  onError,
+}: {
+  payment: PaymentDoc;
+  onSynced: () => Promise<void>;
+  onMessage: (message: string | null) => void;
+  onError: (message: string | null) => void;
+}) {
+  const statusConfig = STATUS_CONFIG[payment.status];
+  const StatusIcon = statusConfig.icon;
+  const lifecycleHref = purposeHref(payment);
+  const isSynced = Boolean(payment.accountingRefs?.qboSalesReceiptId);
   const [syncLoading, setSyncLoading] = useState(false);
-  const isSynced = !!payment.accountingRefs?.qboSalesReceiptId;
 
-  const handleSyncToQBO = async () => {
+  async function handleSyncToQBO() {
     setSyncLoading(true);
+    onMessage(null);
+    onError(null);
     try {
       await syncToQBO({ paymentId: payment.id });
-      onStatusChanged();
-    } catch (err) {
-      console.error("QBO sync failed:", err);
+      onMessage("Payment copied to QuickBooks accounting. Provider payment status was not changed.");
+      await onSynced();
+    } catch (caught) {
+      console.error("QBO sync failed:", caught);
+      onError("This payment could not be synced to QuickBooks accounting.");
     } finally {
       setSyncLoading(false);
     }
-  };
-
-  const handleMarkStatus = async (newStatus: "paid" | "failed" | "refunded") => {
-    setActionLoading(true);
-    try {
-      await markPaymentStatus({
-        paymentId: payment.id,
-        newStatus,
-        note: noteText.trim() || undefined,
-      });
-      setShowActions(false);
-      setConfirmAction(null);
-      setNoteText("");
-      onStatusChanged();
-    } catch (err) {
-      console.error("Failed to update payment status:", err);
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  }
 
   return (
-    <div className="relative">
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 px-5 py-4 hover:bg-slate-50 transition-colors items-center">
-        {/* ID */}
-        <div className="col-span-2">
-          <span className="text-xs font-mono text-slate-500 truncate block">
-            {payment.id.slice(0, 12)}...
-          </span>
-          <span className="text-[10px] text-slate-400 block md:hidden mt-0.5">
-            {new Date(payment.createdAt).toLocaleDateString()}
+    <article className="grid gap-4 py-5 sm:grid-cols-[1.15fr_0.8fr_0.8fr_0.9fr_auto] sm:items-center sm:px-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate font-semibold text-slate-950">{PURPOSE_LABELS[payment.purpose]}</span>
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
+            <StatusIcon className="h-3 w-3" /> {statusConfig.label}
           </span>
         </div>
-
-        {/* Provider */}
-        <div className="col-span-2 flex items-center gap-1.5">
-          {isStripe ? (
-            <CreditCard className="h-3.5 w-3.5 text-indigo-500" />
-          ) : (
-            <FileText className="h-3.5 w-3.5 text-emerald-500" />
-          )}
-          <span className="text-sm font-medium text-slate-700">
-            {providerLabel}
-          </span>
-        </div>
-
-        {/* Amount */}
-        <div className="col-span-2">
-          <span className="text-sm font-bold text-slate-900">
-            ${(payment.amount / 100).toLocaleString("en-US", {
-              minimumFractionDigits: 2,
-            })}
-          </span>
-          <span className="text-[10px] text-slate-400 ml-1 uppercase">
-            {payment.currency}
-          </span>
-        </div>
-
-        {/* Purpose */}
-        <div className="col-span-1">
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 uppercase">
-            {purposeLabel}
-          </span>
-        </div>
-
-        {/* Status */}
-        <div className="col-span-2">
-          <span
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusCfg.bgColor} ${statusCfg.color}`}
-          >
-            <StatusIcon className="h-3 w-3" />
-            {statusCfg.label}
-          </span>
-        </div>
-
-        {/* Date */}
-        <div className="col-span-2 hidden md:block">
-          <span className="text-xs text-slate-500">
-            {new Date(payment.createdAt).toLocaleDateString()}{" "}
-            {new Date(payment.createdAt).toLocaleTimeString([], {
-              hour: "numeric",
-              minute: "2-digit",
-            })}
-          </span>
-        </div>
-
-        {/* Actions */}
-        <div className="col-span-1 flex justify-end">
-          <button
-            onClick={() => setShowActions(!showActions)}
-            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-          >
-            <MoreVertical className="h-4 w-4" />
-          </button>
-        </div>
+        <p className="mt-1 truncate font-mono text-xs text-slate-400">{payment.id}</p>
+        <p className="mt-1 text-xs text-slate-500">{formatDate(payment.createdAt)}</p>
       </div>
 
-      {/* QB Invoice info bar */}
-      {payment.providerRefs?.qbInvoiceNumber && (
-        <div className="px-5 py-2 bg-amber-50/50 border-t border-amber-100 flex items-center gap-3 text-xs">
-          <Receipt className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-          <span className="text-amber-800 font-medium">
-            Invoice #{payment.providerRefs.qbInvoiceNumber}
-          </span>
-          {payment.providerRefs.qbInvoiceUrl && (
-            <a
-              href={payment.providerRefs.qbInvoiceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-medium ml-auto"
-            >
-              View / Pay Invoice
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-        </div>
-      )}
+      <div>
+        <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+          {payment.provider === "stripe"
+            ? <CreditCard className="h-4 w-4 text-slate-400" />
+            : <FileText className="h-4 w-4 text-slate-400" />}
+          {PROVIDER_LABELS[payment.provider]}
+        </p>
+        <p className="mt-1 text-xs leading-5 text-slate-400">{PROVIDER_AUTHORITY[payment.provider]}</p>
+      </div>
 
-      {/* Action panel */}
-      {showActions && (
-        <div className="px-5 pb-4 pt-1 bg-slate-50 border-t border-slate-100">
-          {confirmAction ? (
-            <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <label className="block text-[10px] font-medium text-slate-500 uppercase mb-1">
-                  Note (optional)
-                </label>
-                <input
-                  type="text"
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Reason for status change..."
-                  className="w-full rounded-lg px-3 py-2 border border-slate-200 bg-white text-xs focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
-                />
-              </div>
-              <button
-                onClick={() => handleMarkStatus(confirmAction)}
-                disabled={actionLoading}
-                className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 disabled:opacity-60 inline-flex items-center gap-1.5"
-              >
-                {actionLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-                Confirm {confirmAction}
-              </button>
-              <button
-                onClick={() => { setConfirmAction(null); setNoteText(""); }}
-                className="px-3 py-2 rounded-lg border border-slate-200 text-xs font-medium text-slate-600 hover:bg-white"
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              {payment.status !== "paid" && (
-                <button
-                  onClick={() => setConfirmAction("paid")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200 hover:bg-emerald-100 transition-colors inline-flex items-center gap-1"
-                >
-                  <CheckCircle2 className="h-3 w-3" /> Mark Paid
-                </button>
-              )}
-              {payment.status !== "failed" && (
-                <button
-                  onClick={() => setConfirmAction("failed")}
-                  className="px-3 py-1.5 rounded-lg bg-red-50 text-red-700 text-xs font-semibold border border-red-200 hover:bg-red-100 transition-colors inline-flex items-center gap-1"
-                >
-                  <XCircle className="h-3 w-3" /> Mark Failed
-                </button>
-              )}
-              {payment.status === "paid" && (
-                <button
-                  onClick={() => setConfirmAction("refunded")}
-                  className="px-3 py-1.5 rounded-lg bg-slate-50 text-slate-700 text-xs font-semibold border border-slate-200 hover:bg-slate-100 transition-colors inline-flex items-center gap-1"
-                >
-                  <RotateCcw className="h-3 w-3" /> Refund
-                </button>
-              )}
-              {payment.status === "paid" && !isSynced && (
-                <button
-                  onClick={handleSyncToQBO}
-                  disabled={syncLoading}
-                  className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-semibold border border-amber-200 hover:bg-amber-100 transition-colors inline-flex items-center gap-1 disabled:opacity-60"
-                >
-                  {syncLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Receipt className="h-3 w-3" />}
-                  Sync to QBO
-                </button>
-              )}
-              {isSynced && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 inline-flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3" /> QBO Synced
-                </span>
-              )}
-              <button
-                onClick={() => setShowActions(false)}
-                className="ml-auto text-xs text-slate-400 hover:text-slate-600"
-              >
-                Close
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+      <div>
+        <p className="text-lg font-semibold text-slate-950">{money(payment.amount)}</p>
+        <p className="mt-1 text-xs uppercase text-slate-400">{payment.currency}</p>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Accounting</p>
+        {isSynced ? (
+          <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" /> QBO synced
+          </p>
+        ) : payment.status === "paid" ? (
+          <button
+            type="button"
+            onClick={() => void handleSyncToQBO()}
+            disabled={syncLoading}
+            className="mt-1 inline-flex items-center gap-2 text-sm font-semibold text-slate-700 underline underline-offset-4 disabled:opacity-50"
+          >
+            {syncLoading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Receipt className="h-4 w-4" />}
+            Sync QBO
+          </button>
+        ) : (
+          <p className="mt-1 text-sm text-slate-400">After payment</p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+        {payment.providerRefs?.qbInvoiceUrl && (
+          <a
+            href={payment.providerRefs.qbInvoiceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm font-semibold text-slate-600 underline underline-offset-4"
+          >
+            Invoice <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+        {lifecycleHref && (
+          <Link
+            href={lifecycleHref}
+            className="inline-flex min-h-9 items-center rounded-full border border-slate-200 px-3 text-sm font-semibold text-slate-700"
+          >
+            {purposeActionLabel(payment.purpose)}
+          </Link>
+        )}
+      </div>
+    </article>
   );
 }
