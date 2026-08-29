@@ -30,7 +30,6 @@ import {
   DEFAULT_REFUND_CUTOFF_HOURS,
   type AttendanceStatusV2,
   type EventDocV2,
-  type EventTicketTypeV2,
   type RegistrationDocV2,
   type RegistrationStatusV2,
 } from "./types";
@@ -309,6 +308,9 @@ export const events_v2AdminPublishEvent = onCall(
     const snap = await ref.get();
     if (!snap.exists) throw new HttpsError("not-found", "Event not found.");
     const event = snap.data() as EventDocV2;
+    if (event.status !== "draft") {
+      throw new HttpsError("failed-precondition", "Only draft events can be published.");
+    }
     validateEventForSave(event as unknown as Record<string, unknown>);
     if (event.startTime <= Date.now()) throw new HttpsError("failed-precondition", "A past event cannot be published.");
     const paid = (event.price || 0) > 0 || (event.ticketTypes || []).some((ticket) => ticket.priceCents > 0);
@@ -328,6 +330,10 @@ export const events_v2AdminCancelEvent = onCall(async (request) => {
   const eventRef = db().collection("events").doc(eventId);
   const eventSnap = await eventRef.get();
   if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
+  const event = eventSnap.data() as EventDocV2;
+  if (event.status !== "published") {
+    throw new HttpsError("failed-precondition", "Only published events can be cancelled.");
+  }
   const [registrationsSnap, holdsSnap, waitlistSnap] = await Promise.all([
     db().collection("eventRegistrations").where("eventId", "==", eventId).get(),
     db().collection("eventHolds").where("eventId", "==", eventId).get(),
@@ -339,6 +345,7 @@ export const events_v2AdminCancelEvent = onCall(async (request) => {
     confirmedQuantity: 0,
     registrationCount: 0,
     heldQuantity: 0,
+    ticketTypes: (event.ticketTypes || []).map((ticket) => ({ ...ticket, heldCount: 0 })),
     cancelledAt: Date.now(),
     updatedAt: Date.now(),
   });
@@ -397,6 +404,10 @@ export const events_v2AdminCompleteEvent = onCall(async (request) => {
   const eventRef = db().collection("events").doc(eventId);
   const eventSnap = await eventRef.get();
   if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
+  const event = eventSnap.data() as EventDocV2;
+  if (event.status !== "published" || event.endTime > Date.now()) {
+    throw new HttpsError("failed-precondition", "Only ended published events can be completed.");
+  }
   const regs = await db().collection("eventRegistrations").where("eventId", "==", eventId).get();
   const batch = db().batch();
   batch.set(eventRef, { status: "completed", completedAt: Date.now(), updatedAt: Date.now() }, { merge: true });
