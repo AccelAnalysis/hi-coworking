@@ -36,6 +36,7 @@ const FUNCTIONS_EMULATOR_PORT = 5004;
 const FIRESTORE_EMULATOR_URL = "http://127.0.0.1:8081";
 const PASSWORD = "booking-test-password";
 const FACILITY_TIME_ZONE = "America/New_York";
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 process.env.GCLOUD_PROJECT = PROJECT_ID;
 process.env.FIREBASE_AUTH_EMULATOR_HOST ??= "127.0.0.1:9100";
@@ -107,9 +108,14 @@ function futureFacilityWindow(
   durationHours = 2,
   daysAhead = 1,
 ) {
-  const date = facilityDateValue(
-    Date.now() + daysAhead * 24 * 60 * 60 * 1_000,
-  );
+  let candidateTimestamp = Date.now() + daysAhead * DAY_MS;
+  let date = facilityDateValue(candidateTimestamp);
+  for (let attempts = 0; attempts < 7; attempts += 1) {
+    const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+    if (weekday >= 1 && weekday <= 5) break;
+    candidateTimestamp += DAY_MS;
+    date = facilityDateValue(candidateTimestamp);
+  }
   const start = facilityWallTimeToTimestamp(date, startTime);
   return {
     start,

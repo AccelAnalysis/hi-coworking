@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import {
   ArrowRight,
@@ -17,9 +17,17 @@ import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
 
 const FACILITY_TIME_ZONE = "America/New_York";
-const OPEN_MINUTES = 8 * 60;
-const CLOSE_MINUTES = 20 * 60;
-const DAY_MS = 24 * 60 * 60 * 1000;
+const PUBLIC_DESK_RATE_CENTS = 1750;
+
+type ResourceIntent = "DESK" | "MEETING";
+
+type DaySchedule = {
+  date: string;
+  timeZone: string;
+  isOpen: boolean;
+  intervals: Array<{ startTime: string; endTime: string }>;
+  hasException: boolean;
+};
 
 type AvailabilityOption = {
   resourceId: string;
@@ -57,6 +65,7 @@ type Quote = {
   accountCreditAvailableCents: number;
   accountCreditAppliedCents: number;
   totalCents: number;
+  dailyCapApplied: boolean;
   currency: string;
   deskChangePlanId?: string;
   segments?: [DeskSegment, DeskSegment];
@@ -66,8 +75,13 @@ type Selection =
   | { kind: "single"; option: AvailabilityOption }
   | { kind: "desk_change"; plan: DeskChangePlan };
 
+const getDaySchedule = httpsCallable<{ date: string }, DaySchedule>(
+  functions,
+  "booking_getDaySchedule",
+);
+
 const getAvailability = httpsCallable<
-  { start: number; end: number },
+  { start: number; end: number; resourceType: "SEAT" | "MODE" },
   {
     start: number;
     end: number;
@@ -137,37 +151,62 @@ function minutesToValue(minutes: number) {
 }
 
 function timeValueToMinutes(value: string) {
+  if (!value) return Number.NaN;
   const [hour, minute] = value.split(":").map(Number);
   return hour * 60 + minute;
 }
 
-function timeValues(includeClose = false) {
+function formatClockValue(value: string) {
+  if (!value) return "";
+  return new Date(`2000-01-01T${value}:00Z`).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+function intervalStartValues(schedule: DaySchedule | null, dateValue: string) {
+  if (!schedule) return [] as string[];
+  const today = facilityDateValue();
+  const currentMinutes = facilityClockMinutes();
+  const nextHalfHour = Math.ceil((currentMinutes + 1) / 30) * 30;
   const values: string[] = [];
-  const end = includeClose ? CLOSE_MINUTES : CLOSE_MINUTES - 30;
-  for (let minutes = OPEN_MINUTES; minutes <= end; minutes += 30) {
+  for (const interval of schedule.intervals) {
+    const start = timeValueToMinutes(interval.startTime);
+    const end = timeValueToMinutes(interval.endTime);
+    for (let minutes = start; minutes <= end - 30; minutes += 30) {
+      if (dateValue === today && minutes < nextHalfHour) continue;
+      values.push(minutesToValue(minutes));
+    }
+  }
+  return values;
+}
+
+function intervalForStart(schedule: DaySchedule | null, startValue: string) {
+  if (!schedule || !startValue) return null;
+  const start = timeValueToMinutes(startValue);
+  return schedule.intervals.find((interval) => (
+    start >= timeValueToMinutes(interval.startTime)
+    && start < timeValueToMinutes(interval.endTime)
+  )) || null;
+}
+
+function endValuesForStart(schedule: DaySchedule | null, startValue: string) {
+  const interval = intervalForStart(schedule, startValue);
+  if (!interval) return [] as string[];
+  const start = timeValueToMinutes(startValue);
+  const end = timeValueToMinutes(interval.endTime);
+  const values: string[] = [];
+  for (let minutes = start + 30; minutes <= end; minutes += 30) {
     values.push(minutesToValue(minutes));
   }
   return values;
 }
 
-function defaultBookingValues() {
-  const now = Date.now();
-  const currentMinutes = facilityClockMinutes(now);
-  if (currentMinutes >= CLOSE_MINUTES - 30) {
-    return {
-      date: facilityDateValue(now + DAY_MS),
-      start: "09:00",
-      end: "11:00",
-    };
-  }
-  const rounded = Math.ceil((currentMinutes + 1) / 30) * 30;
-  const startMinutes = Math.max(OPEN_MINUTES, rounded);
-  const endMinutes = Math.min(CLOSE_MINUTES, startMinutes + 120);
-  return {
-    date: facilityDateValue(now),
-    start: minutesToValue(startMinutes),
-    end: minutesToValue(endMinutes),
-  };
+function addDaysToDateKey(value: string, days: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  return date.toISOString().slice(0, 10);
 }
 
 function facilityWallTimeToTimestamp(dateValue: string, timeValue: string) {
@@ -203,6 +242,7 @@ function facilityWallTimeToTimestamp(dateValue: string, timeValue: string) {
 }
 
 function toWindow(dateValue: string, startValue: string, endValue: string) {
+  if (!startValue || !endValue) return { start: 0, end: 0 };
   return {
     start: facilityWallTimeToTimestamp(dateValue, startValue),
     end: facilityWallTimeToTimestamp(dateValue, endValue),
@@ -233,6 +273,17 @@ function money(cents: number) {
   }).format(cents / 100);
 }
 
+function hoursLabel(hours: number) {
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+function scheduleSummary(schedule: DaySchedule | null) {
+  if (!schedule || schedule.intervals.length === 0) return "Closed for bookings";
+  return schedule.intervals
+    .map((interval) => `${formatClockValue(interval.startTime)}–${formatClockValue(interval.endTime)}`)
+    .join(" · ");
+}
+
 function selectionInput(selection: Selection) {
   return selection.kind === "single"
     ? { resourceId: selection.option.resourceId }
@@ -246,13 +297,26 @@ function selectionKey(selection: Selection | null) {
     : `change:${selection.plan.planId}`;
 }
 
+function errorMessage(caught: unknown, fallback: string) {
+  const raw = caught as { message?: string };
+  if (!raw?.message) return fallback;
+  const split = raw.message.split(": ");
+  return split[split.length - 1] || fallback;
+}
+
 export default function BookingExperienceWithDeskChange() {
   const { user, loading: authLoading } = useAuth();
-  const defaults = useMemo(() => defaultBookingValues(), []);
   const todayAtFacility = useMemo(() => facilityDateValue(), []);
-  const [dateValue, setDateValue] = useState(defaults.date);
-  const [startValue, setStartValue] = useState(defaults.start);
-  const [endValue, setEndValue] = useState(defaults.end);
+  const requestedStartRef = useRef<string | null>(null);
+  const requestedDurationRef = useRef<number | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [intent, setIntent] = useState<ResourceIntent | null>(null);
+  const [dateValue, setDateValue] = useState(todayAtFacility);
+  const [startValue, setStartValue] = useState("");
+  const [endValue, setEndValue] = useState("");
+  const [schedule, setSchedule] = useState<DaySchedule | null>(null);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [findingNextOpen, setFindingNextOpen] = useState(false);
   const [preferredResourceId, setPreferredResourceId] = useState<string | null>(null);
   const [options, setOptions] = useState<AvailabilityOption[]>([]);
   const [deskChangeOptions, setDeskChangeOptions] = useState<DeskChangePlan[]>([]);
@@ -268,13 +332,6 @@ export default function BookingExperienceWithDeskChange() {
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
 
-  const bookingWindow = useMemo(
-    () => toWindow(dateValue, startValue, endValue),
-    [dateValue, startValue, endValue],
-  );
-  const durationHours = (bookingWindow.end - bookingWindow.start) / 3_600_000;
-  const validRange = bookingWindow.end > bookingWindow.start;
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedDate = params.get("date");
@@ -285,34 +342,133 @@ export default function BookingExperienceWithDeskChange() {
     if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && requestedDate >= todayAtFacility) {
       setDateValue(requestedDate);
     }
-    if (requestedTime && timeValues().includes(requestedTime)) {
-      setStartValue(requestedTime);
-      if (Number.isFinite(requestedDuration) && requestedDuration > 0) {
-        const proposedEnd = timeValueToMinutes(requestedTime) + requestedDuration * 60;
-        if (proposedEnd <= CLOSE_MINUTES && proposedEnd % 30 === 0) {
-          setEndValue(minutesToValue(proposedEnd));
-        }
-      }
+    if (requestedTime && /^\d{2}:\d{2}$/.test(requestedTime)) {
+      requestedStartRef.current = requestedTime;
     }
-    if (requestedResource) setPreferredResourceId(requestedResource);
+    if (Number.isFinite(requestedDuration) && requestedDuration > 0) {
+      requestedDurationRef.current = requestedDuration;
+    }
+    if (requestedResource) {
+      setPreferredResourceId(requestedResource);
+      setIntent(requestedResource.startsWith("mode-") ? "MEETING" : "DESK");
+    }
     if (params.get("checkout") === "cancelled") {
       setNotice("Checkout was cancelled. No booking was confirmed.");
     }
+    setHydrated(true);
   }, [todayAtFacility]);
 
   useEffect(() => {
+    if (!hydrated || !intent) return;
+    let active = true;
+    setLoadingSchedule(true);
+    setSchedule(null);
+    setError(null);
+    void getDaySchedule({ date: dateValue })
+      .then((result) => {
+        if (!active) return;
+        const nextSchedule = result.data;
+        setSchedule(nextSchedule);
+        const starts = intervalStartValues(nextSchedule, dateValue);
+        if (starts.length === 0) {
+          setStartValue("");
+          setEndValue("");
+          return;
+        }
+        const requestedStart = requestedStartRef.current;
+        const nextStart = requestedStart && starts.includes(requestedStart)
+          ? requestedStart
+          : starts[0];
+        requestedStartRef.current = null;
+        setStartValue(nextStart);
+        const ends = endValuesForStart(nextSchedule, nextStart);
+        const requestedDuration = requestedDurationRef.current;
+        requestedDurationRef.current = null;
+        const preferredEnd = requestedDuration && Number.isFinite(requestedDuration)
+          ? minutesToValue(timeValueToMinutes(nextStart) + requestedDuration * 60)
+          : minutesToValue(timeValueToMinutes(nextStart) + 120);
+        setEndValue(
+          ends.includes(preferredEnd)
+            ? preferredEnd
+            : ends[Math.min(ends.length - 1, 3)] || ends[0] || "",
+        );
+      })
+      .catch((caught) => {
+        if (!active) return;
+        console.error(caught);
+        setStartValue("");
+        setEndValue("");
+        setError("We could not load the available hours for this date. Please try again.");
+      })
+      .finally(() => {
+        if (active) setLoadingSchedule(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [dateValue, hydrated, intent]);
+
+  useEffect(() => {
+    setOptions([]);
+    setDeskChangeOptions([]);
     setSelection(null);
     setQuote(null);
     setReviewOpen(false);
-    setOptions([]);
-    setDeskChangeOptions([]);
-  }, [dateValue, startValue, endValue]);
+  }, [intent, dateValue, startValue, endValue]);
+
+  const startOptions = useMemo(
+    () => intervalStartValues(schedule, dateValue),
+    [schedule, dateValue],
+  );
+  const endOptions = useMemo(
+    () => endValuesForStart(schedule, startValue),
+    [schedule, startValue],
+  );
+  const bookingWindow = useMemo(
+    () => toWindow(dateValue, startValue, endValue),
+    [dateValue, startValue, endValue],
+  );
+  const durationHours = bookingWindow.end > bookingWindow.start
+    ? (bookingWindow.end - bookingWindow.start) / 3_600_000
+    : 0;
+  const validRange = Boolean(intent && startValue && endValue && bookingWindow.end > bookingWindow.start);
+
+  function chooseIntent(nextIntent: ResourceIntent) {
+    setIntent(nextIntent);
+    setPreferredResourceId(null);
+    setNotice(null);
+    setError(null);
+  }
 
   function changeStart(nextStart: string) {
     setStartValue(nextStart);
-    const startMinutes = timeValueToMinutes(nextStart);
-    if (timeValueToMinutes(endValue) <= startMinutes) {
-      setEndValue(minutesToValue(Math.min(CLOSE_MINUTES, startMinutes + 60)));
+    const ends = endValuesForStart(schedule, nextStart);
+    const preferredEnd = minutesToValue(timeValueToMinutes(nextStart) + 120);
+    setEndValue(
+      ends.includes(preferredEnd)
+        ? preferredEnd
+        : ends[Math.min(ends.length - 1, 3)] || ends[0] || "",
+    );
+  }
+
+  async function findNextOpenDay() {
+    setFindingNextOpen(true);
+    setError(null);
+    try {
+      for (let offset = 1; offset <= 14; offset += 1) {
+        const candidate = addDaysToDateKey(dateValue, offset);
+        const result = await getDaySchedule({ date: candidate });
+        if (result.data.isOpen && intervalStartValues(result.data, candidate).length > 0) {
+          setDateValue(candidate);
+          return;
+        }
+      }
+      setError("No open booking date was found in the next two weeks.");
+    } catch (caught) {
+      console.error(caught);
+      setError("We could not find the next open date. Please choose another date.");
+    } finally {
+      setFindingNextOpen(false);
     }
   }
 
@@ -332,15 +488,15 @@ export default function BookingExperienceWithDeskChange() {
     } catch (caught) {
       console.error(caught);
       setSelection(null);
-      setError("That option just became unavailable. Check availability again.");
+      setError(errorMessage(caught, "That option just became unavailable. Check availability again."));
     } finally {
       setLoadingQuote(false);
     }
   }
 
   async function checkAvailability() {
-    if (!validRange) {
-      setError("Choose an end time after your start time.");
+    if (!intent || !validRange) {
+      setError("Choose a space type and a valid start and end time.");
       return;
     }
     setLoadingAvailability(true);
@@ -353,22 +509,28 @@ export default function BookingExperienceWithDeskChange() {
       const result = await getAvailability({
         start: bookingWindow.start,
         end: bookingWindow.end,
+        resourceType: intent === "DESK" ? "SEAT" : "MODE",
       });
       setOptions(result.data.options);
-      setDeskChangeOptions(result.data.deskChangeOptions || []);
+      setDeskChangeOptions(intent === "DESK" ? result.data.deskChangeOptions || [] : []);
+
+      if (intent === "MEETING") {
+        const meeting = result.data.options.find((option) => option.available);
+        if (meeting) await loadQuote({ kind: "single", option: meeting });
+        return;
+      }
+
       const preferred = preferredResourceId
         ? result.data.options.find(
             (option) => option.resourceId === preferredResourceId && option.available,
           )
         : undefined;
-      if (preferred) {
-        await loadQuote({ kind: "single", option: preferred });
-      }
+      if (preferred) await loadQuote({ kind: "single", option: preferred });
     } catch (caught) {
       console.error(caught);
       setOptions([]);
       setDeskChangeOptions([]);
-      setError("We could not check live availability. Please try again.");
+      setError(errorMessage(caught, "We could not check live availability. Please try again."));
     } finally {
       setLoadingAvailability(false);
     }
@@ -428,16 +590,20 @@ export default function BookingExperienceWithDeskChange() {
       window.location.assign(result.data.checkoutUrl);
     } catch (caught) {
       console.error(caught);
-      setError("We could not start checkout. Your card has not been charged. Check availability and try again.");
+      setError(errorMessage(caught, "We could not start checkout. Your card has not been charged. Check availability and try again."));
       setCheckingOut(false);
     }
   }
 
   const availableOptions = options.filter((option) => option.available);
   const selectedKey = selectionKey(selection);
-  const endOptions = timeValues(true).filter(
-    (value) => timeValueToMinutes(value) > timeValueToMinutes(startValue),
-  );
+  const meetingOption = options.find((option) => option.type === "MODE");
+  const remainingAfterBooking = quote
+    ? Math.max(0, quote.includedHoursRemaining - quote.includedHoursApplied)
+    : 0;
+  const memberDiscountPercent = quote?.membershipName && quote.resourceType === "SEAT"
+    ? Math.max(0, Math.round((1 - quote.hourlyRateCents / PUBLIC_DESK_RATE_CENTS) * 100))
+    : 0;
 
   return (
     <AppShell>
@@ -445,102 +611,155 @@ export default function BookingExperienceWithDeskChange() {
         <header className="max-w-3xl">
           <p className="text-sm font-medium text-slate-500">Book a space</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-            Choose when. Pick your spot. You&apos;re ready.
+            Start with the space you need.
           </h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">
-            We look for one desk that stays yours for the whole visit. If the day is fragmented, we can also show an optional plan with one desk change.
+            Choose a coworking desk or the meeting room first. We will show only the booking hours currently open for that date, then check live availability for your full stay.
           </p>
         </header>
 
         {notice ? (
-          <div className="mt-6 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {notice}
-          </div>
+          <div className="mt-6 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">{notice}</div>
         ) : null}
-
         {error ? (
-          <div className="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
-            {error}
-          </div>
+          <div className="mt-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">{error}</div>
         ) : null}
 
-        <section className="mt-8 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-7">
-          <div className="flex items-start gap-3">
-            <CalendarDays className="mt-0.5 h-5 w-5 text-slate-500" aria-hidden="true" />
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">When do you need a desk?</h2>
-              <p className="mt-1 text-sm text-slate-600">Choose one continuous stay. Hours shown are local to Hi Coworking.</p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <label className="text-sm font-medium text-slate-700">
-              Date
-              <input
-                type="date"
-                min={todayAtFacility}
-                value={dateValue}
-                onChange={(event) => setDateValue(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-950"
-              />
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              Start
-              <select
-                value={startValue}
-                onChange={(event) => changeStart(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-950"
-              >
-                {timeValues().map((value) => (
-                  <option key={value} value={value}>{formatFacilityTime(toWindow(dateValue, value, minutesToValue(Math.min(CLOSE_MINUTES, timeValueToMinutes(value) + 30))).start)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-sm font-medium text-slate-700">
-              End
-              <select
-                value={endValue}
-                onChange={(event) => setEndValue(event.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-950"
-              >
-                {endOptions.map((value) => (
-                  <option key={value} value={value}>{formatFacilityTime(toWindow(dateValue, startValue, value).end)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Clock3 className="h-4 w-4" aria-hidden="true" />
-              {validRange ? `${durationHours} hour${durationHours === 1 ? "" : "s"}` : "Choose a valid range"}
-            </div>
+        <section className="mt-8 border-t border-slate-200 pt-7">
+          <h2 className="text-xl font-semibold text-slate-950">1. What are you booking?</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <button
               type="button"
-              onClick={checkAvailability}
-              disabled={loadingAvailability || !validRange}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => chooseIntent("DESK")}
+              className={`flex min-h-28 items-start gap-4 rounded-2xl border p-5 text-left transition ${
+                intent === "DESK"
+                  ? "border-slate-950 bg-slate-950 text-white"
+                  : "border-slate-200 bg-white text-slate-950 hover:border-slate-400"
+              }`}
             >
-              {loadingAvailability ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Check availability
+              <Laptop className="mt-0.5 h-6 w-6 shrink-0" />
+              <span>
+                <span className="block text-lg font-semibold">Coworking desk</span>
+                <span className={`mt-1 block text-sm leading-6 ${intent === "DESK" ? "text-slate-300" : "text-slate-600"}`}>
+                  Pick an available desk. If no single desk covers the whole stay, an optional one-change plan can still be offered.
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => chooseIntent("MEETING")}
+              className={`flex min-h-28 items-start gap-4 rounded-2xl border p-5 text-left transition ${
+                intent === "MEETING"
+                  ? "border-slate-950 bg-slate-950 text-white"
+                  : "border-slate-200 bg-white text-slate-950 hover:border-slate-400"
+              }`}
+            >
+              <Users className="mt-0.5 h-6 w-6 shrink-0" />
+              <span>
+                <span className="block text-lg font-semibold">Meeting room</span>
+                <span className={`mt-1 block text-sm leading-6 ${intent === "MEETING" ? "text-slate-300" : "text-slate-600"}`}>
+                  Check the meeting room directly for the exact time you need.
+                </span>
+              </span>
             </button>
           </div>
         </section>
 
-        {options.length > 0 || deskChangeOptions.length > 0 ? (
-          <section className="mt-8">
+        {intent ? (
+          <section className="mt-9 border-t border-slate-200 pt-7">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Choose your setup</h2>
+                <h2 className="text-xl font-semibold text-slate-950">2. When do you need it?</h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  {availableOptions.length > 0
-                    ? "Continuous options keep you in the same spot for your entire stay."
-                    : "No single desk is open for the full stay."}
+                  Times come from the current operating calendar, including closures and special hours.
                 </p>
               </div>
-              <p className="text-sm text-slate-500">
-                {availableOptions.length} continuous option{availableOptions.length === 1 ? "" : "s"}
-              </p>
+              {schedule ? <p className="text-sm font-medium text-slate-700">{scheduleSummary(schedule)}</p> : null}
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <label className="text-sm font-medium text-slate-800">
+                <span className="mb-2 flex items-center gap-2"><CalendarDays className="h-4 w-4" /> Date</span>
+                <input
+                  type="date"
+                  min={todayAtFacility}
+                  value={dateValue}
+                  onChange={(event) => setDateValue(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950"
+                />
+              </label>
+
+              <label className="text-sm font-medium text-slate-800">
+                <span className="mb-2 flex items-center gap-2"><Clock3 className="h-4 w-4" /> Start</span>
+                <select
+                  value={startValue}
+                  onChange={(event) => changeStart(event.target.value)}
+                  disabled={loadingSchedule || startOptions.length === 0}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950 disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  {startOptions.length === 0 ? <option value="">No start times</option> : null}
+                  {startOptions.map((value) => <option key={value} value={value}>{formatClockValue(value)}</option>)}
+                </select>
+              </label>
+
+              <label className="text-sm font-medium text-slate-800">
+                <span className="mb-2 flex items-center gap-2"><Clock3 className="h-4 w-4" /> End</span>
+                <select
+                  value={endValue}
+                  onChange={(event) => setEndValue(event.target.value)}
+                  disabled={loadingSchedule || endOptions.length === 0}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950 disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  {endOptions.length === 0 ? <option value="">No end times</option> : null}
+                  {endOptions.map((value) => <option key={value} value={value}>{formatClockValue(value)}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {loadingSchedule ? (
+              <p className="mt-4 flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading available hours…</p>
+            ) : startOptions.length === 0 ? (
+              <div className="mt-4 flex flex-col gap-3 border-l-2 border-slate-300 pl-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-600">
+                  {schedule?.isOpen ? "There are no remaining booking times on this date." : "Hi Coworking is closed for bookings on this date."}
+                </p>
+                <button
+                  type="button"
+                  onClick={findNextOpenDay}
+                  disabled={findingNextOpen}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-50"
+                >
+                  {findingNextOpen ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Find next open day
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-slate-500">{hoursLabel(durationHours)} · Carrollton local time</p>
+                <button
+                  type="button"
+                  onClick={checkAvailability}
+                  disabled={loadingAvailability || !validRange}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingAvailability ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+                  {intent === "MEETING" ? "Check meeting room" : "Show available desks"}
+                </button>
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {intent === "DESK" && (options.length > 0 || deskChangeOptions.length > 0) ? (
+          <section className="mt-10 border-t border-slate-200 pt-7">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-950">3. Choose your desk</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  A continuous desk keeps you in the same spot for the full stay.
+                </p>
+              </div>
+              <p className="text-sm text-slate-500">{availableOptions.length} continuous option{availableOptions.length === 1 ? "" : "s"}</p>
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -562,17 +781,11 @@ export default function BookingExperienceWithDeskChange() {
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                        {option.type === "MODE" ? <Users className="h-4 w-4" /> : <Laptop className="h-4 w-4" />}
-                      </div>
-                      <span className="text-xs font-semibold uppercase tracking-wide">
-                        {option.available ? "Available" : "Unavailable"}
-                      </span>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Laptop className="h-4 w-4" /></div>
+                      <span className="text-xs font-semibold uppercase tracking-wide">{option.available ? "Available" : "Unavailable"}</span>
                     </div>
                     <p className="mt-4 font-semibold">{option.name}</p>
-                    <p className={`mt-1 text-sm ${selected ? "text-slate-300" : "text-slate-500"}`}>
-                      {option.type === "MODE" ? "Meeting setup for the full stay" : "Same desk for the full stay"}
-                    </p>
+                    <p className={`mt-1 text-sm ${selected ? "text-slate-300" : "text-slate-500"}`}>Same desk for the full stay</p>
                   </button>
                 );
               })}
@@ -584,10 +797,9 @@ export default function BookingExperienceWithDeskChange() {
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">Optional one-change plan</p>
                   <h3 className="mt-2 text-xl font-semibold text-slate-950">Stay for the full time with one desk change</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-700">
-                    No single desk is available for your entire stay, but we can keep the visit intact by reserving two desks. You will move once at the time shown. This is never selected automatically.
+                    No single desk is free for your entire stay, but the system can reserve two desks with one move. This option is never selected automatically.
                   </p>
                 </div>
-
                 <div className="mt-5 grid gap-4 lg:grid-cols-3">
                   {deskChangeOptions.map((plan) => {
                     const key = `change:${plan.planId}`;
@@ -599,14 +811,12 @@ export default function BookingExperienceWithDeskChange() {
                         disabled={loadingQuote}
                         onClick={() => loadQuote({ kind: "desk_change", plan })}
                         className={`rounded-2xl p-4 text-left ring-1 transition ${
-                          selected
-                            ? "bg-slate-900 text-white ring-slate-900"
-                            : "bg-white text-slate-950 ring-amber-200 hover:ring-amber-400"
+                          selected ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-950 ring-amber-200 hover:ring-amber-400"
                         }`}
                       >
                         <div className="flex items-center gap-2 text-sm font-semibold">
                           <span>{plan.segments[0].resourceName}</span>
-                          <MoveRight className="h-4 w-4" aria-hidden="true" />
+                          <MoveRight className="h-4 w-4" />
                           <span>{plan.segments[1].resourceName}</span>
                         </div>
                         <div className={`mt-4 space-y-2 text-sm ${selected ? "text-slate-300" : "text-slate-600"}`}>
@@ -614,9 +824,6 @@ export default function BookingExperienceWithDeskChange() {
                           <p className="font-semibold">Move once at {formatFacilityTime(plan.changeAt)}</p>
                           <p>{formatFacilityTime(plan.segments[1].start)}–{formatFacilityTime(plan.segments[1].end)} · {plan.segments[1].resourceName}</p>
                         </div>
-                        <p className={`mt-4 text-xs font-semibold uppercase tracking-wide ${selected ? "text-white" : "text-amber-800"}`}>
-                          {selected ? "Selected" : "Choose this plan"}
-                        </p>
                       </button>
                     );
                   })}
@@ -625,148 +832,232 @@ export default function BookingExperienceWithDeskChange() {
             ) : null}
 
             {loadingQuote ? (
-              <div className="mt-5 flex items-center gap-2 text-sm text-slate-600">
-                <Loader2 className="h-4 w-4 animate-spin" /> Preparing your live price…
-              </div>
+              <div className="mt-5 flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" /> Preparing your live price…</div>
             ) : null}
 
             {selection && quote && !reviewOpen ? (
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-slate-50 px-5 py-4 ring-1 ring-slate-200">
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-slate-200 py-5">
                 <div>
                   <p className="font-semibold text-slate-950">{quote.resourceName}</p>
-                  <p className="mt-1 text-sm text-slate-600">{money(quote.totalCents)} total for this stay</p>
+                  <p className="mt-1 text-sm text-slate-600">{money(quote.totalCents)} due for this stay</p>
                 </div>
                 <button
                   type="button"
                   onClick={continueToReview}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
+                  className="inline-flex min-h-12 items-center gap-2 rounded-full bg-slate-900 px-5 py-3 font-semibold text-white"
                 >
-                  Continue to review <ArrowRight className="h-4 w-4" />
+                  Review booking <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
             ) : null}
           </section>
         ) : null}
 
-        {reviewOpen && selection && quote ? (
-          <section id="booking-review" className="mt-9 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-7">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                <Check className="h-5 w-5" />
+        {intent === "MEETING" && options.length > 0 ? (
+          <section className="mt-10 border-t border-slate-200 pt-7">
+            <h2 className="text-xl font-semibold text-slate-950">3. Meeting room availability</h2>
+            {meetingOption?.available && quote ? (
+              <div className="mt-4 flex flex-col gap-4 border-y border-slate-200 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="font-semibold text-slate-950">Available for your full meeting</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={continueToReview}
+                  disabled={loadingQuote}
+                  className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-medium text-white disabled:opacity-50"
+                >
+                  {loadingQuote ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+                  Review meeting room <ArrowRight className="h-4 w-4" />
+                </button>
               </div>
+            ) : (
+              <div className="mt-4 border-l-2 border-amber-300 pl-4 text-sm text-slate-700">
+                The meeting room is not available for that full time range. Choose another time and check again.
+              </div>
+            )}
+          </section>
+        ) : null}
+
+        {reviewOpen && selection && quote ? (
+          <section id="booking-review" className="scroll-mt-24 mt-10 border-t border-slate-200 pt-8">
+            <p className="text-sm font-medium text-slate-500">Review & checkout</p>
+            <div className="mt-4 grid gap-8 lg:grid-cols-[1fr_390px]">
               <div>
-                <p className="text-sm font-medium text-slate-500">Review your booking</p>
-                <h2 className="mt-1 text-2xl font-semibold text-slate-950">{quote.resourceName}</h2>
-                <p className="mt-1 text-sm text-slate-600">
+                <h2 className="text-2xl font-semibold text-slate-950">{intent === "MEETING" ? "Meeting room" : quote.resourceName}</h2>
+                <p className="mt-2 text-slate-600">
                   {formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}
                 </p>
-              </div>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setReviewOpen(false)}
+                  className="mt-3 text-sm font-medium text-slate-700 underline underline-offset-4"
+                >
+                  Change booking
+                </button>
 
-            {quote.bookingKind === "desk_change" && quote.segments ? (
-              <div className="mt-6 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
-                <p className="font-semibold text-slate-950">Your one desk change</p>
-                <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-                  <div>
-                    <p className="font-medium text-slate-900">{quote.segments[0].resourceName}</p>
-                    <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[0].start)}–{formatFacilityTime(quote.segments[0].end)}</p>
+                {quote.bookingKind === "desk_change" && quote.segments ? (
+                  <div className="mt-7 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
+                    <p className="font-semibold text-slate-950">Your one desk change</p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                      <div>
+                        <p className="font-medium text-slate-900">{quote.segments[0].resourceName}</p>
+                        <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[0].start)}–{formatFacilityTime(quote.segments[0].end)}</p>
+                      </div>
+                      <MoveRight className="hidden h-5 w-5 text-amber-700 sm:block" />
+                      <div>
+                        <p className="font-medium text-slate-900">{quote.segments[1].resourceName}</p>
+                        <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[1].start)}–{formatFacilityTime(quote.segments[1].end)}</p>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-amber-900">Move once at {formatFacilityTime(quote.segments[0].end)}.</p>
                   </div>
-                  <MoveRight className="hidden h-5 w-5 text-amber-700 sm:block" />
-                  <div>
-                    <p className="font-medium text-slate-900">{quote.segments[1].resourceName}</p>
-                    <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[1].start)}–{formatFacilityTime(quote.segments[1].end)}</p>
+                ) : null}
+
+                {quote.membershipName && quote.resourceType === "SEAT" ? (
+                  <div className="mt-7 border-y border-slate-200 py-5">
+                    <p className="text-sm font-semibold text-slate-950">Membership hours</p>
+                    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                      <div>
+                        <p className="text-slate-500">Available before</p>
+                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursRemaining)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Used by this booking</p>
+                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursApplied)}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500">Remaining after</p>
+                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(remainingAfterBooking)}</p>
+                      </div>
+                    </div>
+                    {quote.billableHours > 0 ? (
+                      <p className="mt-4 text-sm leading-6 text-slate-600">
+                        {quote.includedHoursRemaining === 0
+                          ? "No included desk hours remain for this month."
+                          : `The first ${hoursLabel(quote.includedHoursApplied)} use your remaining monthly allowance.`}{" "}
+                        The additional {hoursLabel(quote.billableHours)} automatically use your {memberDiscountPercent}% member discount at {money(quote.hourlyRateCents)}/hour.
+                      </p>
+                    ) : null}
                   </div>
+                ) : null}
+
+                {!authLoading && !user ? (
+                  <div className="mt-7">
+                    <h3 className="font-semibold text-slate-950">Your contact information</h3>
+                    <p className="mt-1 text-sm text-slate-600">We&apos;ll use this for the booking confirmation and access details.</p>
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <label className="text-sm font-medium text-slate-700">
+                        Name
+                        <input
+                          value={guestName}
+                          onChange={(event) => setGuestName(event.target.value)}
+                          autoComplete="name"
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                        />
+                      </label>
+                      <label className="text-sm font-medium text-slate-700">
+                        Email
+                        <input
+                          type="email"
+                          value={guestEmail}
+                          onChange={(event) => setGuestEmail(event.target.value)}
+                          autoComplete="email"
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                        />
+                      </label>
+                      <label className="text-sm font-medium text-slate-700 sm:col-span-2">
+                        Phone <span className="font-normal text-slate-500">(optional)</span>
+                        <input
+                          type="tel"
+                          value={guestPhone}
+                          onChange={(event) => setGuestPhone(event.target.value)}
+                          autoComplete="tel"
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <aside className="rounded-2xl bg-slate-50 p-5">
+                <p className="text-sm font-semibold text-slate-950">Price calculation</p>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <span className="text-slate-600">Booking length</span>
+                    <span className="font-medium text-slate-950">{hoursLabel(quote.durationHours)}</span>
+                  </div>
+
+                  {quote.membershipName && quote.resourceType === "SEAT" ? (
+                    <>
+                      <div className="flex items-start justify-between gap-4">
+                        <span className="text-slate-600">Included membership time</span>
+                        <span className="font-medium text-slate-950">{hoursLabel(quote.includedHoursApplied)} · $0.00</span>
+                      </div>
+                      {quote.billableHours > 0 ? (
+                        <div className="flex items-start justify-between gap-4">
+                          <span className="text-slate-600">
+                            Additional member time<br />
+                            <span className="text-xs">{hoursLabel(quote.billableHours)} × {money(quote.hourlyRateCents)} ({memberDiscountPercent}% off)</span>
+                          </span>
+                          <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : quote.dailyCapApplied && quote.resourceType === "SEAT" ? (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-600">
+                        Desk daily cap<br />
+                        <span className="text-xs">Lower than the uncapped hourly total</span>
+                      </span>
+                      <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-600">
+                        Space charge<br />
+                        <span className="text-xs">{hoursLabel(quote.durationHours)} × {money(quote.hourlyRateCents)}</span>
+                      </span>
+                      <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                    </div>
+                  )}
+
+                  {quote.accountCreditAppliedCents > 0 ? (
+                    <div className="flex items-start justify-between gap-4 border-t border-slate-200 pt-3">
+                      <span className="text-slate-600">Account credit</span>
+                      <span className="font-medium text-slate-950">−{money(quote.accountCreditAppliedCents)}</span>
+                    </div>
+                  ) : null}
                 </div>
-                <p className="mt-3 text-sm font-medium text-amber-900">
-                  You&apos;ll move once at {formatFacilityTime(quote.segments[0].end)}.
+
+                <div className="mt-5 flex items-baseline justify-between border-t border-slate-300 pt-4">
+                  <span className="font-semibold">Amount due</span>
+                  <span className="text-2xl font-semibold text-slate-950">{money(quote.totalCents)}</span>
+                </div>
+
+                {quote.totalCents === 0 ? (
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    No card payment is required. Confirming the booking commits the membership hours and/or account credit shown above.
+                  </p>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={checkout}
+                  disabled={checkingOut || authLoading}
+                  className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  {checkingOut ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+                  {quote.totalCents === 0 ? "Confirm booking" : `Pay ${money(quote.totalCents)}`}
+                </button>
+                <p className="mt-3 text-center text-xs leading-5 text-slate-500">
+                  Your space is held for 15 minutes when confirmation begins. Membership hours and account credit are committed only when the booking is confirmed.
                 </p>
-              </div>
-            ) : null}
-
-            <dl className="mt-6 divide-y divide-slate-200 rounded-2xl bg-slate-50 px-4 ring-1 ring-slate-200">
-              <div className="flex justify-between gap-4 py-3 text-sm">
-                <dt className="text-slate-600">Duration</dt>
-                <dd className="font-medium text-slate-950">{quote.durationHours} hour{quote.durationHours === 1 ? "" : "s"}</dd>
-              </div>
-              {quote.membershipName ? (
-                <div className="flex justify-between gap-4 py-3 text-sm">
-                  <dt className="text-slate-600">Membership</dt>
-                  <dd className="font-medium text-slate-950">{quote.membershipName}</dd>
-                </div>
-              ) : null}
-              {quote.includedHoursApplied > 0 ? (
-                <div className="flex justify-between gap-4 py-3 text-sm">
-                  <dt className="text-slate-600">Included hours applied</dt>
-                  <dd className="font-medium text-slate-950">−{quote.includedHoursApplied} hr</dd>
-                </div>
-              ) : null}
-              {quote.accountCreditAppliedCents > 0 ? (
-                <div className="flex justify-between gap-4 py-3 text-sm">
-                  <dt className="text-slate-600">Account credit</dt>
-                  <dd className="font-medium text-slate-950">−{money(quote.accountCreditAppliedCents)}</dd>
-                </div>
-              ) : null}
-              <div className="flex justify-between gap-4 py-4">
-                <dt className="font-semibold text-slate-950">Total</dt>
-                <dd className="text-lg font-semibold text-slate-950">{money(quote.totalCents)}</dd>
-              </div>
-            </dl>
-
-            {!authLoading && !user ? (
-              <div className="mt-6">
-                <h3 className="font-semibold text-slate-950">Your contact information</h3>
-                <p className="mt-1 text-sm text-slate-600">We&apos;ll use this for your booking confirmation and access details.</p>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    Name
-                    <input
-                      value={guestName}
-                      onChange={(event) => setGuestName(event.target.value)}
-                      autoComplete="name"
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                    />
-                  </label>
-                  <label className="text-sm font-medium text-slate-700">
-                    Email
-                    <input
-                      type="email"
-                      value={guestEmail}
-                      onChange={(event) => setGuestEmail(event.target.value)}
-                      autoComplete="email"
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                    />
-                  </label>
-                  <label className="text-sm font-medium text-slate-700 sm:col-span-2">
-                    Phone <span className="font-normal text-slate-500">(optional)</span>
-                    <input
-                      type="tel"
-                      value={guestPhone}
-                      onChange={(event) => setGuestPhone(event.target.value)}
-                      autoComplete="tel"
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
-                    />
-                  </label>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="mt-7 flex flex-wrap items-center justify-between gap-4">
-              <button
-                type="button"
-                onClick={() => setReviewOpen(false)}
-                className="text-sm font-semibold text-slate-600 hover:text-slate-950"
-              >
-                Change selection
-              </button>
-              <button
-                type="button"
-                onClick={checkout}
-                disabled={checkingOut || authLoading}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {checkingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {quote.totalCents === 0 ? "Confirm booking" : `Continue to payment · ${money(quote.totalCents)}`}
-              </button>
+              </aside>
             </div>
           </section>
         ) : null}

@@ -9,6 +9,7 @@ import {
   Bell,
   BookOpen,
   Calendar,
+  Clock3,
   CreditCard,
   DollarSign,
   Hammer,
@@ -148,6 +149,7 @@ function AdminDashboardContent() {
   const quickLinks = [
     { href: "/admin/members", label: "Member Management", icon: Users },
     { href: "/admin/members/actions", label: "Member Actions", icon: WalletCards },
+    { href: "/admin/spaces", label: "Booking Hours & Closures", icon: Clock3 },
     { href: "/admin/roles", label: "Staff & Roles", icon: UserCog },
     { href: "/admin/events", label: "Event Management", icon: Calendar },
     { href: "/admin/bookstore", label: "Bookstore", icon: BookOpen },

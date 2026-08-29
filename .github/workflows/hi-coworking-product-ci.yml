@@ -72,6 +72,7 @@ jobs:
           npx vitest run
           tests/functions/member-management-data-compat.test.ts
           tests/functions/booking-policy.test.ts
+          tests/functions/booking-operating-calendar.test.ts
           tests/functions/event-policy-v2.test.ts
           tests/functions/event-v2-source-contract.test.ts
           tests/functions/event-cancellation-policy.test.ts

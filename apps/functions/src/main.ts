@@ -144,15 +144,29 @@ export const createBooking = onCall(async () => {
   );
 });
 
-// Preserve the already-deployed PR #42 Events v2 names for in-flight sessions
-// while the reconciled operating system becomes the canonical UI and API.
-export * from "./bookingJourney";
-export * from "./bookingManagement";
+// Booking creation, member rescheduling, and admin booking-for-member all flow
+// through the same authoritative operating calendar before the existing
+// availability/hold/payment lifecycle is allowed to run.
 export {
+  booking_getAvailability,
+  booking_createQuote,
+  booking_beginCheckout,
+  booking_finalizeCheckout,
+  booking_getCancellationPreview,
+  booking_cancel,
+  booking_reschedule,
   admin_bookingForMemberGetAvailability,
   admin_bookingForMemberQuote,
   admin_bookingForMemberBeginCheckout,
-} from "./adminMemberOperations";
+} from "./bookingScheduledAuthority";
+export { booking_onDeskChangeBookingUpdated } from "./bookingJourney";
+export {
+  booking_getDaySchedule,
+  booking_adminGetOperatingCalendar,
+  booking_adminSetWeeklyHours,
+  booking_adminAddException,
+  booking_adminDeleteException,
+} from "./bookingOperatingCalendar";
 export {
   admin_membershipGetState,
   admin_membershipChangePlan,
