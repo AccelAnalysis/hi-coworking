@@ -6,6 +6,7 @@ import {
   Bell,
   Briefcase,
   Calendar,
+  CalendarDays,
   ChevronDown,
   LayoutDashboard,
   Loader2,
@@ -182,11 +183,7 @@ export function AppShell({
 
             <div className="hidden gap-5 lg:flex">
               {publicLinks.map((item) => (
-                <PublicNavLink
-                  key={item.href}
-                  href={item.href}
-                  label={item.label}
-                />
+                <PublicNavLink key={item.href} href={item.href} label={item.label} />
               ))}
             </div>
           </div>
@@ -233,12 +230,8 @@ export function AppShell({
                     {avatarOpen && (
                       <div className="absolute right-0 z-50 mt-2 w-60 rounded-xl bg-white py-1 text-slate-900 shadow-xl ring-1 ring-slate-200">
                         <div className="border-b border-slate-100 px-4 py-3">
-                          <p className="truncate text-sm font-bold">
-                            {user.displayName || "Account"}
-                          </p>
-                          <p className="truncate text-xs text-slate-500">
-                            {user.email}
-                          </p>
+                          <p className="truncate text-sm font-bold">{user.displayName || "Account"}</p>
+                          <p className="truncate text-xs text-slate-500">{user.email}</p>
                         </div>
 
                         <Link
@@ -247,6 +240,13 @@ export function AppShell({
                         >
                           <Calendar className="h-4 w-4 text-slate-400" />
                           Bookings
+                        </Link>
+                        <Link
+                          href="/account/events"
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50"
+                        >
+                          <CalendarDays className="h-4 w-4 text-slate-400" />
+                          My Events
                         </Link>
                         <Link
                           href="/profile"
@@ -312,18 +312,8 @@ export function AppShell({
               ) : (
                 <>
                   <div className="hidden items-center gap-3 sm:flex">
-                    <Link
-                      href="/login"
-                      className="text-sm font-medium text-slate-300 transition hover:text-white"
-                    >
-                      Log in
-                    </Link>
-                    <Link
-                      href="/register"
-                      className="rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100"
-                    >
-                      Sign up
-                    </Link>
+                    <Link href="/login" className="text-sm font-medium text-slate-300 transition hover:text-white">Log in</Link>
+                    <Link href="/register" className="rounded-full bg-white px-4 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100">Sign up</Link>
                   </div>
                   <button
                     type="button"
@@ -350,108 +340,63 @@ export function AppShell({
           />
           <div className="fixed bottom-0 right-0 top-0 z-50 w-72 overflow-y-auto bg-white shadow-2xl lg:hidden">
             <div className="flex items-center justify-between border-b border-slate-100 p-4">
-              <Link
-                href="/"
-                className="flex items-center gap-2"
-                onClick={() => setDrawerOpen(false)}
-              >
-                <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
-                  Hi
-                </div>
+              <Link href="/" className="flex items-center gap-2" onClick={() => setDrawerOpen(false)}>
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">Hi</div>
                 <span className="text-lg font-bold text-slate-900">Coworking</span>
               </Link>
-              <button
-                type="button"
-                onClick={() => setDrawerOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600"
-                aria-label="Close menu"
-              >
+              <button type="button" onClick={() => setDrawerOpen(false)} className="p-1 text-slate-400 hover:text-slate-600" aria-label="Close menu">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="space-y-6 p-4">
               <div>
-                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  Explore
-                </p>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Explore</p>
                 {publicLinks.map((item) => (
-                  <PublicNavLink
-                    key={item.href}
-                    href={item.href}
-                    label={item.label}
-                    mobile
-                  />
+                  <PublicNavLink key={item.href} href={item.href} label={item.label} mobile />
                 ))}
               </div>
 
               {user ? (
                 <div className="border-t border-slate-100 pt-4">
-                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                    Account
-                  </p>
-                  <Link
-                    href="/account/bookings"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
-                  >
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Account</p>
+                  <Link href="/account/bookings" className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600">
                     <Calendar className="h-4 w-4 text-slate-400" />
                     Bookings
                   </Link>
-                  <Link
-                    href="/profile"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
-                  >
+                  <Link href="/account/events" className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600">
+                    <CalendarDays className="h-4 w-4 text-slate-400" />
+                    My Events
+                  </Link>
+                  <Link href="/profile" className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600">
                     <Briefcase className="h-4 w-4 text-slate-400" />
                     Profile
                   </Link>
-                  <Link
-                    href="/notifications"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
-                  >
+                  <Link href="/notifications" className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600">
                     <Bell className="h-4 w-4 text-slate-400" />
                     Notifications
                   </Link>
                   {isStaff && (
-                    <Link
-                      href="/staff"
-                      className="flex items-center gap-3 py-2 text-sm font-medium text-emerald-700"
-                    >
+                    <Link href="/staff" className="flex items-center gap-3 py-2 text-sm font-medium text-emerald-700">
                       <User className="h-4 w-4 text-emerald-500" />
                       Staff
                     </Link>
                   )}
                   {isAdmin && (
-                    <Link
-                      href="/admin/dashboard"
-                      className="flex items-center gap-3 py-2 text-sm font-medium text-amber-700"
-                    >
+                    <Link href="/admin/dashboard" className="flex items-center gap-3 py-2 text-sm font-medium text-amber-700">
                       <LayoutDashboard className="h-4 w-4 text-amber-500" />
                       Admin
                     </Link>
                   )}
-                  <button
-                    type="button"
-                    onClick={handleSignOut}
-                    className="flex w-full items-center gap-3 py-2 text-sm font-medium text-red-600 hover:text-red-700"
-                  >
+                  <button type="button" onClick={handleSignOut} className="flex w-full items-center gap-3 py-2 text-sm font-medium text-red-600 hover:text-red-700">
                     <LogOut className="h-4 w-4" />
                     Sign out
                   </button>
                 </div>
               ) : (
                 <div className="space-y-2 border-t border-slate-100 pt-4">
-                  <Link
-                    href="/login"
-                    className="block w-full rounded-xl border border-slate-200 py-2.5 text-center text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Log in
-                  </Link>
-                  <Link
-                    href="/register"
-                    className="block w-full rounded-xl bg-slate-900 py-2.5 text-center text-sm font-medium text-white hover:bg-slate-800"
-                  >
-                    Sign up
-                  </Link>
+                  <Link href="/login" className="block w-full rounded-xl border border-slate-200 py-2.5 text-center text-sm font-medium text-slate-700 hover:bg-slate-50">Log in</Link>
+                  <Link href="/register" className="block w-full rounded-xl bg-slate-900 py-2.5 text-center text-sm font-medium text-white hover:bg-slate-800">Sign up</Link>
                 </div>
               )}
             </div>
@@ -474,9 +419,7 @@ export function AppShell({
           <div className="mb-8 grid grid-cols-2 gap-8 md:grid-cols-4">
             <div className="col-span-2 md:col-span-1">
               <Link href="/" className="mb-3 flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
-                  Hi
-                </div>
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">Hi</div>
                 <span className="text-lg font-bold text-slate-900">Coworking</span>
               </Link>
               <p className="text-sm leading-relaxed text-slate-500">
@@ -487,9 +430,7 @@ export function AppShell({
             </div>
 
             <div>
-              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">
-                Explore
-              </h4>
+              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">Explore</h4>
               <ul className="space-y-2 text-sm">
                 <li><Link href="/spaces" className="text-slate-500 hover:text-slate-900">Spaces</Link></li>
                 <li><Link href="/book" className="text-slate-500 hover:text-slate-900">Book a Space</Link></li>
@@ -500,22 +441,16 @@ export function AppShell({
             </div>
 
             <div>
-              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">
-                Company
-              </h4>
+              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">Company</h4>
               <ul className="space-y-2 text-sm">
                 <li><Link href="/about" className="text-slate-500 hover:text-slate-900">About</Link></li>
                 <li><Link href="/contact" className="text-slate-500 hover:text-slate-900">Contact</Link></li>
-                {isStaff && (
-                  <li><Link href="/staff" className="text-slate-500 hover:text-slate-900">Staff</Link></li>
-                )}
+                {isStaff && <li><Link href="/staff" className="text-slate-500 hover:text-slate-900">Staff</Link></li>}
               </ul>
             </div>
 
             <div>
-              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">
-                Legal
-              </h4>
+              <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-900">Legal</h4>
               <ul className="space-y-2 text-sm">
                 <li><Link href="/terms" className="text-slate-500 hover:text-slate-900">Terms of Service</Link></li>
                 <li><Link href="/privacy" className="text-slate-500 hover:text-slate-900">Privacy Policy</Link></li>
@@ -524,9 +459,7 @@ export function AppShell({
           </div>
 
           <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-200 pt-6 sm:flex-row">
-            <p className="text-xs text-slate-400">
-              &copy; {new Date().getFullYear()} Hi Coworking. All rights reserved.
-            </p>
+            <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()} Hi Coworking. All rights reserved.</p>
             <p className="text-xs text-slate-400">Carrollton, VA</p>
           </div>
         </div>
