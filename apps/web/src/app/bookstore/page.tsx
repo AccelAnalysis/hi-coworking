@@ -1,369 +1,211 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AppShell } from "@/components/AppShell";
-import { getPublishedBooks, trackAffiliateClick } from "@/lib/firestore";
-import { useAuth } from "@/lib/authContext";
-import type { BookDoc } from "@hi/shared";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  BookOpen,
-  Loader2,
-  Filter,
-  ExternalLink,
-  ShoppingCart,
-  Eye,
-  Tag,
-  Star,
-  Library,
-} from "lucide-react";
+import { ArrowRight, BookOpen, ExternalLink, Loader2 } from "lucide-react";
+import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/lib/authContext";
+import { getPublishedBooks, trackAffiliateClick } from "@/lib/firestore";
+import type { BookDoc } from "@hi/shared";
 
-const AVAILABILITY_LABEL: Record<string, string> = {
-  browse_only: "Browse",
-  digital: "Digital",
-  physical: "Physical",
-};
+function startingPrice(book: BookDoc) {
+  const variantPrices = (book.variants || [])
+    .map((variant) => variant.priceCents)
+    .filter((price) => Number.isFinite(price) && price > 0);
+  if (variantPrices.length) return Math.min(...variantPrices);
+  return book.priceCents && book.priceCents > 0 ? book.priceCents : undefined;
+}
 
-const CHANNEL_BADGE: Record<string, { label: string; color: string }> = {
-  owned: { label: "Hi Coworking", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  affiliate: { label: "Partner", color: "bg-blue-50 text-blue-700 border-blue-200" },
-};
+function offerLabel(book: BookDoc) {
+  if (book.availabilityMode === "browse_only") return "Available to read here";
+  if (book.salesChannel === "affiliate") return "Recommended reading";
+  if (book.availabilityMode === "digital") return "Digital edition";
+  return "Pickup at Hi Coworking";
+}
+
+function BookTile({ book, userId }: { book: BookDoc; userId?: string }) {
+  const price = startingPrice(book);
+  const itemHref = `/bookstore/item?id=${encodeURIComponent(book.id)}`;
+
+  async function handleAffiliateClick() {
+    if (!book.affiliateUrl) return;
+    try {
+      await trackAffiliateClick({
+        id: `${book.id}_${Date.now()}`,
+        bookId: book.id,
+        userId,
+        destination: new URL(book.affiliateUrl).hostname,
+        createdAt: Date.now(),
+      });
+    } catch {
+      // Tracking never blocks the customer from visiting the retailer.
+    }
+  }
+
+  return (
+    <article className="group">
+      <Link href={itemHref} className="block">
+        <div className="aspect-[3/4] overflow-hidden rounded-[1.5rem] bg-slate-100 shadow-sm">
+          {book.coverImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={book.coverImageUrl}
+              alt={book.title}
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center bg-slate-100">
+              <BookOpen className="h-14 w-14 text-slate-300" />
+            </div>
+          )}
+        </div>
+        <p className="mt-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+          {offerLabel(book)}
+        </p>
+        <h3 className="mt-1 text-lg font-semibold leading-snug text-slate-950">{book.title}</h3>
+        <p className="mt-1 text-sm text-slate-500">{book.author}</p>
+        {book.description && (
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{book.description}</p>
+        )}
+      </Link>
+
+      <div className="mt-3 flex items-center justify-between gap-4">
+        <span className="text-sm font-semibold text-slate-900">
+          {price != null ? `${book.variants?.length ? "From " : ""}$${(price / 100).toFixed(2)}` : ""}
+        </span>
+        {book.salesChannel === "affiliate" && book.affiliateUrl ? (
+          <a
+            href={book.affiliateUrl}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            onClick={handleAffiliateClick}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800 hover:text-slate-950"
+          >
+            Buy from partner <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        ) : (
+          <Link
+            href={itemHref}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800 hover:text-slate-950"
+          >
+            View book <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function Shelf({ title, intro, books, userId }: {
+  title: string;
+  intro?: string;
+  books: BookDoc[];
+  userId?: string;
+}) {
+  if (!books.length) return null;
+  return (
+    <section className="py-10 md:py-14">
+      <div className="mb-7 max-w-2xl">
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{title}</h2>
+        {intro && <p className="mt-2 text-sm leading-6 text-slate-600">{intro}</p>}
+      </div>
+      <div className="grid gap-x-7 gap-y-10 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {books.map((book) => <BookTile key={book.id} book={book} userId={userId} />)}
+      </div>
+    </section>
+  );
+}
 
 export default function BookstorePage() {
   const { user } = useAuth();
   const [books, setBooks] = useState<BookDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tagFilter, setTagFilter] = useState("");
-  const [channelFilter, setChannelFilter] = useState<"" | "owned" | "affiliate">("");
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    const fetchBooks = async () => {
-      setLoading(true);
-      try {
-        const data = await getPublishedBooks();
+    let active = true;
+    getPublishedBooks()
+      .then((data) => {
+        if (!active) return;
         setBooks(data);
-      } catch (err) {
-        console.error("Failed to fetch books:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchBooks();
+        setLoadError(false);
+      })
+      .catch((error) => {
+        console.error("Failed to load bookstore", error);
+        if (active) setLoadError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, []);
 
-  // Derive unique tags from loaded books
-  const allTags = Array.from(new Set(books.flatMap((b) => b.tags || [])));
-
-  // Client-side filtering
-  let filtered = books;
-  if (tagFilter) {
-    filtered = filtered.filter((b) => b.tags?.includes(tagFilter));
-  }
-  if (channelFilter) {
-    filtered = filtered.filter((b) => b.salesChannel === channelFilter);
-  }
-  // Hide books that require login to view if user is not logged in
-  if (!user) {
-    filtered = filtered.filter((b) => !b.requireLoginToView);
-  }
-
-  // Group into series and standalone
-  const seriesMap = new Map<string, BookDoc[]>();
-  const standalone: BookDoc[] = [];
-  for (const book of filtered) {
-    if (book.seriesTitle) {
-      const group = seriesMap.get(book.seriesTitle) ?? [];
-      group.push(book);
-      seriesMap.set(book.seriesTitle, group);
-    } else {
-      standalone.push(book);
-    }
-  }
-  // Sort within each series by seriesOrder
-  for (const group of seriesMap.values()) {
-    group.sort((a, b) => (a.seriesOrder ?? 999) - (b.seriesOrder ?? 999));
-  }
-  // Sort standalone by featuredRank then createdAt
-  standalone.sort((a, b) => {
-    if (a.featuredRank != null && b.featuredRank != null) return a.featuredRank - b.featuredRank;
-    if (a.featuredRank != null) return -1;
-    if (b.featuredRank != null) return 1;
-    return (b.createdAt ?? 0) - (a.createdAt ?? 0);
-  });
-
-  const seriesEntries = Array.from(seriesMap.entries());
-  const hasContent = filtered.length > 0;
+  const visibleBooks = useMemo(
+    () => books.filter((book) => user || !book.requireLoginToView),
+    [books, user],
+  );
+  const featured = visibleBooks
+    .filter((book) => book.featuredRank != null && book.featuredRank <= 3)
+    .sort((a, b) => (a.featuredRank ?? 99) - (b.featuredRank ?? 99));
+  const featuredIds = new Set(featured.map((book) => book.id));
+  const owned = visibleBooks.filter((book) => book.salesChannel === "owned" && !featuredIds.has(book.id));
+  const partner = visibleBooks.filter((book) => book.salesChannel === "affiliate" && !featuredIds.has(book.id));
 
   return (
     <AppShell>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <BookOpen className="h-8 w-8 text-slate-400" />
-            Bookstore
+      <main className="mx-auto w-full max-w-7xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
+        <header className="max-w-3xl py-8 md:py-12">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Bookstore</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.03em] text-slate-950 md:text-6xl">
+            Books worth keeping close.
           </h1>
-          <p className="text-slate-500 mt-1">
-            Books written by the Hi Coworking team and curated reads from our partners.
+          <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 md:text-lg">
+            Pick up books stocked at Hi Coworking, purchase digital editions, or explore titles we recommend from trusted partners.
           </p>
-        </div>
-
-        {/* Affiliate disclosure */}
-        <div className="mb-6 px-4 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-          <strong>Disclosure:</strong> Some links are affiliate links. We may earn a commission if you purchase through these links, at no extra cost to you.
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <Filter className="h-4 w-4 text-slate-400" />
-
-          {/* Channel filter */}
-          <div className="flex gap-2">
-            {[
-              { value: "", label: "All" },
-              { value: "owned", label: "Hi Coworking" },
-              { value: "affiliate", label: "Partner" },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setChannelFilter(opt.value as "" | "owned" | "affiliate")}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                  channelFilter === opt.value
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600">
+            <span>Online purchase + on-site pickup</span>
+            <span>Secure digital access</span>
           </div>
+        </header>
 
-          {/* Tag filter */}
-          {allTags.length > 0 && (
-            <>
-              <div className="w-px h-5 bg-slate-200" />
-              <div className="flex gap-2 flex-wrap">
-                {tagFilter && (
-                  <button
-                    onClick={() => setTagFilter("")}
-                    className="px-3 py-1.5 rounded-full text-xs font-medium bg-slate-900 text-white border border-slate-900"
-                  >
-                    {tagFilter} ✕
-                  </button>
-                )}
-                {!tagFilter &&
-                  allTags.slice(0, 6).map((tag) => (
-                    <button
-                      key={tag}
-                      onClick={() => setTagFilter(tag)}
-                      className="px-3 py-1.5 rounded-full text-xs font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
-                    >
-                      <Tag className="h-3 w-3 inline mr-1" />
-                      {tag}
-                    </button>
-                  ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Content */}
         {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+          <div className="flex min-h-64 items-center justify-center" role="status">
+            <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
           </div>
-        ) : !hasContent ? (
-          <div className="text-center py-24">
-            <BookOpen className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-slate-700 mb-1">No books found</h2>
-            <p className="text-sm text-slate-500">
-              {tagFilter || channelFilter
-                ? "Try adjusting your filters."
-                : "Check back soon — we're adding new titles!"}
-            </p>
+        ) : loadError ? (
+          <div className="py-20 text-center">
+            <h2 className="text-xl font-semibold text-slate-900">The bookstore could not load.</h2>
+            <p className="mt-2 text-sm text-slate-500">Please refresh and try again.</p>
+          </div>
+        ) : visibleBooks.length === 0 ? (
+          <div className="py-20 text-center">
+            <BookOpen className="mx-auto h-10 w-10 text-slate-300" />
+            <h2 className="mt-4 text-xl font-semibold text-slate-900">The shelf is being stocked.</h2>
+            <p className="mt-2 text-sm text-slate-500">Check back soon for books and resources.</p>
           </div>
         ) : (
-          <div className="space-y-12">
-            {/* Series sections */}
-            {seriesEntries.map(([title, seriesBooks]) => (
-              <section key={title}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Library className="h-5 w-5 text-indigo-400 shrink-0" />
-                  <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-                  <span className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-200">
-                    {seriesBooks.length} {seriesBooks.length === 1 ? "book" : "books"}
-                  </span>
-                  <div className="flex-1 h-px bg-slate-100 ml-2" />
-                </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {seriesBooks.map((book) => (
-                    <BookCard key={book.id} book={book} userId={user?.uid} />
-                  ))}
-                </div>
-              </section>
-            ))}
-
-            {/* Standalone books */}
-            {standalone.length > 0 && (
-              <section>
-                {seriesEntries.length > 0 && (
-                  <div className="flex items-center gap-2 mb-4">
-                    <BookOpen className="h-5 w-5 text-slate-400 shrink-0" />
-                    <h2 className="text-lg font-bold text-slate-900">More Titles</h2>
-                    <div className="flex-1 h-px bg-slate-100 ml-2" />
-                  </div>
-                )}
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {standalone.map((book) => (
-                    <BookCard key={book.id} book={book} userId={user?.uid} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
+          <>
+            <Shelf
+              title="Featured"
+              intro="A few titles we think deserve the front of the shelf."
+              books={featured}
+              userId={user?.uid}
+            />
+            <Shelf
+              title="From Hi Coworking & on our shelf"
+              intro="Books you can purchase directly from us, including copies stocked on site for pickup."
+              books={owned}
+              userId={user?.uid}
+            />
+            <Shelf
+              title="Recommended reading"
+              intro="Curated titles sold by outside retailers. Some links may be affiliate links, which can earn Hi Coworking a commission at no additional cost to you."
+              books={partner}
+              userId={user?.uid}
+            />
+          </>
         )}
-      </div>
+      </main>
     </AppShell>
-  );
-}
-
-function BookCard({ book, userId }: { book: BookDoc; userId?: string }) {
-  const channelBadge = CHANNEL_BADGE[book.salesChannel];
-  const isFeatured = book.featuredRank != null && book.featuredRank <= 3;
-  const hasPrice =
-    book.salesChannel === "owned" &&
-    book.availabilityMode !== "browse_only" &&
-    book.priceCents != null &&
-    book.priceCents > 0;
-
-  const handleAffiliateClick = async () => {
-    if (book.salesChannel !== "affiliate" || !book.affiliateUrl) return;
-    try {
-      const id = `${book.id}_${Date.now()}`;
-      await trackAffiliateClick({
-        id,
-        bookId: book.id,
-        userId: userId || undefined,
-        destination: new URL(book.affiliateUrl).hostname,
-        createdAt: Date.now(),
-      });
-    } catch {
-      // Non-blocking — don't prevent navigation
-    }
-  };
-
-  const ctaContent = () => {
-    if (book.availabilityMode === "browse_only") {
-      return (
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400">
-          <Eye className="h-3.5 w-3.5" /> Browse Only
-        </span>
-      );
-    }
-    if (book.salesChannel === "affiliate" && book.affiliateUrl) {
-      return (
-        <a
-          href={book.affiliateUrl}
-          target="_blank"
-          rel="noopener noreferrer nofollow"
-          onClick={handleAffiliateClick}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 transition-colors"
-        >
-          <ExternalLink className="h-3.5 w-3.5" /> Buy via Partner
-        </a>
-      );
-    }
-    if (book.salesChannel === "owned") {
-      return (
-        <Link
-          href={`/bookstore/${book.id}`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800 transition-colors"
-        >
-          <ShoppingCart className="h-3.5 w-3.5" />
-          {book.availabilityMode === "digital" ? "Get Digital" : "Buy"}
-        </Link>
-      );
-    }
-    return null;
-  };
-
-  return (
-    <div className="group relative flex flex-col bg-white rounded-2xl shadow-sm ring-1 ring-slate-200 hover:ring-slate-300 hover:shadow-md transition-all overflow-hidden">
-      {/* Cover image */}
-      <Link href={`/bookstore/${book.id}`} className="block aspect-3/4 bg-slate-100 relative overflow-hidden">
-        {book.coverImageUrl ? (
-          <img
-            src={book.coverImageUrl}
-            alt={book.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <BookOpen className="h-16 w-16 text-slate-300" />
-          </div>
-        )}
-        {isFeatured && (
-          <div className="absolute top-3 left-3 px-2 py-0.5 rounded-full bg-amber-400 text-amber-950 text-[10px] font-bold flex items-center gap-1">
-            <Star className="h-3 w-3" /> Featured
-          </div>
-        )}
-      </Link>
-
-      {/* Info */}
-      <div className="flex flex-col flex-1 p-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${channelBadge.color}`}>
-            {channelBadge.label}
-          </span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-slate-50 text-slate-500 border-slate-200">
-            {AVAILABILITY_LABEL[book.availabilityMode]}
-          </span>
-        </div>
-
-        <Link href={`/bookstore/${book.id}`}>
-          <h3 className="text-sm font-bold text-slate-900 line-clamp-2 hover:text-slate-700 transition-colors">
-            {book.title}
-          </h3>
-        </Link>
-        <p className="text-xs text-slate-500 mt-0.5">{book.author}</p>
-        {book.seriesTitle && book.seriesOrder != null && (
-          <p className="text-[10px] font-semibold text-indigo-500 mt-0.5">
-            Book {book.seriesOrder} of {book.seriesTitle}
-          </p>
-        )}
-
-        {book.description && (
-          <p className="text-xs text-slate-400 mt-2 line-clamp-2 leading-relaxed">
-            {book.description}
-          </p>
-        )}
-
-        {/* Tags */}
-        {book.tags && book.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {book.tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag}
-                className="px-1.5 py-0.5 rounded text-[10px] bg-slate-50 text-slate-400 border border-slate-100"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Price + CTA */}
-        <div className="flex items-center justify-between mt-auto pt-4">
-          {hasPrice ? (
-            <span className="text-sm font-bold text-slate-900">
-              ${((book.priceCents ?? 0) / 100).toFixed(2)}
-            </span>
-          ) : (
-            <span />
-          )}
-          {ctaContent()}
-        </div>
-      </div>
-    </div>
   );
 }
