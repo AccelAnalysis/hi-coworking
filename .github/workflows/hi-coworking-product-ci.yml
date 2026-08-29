@@ -70,6 +70,7 @@ jobs:
       - name: Run pure policy and source-contract tests
         run: >-
           npx vitest run
+          tests/functions/member-management-data-compat.test.ts
           tests/functions/booking-policy.test.ts
           tests/functions/event-policy-v2.test.ts
           tests/functions/event-v2-source-contract.test.ts
