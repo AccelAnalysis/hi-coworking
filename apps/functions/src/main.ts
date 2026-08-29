@@ -107,7 +107,7 @@ export const leads_submitContact = legacy.leads_submitContact;
 export const stripe_createCheckoutSession = legacy.stripe_createCheckoutSession;
 export const stripe_webhook = legacy.stripe_webhook;
 export const qb_createCheckout = legacy.qb_createCheckout;
-export const admin_markPaymentStatus = legacy.admin_markPaymentStatus;
+export { admin_markPaymentStatus } from "./adminPaymentLegacyGuard";
 export const intuit_getAuthUrl = legacy.intuit_getAuthUrl;
 export const intuit_oauthCallback = legacy.intuit_oauthCallback;
 export const intuit_checkConnection = legacy.intuit_checkConnection;
