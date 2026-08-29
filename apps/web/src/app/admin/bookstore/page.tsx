@@ -1,246 +1,116 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { BookOpen, Boxes, Eye, Loader2, PackageCheck, Pencil, Plus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
-import { getAllBooks, updateBook, deleteBook } from "@/lib/firestore";
+import { getAllBooks, updateBook } from "@/lib/firestore";
 import type { BookDoc } from "@hi/shared";
-import Link from "next/link";
-import {
-  BookOpen,
-  Plus,
-  Loader2,
-  Edit3,
-  Eye,
-  Trash2,
-  CheckCircle2,
-  XCircle,
-  ExternalLink,
-} from "lucide-react";
-
-const AVAILABILITY_LABEL: Record<string, string> = {
-  browse_only: "Browse",
-  digital: "Digital",
-  physical: "Physical",
-};
-
-const CHANNEL_LABEL: Record<string, { label: string; color: string }> = {
-  owned: { label: "Owned", color: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  affiliate: { label: "Affiliate", color: "bg-blue-50 text-blue-700 border-blue-200" },
-};
-
-export default function AdminBookstorePage() {
-  return (
-    <RequireAuth requiredRole="admin">
-      <AdminBookstoreContent />
-    </RequireAuth>
-  );
-}
 
 function AdminBookstoreContent() {
   const [books, setBooks] = useState<BookDoc[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [working, setWorking] = useState("");
 
-  const fetchBooks = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       setBooks(await getAllBooks());
-    } catch (err) {
-      console.error("Failed to fetch books:", err);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchBooks();
-  }, [fetchBooks]);
+  useEffect(() => { load(); }, [load]);
 
-  const handleTogglePublish = async (book: BookDoc) => {
+  async function togglePublished(book: BookDoc) {
+    setWorking(book.id);
     try {
-      await updateBook(book.id, { published: !book.published });
-      fetchBooks();
-    } catch (err) {
-      console.error("Failed to toggle publish:", err);
-    }
-  };
-
-  const handleDelete = async (bookId: string) => {
-    if (!confirm("Are you sure you want to delete this book? This cannot be undone.")) return;
-    setDeleting(bookId);
-    try {
-      await deleteBook(bookId);
-      fetchBooks();
-    } catch (err) {
-      console.error("Failed to delete book:", err);
+      await updateBook(book.id, { published: !book.published, updatedAt: Date.now() });
+      await load();
     } finally {
-      setDeleting(null);
+      setWorking("");
     }
-  };
-
-  const publishedCount = books.filter((b) => b.published).length;
-  const ownedCount = books.filter((b) => b.salesChannel === "owned").length;
-  const affiliateCount = books.filter((b) => b.salesChannel === "affiliate").length;
+  }
 
   return (
     <AppShell>
-      <div className="max-w-5xl mx-auto">
-        <div className="flex items-start justify-between mb-8">
+      <main className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
+        <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-              <BookOpen className="h-8 w-8 text-slate-400" />
-              Manage Bookstore
-            </h1>
-            <p className="text-slate-500 mt-1">Add, edit, and manage books in the virtual bookstore.</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Administration</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Bookstore</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+              Manage the shelf, receive on-site inventory, and fulfill paid pickup orders.
+            </p>
           </div>
-          <Link
-            href="/admin/bookstore/new"
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm"
-          >
-            <Plus className="h-4 w-4" />
-            Add Book
+          <Link href="/admin/bookstore/new" className="inline-flex w-fit items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white">
+            <Plus className="h-4 w-4" /> Add book
           </Link>
         </div>
 
-        {/* Stats */}
-        {!loading && books.length > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-            {[
-              { label: "Total", value: books.length, color: "text-slate-900" },
-              { label: "Published", value: publishedCount, color: "text-emerald-600" },
-              { label: "Owned", value: ownedCount, color: "text-indigo-600" },
-              { label: "Affiliate", value: affiliateCount, color: "text-blue-600" },
-            ].map((s) => (
-              <div key={s.label} className="bg-white rounded-xl ring-1 ring-slate-200 p-3 text-center">
-                <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{s.label}</p>
-              </div>
+        <nav className="mt-8 flex flex-wrap gap-2 border-b border-slate-200 pb-4" aria-label="Bookstore administration">
+          <span className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Catalog</span>
+          <Link href="/admin/bookstore/inventory" className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-650 hover:bg-slate-100">
+            <Boxes className="h-4 w-4" /> Inventory
+          </Link>
+          <Link href="/admin/bookstore/orders" className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-slate-650 hover:bg-slate-100">
+            <PackageCheck className="h-4 w-4" /> Orders
+          </Link>
+        </nav>
+
+        {loading ? (
+          <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div>
+        ) : books.length === 0 ? (
+          <div className="py-20 text-center">
+            <BookOpen className="mx-auto h-10 w-10 text-slate-300" />
+            <h2 className="mt-4 text-xl font-semibold text-slate-900">No books in the catalog</h2>
+            <Link href="/admin/bookstore/new" className="mt-5 inline-flex text-sm font-semibold text-slate-950">Add the first title</Link>
+          </div>
+        ) : (
+          <div className="mt-8 divide-y divide-slate-200 border-y border-slate-200">
+            {books.map((book) => (
+              <article key={book.id} className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 gap-4">
+                  <div className="h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-100">
+                    {book.coverImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={book.coverImageUrl} alt="" className="h-full w-full object-cover" />
+                    ) : <div className="flex h-full items-center justify-center"><BookOpen className="h-5 w-5 text-slate-300" /></div>}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <h2 className="truncate font-semibold text-slate-950">{book.title}</h2>
+                      <span className={`text-xs font-semibold ${book.published ? "text-emerald-700" : "text-slate-400"}`}>{book.published ? "Published" : "Draft / archived"}</span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">{book.author}</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {book.salesChannel === "affiliate" ? `External partner${book.affiliateNetwork ? ` · ${book.affiliateNetwork}` : ""}` : book.availabilityMode === "physical" ? "Physical · pickup inventory managed separately" : book.availabilityMode === "digital" ? "Digital" : "Available to read here"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Link href={`/bookstore/item?id=${encodeURIComponent(book.id)}`} className="rounded-full p-2.5 text-slate-500 hover:bg-slate-100" title="View"><Eye className="h-4 w-4" /></Link>
+                  <Link href={`/admin/bookstore/new?edit=${encodeURIComponent(book.id)}`} className="rounded-full p-2.5 text-slate-500 hover:bg-slate-100" title="Edit"><Pencil className="h-4 w-4" /></Link>
+                  <button
+                    type="button"
+                    disabled={working === book.id}
+                    onClick={() => togglePublished(book)}
+                    className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {working === book.id ? "Saving…" : book.published ? "Archive" : "Publish"}
+                  </button>
+                </div>
+              </article>
             ))}
           </div>
         )}
-
-        {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
-          </div>
-        ) : books.length === 0 ? (
-          <div className="text-center py-24">
-            <BookOpen className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-slate-700 mb-1">No books yet</h2>
-            <p className="text-sm text-slate-500">Add your first book to get started.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {books.map((book) => {
-              const channelCfg = CHANNEL_LABEL[book.salesChannel];
-              return (
-                <div
-                  key={book.id}
-                  className="p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex gap-3 flex-1 min-w-0">
-                      {/* Mini cover */}
-                      <div className="shrink-0 w-12 h-16 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
-                        {book.coverImageUrl ? (
-                          <img
-                            src={book.coverImageUrl}
-                            alt=""
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <BookOpen className="h-5 w-5 text-slate-300" />
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h3 className="text-sm font-bold text-slate-900 truncate">
-                            {book.title}
-                          </h3>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
-                            book.published
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : "bg-slate-100 text-slate-500 border-slate-200"
-                          }`}>
-                            {book.published ? "Published" : "Draft"}
-                          </span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${channelCfg.color}`}>
-                            {channelCfg.label}
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-slate-50 text-slate-400 border-slate-200 shrink-0">
-                            {AVAILABILITY_LABEL[book.availabilityMode]}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-slate-500">
-                          <span>by {book.author}</span>
-                          {book.priceCents != null && book.priceCents > 0 && book.salesChannel === "owned" && (
-                            <span className="font-medium text-slate-700">${(book.priceCents / 100).toFixed(2)}</span>
-                          )}
-                          {book.salesChannel === "affiliate" && book.affiliateNetwork && (
-                            <span className="flex items-center gap-1">
-                              <ExternalLink className="h-3 w-3" /> {book.affiliateNetwork}
-                            </span>
-                          )}
-                          {book.seriesTitle && (
-                            <span className="flex items-center gap-1 text-indigo-500 font-medium">
-                              {book.seriesTitle}{book.seriesOrder != null ? ` #${book.seriesOrder}` : ""}
-                            </span>
-                          )}
-                          {book.tags && book.tags.length > 0 && (
-                            <span className="text-slate-400">{book.tags.join(", ")}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Link
-                        href={`/bookstore/${book.id}`}
-                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                        title="View public page"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Link>
-                      <Link
-                        href={`/admin/bookstore/new?edit=${book.id}`}
-                        className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                        title="Edit"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Link>
-                      <button
-                        onClick={() => handleTogglePublish(book)}
-                        className={`p-2 rounded-lg transition-colors ${
-                          book.published
-                            ? "hover:bg-amber-50 text-amber-500 hover:text-amber-600"
-                            : "hover:bg-emerald-50 text-emerald-500 hover:text-emerald-600"
-                        }`}
-                        title={book.published ? "Unpublish" : "Publish"}
-                      >
-                        {book.published ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(book.id)}
-                        disabled={deleting === book.id}
-                        className="p-2 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                        title="Delete"
-                      >
-                        {deleting === book.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      </main>
     </AppShell>
   );
+}
+
+export default function AdminBookstorePage() {
+  return <RequireAuth requiredRole="admin"><AdminBookstoreContent /></RequireAuth>;
 }
