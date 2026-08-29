@@ -132,12 +132,20 @@ export const setBookstorePickupStatusFn = httpsCallable<{
   order: BookstoreOrder;
 }>(functions, "bookstore_setPickupStatus");
 
+/** Pending checkouts only. Paid orders use refundBookstoreOrderFn. */
 export const cancelBookstoreOrderFn = httpsCallable<{
   orderId: string;
   reason?: string;
 }, {
   order: BookstoreOrder;
 }>(functions, "bookstore_cancelOrder");
+
+export const refundBookstoreOrderFn = httpsCallable<{
+  orderId: string;
+  reason?: string;
+}, {
+  order: BookstoreOrder;
+}>(functions, "bookstore_refundOrder");
 
 export const getBookstoreDownloadLinkFn = httpsCallable<{
   bookId: string;
