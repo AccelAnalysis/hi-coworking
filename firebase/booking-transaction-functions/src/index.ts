@@ -3,6 +3,7 @@ import "./bootstrap";
 export {
   booking_beginCheckout,
   booking_finalizeCheckout,
+  booking_onDeskChangeBookingUpdated,
 } from "../../../apps/functions/src/bookingJourney";
 
 export {
