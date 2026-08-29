@@ -1,6 +1,5 @@
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "./firebase";
+import { functions } from "./firebase";
 import type { EventDoc, EventMediaImage, EventTicketType } from "@hi/shared";
 
 export type EventPublic = EventDoc & {
@@ -65,48 +64,35 @@ export type EventCancellationQuote = {
   cutoffHours: number;
 };
 
+const listPublicEventsFn = httpsCallable<
+  { scope: "upcoming" | "past" },
+  { events: EventPublic[] }
+>(functions, "events_v2ListPublicEvents");
+
+const getPublicEventFn = httpsCallable<
+  { identifier: string },
+  { event: EventPublic }
+>(functions, "events_v2GetPublicEvent");
+
 export async function listPublishedEvents(options?: { includePast?: boolean }) {
-  const q = query(
-    collection(db, "events"),
-    where("status", "==", "published"),
-    orderBy("startTime", "asc"),
-    limit(100),
-  );
-  const snap = await getDocs(q);
-  const rows = snap.docs.map((item) => item.data() as EventPublic);
-  if (options?.includePast) return rows;
-  const now = Date.now();
-  return rows.filter((event) => event.endTime >= now);
+  const upcoming = (await listPublicEventsFn({ scope: "upcoming" })).data.events;
+  if (!options?.includePast) return upcoming;
+  const past = (await listPublicEventsFn({ scope: "past" })).data.events;
+  return [...upcoming, ...past].sort((a, b) => a.startTime - b.startTime);
 }
 
 export async function listPastEvents() {
-  const q = query(
-    collection(db, "events"),
-    where("status", "in", ["published", "completed"]),
-    orderBy("startTime", "desc"),
-    limit(100),
-  );
-  const snap = await getDocs(q);
-  const now = Date.now();
-  return snap.docs
-    .map((item) => item.data() as EventPublic)
-    .filter((event) => event.endTime < now);
+  return (await listPublicEventsFn({ scope: "past" })).data.events;
 }
 
 export async function getPublicEvent(identifier: string): Promise<EventPublic | null> {
-  const direct = await getDoc(doc(db, "events", identifier));
-  if (direct.exists()) {
-    const event = direct.data() as EventPublic;
-    return event.status === "published" || event.status === "completed" ? event : null;
+  try {
+    return (await getPublicEventFn({ identifier })).data.event;
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === "functions/not-found" || code === "not-found") return null;
+    throw error;
   }
-  const bySlug = await getDocs(query(
-    collection(db, "events"),
-    where("slug", "==", identifier),
-    limit(1),
-  ));
-  if (bySlug.empty) return null;
-  const event = bySlug.docs[0].data() as EventPublic;
-  return event.status === "published" || event.status === "completed" ? event : null;
 }
 
 export function eventAvailableSeats(event: EventPublic) {
@@ -122,9 +108,7 @@ export function eventPublicPrice(event: EventPublic, ticket?: EventTicketType) {
 
 export function eventPrimaryImage(event: EventPublic): EventMediaImage | null {
   if (event.heroImage) return event.heroImage;
-  if (event.imageUrl) {
-    return { storagePath: "", downloadUrl: event.imageUrl, alt: event.title };
-  }
+  if (event.imageUrl) return { storagePath: "", downloadUrl: event.imageUrl, alt: event.title };
   return null;
 }
 
