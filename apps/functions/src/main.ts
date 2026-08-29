@@ -148,6 +148,7 @@ export const createBooking = onCall(async () => {
 // while the reconciled operating system becomes the canonical UI and API.
 export * from "./bookingJourney";
 export * from "./bookingManagement";
+export * from "./adminMemberOperations";
 export * from "./eventV2";
 export * from "./eventRefunds";
 export * from "./eventsV2/registration";
