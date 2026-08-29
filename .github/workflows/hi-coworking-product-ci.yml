@@ -61,17 +61,24 @@ jobs:
       - name: Lint web application
         run: npm run lint
 
-      - name: Run active product function tests
+      - name: Run pure policy and source-contract tests
         run: >-
           npx vitest run
-          tests/functions/booking-journey.test.ts
           tests/functions/booking-policy.test.ts
-          tests/functions/bookstore-commerce.test.ts
           tests/functions/event-policy-v2.test.ts
           tests/functions/event-v2-source-contract.test.ts
           tests/functions/event-cancellation-policy.test.ts
           tests/functions/event-series-timezone.test.ts
-          tests/functions/events-v2.test.ts
+
+      - name: Run active transaction integration tests
+        run: >-
+          npx firebase emulators:exec
+          --project demo-hi-coworking
+          --only auth,firestore,functions
+          "npx vitest run
+          tests/functions/booking-journey.test.ts
+          tests/functions/bookstore-commerce.test.ts
+          tests/functions/events-v2.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-
