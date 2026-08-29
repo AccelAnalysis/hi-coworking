@@ -18,6 +18,11 @@ const finalizeCheckout = httpsCallable<
   }
 >(functions, "booking_finalizeCheckout");
 
+const finalizeAdminMemberCheckout = httpsCallable<
+  { holdId: string; holdSecret: string },
+  { success: boolean; bookingId: string; alreadyFinalized?: boolean }
+>(functions, "admin_bookingForMemberFinalize");
+
 type State =
   | { kind: "loading" }
   | { kind: "success"; bookingId: string; accountReady: boolean }
@@ -40,6 +45,44 @@ export default function BookingCompletePage() {
         accountReady: Boolean(auth.currentUser),
       });
       return;
+    }
+
+    const adminHoldId = params.get("adminHoldId");
+    const adminHoldSecret = params.get("adminHoldSecret");
+    if (adminHoldId && adminHoldSecret) {
+      let cancelled = false;
+      async function finalizeAdminBooking() {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            const result = await finalizeAdminMemberCheckout({
+              holdId: adminHoldId!,
+              holdSecret: adminHoldSecret!,
+            });
+            if (cancelled) return;
+            setState({
+              kind: "success",
+              bookingId: result.data.bookingId,
+              accountReady: Boolean(auth.currentUser),
+            });
+            return;
+          } catch (error) {
+            lastError = error;
+            if (cancelled) return;
+            if (attempt < 5) await sleep(1_500);
+          }
+        }
+        console.error(lastError);
+        if (!cancelled) {
+          setState({
+            kind: "error",
+            message:
+              "Payment returned, but the member booking is still reconciling. Do not pay again. Hi Coworking can verify the payment and booking hold.",
+          });
+        }
+      }
+      void finalizeAdminBooking();
+      return () => { cancelled = true; };
     }
 
     let stored: {
@@ -152,9 +195,8 @@ export default function BookingCompletePage() {
             </p>
             {!state.accountReady && (
               <p className="mx-auto mt-4 max-w-lg rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                The booking is confirmed, but automatic account sign-in did
-                not complete. Use Log in or contact Hi Coworking for account
-                access; do not pay again.
+                The booking is confirmed. Log in with the member account to
+                view or manage it; do not pay again.
               </p>
             )}
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">

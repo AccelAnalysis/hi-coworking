@@ -299,6 +299,7 @@ function AdminMembersContent() {
     const allowance = tier?.includedHoursPerMonth || 0;
     const remainingHours = Math.max(0, allowance - usedHours);
     const latestMembershipPayment = payments.find((payment) => payment.purpose === "membership");
+    const actionsHref = `/admin/members/actions?uid=${encodeURIComponent(selected.uid)}`;
     const activity = [
       ...(selected.createdAt
         ? [{ key: "account-created", at: selected.createdAt, label: "Account created", detail: selected.email || "Member account" }]
@@ -360,6 +361,12 @@ function AdminMembersContent() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Link
+                href={actionsHref}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                <WalletCards className="h-4 w-4" /> Member actions
+              </Link>
               <button
                 type="button"
                 onClick={() => void copyEmail(selected)}
@@ -379,7 +386,7 @@ function AdminMembersContent() {
               </button>
               <Link
                 href="/admin/roles"
-                className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 <UserCog className="h-4 w-4" /> Staff & roles
               </Link>
@@ -459,6 +466,7 @@ function AdminMembersContent() {
                   <aside className="border-t border-slate-200 pt-6 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Quick actions</h2>
                     <div className="mt-4 space-y-2">
+                      <Link href={actionsHref} className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-100"><span className="flex items-center gap-2"><WalletCards className="h-4 w-4 text-slate-400" /> Membership, booking & credit</span><span>→</span></Link>
                       <Link href="/admin/access" className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-100"><span className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-slate-400" /> Access control</span><span>→</span></Link>
                       <Link href="/admin/payments" className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-100"><span className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-slate-400" /> Payment ledger</span><span>→</span></Link>
                       <Link href="/admin/roles" className="flex items-center justify-between rounded-xl px-3 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-100"><span className="flex items-center gap-2"><UserCog className="h-4 w-4 text-slate-400" /> Staff & roles</span><span>→</span></Link>
@@ -483,13 +491,20 @@ function AdminMembersContent() {
                     <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Used this month</dt><dd className="mt-1 text-lg font-semibold text-slate-950">{usedHours.toFixed(1)} hours</dd></div>
                     <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">Entitlement through</dt><dd className="mt-1 text-lg font-semibold text-slate-950">{formatDate(selected.expiresAt)}</dd></div>
                   </dl>
-                  <div className="mt-7 rounded-2xl bg-sky-50 px-5 py-4 text-sm leading-6 text-sky-950"><strong>Membership lifecycle protection:</strong> plan changes, cancellations and reactivation remain read-only until the server-authoritative Admin membership workflow is built.</div>
+                  <div className="mt-7 rounded-2xl bg-sky-50 px-5 py-4 text-sm leading-6 text-sky-950"><strong>Authoritative membership actions are available.</strong> Plan changes run through Stripe with proration, cancellations are scheduled at period end, and reactivation restores or restarts the Stripe subscription before Hi Coworking entitlements are changed.</div>
+                  <div className="mt-5 flex flex-wrap gap-4">
+                    <Link href={actionsHref} className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"><WalletCards className="h-4 w-4" /> Manage membership</Link>
+                    <Link href="/admin/products" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 underline underline-offset-4">Review canonical pricing →</Link>
+                  </div>
                 </section>
               )}
 
               {activeTab === "bookings" && (
                 <section>
-                  <div className="flex items-end justify-between gap-4"><div><h2 className="text-xl font-semibold text-slate-950">Bookings</h2><p className="mt-1 text-sm text-slate-500">Upcoming and recent space use for this member.</p></div><span className="text-sm text-slate-500">{memberBookings.length} total</span></div>
+                  <div className="flex items-end justify-between gap-4">
+                    <div><h2 className="text-xl font-semibold text-slate-950">Bookings</h2><p className="mt-1 text-sm text-slate-500">Upcoming and recent space use for this member.</p></div>
+                    <Link href={actionsHref} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900 underline underline-offset-4"><CalendarClock className="h-4 w-4" /> Book for member</Link>
+                  </div>
                   {memberBookings.length === 0 ? <p className="mt-8 text-sm text-slate-500">No bookings are recorded for this member.</p> : (
                     <div className="mt-5 divide-y divide-slate-200 border-y border-slate-200">
                       {memberBookings.slice(0, 20).map((booking) => (
@@ -501,6 +516,7 @@ function AdminMembersContent() {
                       ))}
                     </div>
                   )}
+                  <p className="mt-5 text-xs leading-5 text-slate-500">New bookings for a member use the same authoritative availability, included-hours, account-credit and payment lifecycle as customer bookings. Existing booking cancellation/reschedule continues through its established booking-management workflow.</p>
                 </section>
               )}
 
@@ -553,8 +569,9 @@ function AdminMembersContent() {
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">Membership, usage, bookings, billing and customer-service history in one place. Staff/Admin role assignment is managed separately.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link href="/admin/members/actions" className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"><WalletCards className="h-4 w-4" /> Member actions</Link>
             <Link href="/admin/roles" className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"><UserCog className="h-4 w-4" /> Staff & roles</Link>
-            <button type="button" onClick={() => void fetchDirectory()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh</button>
+            <button type="button" onClick={() => void fetchDirectory()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh</button>
           </div>
         </div>
 
