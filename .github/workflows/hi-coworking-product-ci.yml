@@ -116,6 +116,7 @@ jobs:
           const routes = [
             'admin/dashboard',
             'admin/members',
+            'admin/roles',
             'admin/events',
             'staff',
           ];
