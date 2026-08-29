@@ -10,6 +10,18 @@ const pageSource = readFileSync(
   "apps/web/src/app/admin/payments/page.tsx",
   "utf8",
 );
+const isolatedIndex = readFileSync(
+  "firebase/payment-status-guard-functions/src/index.ts",
+  "utf8",
+);
+const isolatedPackage = readFileSync(
+  "firebase/payment-status-guard-functions/package.json",
+  "utf8",
+);
+const isolatedConfig = JSON.parse(
+  readFileSync("firebase.payment-status-guard.json", "utf8"),
+);
+const rootPackage = JSON.parse(readFileSync("package.json", "utf8"));
 const firestoreRules = readFileSync("firestore.rules", "utf8");
 
 describe("provider-authoritative Payment Ledger", () => {
@@ -62,6 +74,26 @@ describe("provider-authoritative Payment Ledger", () => {
     );
     expect(paymentRule).toContain(
       "allow create, update, delete: if false",
+    );
+  });
+
+  it("deploys the guard from an isolated default-codebase bundle without retired secrets", () => {
+    expect(isolatedConfig.functions.source).toBe(
+      "firebase/payment-status-guard-functions",
+    );
+    expect(isolatedConfig.functions.codebase).toBeUndefined();
+    expect(isolatedIndex.trim()).toBe(
+      'export { admin_markPaymentStatus } from "../../../apps/functions/src/adminPaymentLegacyGuard";',
+    );
+    expect(isolatedIndex).not.toContain("TWILIO");
+    expect(isolatedIndex).not.toContain("SENDGRID");
+    expect(isolatedPackage).not.toContain("twilio");
+    expect(rootPackage.scripts["build:payment-status-guard-deploy"]).toBeTruthy();
+    expect(rootPackage.scripts["deploy:payment-status-guard"]).toContain(
+      "firebase.payment-status-guard.json",
+    );
+    expect(rootPackage.scripts["deploy:payment-status-guard"]).toContain(
+      "functions:admin_markPaymentStatus",
     );
   });
 });
