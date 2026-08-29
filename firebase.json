@@ -21,6 +21,7 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "cleanUrls": true,
     "redirects": [
       { "source": "/dashboard", "destination": "/my-hi", "type": 302 },
       { "source": "/profile", "destination": "/my-hi", "type": 302 },
