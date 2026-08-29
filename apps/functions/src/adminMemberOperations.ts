@@ -94,6 +94,7 @@ type AdminHold = {
   membershipUsageId?: string | null;
   accountCreditReservationCents?: number;
   paymentId?: string;
+  totalCents?: number;
   bookingId?: string;
 };
 
