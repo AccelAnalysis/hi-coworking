@@ -11,6 +11,7 @@ on:
       - "tests/rules/**"
       - "firestore.rules"
       - "firestore.indexes.json"
+      - "firebase.json"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/hi-coworking-product-ci.yml"
@@ -98,6 +99,37 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+
+      - name: Verify Firebase Hosting serves exported Admin routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const config = JSON.parse(fs.readFileSync('firebase.json', 'utf8'));
+          if (config.hosting?.cleanUrls !== true) {
+            throw new Error('Firebase Hosting cleanUrls must remain enabled for the Next.js static export.');
+          }
+
+          const routes = [
+            'admin/dashboard',
+            'admin/members',
+            'admin/events',
+            'staff',
+          ];
+
+          for (const route of routes) {
+            const candidates = [
+              path.join('apps/web/out', `${route}.html`),
+              path.join('apps/web/out', route, 'index.html'),
+            ];
+            if (!candidates.some((candidate) => fs.existsSync(candidate))) {
+              throw new Error(`Missing exported static route: /${route}`);
+            }
+          }
+          NODE
 
       - name: Verify clean patch
         run: git diff --check
