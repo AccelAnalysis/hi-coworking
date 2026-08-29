@@ -5,6 +5,10 @@ const source = readFileSync(
   "apps/functions/src/adminMemberOperations.ts",
   "utf8",
 );
+const membershipAuthoritySource = readFileSync(
+  "apps/functions/src/adminMembershipAuthority.ts",
+  "utf8",
+);
 const authoritySource = readFileSync(
   "apps/functions/src/adminMemberOperationsAuthority.ts",
   "utf8",
@@ -26,22 +30,24 @@ const packageJson = JSON.parse(
 
 describe("Admin member operations source contract", () => {
   it("exposes the authoritative membership lifecycle", () => {
-    expect(authoritySource).toContain("admin_membershipGetState");
-    expect(source).toContain("admin_membershipChangePlan");
-    expect(source).toContain("admin_membershipCancel");
-    expect(source).toContain("admin_membershipReactivate");
-    expect(source).toContain('proration_behavior: "always_invoice"');
-    expect(source).toContain('payment_behavior: "error_if_incomplete"');
-    expect(source).toContain("cancel_at_period_end: true");
-    expect(source).toContain("membership_plan_changed");
-    expect(source).toContain("membership_cancel_at_period_end");
+    expect(membershipAuthoritySource).toContain("admin_membershipGetState");
+    expect(membershipAuthoritySource).toContain("admin_membershipChangePlan");
+    expect(membershipAuthoritySource).toContain("admin_membershipCancel");
+    expect(membershipAuthoritySource).toContain("admin_membershipReactivate");
+    expect(membershipAuthoritySource).toContain('proration_behavior: "always_invoice"');
+    expect(membershipAuthoritySource).toContain('payment_behavior: "error_if_incomplete"');
+    expect(membershipAuthoritySource).toContain("cancel_at_period_end: true");
+    expect(membershipAuthoritySource).toContain("membership_plan_changed");
+    expect(membershipAuthoritySource).toContain("membership_cancel_at_period_end");
+    expect(membershipAuthoritySource).toContain("safeReturnOrigin");
   });
 
   it("treats ended Stripe subscriptions as restartable rather than cancellable", () => {
-    expect(authoritySource).toContain("ACTIVE_SUBSCRIPTION_STATUSES");
-    expect(authoritySource).toContain("const hasSubscription = ACTIVE_SUBSCRIPTION_STATUSES.has");
-    expect(authoritySource).toContain("canRestart: !hasSubscription");
-    expect(authoritySource).toContain("hasStripeSubscriptionRecord: true");
+    expect(membershipAuthoritySource).toContain("ACTIVE_SUBSCRIPTION_STATUSES");
+    expect(membershipAuthoritySource).toContain("const hasSubscription = ACTIVE_SUBSCRIPTION_STATUSES.has");
+    expect(membershipAuthoritySource).toContain("canRestart: !hasSubscription");
+    expect(membershipAuthoritySource).toContain("hasStripeSubscriptionRecord: true");
+    expect(membershipAuthoritySource).toContain("stripe.customers.list");
   });
 
   it("keeps account-credit adjustments transactional, bounded, idempotent and audited", () => {
@@ -81,7 +87,11 @@ describe("Admin member operations source contract", () => {
 
   it("exports the hardened handlers instead of the superseded module implementations", () => {
     expect(mainSource).not.toContain('export * from "./adminMemberOperations";');
+    expect(mainSource).toContain('from "./adminMembershipAuthority";');
     expect(mainSource).toContain('from "./adminMemberOperationsAuthority";');
+    expect(deployIndex).toContain(
+      'from "../../../apps/functions/src/adminMembershipAuthority";',
+    );
     expect(deployIndex).toContain(
       'from "../../../apps/functions/src/adminMemberOperationsAuthority";',
     );
