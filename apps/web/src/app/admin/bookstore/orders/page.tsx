@@ -224,5 +224,5 @@ function OrdersContent() {
 }
 
 export default function AdminBookstoreOrdersPage() {
-  return <RequireAuth requiredRole="admin"><OrdersContent /></RequireAuth>;
+  return <RequireAuth requiredRole="staff"><OrdersContent /></RequireAuth>;
 }
