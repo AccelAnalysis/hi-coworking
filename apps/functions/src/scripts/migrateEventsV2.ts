@@ -41,15 +41,17 @@ async function main() {
       eventDoc.ref.collection("waitlist").get(),
     ]);
 
-    let confirmedQuantity = 0;
+    let derivedConfirmedQuantity = 0;
     for (const registrationDoc of registrations.docs) {
       const registration = registrationDoc.data();
-      const quantity = Math.max(1, Number(registration.quantity || 1));
+      const quantity = Math.max(1, Math.round(Number(registration.quantity || 1)));
       const status = mapStatus(registration.status);
-      if (status === "CONFIRMED") confirmedQuantity += quantity;
+      if (status === "CONFIRMED") derivedConfirmedQuantity += quantity;
       const id = `legacy_${eventDoc.id}_${registrationDoc.id}`;
       const email = String(registration.email || "").trim().toLowerCase();
       if (!email) anomalies.push(`${eventDoc.id}/${registrationDoc.id}: registration has no email`);
+      const amountPaidCents = Math.max(0, Math.round(Number(registration.amountPaidCents || 0)));
+      const unitPriceCents = Math.round(amountPaidCents / quantity);
       const payload = {
         id,
         eventId: eventDoc.id,
@@ -58,10 +60,10 @@ async function main() {
         email: email || `${registrationDoc.id}@invalid.local`,
         ticketTypeId: registration.ticketTypeId || null,
         quantity,
-        publicUnitPriceCents: Number(registration.amountPaidCents || 0) / quantity,
+        publicUnitPriceCents: unitPriceCents,
         discountCents: 0,
-        finalUnitPriceCents: Number(registration.amountPaidCents || 0) / quantity,
-        amountPaidCents: Number(registration.amountPaidCents || 0),
+        finalUnitPriceCents: unitPriceCents,
+        amountPaidCents,
         currency: String(event.currency || "usd").toLowerCase(),
         paymentId: registration.paymentId || null,
         status,
@@ -74,10 +76,16 @@ async function main() {
         migratedFrom: `events/${eventDoc.id}/registrations/${registrationDoc.id}`,
         migratedAt: Date.now(),
       };
-      if (apply) {
-        await db.collection("eventRegistrations").doc(id).set(payload, { merge: true });
-      }
+      if (apply) await db.collection("eventRegistrations").doc(id).set(payload, { merge: true });
       registrationWrites += 1;
+    }
+
+    const legacyRegistrationCount = Math.max(0, Math.round(Number(event.registrationCount || 0)));
+    const confirmedQuantity = registrations.empty ? legacyRegistrationCount : derivedConfirmedQuantity;
+    if (!registrations.empty && legacyRegistrationCount !== derivedConfirmedQuantity) {
+      anomalies.push(
+        `${eventDoc.id}: legacy registrationCount=${legacyRegistrationCount}, derived active quantity=${derivedConfirmedQuantity}; using derived quantity`,
+      );
     }
 
     for (const waitlistDoc of waitlist.docs) {
@@ -103,9 +111,7 @@ async function main() {
         migratedFrom: `events/${eventDoc.id}/waitlist/${waitlistDoc.id}`,
         migratedAt: Date.now(),
       };
-      if (apply) {
-        await db.collection("eventWaitlist").doc(id).set(payload, { merge: true });
-      }
+      if (apply) await db.collection("eventWaitlist").doc(id).set(payload, { merge: true });
       waitlistWrites += 1;
     }
 
@@ -117,6 +123,9 @@ async function main() {
       confirmedQuantity,
       registrationCount: confirmedQuantity,
       heldQuantity: Math.max(0, Number(event.heldQuantity || 0)),
+      ticketTypes: Array.isArray(event.ticketTypes)
+        ? event.ticketTypes.map((ticket: Record<string, unknown>) => ({ ...ticket, heldCount: Math.max(0, Number(ticket.heldCount || 0)) }))
+        : [],
       refundCutoffHours: Number.isFinite(Number(event.refundCutoffHours)) ? Number(event.refundCutoffHours) : 24,
       reminders: event.reminders || {
         confirmation: true,
@@ -141,9 +150,7 @@ async function main() {
     anomalies: anomalies.slice(0, 50),
   }, null, 2));
 
-  if (!apply) {
-    console.log("Dry run only. Re-run with --apply after reviewing the counts and anomalies.");
-  }
+  if (!apply) console.log("Dry run only. Re-run with --apply after reviewing the counts and anomalies.");
 }
 
 main().catch((error) => {
