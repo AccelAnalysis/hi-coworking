@@ -1,0 +1,11 @@
+{
+  "name": "hi-coworking-payment-status-guard-functions",
+  "private": true,
+  "main": "lib/firebase/payment-status-guard-functions/src/index.js",
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-functions": "^7.2.5"
+  }
+}
