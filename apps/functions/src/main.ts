@@ -47,11 +47,7 @@ export const businessReferral_withdrawConsent = legacy.businessReferral_withdraw
 export const businessReferral_prepareEvidenceAccess = legacy.businessReferral_prepareEvidenceAccess;
 export const businessReferral_createDispute = legacy.businessReferral_createDispute;
 export const businessReferral_resolveDispute = legacy.businessReferral_resolveDispute;
-export const events_createTicketCheckout = legacy.events_createTicketCheckout;
 export const events_createSponsorshipCheckout = legacy.events_createSponsorshipCheckout;
-export const events_registerFree = legacy.events_registerFree;
-export const events_cancelRegistration = legacy.events_cancelRegistration;
-export const events_joinWaitlist = legacy.events_joinWaitlist;
 export const events_upsertSeries = legacy.events_upsertSeries;
 export const events_extendHorizon = legacy.events_extendHorizon;
 export const events_setSeriesOccurrenceOverride = legacy.events_setSeriesOccurrenceOverride;
@@ -107,24 +103,37 @@ export const notify_referralUpdate = legacy.notify_referralUpdate;
 export const notify_eventRegistration = legacy.notify_eventRegistration;
 export const notify_paymentCreated = legacy.notify_paymentCreated;
 
-// The original direct-booking callables could create confirmed bookings without
-// authoritative checkout. They remain deployed only as fail-closed compatibility
-// shims so stale clients cannot bypass the current availability/hold/payment flow.
-export const createBookingQuote = onCall(async () => {
-  throw new HttpsError(
-    "failed-precondition",
-    "This quote endpoint has been retired. Start from Spaces and use the current booking checkout.",
-  );
-});
+function retiredTransactionEndpoint(message: string) {
+  return onCall(async () => {
+    throw new HttpsError("failed-precondition", message);
+  });
+}
 
-export const createBooking = onCall(async () => {
-  throw new HttpsError(
-    "failed-precondition",
-    "This booking endpoint has been retired. Start from Spaces and use the current booking checkout.",
-  );
-});
+// Fail closed for stale booking clients.
+export const createBookingQuote = retiredTransactionEndpoint(
+  "This quote endpoint has been retired. Start from Spaces and use the current booking checkout.",
+);
+export const createBooking = retiredTransactionEndpoint(
+  "This booking endpoint has been retired. Start from Spaces and use the current booking checkout.",
+);
+
+// Fail closed for stale Events clients so no browser can bypass Events v2 holds,
+// authoritative pricing, guest management tokens, or quantity-aware cancellation.
+export const events_createTicketCheckout = retiredTransactionEndpoint(
+  "This event checkout endpoint has been retired. Reopen the event and use the current registration flow.",
+);
+export const events_registerFree = retiredTransactionEndpoint(
+  "This event registration endpoint has been retired. Reopen the event and use the current registration flow.",
+);
+export const events_cancelRegistration = retiredTransactionEndpoint(
+  "This event cancellation endpoint has been retired. Reopen the event and use the current registration flow.",
+);
+export const events_joinWaitlist = retiredTransactionEndpoint(
+  "This event waitlist endpoint has been retired. Reopen the event and use the current registration flow.",
+);
 
 export * from "./bookingJourney";
 export * from "./bookingManagement";
 export * from "./eventJourney";
 export * from "./eventPaymentTrigger";
+export * from "./eventStaff";
