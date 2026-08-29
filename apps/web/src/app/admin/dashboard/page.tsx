@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Loader2,
   Rocket,
+  UserCog,
   Users,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
@@ -145,6 +146,7 @@ function AdminDashboardContent() {
 
   const quickLinks = [
     { href: "/admin/members", label: "Member Management", icon: Users },
+    { href: "/admin/roles", label: "Staff & Roles", icon: UserCog },
     { href: "/admin/events", label: "Event Management", icon: Calendar },
     { href: "/admin/bookstore", label: "Bookstore", icon: BookOpen },
     { href: "/admin/payments", label: "Payments Ledger", icon: CreditCard },
