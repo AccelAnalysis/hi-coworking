@@ -60,8 +60,6 @@ export const events_processCampaignJobs = legacy.events_processCampaignJobs;
 export const events_generateShareKits = legacy.events_generateShareKits;
 export const events_processSocialPosts = legacy.events_processSocialPosts;
 export const events_onMediaUploaded = legacy.events_onMediaUploaded;
-export const bookstore_createCheckoutSession = legacy.bookstore_createCheckoutSession;
-export const bookstore_getDownloadLink = legacy.bookstore_getDownloadLink;
 export const territory_create = legacy.territory_create;
 export const territory_update = legacy.territory_update;
 export const territory_list_released = legacy.territory_list_released;
@@ -126,3 +124,4 @@ export const createBooking = onCall(async () => {
 
 export * from "./bookingJourney";
 export * from "./bookingManagement";
+export * from "./bookstoreCommerce";
