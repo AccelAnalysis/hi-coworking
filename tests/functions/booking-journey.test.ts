@@ -348,7 +348,7 @@ describe("booking journey", () => {
     );
 
     expect(quote.membershipName).toBe("Coworking Member");
-    expect(quote.includedHoursRemaining).toBe(13);
+    expect(quote.includedHoursRemaining).toBe(8);
     expect(quote.includedHoursApplied).toBe(3);
     expect(quote.billableHours).toBe(0);
     expect(quote.totalCents).toBe(0);
@@ -371,14 +371,14 @@ describe("booking journey", () => {
     await db.collection("users").doc(
       "booking-credit-member",
     ).update({
-      accountCreditCents: 1050,
+      accountCreditCents: 1400,
     });
     await db.collection("membershipUsage").doc(
       `booking-credit-member_${monthParts.year}-${monthParts.month}`,
     ).set({
       uid: "booking-credit-member",
       monthKey: `${monthParts.year}-${monthParts.month}`,
-      usedHours: 15,
+      usedHours: 10,
       reservations: {},
       updatedAt: Date.now(),
     });
@@ -396,8 +396,8 @@ describe("booking journey", () => {
         end: window.end,
       },
     );
-    expect(quote.subtotalCents).toBe(1050);
-    expect(quote.accountCreditAppliedCents).toBe(1050);
+    expect(quote.subtotalCents).toBe(1400);
+    expect(quote.accountCreditAppliedCents).toBe(1400);
     expect(quote.totalCents).toBe(0);
 
     const result = await callFunction<{
@@ -428,7 +428,7 @@ describe("booking journey", () => {
         result.bookingId!,
       ).get()
     ).data();
-    expect(booking?.accountCreditAppliedCents).toBe(1050);
+    expect(booking?.accountCreditAppliedCents).toBe(1400);
     expect(booking?.status).toBe("CONFIRMED");
   });
 
