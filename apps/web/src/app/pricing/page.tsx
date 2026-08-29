@@ -152,7 +152,7 @@ export default function PricingPage() {
                             {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
                           </p>
                           <p className="text-xs text-emerald-700 mt-0.5">
-                            Additional hours: ${(tier.extraHourlyRateCents / 100).toFixed(tier.extraHourlyRateCents % 100 === 0 ? 0 : 2)}/hr
+                            Additional hours: {tier.id === "coworking" ? "20%" : "30%"} off the regular hourly price
                           </p>
                         </>
                       )}
