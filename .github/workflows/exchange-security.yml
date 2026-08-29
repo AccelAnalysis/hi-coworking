@@ -11,6 +11,13 @@ permissions:
 
 jobs:
   verify:
+    # The Exchange surface guarded by this workflow is retired. Keep the
+    # verification available for legacy Exchange branches without making it
+    # a gate for active Hi Coworking product work.
+    if: >-
+      github.event_name == 'push' ||
+      startsWith(github.head_ref, 'codex/exchange-') ||
+      startsWith(github.head_ref, 'exchange/')
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
