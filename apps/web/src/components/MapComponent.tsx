@@ -16,13 +16,17 @@ export function MapComponent() {
     const map = L.map(mapRef.current).setView(position, 15);
     mapInstanceRef.current = map;
 
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-      }
-    ).addTo(map);
+    const tileUrl = process.env.NEXT_PUBLIC_OPENSTREETMAP_TILE_URL;
+
+    if (!tileUrl) {
+      throw new Error("NEXT_PUBLIC_OPENSTREETMAP_TILE_URL is not configured");
+    }
+
+    L.tileLayer(tileUrl, {
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      maxZoom: 20,
+    }).addTo(map);
 
     const customIcon = L.icon({
       iconUrl: "/images/hi_map_marker.svg",
