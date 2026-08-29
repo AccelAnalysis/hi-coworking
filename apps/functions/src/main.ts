@@ -48,13 +48,31 @@ export const businessReferral_prepareEvidenceAccess = legacy.businessReferral_pr
 export const businessReferral_createDispute = legacy.businessReferral_createDispute;
 export const businessReferral_resolveDispute = legacy.businessReferral_resolveDispute;
 
-// Legacy event endpoints stay deployed during the Events v2 cutover. The new
-// public client uses the v2 endpoints exported from eventV2 below.
-export const events_createTicketCheckout = legacy.events_createTicketCheckout;
+function retiredEventEndpoint(message: string) {
+  return onCall(async () => {
+    throw new HttpsError("failed-precondition", message);
+  });
+}
+
+// Keep the legacy function names deployed as fail-closed compatibility shims.
+// Stale clients therefore cannot bypass Events v2 capacity holds, payment
+// reconciliation, cancellation policy, refunds, or waitlist promotion.
+export const events_createTicketCheckout = retiredEventEndpoint(
+  "The legacy ticket checkout has been retired. Refresh the Events page and use the current registration flow.",
+);
+export const events_registerFree = retiredEventEndpoint(
+  "The legacy free-registration endpoint has been retired. Refresh the Events page and register again.",
+);
+export const events_cancelRegistration = retiredEventEndpoint(
+  "The legacy cancellation endpoint has been retired. Open your registration and use Manage registration.",
+);
+export const events_joinWaitlist = retiredEventEndpoint(
+  "The legacy waitlist endpoint has been retired. Refresh the Events page and join through the current event flow.",
+);
+
+// Advanced event commerce, recurring-series, marketing, and media functions
+// remain available while the registration lifecycle is fully Events v2.
 export const events_createSponsorshipCheckout = legacy.events_createSponsorshipCheckout;
-export const events_registerFree = legacy.events_registerFree;
-export const events_cancelRegistration = legacy.events_cancelRegistration;
-export const events_joinWaitlist = legacy.events_joinWaitlist;
 export const events_upsertSeries = legacy.events_upsertSeries;
 export const events_extendHorizon = legacy.events_extendHorizon;
 export const events_setSeriesOccurrenceOverride = legacy.events_setSeriesOccurrenceOverride;
@@ -126,10 +144,16 @@ export const createBooking = onCall(async () => {
   );
 });
 
+// Preserve the already-deployed PR #42 Events v2 names for in-flight sessions
+// while the reconciled operating system becomes the canonical UI and API.
 export * from "./bookingJourney";
 export * from "./bookingManagement";
 export * from "./eventV2";
 export * from "./eventRefunds";
+export * from "./eventsV2/registration";
+export * from "./eventsV2/management";
+export * from "./eventsV2/notifications";
+
 export {
   bookstore_getPublicStock,
   bookstore_createCheckoutSession,

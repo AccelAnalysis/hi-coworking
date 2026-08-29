@@ -1,224 +1,217 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AppShell } from "@/components/AppShell";
-import { getEvents, type EventFilters } from "@/lib/firestore";
-import type { EventDoc, EventFormat } from "@hi/shared";
+import Image from "next/image";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarDays, Loader2, MapPin } from "lucide-react";
+import { AppShell } from "@/components/AppShell";
 import {
-  Calendar,
-  MapPin,
-  Video,
-  Users,
-  Loader2,
-  Filter,
-  Clock,
-  DollarSign,
-  Play,
-} from "lucide-react";
+  eventAvailableSeats,
+  eventPrimaryImage,
+  listPastEvents,
+  listPublishedEvents,
+  type EventPublic,
+} from "@/lib/eventsV2";
 
-const FORMAT_OPTIONS: { value: EventFormat | ""; label: string }[] = [
-  { value: "", label: "All Formats" },
-  { value: "in-person", label: "In-Person" },
-  { value: "virtual", label: "Virtual" },
-  { value: "hybrid", label: "Hybrid" },
-];
+function dateLabel(timestamp: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(timestamp));
+}
 
-const FORMAT_ICON: Record<EventFormat, typeof MapPin> = {
-  "in-person": MapPin,
-  virtual: Video,
-  hybrid: Users,
-};
+function timeLabel(timestamp: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(timestamp));
+}
 
-const FORMAT_COLOR: Record<EventFormat, string> = {
-  "in-person": "bg-blue-50 text-blue-700 border-blue-200",
-  virtual: "bg-purple-50 text-purple-700 border-purple-200",
-  hybrid: "bg-amber-50 text-amber-700 border-amber-200",
-};
+function priceLabel(event: EventPublic) {
+  const prices = event.ticketTypes?.length
+    ? event.ticketTypes.filter((ticket) => ticket.targetAudience !== "vip").map((ticket) => ticket.priceCents)
+    : [event.price || 0];
+  const minimum = Math.min(...prices);
+  if (minimum <= 0) return "Free";
+  return `From $${(minimum / 100).toFixed(minimum % 100 === 0 ? 0 : 2)}`;
+}
 
-export default function EventsPage() {
-  const [events, setEvents] = useState<EventDoc[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [formatFilter, setFormatFilter] = useState<EventFormat | "">("");
-  const [showPast, setShowPast] = useState(false);
+function hrefFor(event: EventPublic) {
+  return `/events/detail?event=${encodeURIComponent(event.slug || event.id)}`;
+}
 
-  useEffect(() => {
-    const fetchEvents = async () => {
-      setLoading(true);
-      try {
-        const filters: EventFilters = {
-          status: "published",
-          upcoming: !showPast,
-        };
-        if (formatFilter) filters.format = formatFilter;
-        const data = await getEvents(filters);
-        setEvents(data);
-      } catch (err) {
-        console.error("Failed to fetch events:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchEvents();
-  }, [formatFilter, showPast]);
-
+function EventImage({ event, priority = false }: { event: EventPublic; priority?: boolean }) {
+  const image = eventPrimaryImage(event);
+  if (image?.downloadUrl) {
+    return (
+      <Image
+        src={image.downloadUrl}
+        alt={image.alt || event.title}
+        fill
+        priority={priority}
+        className="object-cover"
+        sizes={priority ? "(max-width: 1024px) 100vw, 62vw" : "(max-width: 768px) 100vw, 33vw"}
+      />
+    );
+  }
   return (
-    <AppShell>
-      <div className="max-w-5xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
-            <Calendar className="h-8 w-8 text-slate-400" />
-            Events
-          </h1>
-          <p className="text-slate-500 mt-1">
-            Workshops, networking, and knowledge-sharing — in-person, virtual, or hybrid.
-          </p>
-        </div>
-
-        {/* Filters */}
-        <div className="flex items-center gap-3 mb-6">
-          <Filter className="h-4 w-4 text-slate-400" />
-          <div className="flex gap-2">
-            {FORMAT_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setFormatFilter(opt.value as EventFormat | "")}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                  formatFilter === opt.value
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <div className="ml-auto">
-            <button
-              onClick={() => setShowPast(!showPast)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                showPast
-                  ? "bg-slate-900 text-white border-slate-900"
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              {showPast ? "Showing All" : "Upcoming Only"}
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        {loading ? (
-          <div className="flex items-center justify-center py-24">
-            <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
-          </div>
-        ) : events.length === 0 ? (
-          <div className="text-center py-24">
-            <Calendar className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-slate-700 mb-1">
-              No events found
-            </h2>
-            <p className="text-sm text-slate-500">
-              {showPast
-                ? "No events match your filters."
-                : "No upcoming events — check back soon!"}
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {events.map((event) => (
-              <EventCard key={event.id} event={event} />
-            ))}
-          </div>
-        )}
-      </div>
-    </AppShell>
+    <div className="absolute inset-0 bg-gradient-to-br from-slate-100 via-sky-50 to-slate-200" aria-hidden="true" />
   );
 }
 
-function EventCard({ event }: { event: EventDoc }) {
-  const FormatIcon = FORMAT_ICON[event.format];
-  const formatColor = FORMAT_COLOR[event.format];
-  const isFree = !event.price || event.price === 0;
-  const isFull = event.seatCap ? event.registrationCount >= event.seatCap : false;
-  const [isPast, setIsPast] = useState(false);
-  useEffect(() => { setIsPast(event.endTime < Date.now()); }, [event.endTime]);
-  const startDate = new Date(event.startTime);
-  const endDate = new Date(event.endTime);
+export default function EventsPage() {
+  const [events, setEvents] = useState<EventPublic[]>([]);
+  const [pastEvents, setPastEvents] = useState<EventPublic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"upcoming" | "month" | "past">("upcoming");
 
-  const dateStr = startDate.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-  const timeStr = `${startDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} – ${endDate.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [upcoming, past] = await Promise.all([
+          listPublishedEvents(),
+          listPastEvents(),
+        ]);
+        if (!active) return;
+        setEvents(upcoming);
+        setPastEvents(past);
+      } catch (err) {
+        if (!active) return;
+        console.error("Failed to load events", err);
+        setError("We couldn’t load the event calendar right now. Please try again shortly.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void load();
+    return () => { active = false; };
+  }, []);
+
+  const thisMonth = useMemo(() => {
+    const now = new Date();
+    return events.filter((event) => {
+      const date = new Date(event.startTime);
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    });
+  }, [events]);
+
+  const visible = view === "past" ? pastEvents : view === "month" ? thisMonth : events;
+  const featured = view === "upcoming" ? visible[0] : undefined;
+  const gridEvents = featured ? visible.slice(1) : visible;
 
   return (
-    <Link
-      href={`/events/detail?id=${event.id}`}
-      className="block p-5 rounded-xl bg-white shadow-sm ring-1 ring-slate-200 hover:ring-slate-300 hover:shadow-md transition-all"
-    >
-      <div className="flex items-start gap-4">
-        {/* Date block */}
-        <div className="shrink-0 w-16 h-16 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center">
-          <span className="text-[10px] font-bold text-slate-400 uppercase">
-            {startDate.toLocaleDateString("en-US", { month: "short" })}
-          </span>
-          <span className="text-xl font-bold text-slate-900 leading-none">
-            {startDate.getDate()}
-          </span>
+    <AppShell>
+      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        <div className="max-w-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">At Hi Coworking</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Come work, learn, and meet people here.</h1>
+          <p className="mt-4 text-base leading-7 text-slate-600">
+            Community mornings, practical workshops, and local gatherings in Carrollton.
+          </p>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 line-clamp-1">
-                {event.title}
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
-                {event.description}
-              </p>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {isPast && event.recordingUrl && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-200 inline-flex items-center gap-1">
-                  <Play className="h-3 w-3" /> Recording
-                </span>
-              )}
-              {!isFree && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200 inline-flex items-center gap-1">
-                  <DollarSign className="h-3 w-3" />
-                  ${(event.price / 100).toFixed(2)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 mt-2">
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border inline-flex items-center gap-1 ${formatColor}`}>
-              <FormatIcon className="h-3 w-3" />
-              {event.format}
-            </span>
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {dateStr} · {timeStr}
-            </span>
-            {event.location && (
-              <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {event.location}
-              </span>
-            )}
-            {event.seatCap && (
-              <span className={`text-[10px] font-medium ${isFull ? "text-red-500" : "text-slate-400"}`}>
-                {event.registrationCount}/{event.seatCap} seats
-              </span>
-            )}
-          </div>
+        <div className="mt-8 flex flex-wrap gap-2" aria-label="Event view">
+          {([
+            ["upcoming", "Upcoming"],
+            ["month", "This month"],
+            ["past", "Past events"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setView(value)}
+              className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                view === value
+                  ? "bg-slate-950 text-white"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:text-slate-950"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      </div>
-    </Link>
+
+        {loading && (
+          <div className="flex min-h-64 items-center justify-center" role="status">
+            <Loader2 className="h-7 w-7 animate-spin text-slate-400" />
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="mt-10 rounded-2xl bg-rose-50 p-5 text-sm text-rose-800">{error}</div>
+        )}
+
+        {!loading && !error && visible.length === 0 && (
+          <div className="mt-12 border-t border-slate-200 py-16">
+            <CalendarDays className="h-8 w-8 text-slate-300" />
+            <h2 className="mt-4 text-2xl font-semibold text-slate-900">
+              {view === "past" ? "No past events to show yet." : "Nothing scheduled here yet."}
+            </h2>
+            <p className="mt-2 max-w-lg text-sm leading-6 text-slate-500">
+              Check back soon. New gatherings will appear here as they’re announced.
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && featured && (
+          <Link href={hrefFor(featured)} className="group mt-10 grid overflow-hidden rounded-[2rem] bg-slate-950 text-white lg:grid-cols-[1.45fr_1fr]">
+            <div className="relative min-h-72 lg:min-h-[28rem]">
+              <EventImage event={featured} priority />
+            </div>
+            <div className="flex flex-col justify-between p-7 sm:p-9">
+              <div>
+                <p className="text-sm font-medium text-sky-200">Next up · {dateLabel(featured.startTime)}</p>
+                <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{featured.title}</h2>
+                <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-300">{featured.description}</p>
+              </div>
+              <div className="mt-8 space-y-2 text-sm text-slate-300">
+                <p>{timeLabel(featured.startTime)} · {priceLabel(featured)}</p>
+                {featured.location && (
+                  <p className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {featured.location}</p>
+                )}
+                {eventAvailableSeats(featured) === 0 && <p className="font-medium text-amber-200">Waitlist available</p>}
+                <span className="mt-5 inline-flex rounded-full bg-white px-4 py-2 font-semibold text-slate-950 transition group-hover:bg-sky-100">View event</span>
+              </div>
+            </div>
+          </Link>
+        )}
+
+        {!loading && !error && gridEvents.length > 0 && (
+          <section className="mt-12" aria-labelledby="event-list-heading">
+            <div className="flex items-end justify-between border-b border-slate-200 pb-4">
+              <h2 id="event-list-heading" className="text-2xl font-semibold text-slate-950">
+                {view === "past" ? "Past events" : view === "month" ? "This month" : "More upcoming"}
+              </h2>
+            </div>
+            <div className="mt-6 grid gap-x-6 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+              {gridEvents.map((event) => {
+                const available = eventAvailableSeats(event);
+                return (
+                  <Link key={event.id} href={hrefFor(event)} className="group block">
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-100">
+                      <EventImage event={event} />
+                    </div>
+                    <div className="pt-4">
+                      <p className="text-sm font-medium text-sky-700">{dateLabel(event.startTime)} · {timeLabel(event.startTime)}</p>
+                      <h3 className="mt-1 text-xl font-semibold text-slate-950 transition group-hover:text-sky-800">{event.title}</h3>
+                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{event.description}</p>
+                      <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
+                        <span>{priceLabel(event)}</span>
+                        {available === 0 && <span className="text-amber-700">Waitlist</span>}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+      </main>
+    </AppShell>
   );
 }

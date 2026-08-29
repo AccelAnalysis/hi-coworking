@@ -366,43 +366,39 @@ service cloud.firestore {
     }
 
     // --- events/{eventId} ---
-    // Public read for published events; admin write.
+    // Events v2 exposes a sanitized public projection through Cloud Functions.
+    // Raw event documents may contain private joining or operational metadata.
     match /events/{eventId} {
-      allow read: if isAdmin()
-                  || (resource.data.status == "published");
-      allow create, update, delete: if isAdmin();
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
 
-      // --- events/{eventId}/registrations/{uid} ---
+      // Legacy nested registrations remain readable only by their owner/admin
+      // during migration; all writes are server-authoritative.
       match /registrations/{uid} {
         allow read: if isOwner(uid) || isAdmin();
-        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+        allow create, update, delete: if false;
       }
 
-      // --- events/{eventId}/waitlist/{uid} ---
       match /waitlist/{uid} {
         allow read: if isOwner(uid) || isAdmin();
-        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+        allow create, update, delete: if false;
       }
 
-      // --- events/{eventId}/sponsors/{sponsorId} ---
       match /sponsors/{sponsorId} {
         allow read: if isAdmin();
-        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+        allow create, update, delete: if false;
       }
 
-      // --- events/{eventId}/vendorTables/{tableId} ---
       match /vendorTables/{tableId} {
         allow read: if isAdmin();
-        allow create, update, delete: if false; // Server-authoritative via Cloud Functions
+        allow create, update, delete: if false;
       }
     }
 
     // --- eventSeries/{seriesId} ---
-    // Public read for published series; admin write.
+    // Recurring-series management remains an advanced admin workflow.
     match /eventSeries/{seriesId} {
-      allow read: if isAdmin()
-                  || (resource.data.status == "published");
-      allow create, update, delete: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
     // --- eventCampaigns/{campaignId} ---
