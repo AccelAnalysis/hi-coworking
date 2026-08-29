@@ -59,7 +59,6 @@ export async function handleStripeWebhook(
     return { status: 400, body: { error: "Invalid webhook" } };
   }
 
-  // Idempotency check
   const isNew = await ensureIdempotent(result.eventId, "stripe");
   if (!isNew) {
     return { status: 200, body: { received: true, skipped: true } };
@@ -77,9 +76,6 @@ export async function handleStripeWebhook(
   return { status: 200, body: { received: true } };
 }
 
-/**
- * Route the webhook result to the appropriate handler.
- */
 async function processWebhookResult(
   result: WebhookResult,
   intuitClientId?: string,
@@ -98,17 +94,10 @@ async function processWebhookResult(
       }
       break;
     case "unknown":
-      // No action needed
       break;
   }
 }
 
-/**
- * On successful payment/subscription:
- * 1. Update or create payment doc in ledger
- * 2. Provision membership entitlements on users/{uid}
- * 3. Sync to QBO accounting if connected (PR-14)
- */
 async function handlePaymentSucceeded(
   result: WebhookResult,
   intuitClientId?: string,
@@ -118,22 +107,21 @@ async function handlePaymentSucceeded(
   const subscriptionId = result.metadata?.subscriptionId;
   const plan = result.metadata?.plan;
 
-  // Update existing payment doc if we have a paymentId
   if (result.paymentId) {
     await updatePaymentStatus(result.paymentId, "paid", {
       providerRefs: {
         stripeSubscriptionId: subscriptionId || "",
         stripeCustomerId: result.metadata?.customerId || "",
+        ...(result.metadata?.checkoutSessionId ? { stripeCheckoutSessionId: result.metadata.checkoutSessionId } : {}),
+        ...(result.metadata?.paymentIntentId ? { stripePaymentIntentId: result.metadata.paymentIntentId } : {}),
       },
     });
   }
 
-  // Provision membership entitlements
   if (uid && plan) {
     await provisionMembership(uid, plan, subscriptionId);
   }
 
-  // Handle Referral Payouts (PR-16)
   if (result.metadata?.purpose === "referral" && result.metadata.purposeRefId) {
     const referralId = result.metadata.purposeRefId;
     await getDb().collection("referrals").doc(referralId).update({
@@ -146,21 +134,15 @@ async function handlePaymentSucceeded(
     logger.info("Referral marked as paid via platform", { referralId, paymentId: result.paymentId });
   }
 
-  // Handle Bookstore Fulfillment (PR-19)
   if (result.metadata?.bookId) {
     const bookId = result.metadata.bookId;
-    const purchaseId = `purchase_${result.eventId}_${bookId}`; // Idempotent ID based on stripe event
-    
-    // Create BookPurchaseDoc
+    const purchaseId = `purchase_${result.eventId}_${bookId}`;
     await getDb().collection("bookPurchases").doc(purchaseId).set({
       id: purchaseId,
-      bookId: bookId,
+      bookId,
       userId: uid || null,
-      email: result.metadata.email || null, // Assuming email passed in metadata or we get it from result if available (result doesn't generic expose customer_email in metadata usually, but we passed it in session creation?)
-      // We didn't pass email in metadata in bookstore.ts, only in createCheckoutSession args. 
-      // But Stripe result might have customer details if we fetched them. 
-      // Let's rely on uid if present.
-      stripeSessionId: result.eventId, // Using eventId as proxy or we can store session ID if available in result (it is in event.id or resource ID)
+      email: result.metadata.email || null,
+      stripeSessionId: result.eventId,
       variantId: result.metadata.variantId || null,
       quantity: parseInt(result.metadata.quantity || "1"),
       accessGrantedAt: Date.now(),
@@ -169,12 +151,10 @@ async function handlePaymentSucceeded(
     logger.info("Book purchase fulfilled", { bookId, uid, purchaseId });
   }
 
-  // Handle Event finalization (tickets/sponsorship/vendor tables)
   if (result.metadata?.purpose === "event" || result.metadata?.eventId) {
     await finalizeEventCommerce(result);
   }
 
-  // Sync to QBO accounting (PR-14) — non-fatal
   if (result.paymentId && intuitClientId && intuitClientSecret) {
     try {
       await syncPaymentToQBO(result.paymentId, intuitClientId, intuitClientSecret);
@@ -188,18 +168,20 @@ async function handlePaymentSucceeded(
 }
 
 async function finalizeEventCommerce(result: WebhookResult): Promise<void> {
-  const checkoutType = result.metadata?.checkoutType;
+  // Events v2 owns its seat hold and registration finalization through the
+  // payment-ledger trigger. Do not also execute the legacy ticket writer or the
+  // same paid registration would be counted twice.
+  if (result.metadata?.eventFlowVersion === "2") return;
 
+  const checkoutType = result.metadata?.checkoutType;
   if (checkoutType === "sponsorship") {
     await finalizeSponsorshipPurchase(result);
     return;
   }
-
   if (checkoutType === "vendor_table") {
     await finalizeVendorTablePurchase(result);
     return;
   }
-
   await finalizeTicketPurchase(result);
 }
 
@@ -210,7 +192,6 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
 
   const ticketTypeId = result.metadata?.ticketTypeId || undefined;
   const quantity = Math.max(1, parseInt(result.metadata?.quantity || "1", 10) || 1);
-
   const db = getDb();
   const eventRef = db.collection("events").doc(eventId);
   const registrationRef = eventRef.collection("registrations").doc(uid);
@@ -220,7 +201,6 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
       tx.get(eventRef),
       tx.get(registrationRef),
     ]);
-
     if (!eventSnap.exists || registrationSnap.exists) return;
 
     const eventDoc = eventSnap.data() as EventDocLite;
@@ -229,7 +209,7 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
       throw new Error(`Seat cap exceeded during webhook finalization for event ${eventId}`);
     }
 
-    const registration = {
+    tx.set(registrationRef, {
       uid,
       eventId,
       displayName: result.metadata?.displayName || undefined,
@@ -239,15 +219,12 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
       ticketTypeId,
       quantity,
       status: "active",
-    };
-
-    tx.set(registrationRef, registration);
+    });
 
     const updatePayload: Record<string, unknown> = {
       registrationCount: FieldValue.increment(quantity),
       updatedAt: Date.now(),
     };
-
     if (ticketTypeId && eventDoc.ticketTypes?.length) {
       updatePayload.ticketTypes = eventDoc.ticketTypes.map((t) => (
         t.id === ticketTypeId
@@ -255,7 +232,6 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
           : t
       ));
     }
-
     tx.update(eventRef, updatePayload);
   });
 }
@@ -270,27 +246,15 @@ async function finalizeSponsorshipPurchase(result: WebhookResult): Promise<void>
   const db = getDb();
   const eventRef = db.collection("events").doc(eventId);
   const sponsorRef = eventRef.collection("sponsors").doc(paymentId);
-
   await db.runTransaction(async (tx) => {
     const [eventSnap, sponsorSnap] = await Promise.all([tx.get(eventRef), tx.get(sponsorRef)]);
     if (!eventSnap.exists || sponsorSnap.exists) return;
-
     const eventDoc = eventSnap.data() as EventDocLite;
     const tiers = eventDoc.sponsorships || [];
     const tier = tiers.find((t) => t.id === sponsorshipTierId);
-    if (!tier) {
-      throw new Error(`Sponsorship tier ${sponsorshipTierId} missing for event ${eventId}`);
-    }
-    if (tier.soldCount >= tier.slots) {
-      throw new Error(`Sponsorship tier ${sponsorshipTierId} sold out during finalization`);
-    }
-
-    const nextTiers = tiers.map((t) => (
-      t.id === sponsorshipTierId
-        ? { ...t, soldCount: t.soldCount + 1 }
-        : t
-    ));
-
+    if (!tier) throw new Error(`Sponsorship tier ${sponsorshipTierId} missing for event ${eventId}`);
+    if (tier.soldCount >= tier.slots) throw new Error(`Sponsorship tier ${sponsorshipTierId} sold out during finalization`);
+    const nextTiers = tiers.map((t) => t.id === sponsorshipTierId ? { ...t, soldCount: t.soldCount + 1 } : t);
     tx.set(sponsorRef, {
       id: paymentId,
       paymentId,
@@ -309,12 +273,10 @@ async function finalizeVendorTablePurchase(result: WebhookResult): Promise<void>
   const uid = result.metadata?.uid;
   const paymentId = result.paymentId;
   if (!eventId || !uid || !paymentId) return;
-
   const db = getDb();
   const vendorTableRef = db.collection("events").doc(eventId).collection("vendorTables").doc(paymentId);
   const vendorTableSnap = await vendorTableRef.get();
   if (vendorTableSnap.exists) return;
-
   await vendorTableRef.set({
     id: paymentId,
     paymentId,
@@ -325,22 +287,14 @@ async function finalizeVendorTablePurchase(result: WebhookResult): Promise<void>
   });
 }
 
-/**
- * On failed payment:
- * 1. Update payment doc
- * 2. Downgrade membership status to pastDue or cancelled
- */
 async function handlePaymentFailed(result: WebhookResult): Promise<void> {
   if (result.paymentId) {
     await updatePaymentStatus(result.paymentId, "failed");
   }
-
   const uid = result.metadata?.uid;
   const reason = result.metadata?.reason;
-
   if (uid) {
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
-
     if (reason === "subscription_cancelled") {
       updates.membershipStatus = "cancelled";
       updates.plan = null;
@@ -348,35 +302,27 @@ async function handlePaymentFailed(result: WebhookResult): Promise<void> {
     } else {
       updates.membershipStatus = "pastDue";
     }
-
     await getDb().collection("users").doc(uid).update(updates);
     logger.info("Membership status downgraded", { uid, reason, updates });
   }
 }
 
-/**
- * Set membership entitlements on the user doc after a successful subscription.
- */
 async function provisionMembership(
   uid: string,
   plan: string,
   subscriptionId?: string
 ): Promise<void> {
   const now = Date.now();
-  // Default expiration: 35 days from now (gives buffer for monthly billing)
   const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
-
   const updates: Record<string, unknown> = {
     membershipStatus: "active",
     plan,
     expiresAt,
     updatedAt: now,
   };
-
   if (subscriptionId) {
     updates["features.stripeSubscriptionId"] = subscriptionId;
   }
-
   await getDb().collection("users").doc(uid).update(updates);
   logger.info("Membership provisioned", { uid, plan, expiresAt });
 }
