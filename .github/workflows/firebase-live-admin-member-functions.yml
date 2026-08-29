@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "apps/functions/src/adminMemberOperations.ts"
+      - "apps/functions/src/adminMembershipAuthority.ts"
+      - "apps/functions/src/adminMemberOperationsAuthority.ts"
+      - "apps/functions/src/adminMemberBookingAuthority.ts"
       - "apps/functions/src/access.ts"
       - "apps/functions/src/payments/**"
       - "apps/functions/package.json"

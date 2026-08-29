@@ -13,12 +13,20 @@ const authoritySource = readFileSync(
   "apps/functions/src/adminMemberOperationsAuthority.ts",
   "utf8",
 );
+const bookingAuthoritySource = readFileSync(
+  "apps/functions/src/adminMemberBookingAuthority.ts",
+  "utf8",
+);
 const mainSource = readFileSync(
   "apps/functions/src/main.ts",
   "utf8",
 );
 const deployIndex = readFileSync(
   "firebase/admin-member-functions/src/index.ts",
+  "utf8",
+);
+const deployWorkflow = readFileSync(
+  ".github/workflows/firebase-live-admin-member-functions.yml",
   "utf8",
 );
 const deployConfig = JSON.parse(
@@ -65,35 +73,52 @@ describe("Admin member operations source contract", () => {
     expect(source).toContain("admin_bookingForMemberGetAvailability");
     expect(source).toContain("admin_bookingForMemberQuote");
     expect(source).toContain("admin_bookingForMemberBeginCheckout");
-    expect(authoritySource).toContain("admin_bookingForMemberFinalize");
+    expect(bookingAuthoritySource).toContain("admin_bookingForMemberFinalize");
     expect(source).toContain('kind: "ADMIN_MEMBER"');
     expect(source).toContain('status: "HELD"');
     expect(source).toContain('purpose: "booking"');
-    expect(authoritySource).toContain("admin_onMemberBookingPaymentUpdated");
-    expect(authoritySource).toContain("createdByAdminUid");
+    expect(bookingAuthoritySource).toContain("admin_onMemberBookingPaymentUpdated");
+    expect(bookingAuthoritySource).toContain("createdByAdminUid");
   });
 
-  it("does not confirm an expired paid hold without consuming its quoted reservations", () => {
-    expect(authoritySource).toContain("stripePaymentCompletedAt");
-    expect(authoritySource).toContain("paymentWasWithinHold");
-    expect(authoritySource).toContain("refundExpiredPaidHold");
-    expect(authoritySource).toContain("refundCheckoutPayment");
-    expect(authoritySource).toContain("EXPIRED_PAYMENT_REFUNDED");
-    expect(authoritySource).toContain("rawUsageReservations");
-    expect(authoritySource).toContain("rawCreditReservations");
-    expect(authoritySource).toContain("The member-hour reservation no longer matches");
-    expect(authoritySource).toContain("The account-credit reservation no longer matches");
+  it("requires Stripe provider evidence rather than trusting a manually changed ledger status", () => {
+    expect(bookingAuthoritySource).toContain("verifyStripePayment");
+    expect(bookingAuthoritySource).toContain('payment.provider !== "stripe"');
+    expect(bookingAuthoritySource).toContain('session.payment_status !== "paid"');
+    expect(bookingAuthoritySource).toContain('intent.status !== "succeeded"');
+    expect(bookingAuthoritySource).toContain("resolveSuccessfulCharge");
+    expect(bookingAuthoritySource).toContain("metadata.paymentId !== payment.id");
+    expect(bookingAuthoritySource).toContain("linkedHold !== hold.id");
+    expect(bookingAuthoritySource).toContain("metadata.uid !== hold.bookedForUid");
+    expect(bookingAuthoritySource).toContain("session.amount_total");
+  });
+
+  it("refunds verified payments that cannot produce the quoted booking", () => {
+    expect(bookingAuthoritySource).toContain("verified.completedAt > Number(initial.expiresAt");
+    expect(bookingAuthoritySource).toContain("refundPaidHold");
+    expect(bookingAuthoritySource).toContain("refundCheckoutPayment");
+    expect(bookingAuthoritySource).toContain("EXPIRED_PAYMENT_REFUNDED");
+    expect(bookingAuthoritySource).toContain("FULFILLMENT_FAILED_REFUNDED");
+    expect(bookingAuthoritySource).toContain("PAYMENT_RECONCILIATION_REQUIRED");
+    expect(bookingAuthoritySource).toContain("rawUsageReservations");
+    expect(bookingAuthoritySource).toContain("rawCreditReservations");
+    expect(bookingAuthoritySource).toContain("The member-hour reservation no longer matches");
+    expect(bookingAuthoritySource).toContain("The account-credit reservation no longer matches");
   });
 
   it("exports the hardened handlers instead of the superseded module implementations", () => {
     expect(mainSource).not.toContain('export * from "./adminMemberOperations";');
     expect(mainSource).toContain('from "./adminMembershipAuthority";');
     expect(mainSource).toContain('from "./adminMemberOperationsAuthority";');
+    expect(mainSource).toContain('from "./adminMemberBookingAuthority";');
     expect(deployIndex).toContain(
       'from "../../../apps/functions/src/adminMembershipAuthority";',
     );
     expect(deployIndex).toContain(
       'from "../../../apps/functions/src/adminMemberOperationsAuthority";',
+    );
+    expect(deployIndex).toContain(
+      'from "../../../apps/functions/src/adminMemberBookingAuthority";',
     );
     expect(deployIndex).toContain("admin_bookingForMemberFinalize");
     expect(deployIndex).toContain("admin_membershipGetState");
@@ -109,6 +134,9 @@ describe("Admin member operations source contract", () => {
     expect(deployIndex).toContain("admin_membershipChangePlan");
     expect(deployIndex).toContain("admin_bookingForMemberBeginCheckout");
     expect(deployIndex).not.toContain("SENDGRID");
+    expect(deployWorkflow).toContain("adminMembershipAuthority.ts");
+    expect(deployWorkflow).toContain("adminMemberOperationsAuthority.ts");
+    expect(deployWorkflow).toContain("adminMemberBookingAuthority.ts");
     expect(packageJson.scripts["build:admin-member-deploy"]).toBeTruthy();
     expect(packageJson.scripts["deploy:admin-member"]).toContain(
       "firebase.admin.json",
