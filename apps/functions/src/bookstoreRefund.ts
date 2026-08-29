@@ -156,7 +156,7 @@ export const bookstore_refundOrder = onCall(
       }
 
       const updates = {
-        status: "refunded",
+        status: "refunded" as const,
         fulfillmentStatus: "cancelled",
         refundReason: reason,
         refundedAt: now,
