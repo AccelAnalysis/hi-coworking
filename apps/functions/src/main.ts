@@ -47,6 +47,9 @@ export const businessReferral_withdrawConsent = legacy.businessReferral_withdraw
 export const businessReferral_prepareEvidenceAccess = legacy.businessReferral_prepareEvidenceAccess;
 export const businessReferral_createDispute = legacy.businessReferral_createDispute;
 export const businessReferral_resolveDispute = legacy.businessReferral_resolveDispute;
+
+// Legacy event endpoints stay deployed during the Events v2 cutover. The new
+// public client uses the v2 endpoints exported from eventV2 below.
 export const events_createTicketCheckout = legacy.events_createTicketCheckout;
 export const events_createSponsorshipCheckout = legacy.events_createSponsorshipCheckout;
 export const events_registerFree = legacy.events_registerFree;
@@ -60,6 +63,7 @@ export const events_processCampaignJobs = legacy.events_processCampaignJobs;
 export const events_generateShareKits = legacy.events_generateShareKits;
 export const events_processSocialPosts = legacy.events_processSocialPosts;
 export const events_onMediaUploaded = legacy.events_onMediaUploaded;
+
 export const territory_create = legacy.territory_create;
 export const territory_update = legacy.territory_update;
 export const territory_list_released = legacy.territory_list_released;
@@ -124,6 +128,8 @@ export const createBooking = onCall(async () => {
 
 export * from "./bookingJourney";
 export * from "./bookingManagement";
+export * from "./eventV2";
+export * from "./eventRefunds";
 export {
   bookstore_getPublicStock,
   bookstore_createCheckoutSession,
