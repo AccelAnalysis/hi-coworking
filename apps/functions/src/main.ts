@@ -148,7 +148,20 @@ export const createBooking = onCall(async () => {
 // while the reconciled operating system becomes the canonical UI and API.
 export * from "./bookingJourney";
 export * from "./bookingManagement";
-export * from "./adminMemberOperations";
+export {
+  admin_membershipChangePlan,
+  admin_membershipCancel,
+  admin_membershipReactivate,
+  admin_bookingForMemberGetAvailability,
+  admin_bookingForMemberQuote,
+  admin_bookingForMemberBeginCheckout,
+} from "./adminMemberOperations";
+export {
+  admin_membershipGetState,
+  admin_accountCreditAdjust,
+  admin_bookingForMemberFinalize,
+  admin_onMemberBookingPaymentUpdated,
+} from "./adminMemberOperationsAuthority";
 export * from "./eventV2";
 export * from "./eventRefunds";
 export * from "./eventsV2/registration";
