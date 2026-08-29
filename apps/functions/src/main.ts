@@ -47,11 +47,24 @@ export const businessReferral_withdrawConsent = legacy.businessReferral_withdraw
 export const businessReferral_prepareEvidenceAccess = legacy.businessReferral_prepareEvidenceAccess;
 export const businessReferral_createDispute = legacy.businessReferral_createDispute;
 export const businessReferral_resolveDispute = legacy.businessReferral_resolveDispute;
-export const events_createTicketCheckout = legacy.events_createTicketCheckout;
+
+const retiredEventTransaction = () => onCall(async () => {
+  throw new HttpsError(
+    "failed-precondition",
+    "This event registration endpoint has been retired. Reopen the event page to use the current registration flow.",
+  );
+});
+
+// Fail closed so stale clients cannot bypass Events v2 capacity holds, pricing,
+// refund policy, or the server-authoritative waitlist lifecycle.
+export const events_createTicketCheckout = retiredEventTransaction();
+export const events_registerFree = retiredEventTransaction();
+export const events_cancelRegistration = retiredEventTransaction();
+export const events_joinWaitlist = retiredEventTransaction();
+
+// Advanced commerce/series/marketing services remain available while their UI is
+// intentionally de-emphasized in the streamlined Events experience.
 export const events_createSponsorshipCheckout = legacy.events_createSponsorshipCheckout;
-export const events_registerFree = legacy.events_registerFree;
-export const events_cancelRegistration = legacy.events_cancelRegistration;
-export const events_joinWaitlist = legacy.events_joinWaitlist;
 export const events_upsertSeries = legacy.events_upsertSeries;
 export const events_extendHorizon = legacy.events_extendHorizon;
 export const events_setSeriesOccurrenceOverride = legacy.events_setSeriesOccurrenceOverride;
