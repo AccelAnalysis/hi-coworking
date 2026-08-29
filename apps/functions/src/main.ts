@@ -149,15 +149,17 @@ export const createBooking = onCall(async () => {
 export * from "./bookingJourney";
 export * from "./bookingManagement";
 export {
-  admin_membershipChangePlan,
-  admin_membershipCancel,
-  admin_membershipReactivate,
   admin_bookingForMemberGetAvailability,
   admin_bookingForMemberQuote,
   admin_bookingForMemberBeginCheckout,
 } from "./adminMemberOperations";
 export {
   admin_membershipGetState,
+  admin_membershipChangePlan,
+  admin_membershipCancel,
+  admin_membershipReactivate,
+} from "./adminMembershipAuthority";
+export {
   admin_accountCreditAdjust,
   admin_bookingForMemberFinalize,
   admin_onMemberBookingPaymentUpdated,
