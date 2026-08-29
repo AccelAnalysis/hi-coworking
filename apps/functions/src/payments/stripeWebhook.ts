@@ -14,6 +14,7 @@ import { ensureIdempotent, markWebhookResult } from "./idempotency";
 import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
+import { maybeFinalizeEventV2Checkout } from "../eventWebhookBridge";
 
 function getDb() { return admin.firestore(); }
 
@@ -124,9 +125,20 @@ async function handlePaymentSucceeded(
       providerRefs: {
         stripeSubscriptionId: subscriptionId || "",
         stripeCustomerId: result.metadata?.customerId || "",
+        ...(result.metadata?.checkoutSessionId ? { stripeCheckoutSessionId: result.metadata.checkoutSessionId } : {}),
+        ...(result.metadata?.paymentIntentId ? { stripePaymentIntentId: result.metadata.paymentIntentId } : {}),
       },
     });
   }
+
+  // Events v2 finalization consumes the authoritative capacity hold. Do this
+  // before the legacy event commerce branch and return from that branch once
+  // handled so a v2 payment cannot create a duplicate legacy registration.
+  const handledByEventV2 = await maybeFinalizeEventV2Checkout({
+    checkoutType: result.metadata?.checkoutType,
+    holdId: result.metadata?.holdId,
+    paymentId: result.paymentId,
+  });
 
   // Provision membership entitlements
   if (uid && plan) {
@@ -149,18 +161,13 @@ async function handlePaymentSucceeded(
   // Handle Bookstore Fulfillment (PR-19)
   if (result.metadata?.bookId) {
     const bookId = result.metadata.bookId;
-    const purchaseId = `purchase_${result.eventId}_${bookId}`; // Idempotent ID based on stripe event
-    
-    // Create BookPurchaseDoc
+    const purchaseId = `purchase_${result.eventId}_${bookId}`;
     await getDb().collection("bookPurchases").doc(purchaseId).set({
       id: purchaseId,
       bookId: bookId,
       userId: uid || null,
-      email: result.metadata.email || null, // Assuming email passed in metadata or we get it from result if available (result doesn't generic expose customer_email in metadata usually, but we passed it in session creation?)
-      // We didn't pass email in metadata in bookstore.ts, only in createCheckoutSession args. 
-      // But Stripe result might have customer details if we fetched them. 
-      // Let's rely on uid if present.
-      stripeSessionId: result.eventId, // Using eventId as proxy or we can store session ID if available in result (it is in event.id or resource ID)
+      email: result.metadata.email || null,
+      stripeSessionId: result.eventId,
       variantId: result.metadata.variantId || null,
       quantity: parseInt(result.metadata.quantity || "1"),
       accessGrantedAt: Date.now(),
@@ -169,8 +176,9 @@ async function handlePaymentSucceeded(
     logger.info("Book purchase fulfilled", { bookId, uid, purchaseId });
   }
 
-  // Handle Event finalization (tickets/sponsorship/vendor tables)
-  if (result.metadata?.purpose === "event" || result.metadata?.eventId) {
+  // Handle legacy Event finalization (tickets/sponsorship/vendor tables) only
+  // when this was not an Events v2 checkout.
+  if (!handledByEventV2 && (result.metadata?.purpose === "event" || result.metadata?.eventId)) {
     await finalizeEventCommerce(result);
   }
 
@@ -363,7 +371,6 @@ async function provisionMembership(
   subscriptionId?: string
 ): Promise<void> {
   const now = Date.now();
-  // Default expiration: 35 days from now (gives buffer for monthly billing)
   const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
 
   const updates: Record<string, unknown> = {
