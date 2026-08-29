@@ -10,6 +10,7 @@ import {
   GUEST_BOOKING_WINDOW_DAYS,
   GUEST_DAILY_CAP_CENTS,
   GUEST_HOURLY_RATE_CENTS,
+  getDeskMembershipTierById,
   getTierById,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
@@ -313,7 +314,7 @@ async function quoteFor(resourceId: string, start: number, end: number, uid?: st
   }
 
   if (uid && user && resource.type === "SEAT" && user.membershipStatus === "active" && user.plan) {
-    const tier = getTierById(user.plan);
+    const tier = getDeskMembershipTierById(user.plan);
     if (tier) {
       membershipName = tier.name;
       hourlyRateCents = tier.extraHourlyRateCents;
@@ -413,7 +414,7 @@ async function createHoldAtomically(
 
     if (authenticatedUid && resource.type === "SEAT") {
       const tier = user?.membershipStatus === "active" && user?.plan
-        ? getTierById(user.plan)
+        ? getDeskMembershipTierById(user.plan)
         : undefined;
 
       if (tier) {

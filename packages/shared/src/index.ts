@@ -1894,13 +1894,13 @@ export interface MembershipTierDef {
 export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
   {
     id: "virtual",
-    name: "Virtual Member",
+    name: "Virtual Office",
     amountCents: 4900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_virtual_monthly",
-    includedHoursPerMonth: 2,
-    extraHourlyRateCents: 1200,
+    stripePriceId: "price_1U9J0xAHu8lEXCs8UHv7AAiz",
+    includedHoursPerMonth: 0,
+    extraHourlyRateCents: 1750,
     bookingWindowDays: 14,
     includedCreditsPerMonth: 3,
     limits: {
@@ -1912,13 +1912,9 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 3
     },
     features: [
-      "Member Directory access",
-      "AccelProcure / RFx feed access",
-      "Business profile + Procurement-Ready badge",
-      "Virtual community events",
-      "2 desk hours/month included",
-      "Extra hours: $12/hr",
-      "3 Credits/mo included"
+      "Virtual Office membership",
+      "Coworking desk access at the public rate",
+      "Desk use: $17.50/hr"
     ],
   },
   {
@@ -1927,9 +1923,9 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
     amountCents: 12900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_monthly",
-    includedHoursPerMonth: 15,
-    extraHourlyRateCents: 1050,
+    stripePriceId: "price_1U9J1CAHu8lEXCs8X1o0O5hG",
+    includedHoursPerMonth: 10,
+    extraHourlyRateCents: 1400,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 10,
     limits: {
@@ -1941,12 +1937,10 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 15
     },
     features: [
-      "Everything in Virtual Member",
-      "15 desk hours/month included",
-      "Extra hours: $10.50/hr",
+      "10 desk hours/month included",
+      "20% off additional desk hours ($14/hr)",
       "Book up to 90 days ahead",
-      "10 Credits/mo included",
-      "Full RFx participation"
+      "Wi-Fi, coffee, and shared amenities"
     ],
   },
   {
@@ -1955,9 +1949,9 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
     amountCents: 19900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_plus_monthly",
-    includedHoursPerMonth: 30,
-    extraHourlyRateCents: 900,
+    stripePriceId: "price_1U9J1KAHu8lEXCs8xZETzk7F",
+    includedHoursPerMonth: 15,
+    extraHourlyRateCents: 1225,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 25,
     limits: {
@@ -1969,12 +1963,10 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 50
     },
     features: [
-      "Everything in Coworking Member",
-      "30 desk hours/month included",
-      "Extra hours: $9/hr",
-      "Highest booking priority",
-      "25 Credits/mo included",
-      "Priority RFx & Referrals"
+      "15 desk hours/month included",
+      "30% off additional desk hours ($12.25/hr)",
+      "Book up to 90 days ahead",
+      "Wi-Fi, coffee, and shared amenities"
     ],
   },
 ];
@@ -1990,7 +1982,7 @@ export const RESOURCE_CATALOG: Record<string, Resource> = {
   "seat-4": { id: "seat-4", name: "Seat 4", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-5": { id: "seat-5", name: "Seat 5", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-6": { id: "seat-6", name: "Seat 6", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 10, guestRateHourly: 75 },
+  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 10, guestRateHourly: 99 },
 };
 
 export function getResourceById(id: string): Resource | undefined {
@@ -2020,7 +2012,7 @@ export const NON_MEMBER_PRICING = GUEST_PRICING;
 export const CONFERENCE_ROOM_CONFIG = {
   maxCapacity: 10,
   /** Per hour in cents */
-  hourlyRateCents: 7500,
+  hourlyRateCents: 9900,
 } as const;
 
 // --- Space Inventory ---
