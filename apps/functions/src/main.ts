@@ -159,11 +159,11 @@ export {
   admin_membershipCancel,
   admin_membershipReactivate,
 } from "./adminMembershipAuthority";
+export { admin_accountCreditAdjust } from "./adminMemberOperationsAuthority";
 export {
-  admin_accountCreditAdjust,
   admin_bookingForMemberFinalize,
   admin_onMemberBookingPaymentUpdated,
-} from "./adminMemberOperationsAuthority";
+} from "./adminMemberBookingAuthority";
 export * from "./eventV2";
 export * from "./eventRefunds";
 export * from "./eventsV2/registration";
