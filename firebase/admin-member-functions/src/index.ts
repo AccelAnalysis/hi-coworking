@@ -13,8 +13,9 @@ export {
   admin_membershipReactivate,
 } from "../../../apps/functions/src/adminMembershipAuthority";
 
+export { admin_accountCreditAdjust } from "../../../apps/functions/src/adminMemberOperationsAuthority";
+
 export {
-  admin_accountCreditAdjust,
   admin_bookingForMemberFinalize,
   admin_onMemberBookingPaymentUpdated,
-} from "../../../apps/functions/src/adminMemberOperationsAuthority";
+} from "../../../apps/functions/src/adminMemberBookingAuthority";
