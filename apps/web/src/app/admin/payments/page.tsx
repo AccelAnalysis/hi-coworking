@@ -112,7 +112,7 @@ function purposeHref(payment: PaymentDoc) {
     case "event":
       return "/admin/events";
     case "bookstore":
-      return "/admin/bookstore";
+      return "/admin/bookstore/orders";
     default:
       return null;
   }
