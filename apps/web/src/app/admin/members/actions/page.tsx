@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { collection, doc, getDoc, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import {
   AlertTriangle,
@@ -19,9 +19,10 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { db, functions } from "@/lib/firebase";
-import { MEMBERSHIP_TIERS, type UserDoc } from "@hi/shared";
+import { normalizeMember, type AdminMemberRecord } from "@/lib/adminMemberData";
+import { MEMBERSHIP_TIERS } from "@hi/shared";
 
-type MemberRecord = UserDoc & { accountCreditCents?: number };
+type MemberRecord = AdminMemberRecord;
 type MembershipState = {
   hasSubscription: boolean;
   subscriptionId: string | null;
@@ -91,6 +92,10 @@ function planName(plan?: string | null) {
   return MEMBERSHIP_TIERS.find((tier) => tier.id === plan)?.name || "No plan";
 }
 
+function memberName(member: MemberRecord) {
+  return member.displayName || member.email || "Member";
+}
+
 function easternEpoch(dateValue: string, timeValue: string) {
   const [year, month, day] = dateValue.split("-").map(Number);
   const [hour, minute] = timeValue.split(":").map(Number);
@@ -148,11 +153,10 @@ function AdminMemberActionsContent() {
     setLoading(true);
     setError(null);
     try {
-      const snap = await getDocs(query(collection(db, "users"), orderBy("createdAt", "desc")));
-      const records = snap.docs.map((memberDoc) => ({
-        ...(memberDoc.data() as MemberRecord),
-        uid: (memberDoc.data() as MemberRecord).uid || memberDoc.id,
-      }));
+      const snap = await getDocs(collection(db, "users"));
+      const records = snap.docs
+        .map((memberDoc) => normalizeMember(memberDoc.data(), memberDoc.id))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setMembers(records);
       const params = new URLSearchParams(window.location.search);
       const requested = params.get("uid");
@@ -177,7 +181,7 @@ function AdminMemberActionsContent() {
     try {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) throw new Error("Member not found");
-      setMember({ ...(snap.data() as MemberRecord), uid });
+      setMember(normalizeMember(snap.data(), snap.id));
       try {
         setMembership((await getMembershipState({ uid })).data);
       } catch (membershipError) {
@@ -201,7 +205,7 @@ function AdminMemberActionsContent() {
   async function doChangePlan(tierId: string) {
     if (!member) return;
     const tier = MEMBERSHIP_TIERS.find((item) => item.id === tierId);
-    if (!tier || !window.confirm(`Change ${member.displayName || member.email} to ${tier.name}? Stripe will apply the plan change and proration before Hi Coworking updates the entitlement.`)) return;
+    if (!tier || !window.confirm(`Change ${memberName(member)} to ${tier.name}? Stripe will apply the plan change and proration before Hi Coworking updates the entitlement.`)) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await changeMembershipPlan({ uid: member.uid, tierId });
@@ -214,7 +218,7 @@ function AdminMemberActionsContent() {
   }
 
   async function doCancelMembership() {
-    if (!member || !window.confirm(`Cancel ${member.displayName || member.email}'s membership at the end of the current Stripe billing period? Access and entitlements remain active through that date.`)) return;
+    if (!member || !window.confirm(`Cancel ${memberName(member)}'s membership at the end of the current Stripe billing period? Access and entitlements remain active through that date.`)) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await cancelMembership({ uid: member.uid });
@@ -266,7 +270,7 @@ function AdminMemberActionsContent() {
 
   async function createBooking() {
     if (!member || !resourceId || !quote) return;
-    if (!window.confirm(`Create this ${quote.resourceName} booking for ${member.displayName || member.email}? The server will reserve included hours/account credit and require Stripe payment for any remaining balance.`)) return;
+    if (!window.confirm(`Create this ${quote.resourceName} booking for ${memberName(member)}? The server will reserve included hours/account credit and require Stripe payment for any remaining balance.`)) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       const result = await beginBooking({
@@ -290,7 +294,7 @@ function AdminMemberActionsContent() {
     const amount = Math.round(Number(creditAmount) * 100);
     if (!Number.isFinite(amount) || amount <= 0) { setError("Enter a positive dollar amount."); return; }
     const deltaCents = creditDirection === "add" ? amount : -amount;
-    if (!window.confirm(`${creditDirection === "add" ? "Add" : "Deduct"} ${money(amount)} ${creditDirection === "add" ? "to" : "from"} ${member.displayName || member.email}'s Hi Coworking account credit? This creates a permanent audit record.`)) return;
+    if (!window.confirm(`${creditDirection === "add" ? "Add" : "Deduct"} ${money(amount)} ${creditDirection === "add" ? "to" : "from"} ${memberName(member)}'s Hi Coworking account credit? This creates a permanent audit record.`)) return;
     setActionLoading(true); setError(null); setSuccess(null);
     try {
       const requestId = `credit_${Date.now()}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -333,13 +337,13 @@ function AdminMemberActionsContent() {
           <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Member</label>
           <div className="relative">
             <select value={selectedUid} onChange={(event) => setSelectedUid(event.target.value)} className="w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100">
-              {members.map((record) => <option key={record.uid} value={record.uid}>{record.displayName || record.email} · {record.email}</option>)}
+              {members.map((record) => <option key={record.uid} value={record.uid}>{memberName(record)}{record.email ? ` · ${record.email}` : ""}</option>)}
             </select>
             <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           </div>
         </div>
 
-        {member && <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500"><span className="inline-flex items-center gap-2 font-semibold text-slate-900"><UserRound className="h-4 w-4 text-slate-400" /> {member.displayName || member.email}</span><span>{planName(membership?.planId || member.plan)}</span><span>Credit {money(member.accountCreditCents || 0)}</span></div>}
+        {member && <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500"><span className="inline-flex items-center gap-2 font-semibold text-slate-900"><UserRound className="h-4 w-4 text-slate-400" /> {memberName(member)}</span><span>{planName(membership?.planId || member.plan)}</span><span>Credit {money(member.accountCreditCents || 0)}</span></div>}
 
         {(error || success) && <div className={`mt-6 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>{error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}<span>{error || success}</span></div>}
 
@@ -358,7 +362,7 @@ function AdminMemberActionsContent() {
           </section>}
 
           {tab === "booking" && <section>
-            <h2 className="text-xl font-semibold text-slate-950">Book for {member.displayName || member.email}</h2><p className="mt-1 text-sm text-slate-500">The member&apos;s plan, included hours, account credit, availability and booking window are applied on the server.</p>
+            <h2 className="text-xl font-semibold text-slate-950">Book for {memberName(member)}</h2><p className="mt-1 text-sm text-slate-500">The member&apos;s plan, included hours, account credit, availability and booking window are applied on the server.</p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3"><input type="date" value={dateValue} min={todayEastern()} onChange={(event) => setDateValue(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3" /><select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(0, -1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select><select value={endTime} onChange={(event) => setEndTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select></div>
             <button type="button" disabled={actionLoading} onClick={() => void checkAvailability()} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white disabled:opacity-50">{actionLoading && <Loader2 className="h-4 w-4 animate-spin" />} Check availability</button>
             {spaces.length > 0 && <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{spaces.map((space) => <button key={space.resourceId} type="button" disabled={!space.available || actionLoading} onClick={() => void selectSpace(space.resourceId)} className={`rounded-2xl border p-4 text-left ${resourceId === space.resourceId ? "border-slate-900 bg-slate-50" : "border-slate-200 bg-white"} disabled:bg-slate-50 disabled:text-slate-400`}><p className="font-semibold">{space.name}</p><p className="mt-1 text-xs">{space.available ? "Available" : "Unavailable"}</p></button>)}</div>}
