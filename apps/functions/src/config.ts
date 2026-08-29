@@ -2,13 +2,13 @@
 export const MEMBERSHIP_TIERS = [
   {
     id: "virtual",
-    name: "Virtual Member",
+    name: "Virtual Office",
     amountCents: 4900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_virtual_monthly",
-    includedHoursPerMonth: 2,
-    extraHourlyRateCents: 1200,
+    stripePriceId: "price_1U9J0xAHu8lEXCs8UHv7AAiz",
+    includedHoursPerMonth: 0,
+    extraHourlyRateCents: 1750,
     bookingWindowDays: 14,
     includedCreditsPerMonth: 3,
     limits: {
@@ -26,9 +26,9 @@ export const MEMBERSHIP_TIERS = [
     amountCents: 12900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_monthly",
-    includedHoursPerMonth: 15,
-    extraHourlyRateCents: 1050,
+    stripePriceId: "price_1U9J1CAHu8lEXCs8X1o0O5hG",
+    includedHoursPerMonth: 10,
+    extraHourlyRateCents: 1400,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 10,
     limits: {
@@ -46,9 +46,9 @@ export const MEMBERSHIP_TIERS = [
     amountCents: 19900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_coworking_plus_monthly",
-    includedHoursPerMonth: 30,
-    extraHourlyRateCents: 900,
+    stripePriceId: "price_1U9J1KAHu8lEXCs8xZETzk7F",
+    includedHoursPerMonth: 15,
+    extraHourlyRateCents: 1225,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 25,
     limits: {
@@ -105,5 +105,5 @@ export const RESOURCE_CONFIG: Record<string, {
   "seat-4": { name: "Seat 4", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-5": { name: "Seat 5", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-6": { name: "Seat 6", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 75, exclusiveGroupId: "main_space", capacity: 10 },
+  "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 99, exclusiveGroupId: "main_space", capacity: 10 },
 };

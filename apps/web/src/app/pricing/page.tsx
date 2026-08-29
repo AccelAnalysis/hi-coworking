@@ -70,10 +70,10 @@ export default function PricingPage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-slate-900 mb-4">
-              Simple, Transparent Pricing
+              Simple pricing for how you use the space
             </h1>
             <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-              No long contracts. No hidden fees. Walk in as a guest or become a member for included hours and better rates.
+              Book by the hour, become a coworking member for included time and lower rates, or choose Virtual Office when you do not need regular desk access.
             </p>
           </div>
 
@@ -115,6 +115,7 @@ export default function PricingPage() {
             <div className="grid md:grid-cols-3 gap-6">
               {MEMBERSHIP_TIERS.map((tier) => {
                 const isPopular = tier.id === "coworking";
+                const isVirtualOffice = tier.id === "virtual";
                 const visibleFeatures = coworkingOnlyFeatures(tier.features);
                 return (
                   <div
@@ -127,7 +128,7 @@ export default function PricingPage() {
                   >
                     {isPopular && (
                       <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-semibold text-white bg-emerald-600 px-3 py-1 rounded-full shadow-lg shadow-emerald-600/20 uppercase tracking-wider">
-                        Most Popular
+                        Best for regular use
                       </span>
                     )}
 
@@ -140,12 +141,21 @@ export default function PricingPage() {
                     </p>
 
                     <div className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                      <p className="text-sm font-semibold text-emerald-900">
-                        {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
-                      </p>
-                      <p className="text-xs text-emerald-700 mt-0.5">
-                        Extra hours: ${(tier.extraHourlyRateCents / 100).toFixed(tier.extraHourlyRateCents % 100 === 0 ? 0 : 2)}/hr
-                      </p>
+                      {isVirtualOffice ? (
+                        <>
+                          <p className="text-sm font-semibold text-emerald-900">No desk hours included</p>
+                          <p className="text-xs text-emerald-700 mt-0.5">Coworking desk use: $17.50/hr</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-semibold text-emerald-900">
+                            {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
+                          </p>
+                          <p className="text-xs text-emerald-700 mt-0.5">
+                            Additional hours: ${(tier.extraHourlyRateCents / 100).toFixed(tier.extraHourlyRateCents % 100 === 0 ? 0 : 2)}/hr
+                          </p>
+                        </>
+                      )}
                     </div>
 
                     <ul className="mt-5 space-y-3 flex-1">
@@ -174,7 +184,7 @@ export default function PricingPage() {
                             <Loader2 className="h-4 w-4 animate-spin" /> Redirecting...
                           </span>
                         ) : (
-                          "Subscribe"
+                          isVirtualOffice ? "Choose Virtual Office" : "Become a Member"
                         )}
                       </button>
                     ) : (
@@ -186,7 +196,7 @@ export default function PricingPage() {
                             : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
                         }`}
                       >
-                        Get Started
+                        {isVirtualOffice ? "Choose Virtual Office" : "Become a Member"}
                       </Link>
                     )}
                   </div>
@@ -202,9 +212,9 @@ export default function PricingPage() {
             <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <h3 className="text-xl font-bold text-slate-900">Conference Room Mode</h3>
+                  <h3 className="text-xl font-bold text-slate-900">Conference Room</h3>
                   <p className="text-sm text-slate-500 mt-1">
-                    Up to {CONFERENCE_ROOM_CONFIG.maxCapacity} people · Modular room conversion · Hourly booking
+                    Private use for meetings, presentations, interviews, and small team sessions · Up to {CONFERENCE_ROOM_CONFIG.maxCapacity} people
                   </p>
                 </div>
                 <div className="text-right">
@@ -214,36 +224,12 @@ export default function PricingPage() {
                   <span className="text-base text-slate-500">/hr</span>
                 </div>
               </div>
-              <p className="mt-4 text-xs text-slate-400">
-                When the space is reserved in conference mode, desk inventory is not simultaneously available.
-              </p>
             </div>
           </div>
 
-          <div className="mt-12 p-6 rounded-2xl bg-slate-50 border border-slate-200">
-            <h3 className="text-sm font-bold text-slate-700 mb-4">At a Glance</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="font-bold text-slate-900">Guest</span>
-                <p className="text-slate-500 mt-0.5">$17.50/hr · $115/day cap · 2-week window</p>
-              </div>
-              <div>
-                <span className="font-bold text-slate-900">Virtual Member</span>
-                <p className="text-slate-500 mt-0.5">$49/mo · 2 hrs included · $12/hr extra</p>
-              </div>
-              <div>
-                <span className="font-bold text-slate-900">Coworking Member</span>
-                <p className="text-slate-500 mt-0.5">$129/mo · 15 hrs included · $10.50/hr extra</p>
-              </div>
-              <div>
-                <span className="font-bold text-slate-900">Coworking Plus</span>
-                <p className="text-slate-500 mt-0.5">$199/mo · 30 hrs included · $9/hr extra</p>
-              </div>
-            </div>
-          </div>
 
           <p className="text-center text-sm text-slate-500 mt-8">
-            All plans include Wi-Fi, coffee, and access to shared amenities. Subscriptions managed through Stripe. Cancel anytime.
+            Physical coworking bookings include Wi-Fi, coffee, and shared amenities. Memberships renew monthly. Cancel anytime.
           </p>
         </div>
       </AppShell>

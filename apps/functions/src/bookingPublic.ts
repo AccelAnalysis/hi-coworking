@@ -5,6 +5,7 @@ import {
   GUEST_BOOKING_WINDOW_DAYS,
   GUEST_DAILY_CAP_CENTS,
   GUEST_HOURLY_RATE_CENTS,
+  getDeskMembershipTierById,
   getTierById,
 } from "./payments/stripeConfig";
 
@@ -301,7 +302,7 @@ async function quoteFor(
   }
 
   if (uid && user && resource.type === "SEAT" && user.membershipStatus === "active" && user.plan) {
-    const tier = getTierById(user.plan);
+    const tier = getDeskMembershipTierById(user.plan);
     if (tier) {
       membershipName = tier.name;
       hourlyRateCents = tier.extraHourlyRateCents;

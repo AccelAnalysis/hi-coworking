@@ -37,55 +37,52 @@ export interface MembershipTier {
 export const MEMBERSHIP_TIERS: MembershipTier[] = [
   {
     id: "virtual",
-    name: "Virtual Member",
-    stripePriceId: "price_virtual_monthly",
+    name: "Virtual Office",
+    stripePriceId: "price_1U9J0xAHu8lEXCs8UHv7AAiz",
     interval: "month",
     amountCents: 4900,
     currency: "usd",
-    includedHoursPerMonth: 2,
-    extraHourlyRateCents: 1200,
+    includedHoursPerMonth: 0,
+    extraHourlyRateCents: 1750,
     bookingWindowDays: 14,
     features: [
-      "Member Directory access",
-      "AccelProcure / RFx feed access",
-      "Business profile + Procurement-Ready badge",
-      "Virtual community events",
-      "2 desk hours/month included",
-      "Extra hours: $12/hr",
+      "Virtual Office membership",
+      "Coworking desk access at the public rate",
+      "Desk use: $17.50/hr",
     ],
   },
   {
     id: "coworking",
     name: "Coworking Member",
-    stripePriceId: "price_coworking_monthly",
+    stripePriceId: "price_1U9J1CAHu8lEXCs8X1o0O5hG",
     interval: "month",
     amountCents: 12900,
     currency: "usd",
-    includedHoursPerMonth: 15,
-    extraHourlyRateCents: 1050,
+    includedHoursPerMonth: 10,
+    extraHourlyRateCents: 1400,
     bookingWindowDays: 90,
     features: [
-      "Everything in Virtual Member",
-      "15 desk hours/month included",
-      "Extra hours: $10.50/hr",
+      "10 desk hours/month included",
+      "20% off additional desk hours ($14/hr)",
       "Book up to 90 days ahead",
+      "Wi-Fi, coffee, and shared amenities",
     ],
   },
   {
     id: "coworking_plus",
     name: "Coworking Plus",
-    stripePriceId: "price_coworking_plus_monthly",
+    stripePriceId: "price_1U9J1KAHu8lEXCs8xZETzk7F",
     interval: "month",
     amountCents: 19900,
     currency: "usd",
-    includedHoursPerMonth: 30,
-    extraHourlyRateCents: 900,
+    includedHoursPerMonth: 15,
+    extraHourlyRateCents: 1225,
     bookingWindowDays: 90,
     features: [
-      "Everything in Coworking Member",
-      "30 desk hours/month included",
-      "Extra hours: $9/hr",
-      "Highest booking priority",
+      "15 desk hours/month included",
+      "30% off additional desk hours ($12.25/hr)",
+      "Book up to 90 days ahead",
+      "Wi-Fi, coffee, and shared amenities",
     ],
   },
 ];
@@ -98,7 +95,7 @@ export const GUEST_BOOKING_WINDOW_DAYS = 14;
 
 // --- Conference Room ---
 
-export const CONFERENCE_ROOM_HOURLY_RATE_CENTS = 7500;
+export const CONFERENCE_ROOM_HOURLY_RATE_CENTS = 9900;
 export const CONFERENCE_ROOM_MAX_CAPACITY = 10;
 
 // --- Lookup Helpers ---
@@ -109,4 +106,12 @@ export function getTierByPriceId(priceId: string): MembershipTier | undefined {
 
 export function getTierById(tierId: string): MembershipTier | undefined {
   return MEMBERSHIP_TIERS.find((t) => t.id === tierId);
+}
+
+/** Only physical coworking plans receive included desk time/member overage pricing. */
+export function getDeskMembershipTierById(tierId: string): MembershipTier | undefined {
+  const tier = getTierById(tierId);
+  return tier && (tier.id === "coworking" || tier.id === "coworking_plus")
+    ? tier
+    : undefined;
 }
