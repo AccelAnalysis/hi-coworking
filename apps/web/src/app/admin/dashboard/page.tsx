@@ -18,6 +18,7 @@ import {
   Rocket,
   UserCog,
   Users,
+  WalletCards,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -146,6 +147,7 @@ function AdminDashboardContent() {
 
   const quickLinks = [
     { href: "/admin/members", label: "Member Management", icon: Users },
+    { href: "/admin/members/actions", label: "Member Actions", icon: WalletCards },
     { href: "/admin/roles", label: "Staff & Roles", icon: UserCog },
     { href: "/admin/events", label: "Event Management", icon: Calendar },
     { href: "/admin/bookstore", label: "Bookstore", icon: BookOpen },
