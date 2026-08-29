@@ -12,10 +12,13 @@ import {
   type RegistrationDocV2,
 } from "./types";
 
-const firestore = admin.firestore();
-firestore.settings({ ignoreUndefinedProperties: true });
+let firestore: FirebaseFirestore.Firestore | undefined;
 
 export function db() {
+  if (!firestore) {
+    firestore = admin.firestore();
+    firestore.settings({ ignoreUndefinedProperties: true });
+  }
   return firestore;
 }
 
