@@ -27,44 +27,53 @@ function getCountdownValue(now: number): CountdownValue {
   };
 }
 
-function PerspectiveUnit({ value, label, index }: { value: string; label: string; index: number }) {
+function SplitFlapUnit({ value, label }: { value: string; label: string }) {
   const [displayValue, setDisplayValue] = useState(value);
   const [previousValue, setPreviousValue] = useState(value);
-  const [scrolling, setScrolling] = useState(false);
+  const [flipping, setFlipping] = useState(false);
 
   useEffect(() => {
     if (value === displayValue) return;
 
     setPreviousValue(displayValue);
     setDisplayValue(value);
-    setScrolling(true);
+    setFlipping(true);
 
-    const timer = window.setTimeout(() => setScrolling(false), 500);
+    const timer = window.setTimeout(() => setFlipping(false), 680);
     return () => window.clearTimeout(timer);
   }, [displayValue, value]);
 
   return (
-    <div className={styles.unit} data-perspective-unit data-index={index}>
-      <div className={styles.plate}>
-        <div className={styles.valueStack}>
-          {scrolling ? (
-            <>
-              <span className={`${styles.value} ${styles.leaving}`}>{previousValue}</span>
-              <span className={`${styles.value} ${styles.entering}`}>{displayValue}</span>
-            </>
-          ) : (
-            <span className={styles.value}>{displayValue}</span>
-          )}
+    <div className={styles.unit}>
+      <div className={styles.card}>
+        <div className={`${styles.half} ${styles.top}`}>
+          <span>{displayValue}</span>
         </div>
-        <span className={styles.label}>{label}</span>
+        <div className={`${styles.half} ${styles.bottom}`}>
+          <span>{displayValue}</span>
+        </div>
+
+        {flipping && (
+          <>
+            <div className={`${styles.flap} ${styles.topFlap}`}>
+              <span>{previousValue}</span>
+            </div>
+            <div className={`${styles.flap} ${styles.bottomFlap}`}>
+              <span>{displayValue}</span>
+            </div>
+          </>
+        )}
       </div>
+      <span className={styles.label}>{label}</span>
     </div>
   );
 }
 
 export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
   const [countdown, setCountdown] = useState<CountdownValue>(() => getCountdownValue(Date.now()));
-  const perspectiveRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const stickyRef = useRef<HTMLDivElement>(null);
+  const clockRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const tick = () => {
@@ -82,33 +91,32 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
   }, [onComplete]);
 
   useEffect(() => {
-    const stage = perspectiveRef.current;
-    if (!stage) return;
+    const track = trackRef.current;
+    const sticky = stickyRef.current;
+    const clock = clockRef.current;
+    if (!track || !sticky || !clock) return;
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reducedMotion) return;
 
     let frame = 0;
+    let lastScrollY = window.scrollY;
 
     const updatePerspective = () => {
       frame = 0;
-      const rect = stage.getBoundingClientRect();
-      const viewportHeight = Math.max(window.innerHeight, 1);
-      const stageCenter = rect.top + rect.height / 2;
-      const viewportCenter = viewportHeight / 2;
-      const normalized = Math.max(-1, Math.min(1, (stageCenter - viewportCenter) / viewportHeight));
+      const rect = track.getBoundingClientRect();
+      const stickyTop = Number.parseFloat(window.getComputedStyle(sticky).top) || 0;
+      const travel = Math.max(1, track.offsetHeight - sticky.offsetHeight);
+      const progress = Math.max(0, Math.min(1, (stickyTop - rect.top) / travel));
+      const perspectiveProgress = progress * 2 - 1;
+      const delta = window.scrollY - lastScrollY;
+      lastScrollY = window.scrollY;
 
-      stage.style.setProperty("--tilt", `${(-normalized * 9).toFixed(2)}deg`);
-      stage.style.setProperty("--shift", `${(-normalized * 7).toFixed(2)}px`);
+      const tilt = -perspectiveProgress * 17;
+      const yaw = Math.max(-5, Math.min(5, delta * 0.08));
 
-      stage.querySelectorAll<HTMLElement>("[data-perspective-unit]").forEach((unit, index) => {
-        const side = index % 2 === 0 ? 1 : -1;
-        const spread = index < 2 ? -1 : 1;
-        unit.style.setProperty("--yaw", `${(normalized * side * 4.5).toFixed(2)}deg`);
-        unit.style.setProperty("--unit-depth", `${(Math.abs(normalized) * spread * 8).toFixed(2)}px`);
-        unit.style.setProperty("--plate-depth", `${(16 + Math.abs(normalized) * 8).toFixed(2)}px`);
-        unit.style.setProperty("--card-tilt", `${(-normalized * 3.5).toFixed(2)}deg`);
-      });
+      clock.style.setProperty("--scroll-tilt", `${tilt.toFixed(2)}deg`);
+      clock.style.setProperty("--scroll-yaw", `${yaw.toFixed(2)}deg`);
     };
 
     const requestPerspectiveUpdate = () => {
@@ -131,23 +139,27 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
 
   return (
     <section className={styles.countdown} aria-labelledby="launch-countdown-title">
-      <div className={styles.inner}>
+      <div className={styles.copy}>
         <p className={styles.eyebrow}>Hi Coworking</p>
         <h1 id="launch-countdown-title" className={styles.title}>
           Something good is getting ready.
         </h1>
         <p className={styles.subhead}>Our doors open soon.</p>
-
         <p className={styles.srOnly} aria-live="off">
           {accessibleTime} until opening.
         </p>
+      </div>
 
-        <div ref={perspectiveRef} className={styles.perspective}>
-          <div className={styles.clock} aria-hidden="true">
-            <PerspectiveUnit value={countdown.days} label="Days" index={0} />
-            <PerspectiveUnit value={countdown.hours} label="Hours" index={1} />
-            <PerspectiveUnit value={countdown.minutes} label="Minutes" index={2} />
-            <PerspectiveUnit value={countdown.seconds} label="Seconds" index={3} />
+      <div ref={trackRef} className={styles.track}>
+        <div ref={stickyRef} className={styles.sticky}>
+          <div className={styles.shell}>
+            <div ref={clockRef} className={styles.clock} aria-hidden="true">
+              <SplitFlapUnit value={countdown.days} label="Days" />
+              <SplitFlapUnit value={countdown.hours} label="Hours" />
+              <SplitFlapUnit value={countdown.minutes} label="Minutes" />
+              <SplitFlapUnit value={countdown.seconds} label="Seconds" />
+            </div>
+            <p className={styles.hint}>Scroll to change the viewing angle.</p>
           </div>
         </div>
       </div>
