@@ -223,9 +223,14 @@
   border-color: rgb(209 250 229 / 95%) !important;
 }
 
+.hc-principle__original-icon {
+  display: none !important;
+}
+
 .hc-principle__icon {
   width: 3.5rem;
   height: 3.5rem;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -244,25 +249,28 @@
   height: 2.25rem;
 }
 
-.hc-principle__eyebrow {
+.hc-principle__title {
+  margin-top: auto;
+  color: #0f172a !important;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-decoration: none !important;
+}
+
+.hc-principle__title::before {
+  display: block;
   margin-bottom: 0.35rem;
   color: #047857;
+  content: attr(data-hc-eyebrow);
   font-size: 0.68rem;
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
-.hc-principle--neutral .hc-principle__eyebrow {
+.hc-principle--neutral .hc-principle__title::before {
   color: #94a3b8;
-}
-
-.hc-principle__title {
-  color: #0f172a;
-  font-size: 1rem;
-  font-weight: 600;
-  line-height: 1.25;
-  text-decoration: none !important;
 }
 
 @keyframes hcFlipTop {
