@@ -107,7 +107,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
       <div className="min-h-dvh bg-slate-50">
         <ComingSoonTopbar />
         <LaunchCountdown />
-        <div className="[&_nav]:hidden">
+        <div className="[&_nav]:hidden [&_header>div>div:first-child]:hidden">
           <ComingSoonExperience />
         </div>
       </div>
