@@ -50,7 +50,7 @@
 .sticky {
   position: sticky;
   top: 4.5rem;
-  min-height: calc(100svh - 4.5rem);
+  min-height: 520px;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -242,7 +242,7 @@
 
   .sticky {
     top: 4rem;
-    min-height: calc(100svh - 4rem);
+    min-height: 520px;
     padding: 0.75rem 1rem 2rem;
   }
 
