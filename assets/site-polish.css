@@ -1,9 +1,118 @@
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 1rem;
+}
+
+/* The React build still contains its original sticky nav. The GitHub Pages shell
+   now owns the top banner so the duplicate cannot float over mobile content. */
+#root > div > nav.sticky {
+  display: none !important;
+}
+
+.hc-topbar {
+  position: relative;
+  z-index: 60;
+  width: 100%;
+  border-bottom: 1px solid rgb(226 232 240 / 85%);
+  background: rgb(255 255 255 / 96%);
+  color: #0f172a;
+}
+
+.hc-topbar__inner {
+  display: flex;
+  width: min(100%, 80rem);
+  min-height: 4.5rem;
+  margin: 0 auto;
+  padding: 0.75rem clamp(1rem, 3vw, 3rem);
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.hc-topbar__brand {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  color: #0f172a;
+  font-size: 1.16rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  text-decoration: none;
+}
+
+.hc-topbar__mark {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.55rem 0.55rem 0.55rem 0;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.hc-topbar__name {
+  white-space: nowrap;
+}
+
+.hc-topbar__links {
+  display: flex;
+  margin-left: auto;
+  align-items: center;
+  gap: clamp(1rem, 2.3vw, 1.65rem);
+  color: #475569;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.hc-topbar__links a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.hc-topbar__links a:hover,
+.hc-topbar__links a:focus-visible {
+  color: #0f172a;
+}
+
+.hc-topbar__cta {
+  display: inline-flex;
+  min-height: 2.5rem;
+  padding: 0.65rem 1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.hc-topbar__cta:hover,
+.hc-topbar__cta:focus-visible {
+  background: #1e293b;
+  transform: translateY(-1px);
+}
+
 .hc-countdown {
   position: relative;
   z-index: 20;
   width: 100%;
-  padding: clamp(2.5rem, 7vw, 5.5rem) 1.5rem clamp(2.75rem, 6vw, 5rem);
-  background: transparent;
+  overflow: clip;
+  padding: clamp(2.75rem, 7vw, 5.5rem) 1.5rem clamp(3rem, 6vw, 5rem);
+  background:
+    radial-gradient(circle at 50% 18%, rgb(209 250 229 / 42%), transparent 34rem),
+    transparent;
   color: #0f172a;
 }
 
@@ -38,150 +147,131 @@
   line-height: 1.5;
 }
 
+.hc-countdown__perspective {
+  --hc-scroll: 0;
+  width: min(100%, 62rem);
+  margin: clamp(2rem, 4.5vw, 3.35rem) auto 0;
+  perspective: 1100px;
+  perspective-origin: 50% 42%;
+}
+
 .hc-countdown__clock {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: clamp(0.85rem, 2.4vw, 1.75rem);
-  width: min(100%, 60rem);
-  margin: clamp(2rem, 4.5vw, 3.25rem) auto 0;
-  align-items: end;
+  gap: clamp(0.8rem, 2.2vw, 1.4rem);
+  width: 100%;
+  align-items: stretch;
+  transform: rotateX(var(--hc-tilt, 0deg)) translateY(var(--hc-shift, 0px));
+  transform-style: preserve-3d;
+  transition: transform 80ms linear;
+  will-change: transform;
 }
 
 .hc-countdown__unit {
-  min-width: 0;
-}
-
-.hc-countdown__digits {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(0.45rem, 1.2vw, 0.9rem);
-}
-
-.hc-countdown__flip-card {
   position: relative;
-  aspect-ratio: 0.72 / 1;
-  perspective: 900px;
-  filter: drop-shadow(0 0.75rem 0.75rem rgb(15 23 42 / 12%));
+  min-width: 0;
+  aspect-ratio: 0.92 / 1;
+  transform: translateZ(var(--hc-unit-depth, 0px)) rotateY(var(--hc-yaw, 0deg));
+  transform-style: preserve-3d;
+  will-change: transform;
 }
 
-.hc-countdown__half,
-.hc-countdown__flap {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 50%;
-  overflow: hidden;
-  color: #f8fafc;
-  border: 1px solid #020617;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-}
-
-.hc-countdown__top {
-  top: 0;
-  border-radius: clamp(0.45rem, 1vw, 0.8rem) clamp(0.45rem, 1vw, 0.8rem) 2px 2px;
-  border-bottom-color: #020617;
-  background: #1e293b;
-}
-
-.hc-countdown__bottom {
-  bottom: 0;
-  border-radius: 2px 2px clamp(0.45rem, 1vw, 0.8rem) clamp(0.45rem, 1vw, 0.8rem);
-  border-top-color: #334155;
-  background: #172033;
-}
-
-.hc-countdown__half span,
-.hc-countdown__flap span {
-  position: absolute;
-  left: 0;
+.hc-countdown__plate {
+  position: relative;
   display: flex;
   width: 100%;
-  height: 200%;
+  height: 100%;
+  min-height: clamp(7.75rem, 15vw, 11.75rem);
+  overflow: hidden;
+  padding: clamp(0.8rem, 2vw, 1.25rem);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(148 163 184 / 24%);
+  border-radius: clamp(1rem, 2vw, 1.55rem);
+  background:
+    linear-gradient(155deg, rgb(30 41 59 / 98%), rgb(15 23 42 / 98%) 58%, rgb(2 6 23 / 98%)),
+    #0f172a;
+  box-shadow:
+    0 1.4rem 2.6rem rgb(15 23 42 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 11%),
+    inset 0 -1px 0 rgb(0 0 0 / 38%);
+  transform: translateZ(var(--hc-plate-depth, 16px)) rotateX(var(--hc-card-tilt, 0deg));
+  transform-style: preserve-3d;
+  transition: box-shadow 180ms ease, transform 80ms linear;
+  will-change: transform;
+}
+
+.hc-countdown__plate::before {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(115deg, rgb(255 255 255 / 12%), transparent 34%, transparent 67%, rgb(255 255 255 / 4%)),
+    radial-gradient(circle at 50% -20%, rgb(255 255 255 / 12%), transparent 55%);
+  content: "";
+  pointer-events: none;
+}
+
+.hc-countdown__plate::after {
+  position: absolute;
+  right: 12%;
+  bottom: -18%;
+  left: 12%;
+  height: 30%;
+  border-radius: 50%;
+  background: rgb(16 185 129 / 14%);
+  filter: blur(24px);
+  content: "";
+  pointer-events: none;
+}
+
+.hc-countdown__value-stack {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: clamp(4.6rem, 10vw, 7.4rem);
+  overflow: hidden;
+  perspective: 700px;
+  transform: translateZ(28px);
+  transform-style: preserve-3d;
+}
+
+.hc-countdown__value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
   justify-content: center;
   color: #f8fafc;
   font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-  font-size: clamp(2.9rem, 8.3vw, 7rem);
+  font-size: clamp(3.45rem, 8.3vw, 7.2rem);
   font-weight: 900;
   letter-spacing: -0.055em;
   line-height: 1;
-  text-shadow: 0 2px 0 #020617;
+  text-shadow: 0 0.1rem 0 rgb(2 6 23 / 70%);
+  transform-origin: center;
   user-select: none;
 }
 
-.hc-countdown__top span,
-.hc-countdown__top-flap span {
-  top: 0;
-  align-items: center;
+.hc-countdown__value--leaving {
+  animation: hcPerspectiveLeave 480ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-.hc-countdown__bottom span,
-.hc-countdown__bottom-flap span {
-  bottom: 0;
-  align-items: center;
-}
-
-.hc-countdown__flip-card::after {
-  position: absolute;
-  z-index: 10;
-  top: 50%;
-  right: 4px;
-  left: 4px;
-  height: 1px;
-  background: rgb(2 6 23 / 96%);
-  box-shadow: 0 -1px 0 rgb(255 255 255 / 3%), 0 1px 0 rgb(255 255 255 / 4%);
-  content: "";
-  pointer-events: none;
-  transform: translateY(-0.5px);
-}
-
-.hc-countdown__flip-card::before {
-  position: absolute;
-  z-index: 11;
-  top: 47%;
-  right: -3px;
-  left: -3px;
-  height: 6%;
-  border-radius: 999px;
-  background: linear-gradient(
-    90deg,
-    #020617 0 3px,
-    transparent 3px calc(100% - 3px),
-    #020617 calc(100% - 3px)
-  );
-  content: "";
-  pointer-events: none;
-}
-
-.hc-countdown__flap {
-  z-index: 5;
-}
-
-.hc-countdown__top-flap {
-  top: 0;
-  border-radius: clamp(0.45rem, 1vw, 0.8rem) clamp(0.45rem, 1vw, 0.8rem) 2px 2px;
-  background: #1e293b;
-  transform-origin: bottom;
-  animation: hcFlipTop 360ms cubic-bezier(0.37, 0.01, 0.94, 0.35) forwards;
-}
-
-.hc-countdown__bottom-flap {
-  bottom: 0;
-  border-radius: 2px 2px clamp(0.45rem, 1vw, 0.8rem) clamp(0.45rem, 1vw, 0.8rem);
-  background: #172033;
-  transform: rotateX(90deg);
-  transform-origin: top;
-  animation: hcFlipBottom 360ms 340ms cubic-bezier(0.15, 0.45, 0.28, 1) forwards;
+.hc-countdown__value--entering {
+  animation: hcPerspectiveEnter 480ms cubic-bezier(0.22, 0.7, 0.22, 1) forwards;
 }
 
 .hc-countdown__label {
+  position: relative;
+  z-index: 2;
   display: block;
-  margin-top: clamp(0.55rem, 1.4vw, 0.9rem);
-  color: #64748b;
-  font-size: clamp(0.64rem, 1.15vw, 0.78rem);
+  margin-top: 0.25rem;
+  color: #a7f3d0;
+  font-size: clamp(0.64rem, 1.1vw, 0.78rem);
   font-weight: 800;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  transform: translateZ(20px);
 }
 
 .hc-sr-only {
@@ -273,26 +363,79 @@
   color: #94a3b8;
 }
 
-@keyframes hcFlipTop {
-  from { transform: rotateX(0deg); }
-  to { transform: rotateX(-90deg); }
+@keyframes hcPerspectiveLeave {
+  from {
+    opacity: 1;
+    transform: translateY(0) translateZ(0) rotateX(0deg);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-64%) translateZ(-70px) rotateX(-56deg);
+  }
 }
 
-@keyframes hcFlipBottom {
-  from { transform: rotateX(90deg); }
-  to { transform: rotateX(0deg); }
+@keyframes hcPerspectiveEnter {
+  from {
+    opacity: 0;
+    transform: translateY(64%) translateZ(-70px) rotateX(56deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateZ(0) rotateX(0deg);
+  }
+}
+
+@media (max-width: 820px) {
+  .hc-topbar__links {
+    display: none;
+  }
 }
 
 @media (max-width: 680px) {
+  .hc-topbar__inner {
+    min-height: 4rem;
+    padding: 0.65rem 1rem;
+  }
+
+  .hc-topbar__brand {
+    gap: 0.45rem;
+    font-size: 1rem;
+  }
+
+  .hc-topbar__mark {
+    width: 1.85rem;
+    height: 1.85rem;
+    font-size: 0.75rem;
+  }
+
+  .hc-topbar__cta {
+    min-height: 2.3rem;
+    padding: 0.58rem 0.82rem;
+    font-size: 0.74rem;
+  }
+
   .hc-countdown {
-    padding-right: 1rem;
-    padding-left: 1rem;
+    padding: 2.4rem 1rem 3.2rem;
   }
 
   .hc-countdown__clock {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.5rem 1.1rem;
-    width: min(100%, 30rem);
+    gap: 1rem;
+    width: min(100%, 31rem);
+    margin: 0 auto;
+  }
+
+  .hc-countdown__unit {
+    aspect-ratio: 1.02 / 1;
+  }
+
+  .hc-countdown__plate {
+    min-height: 8.25rem;
+    border-radius: 1.2rem;
+  }
+
+  .hc-countdown__value-stack {
+    height: 5.2rem;
   }
 
   .hc-principle {
@@ -302,9 +445,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hc-countdown__top-flap,
-  .hc-countdown__bottom-flap {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .hc-countdown__clock,
+  .hc-countdown__unit,
+  .hc-countdown__plate {
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .hc-countdown__value--leaving,
+  .hc-countdown__value--entering {
     animation-duration: 1ms;
-    animation-delay: 0ms;
+  }
+
+  .hc-topbar__cta,
+  .hc-topbar__links a {
+    transition: none;
   }
 }
