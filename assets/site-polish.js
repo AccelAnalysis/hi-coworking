@@ -14,92 +14,46 @@ function makeCountdownUnit(key, label) {
   const unit = document.createElement("div");
   unit.className = "hc-scroll-countdown__unit";
   unit.dataset.unit = key;
-  unit.dataset.value = "";
 
-  const card = document.createElement("div");
-  card.className = "hc-scroll-countdown__card";
-  card.innerHTML = `
-    <div class="hc-scroll-countdown__half hc-scroll-countdown__top"><span>00</span></div>
-    <div class="hc-scroll-countdown__half hc-scroll-countdown__bottom"><span>00</span></div>
-  `;
+  const face = document.createElement("div");
+  face.className = "hc-scroll-countdown__face";
+
+  const value = document.createElement("strong");
+  value.textContent = "00";
+  face.append(value);
 
   const caption = document.createElement("span");
   caption.className = "hc-scroll-countdown__label";
   caption.textContent = label;
 
-  unit.append(card, caption);
+  unit.append(face, caption);
   return unit;
 }
 
-function setUnitValue(unit, nextValue, reducedMotion) {
-  const previousValue = unit.dataset.value;
-  const card = unit.querySelector(".hc-scroll-countdown__card");
-  const top = card?.querySelector(".hc-scroll-countdown__top span");
-  const bottom = card?.querySelector(".hc-scroll-countdown__bottom span");
-  if (!card || !top || !bottom) return;
+function setUnitValue(unit, nextValue) {
+  const value = unit.querySelector(".hc-scroll-countdown__face strong");
+  if (value) value.textContent = nextValue;
+}
 
-  if (!previousValue) {
-    top.textContent = nextValue;
-    bottom.textContent = nextValue;
-    unit.dataset.value = nextValue;
-    return;
-  }
-
-  if (previousValue === nextValue) return;
-
-  card.querySelectorAll(".hc-scroll-countdown__flap").forEach((flap) => flap.remove());
-
-  if (reducedMotion) {
-    top.textContent = nextValue;
-    bottom.textContent = nextValue;
-    unit.dataset.value = nextValue;
-    return;
-  }
-
-  bottom.textContent = nextValue;
-
-  const topFlap = document.createElement("div");
-  topFlap.className = "hc-scroll-countdown__flap hc-scroll-countdown__top-flap";
-  topFlap.innerHTML = `<span>${previousValue}</span>`;
-
-  const bottomFlap = document.createElement("div");
-  bottomFlap.className = "hc-scroll-countdown__flap hc-scroll-countdown__bottom-flap";
-  bottomFlap.innerHTML = `<span>${nextValue}</span>`;
-
-  card.append(topFlap, bottomFlap);
-  unit.dataset.value = nextValue;
-
-  window.setTimeout(() => {
-    if (unit.dataset.value === nextValue) top.textContent = nextValue;
-  }, 300);
-
-  window.setTimeout(() => {
-    topFlap.remove();
-    bottomFlap.remove();
-  }, 680);
+function viewportPerspective(element) {
+  const rect = element.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1;
+  const center = rect.top + rect.height / 2;
+  return Math.max(-1, Math.min(1, (viewportHeight / 2 - center) / (viewportHeight * 0.56)));
 }
 
 function startScrollPerspective(reducedMotion) {
-  const track = document.querySelector("[data-hc-scroll-track]");
-  const sticky = track?.querySelector(".hc-scroll-countdown__sticky");
+  const shell = document.querySelector("[data-hc-perspective]");
   const clock = document.querySelector("[data-hc-countdown-clock]");
-  if (!track || !sticky || !clock || reducedMotion) return;
+  if (!shell || !clock || reducedMotion) return;
 
   let frame = 0;
-  let lastScrollY = window.scrollY;
 
   const update = () => {
     frame = 0;
-    const rect = track.getBoundingClientRect();
-    const travel = Math.max(1, track.offsetHeight - sticky.offsetHeight);
-    const progress = Math.max(0, Math.min(1, -rect.top / travel));
-    const perspectiveProgress = progress * 2 - 1;
-    const delta = window.scrollY - lastScrollY;
-    lastScrollY = window.scrollY;
-
-    const tilt = -perspectiveProgress * 17;
-    const yaw = Math.max(-5, Math.min(5, delta * 0.08));
-
+    const progress = viewportPerspective(shell);
+    const tilt = progress * 26;
+    const yaw = -tilt * 0.12;
     clock.style.setProperty("--hc-scroll-tilt", `${tilt.toFixed(2)}deg`);
     clock.style.setProperty("--hc-scroll-yaw", `${yaw.toFixed(2)}deg`);
   };
@@ -136,7 +90,7 @@ function startCountdown() {
 
     Object.entries(values).forEach(([key, value]) => {
       const unit = clock.querySelector(`[data-unit="${key}"]`);
-      if (unit) setUnitValue(unit, value, reducedMotion);
+      if (unit) setUnitValue(unit, value);
     });
 
     if (accessible) {
