@@ -5,6 +5,12 @@
   display: none !important;
 }
 
+/* The countdown now communicates launch status, so the old hero
+   "Space opening soon" pill is intentionally removed from view. */
+#root > div > header > div > div:first-child {
+  display: none !important;
+}
+
 .hc-topbar {
   position: sticky !important;
   top: 0 !important;
