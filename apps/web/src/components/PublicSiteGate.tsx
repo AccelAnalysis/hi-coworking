@@ -18,6 +18,35 @@ const DEFAULT_SETTINGS: PublicSiteSettingsDoc = {
   updatedAt: 0,
 };
 
+function ComingSoonTopbar() {
+  return (
+    <nav className="relative z-50 border-b border-slate-200/80 bg-white/95" aria-label="Primary navigation">
+      <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 py-2.5 md:min-h-[4.5rem] md:px-12">
+        <a href="#launch-countdown-title" className="inline-flex min-w-0 items-center gap-2 text-slate-900 no-underline">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-sm font-bold text-white">
+            Hi
+          </span>
+          <span className="whitespace-nowrap text-base font-bold tracking-tight md:text-xl">Coworking</span>
+        </a>
+
+        <div className="ml-auto hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
+          <a href="#concept" className="transition-colors hover:text-slate-900">Concept</a>
+          <a href="#impact" className="transition-colors hover:text-slate-900">Local Impact</a>
+          <a href="#ecosystem" className="transition-colors hover:text-slate-900">Ecosystem</a>
+          <a href="#access" className="transition-colors hover:text-slate-900">Early Access</a>
+        </div>
+
+        <a
+          href="#access"
+          className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-full bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white no-underline transition-colors hover:bg-slate-800 md:min-h-10 md:px-4 md:text-sm"
+        >
+          Get Early Access
+        </a>
+      </div>
+    </nav>
+  );
+}
+
 export function PublicSiteGate({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { loading: authLoading, role } = useAuth();
@@ -73,8 +102,11 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
   if (showComingSoon) {
     return (
       <div className="min-h-dvh bg-slate-50">
+        <ComingSoonTopbar />
         <LaunchCountdown />
-        <ComingSoonExperience />
+        <div className="[&>div>nav]:hidden">
+          <ComingSoonExperience />
+        </div>
       </div>
     );
   }
