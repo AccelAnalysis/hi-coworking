@@ -7,6 +7,7 @@
     <script type="module" crossorigin src="./assets/index-BUW-P55Z.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-B4duReCQ.css">
     <link rel="stylesheet" href="./assets/site-polish.css">
+    <link rel="stylesheet" href="./assets/scroll-perspective-countdown.css">
     <link rel="stylesheet" href="./assets/banner-fix.css">
   </head>
   <body>
@@ -28,15 +29,24 @@
 
     <section id="top" class="hc-countdown" aria-labelledby="hc-launch-countdown-title">
       <div class="hc-countdown__inner">
-        <p class="hc-countdown__eyebrow">Hi Coworking</p>
-        <h1 id="hc-launch-countdown-title" class="hc-countdown__title">Something good is getting ready.</h1>
-        <p class="hc-countdown__subhead">Our doors open soon.</p>
-        <p class="hc-sr-only" data-hc-countdown-accessible aria-live="off">Countdown until opening.</p>
-        <div class="hc-countdown__perspective" data-hc-perspective>
-          <div class="hc-countdown__clock" data-hc-countdown-clock aria-hidden="true"></div>
+        <div class="hc-countdown__copy">
+          <p class="hc-countdown__eyebrow">Hi Coworking</p>
+          <h1 id="hc-launch-countdown-title" class="hc-countdown__title">Something good is getting ready.</h1>
+          <p class="hc-countdown__subhead">Our doors open soon.</p>
+          <p class="hc-sr-only" data-hc-countdown-accessible aria-live="off">Countdown until opening.</p>
+        </div>
+
+        <div class="hc-scroll-countdown__track" data-hc-scroll-track>
+          <div class="hc-scroll-countdown__sticky">
+            <div class="hc-scroll-countdown__shell" data-hc-perspective>
+              <div class="hc-scroll-countdown__clock" data-hc-countdown-clock aria-hidden="true"></div>
+              <p class="hc-scroll-countdown__hint">Scroll to change the viewing angle.</p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
+
     <div id="root"></div>
     <script type="module" src="./assets/site-polish.js"></script>
   </body>
