@@ -4,9 +4,7 @@
   width: 100%;
   overflow: visible;
   padding: clamp(1.65rem, 3.4vw, 2.5rem) 1rem clamp(1.5rem, 3vw, 2.25rem);
-  background:
-    radial-gradient(circle at 50% 18%, rgb(209 250 229 / 42%), transparent 34rem),
-    transparent;
+  background: transparent;
   color: #0f172a;
 }
 
