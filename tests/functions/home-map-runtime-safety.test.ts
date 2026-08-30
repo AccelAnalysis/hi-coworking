@@ -7,11 +7,16 @@ const source = readFileSync(
 );
 
 describe("home map runtime safety", () => {
-  it("renders a user-facing fallback when map tiles are not configured", () => {
+  it("keeps the map visible when a custom tile URL is not configured", () => {
     expect(source).toContain(
       "process.env.NEXT_PUBLIC_OPENSTREETMAP_TILE_URL?.trim()",
     );
-    expect(source).toContain("if (!tileUrl || mapFailed)");
+    expect(source).toContain(
+      'const defaultTileUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"',
+    );
+    expect(source).toContain("const tileUrl = configuredTileUrl || defaultTileUrl");
+    expect(source).toContain("if (mapFailed)");
+    expect(source).not.toContain("if (!tileUrl || mapFailed)");
     expect(source).toContain("Get directions");
     expect(source).not.toContain(
       'throw new Error("NEXT_PUBLIC_OPENSTREETMAP_TILE_URL is not configured")',
