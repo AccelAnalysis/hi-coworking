@@ -9,13 +9,31 @@
     <link rel="stylesheet" href="./assets/site-polish.css">
   </head>
   <body>
-    <section class="hc-countdown" aria-labelledby="hc-launch-countdown-title">
+    <nav class="hc-topbar" aria-label="Primary navigation">
+      <div class="hc-topbar__inner">
+        <a class="hc-topbar__brand" href="#top" aria-label="Hi Coworking home">
+          <span class="hc-topbar__mark" aria-hidden="true">Hi</span>
+          <span class="hc-topbar__name">Coworking</span>
+        </a>
+        <div class="hc-topbar__links" aria-label="Coming soon sections">
+          <a href="#concept">Concept</a>
+          <a href="#impact">Local Impact</a>
+          <a href="#ecosystem">Ecosystem</a>
+          <a href="#access">Early Access</a>
+        </div>
+        <a class="hc-topbar__cta" href="#access">Get Early Access</a>
+      </div>
+    </nav>
+
+    <section id="top" class="hc-countdown" aria-labelledby="hc-launch-countdown-title">
       <div class="hc-countdown__inner">
         <p class="hc-countdown__eyebrow">Hi Coworking</p>
         <h1 id="hc-launch-countdown-title" class="hc-countdown__title">Something good is getting ready.</h1>
         <p class="hc-countdown__subhead">Our doors open soon.</p>
         <p class="hc-sr-only" data-hc-countdown-accessible aria-live="off">Countdown until opening.</p>
-        <div class="hc-countdown__clock" data-hc-countdown-clock aria-hidden="true"></div>
+        <div class="hc-countdown__perspective" data-hc-perspective>
+          <div class="hc-countdown__clock" data-hc-countdown-clock aria-hidden="true"></div>
+        </div>
       </div>
     </section>
     <div id="root"></div>
