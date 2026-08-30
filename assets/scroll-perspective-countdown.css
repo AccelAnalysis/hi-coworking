@@ -1,0 +1,241 @@
+/* Scroll-Perspective Split-Flap Countdown
+   Ported from the selected mobile-first Hi Coworking countdown prototype. */
+
+.hc-countdown {
+  overflow: visible !important;
+  padding: clamp(2.4rem, 6vw, 4.5rem) 0 0 !important;
+}
+
+.hc-countdown__inner {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.hc-countdown__copy {
+  width: min(100% - 2rem, 68rem);
+  margin: 0 auto;
+  text-align: center;
+}
+
+.hc-scroll-countdown__track {
+  position: relative;
+  height: 980px;
+  margin-top: clamp(1.5rem, 3.5vw, 2.5rem);
+}
+
+.hc-scroll-countdown__sticky {
+  position: sticky;
+  top: 4.5rem;
+  min-height: calc(100svh - 4.5rem);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  padding: 1rem 1.5rem 3rem;
+}
+
+.hc-scroll-countdown__shell {
+  width: min(100%, 64rem);
+  perspective: 1200px;
+  perspective-origin: 50% 48%;
+}
+
+.hc-scroll-countdown__clock {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(0.85rem, 2vw, 1.35rem);
+  width: 100%;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--hc-scroll-tilt, 0deg)) rotateY(var(--hc-scroll-yaw, 0deg));
+  transition: transform 90ms linear;
+  will-change: transform;
+}
+
+.hc-scroll-countdown__unit {
+  min-width: 0;
+  text-align: center;
+  transform-style: preserve-3d;
+}
+
+.hc-scroll-countdown__card {
+  position: relative;
+  height: clamp(11.5rem, 22vw, 15.5rem);
+  border-radius: clamp(1rem, 2vw, 1.35rem);
+  filter: drop-shadow(0 1.25rem 1.2rem rgb(15 23 42 / 17%));
+  transform-style: preserve-3d;
+}
+
+.hc-scroll-countdown__card::before {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #020617;
+  border-radius: inherit;
+  background: #050b16;
+  box-shadow: 0 0 0 1px rgb(148 163 184 / 12%);
+  content: "";
+  transform: translateZ(-28px);
+}
+
+.hc-scroll-countdown__half,
+.hc-scroll-countdown__flap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+  border: 1px solid #020617;
+  color: #f8fafc;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.hc-scroll-countdown__top {
+  top: 0;
+  border-radius: clamp(1rem, 2vw, 1.35rem) clamp(1rem, 2vw, 1.35rem) 2px 2px;
+  border-bottom-color: #020617;
+  background: linear-gradient(#253247, #111827);
+}
+
+.hc-scroll-countdown__bottom {
+  bottom: 0;
+  border-radius: 2px 2px clamp(1rem, 2vw, 1.35rem) clamp(1rem, 2vw, 1.35rem);
+  border-top-color: #334155;
+  background: linear-gradient(#0f172a, #0b1220);
+}
+
+.hc-scroll-countdown__half span,
+.hc-scroll-countdown__flap span {
+  position: absolute;
+  left: 0;
+  display: flex;
+  width: 100%;
+  height: 200%;
+  align-items: center;
+  justify-content: center;
+  color: #f8fafc;
+  font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  font-size: clamp(4.2rem, 10vw, 7.4rem);
+  font-weight: 900;
+  letter-spacing: -0.065em;
+  line-height: 1;
+  text-shadow: 0 2px 0 #020617;
+  user-select: none;
+}
+
+.hc-scroll-countdown__top span,
+.hc-scroll-countdown__top-flap span {
+  top: 0;
+}
+
+.hc-scroll-countdown__bottom span,
+.hc-scroll-countdown__bottom-flap span {
+  bottom: 0;
+}
+
+.hc-scroll-countdown__card::after {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  right: 5px;
+  left: 5px;
+  height: 1px;
+  background: rgb(2 6 23 / 98%);
+  box-shadow: 0 -1px 0 rgb(255 255 255 / 4%), 0 1px 0 rgb(255 255 255 / 4%);
+  content: "";
+  transform: translateY(-0.5px) translateZ(2px);
+  pointer-events: none;
+}
+
+.hc-scroll-countdown__flap {
+  z-index: 7;
+}
+
+.hc-scroll-countdown__top-flap {
+  top: 0;
+  border-radius: clamp(1rem, 2vw, 1.35rem) clamp(1rem, 2vw, 1.35rem) 2px 2px;
+  background: linear-gradient(#253247, #111827);
+  transform-origin: bottom;
+  animation: hcScrollFlipTop 330ms cubic-bezier(0.37, 0.01, 0.94, 0.35) forwards;
+}
+
+.hc-scroll-countdown__bottom-flap {
+  bottom: 0;
+  border-radius: 2px 2px clamp(1rem, 2vw, 1.35rem) clamp(1rem, 2vw, 1.35rem);
+  background: linear-gradient(#0f172a, #0b1220);
+  transform: rotateX(90deg);
+  transform-origin: top;
+  animation: hcScrollFlipBottom 330ms 300ms cubic-bezier(0.15, 0.45, 0.28, 1) forwards;
+}
+
+.hc-scroll-countdown__label {
+  display: block;
+  margin-top: clamp(0.65rem, 1.4vw, 0.9rem);
+  color: #64748b;
+  font-size: clamp(0.64rem, 1.05vw, 0.78rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transform: translateZ(14px);
+}
+
+.hc-scroll-countdown__hint {
+  margin: 1rem 0 0;
+  color: #94a3b8;
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+@keyframes hcScrollFlipTop {
+  from { transform: rotateX(0deg); }
+  to { transform: rotateX(-90deg); }
+}
+
+@keyframes hcScrollFlipBottom {
+  from { transform: rotateX(90deg); }
+  to { transform: rotateX(0deg); }
+}
+
+@media (max-width: 680px) {
+  .hc-countdown {
+    padding-top: 2.1rem !important;
+  }
+
+  .hc-scroll-countdown__track {
+    height: 1080px;
+    margin-top: 1rem;
+  }
+
+  .hc-scroll-countdown__sticky {
+    top: 4rem;
+    min-height: calc(100svh - 4rem);
+    padding: 0.75rem 1rem 2rem;
+  }
+
+  .hc-scroll-countdown__clock {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    width: min(100%, 31rem);
+    margin: 0 auto;
+  }
+
+  .hc-scroll-countdown__card {
+    height: clamp(9.4rem, 42vw, 12rem);
+  }
+
+  .hc-scroll-countdown__half span,
+  .hc-scroll-countdown__flap span {
+    font-size: clamp(3.75rem, 18vw, 5.8rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-scroll-countdown__clock {
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .hc-scroll-countdown__top-flap,
+  .hc-scroll-countdown__bottom-flap {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+}
