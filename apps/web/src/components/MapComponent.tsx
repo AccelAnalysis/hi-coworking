@@ -6,15 +6,17 @@ import "leaflet/dist/leaflet.css";
 
 const position: [number, number] = [36.92904282704385, -76.52067450742162];
 const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${position[0]},${position[1]}`;
+const defaultTileUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 export function MapComponent() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const [mapFailed, setMapFailed] = useState(false);
-  const tileUrl = process.env.NEXT_PUBLIC_OPENSTREETMAP_TILE_URL?.trim();
+  const configuredTileUrl = process.env.NEXT_PUBLIC_OPENSTREETMAP_TILE_URL?.trim();
+  const tileUrl = configuredTileUrl || defaultTileUrl;
 
   useEffect(() => {
-    if (!tileUrl || !mapRef.current || mapInstanceRef.current) return;
+    if (!mapRef.current || mapInstanceRef.current) return;
 
     let map: L.Map | null = null;
 
@@ -23,8 +25,9 @@ export function MapComponent() {
       mapInstanceRef.current = map;
 
       L.tileLayer(tileUrl, {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        attribution: configuredTileUrl
+          ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 20,
       }).addTo(map);
 
@@ -55,9 +58,9 @@ export function MapComponent() {
       map?.remove();
       mapInstanceRef.current = null;
     };
-  }, [tileUrl]);
+  }, [configuredTileUrl, tileUrl]);
 
-  if (!tileUrl || mapFailed) {
+  if (mapFailed) {
     return (
       <div className="flex h-64 w-full items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 px-6 text-center shadow-xl shadow-slate-200/40 md:h-80">
         <div>
