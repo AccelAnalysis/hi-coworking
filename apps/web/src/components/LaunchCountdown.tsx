@@ -27,42 +27,11 @@ function getCountdownValue(now: number): CountdownValue {
   };
 }
 
-function SplitFlapUnit({ value, label }: { value: string; label: string }) {
-  const [displayValue, setDisplayValue] = useState(value);
-  const [previousValue, setPreviousValue] = useState(value);
-  const [flipping, setFlipping] = useState(false);
-
-  useEffect(() => {
-    if (value === displayValue) return;
-
-    setPreviousValue(displayValue);
-    setDisplayValue(value);
-    setFlipping(true);
-
-    const timer = window.setTimeout(() => setFlipping(false), 680);
-    return () => window.clearTimeout(timer);
-  }, [displayValue, value]);
-
+function PerspectiveUnit({ value, label }: { value: string; label: string }) {
   return (
     <div className={styles.unit}>
-      <div className={styles.card}>
-        <div className={`${styles.half} ${styles.top}`}>
-          <span>{displayValue}</span>
-        </div>
-        <div className={`${styles.half} ${styles.bottom}`}>
-          <span>{displayValue}</span>
-        </div>
-
-        {flipping && (
-          <>
-            <div className={`${styles.flap} ${styles.topFlap}`}>
-              <span>{previousValue}</span>
-            </div>
-            <div className={`${styles.flap} ${styles.bottomFlap}`}>
-              <span>{displayValue}</span>
-            </div>
-          </>
-        )}
+      <div className={styles.face}>
+        <strong>{value}</strong>
       </div>
       <span className={styles.label}>{label}</span>
     </div>
@@ -71,8 +40,7 @@ function SplitFlapUnit({ value, label }: { value: string; label: string }) {
 
 export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
   const [countdown, setCountdown] = useState<CountdownValue>(() => getCountdownValue(Date.now()));
-  const trackRef = useRef<HTMLDivElement>(null);
-  const stickyRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const clockRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -91,46 +59,39 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
   }, [onComplete]);
 
   useEffect(() => {
-    const track = trackRef.current;
-    const sticky = stickyRef.current;
+    const shell = shellRef.current;
     const clock = clockRef.current;
-    if (!track || !sticky || !clock) return;
+    if (!shell || !clock) return;
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reducedMotion) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     let frame = 0;
-    let lastScrollY = window.scrollY;
 
     const updatePerspective = () => {
       frame = 0;
-      const rect = track.getBoundingClientRect();
-      const stickyTop = Number.parseFloat(window.getComputedStyle(sticky).top) || 0;
-      const travel = Math.max(1, track.offsetHeight - sticky.offsetHeight);
-      const progress = Math.max(0, Math.min(1, (stickyTop - rect.top) / travel));
-      const perspectiveProgress = progress * 2 - 1;
-      const delta = window.scrollY - lastScrollY;
-      lastScrollY = window.scrollY;
-
-      const tilt = -perspectiveProgress * 17;
-      const yaw = Math.max(-5, Math.min(5, delta * 0.08));
+      const rect = shell.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1;
+      const center = rect.top + rect.height / 2;
+      const progress = Math.max(-1, Math.min(1, (viewportHeight / 2 - center) / (viewportHeight * 0.56)));
+      const tilt = progress * 26;
+      const yaw = -tilt * 0.12;
 
       clock.style.setProperty("--scroll-tilt", `${tilt.toFixed(2)}deg`);
       clock.style.setProperty("--scroll-yaw", `${yaw.toFixed(2)}deg`);
     };
 
-    const requestPerspectiveUpdate = () => {
+    const requestUpdate = () => {
       if (frame) return;
       frame = window.requestAnimationFrame(updatePerspective);
     };
 
     updatePerspective();
-    window.addEventListener("scroll", requestPerspectiveUpdate, { passive: true });
-    window.addEventListener("resize", requestPerspectiveUpdate, { passive: true });
+    window.addEventListener("scroll", requestUpdate, { passive: true });
+    window.addEventListener("resize", requestUpdate, { passive: true });
 
     return () => {
-      window.removeEventListener("scroll", requestPerspectiveUpdate);
-      window.removeEventListener("resize", requestPerspectiveUpdate);
+      window.removeEventListener("scroll", requestUpdate);
+      window.removeEventListener("resize", requestUpdate);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
@@ -150,17 +111,12 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
         </p>
       </div>
 
-      <div ref={trackRef} className={styles.track}>
-        <div ref={stickyRef} className={styles.sticky}>
-          <div className={styles.shell}>
-            <div ref={clockRef} className={styles.clock} aria-hidden="true">
-              <SplitFlapUnit value={countdown.days} label="Days" />
-              <SplitFlapUnit value={countdown.hours} label="Hours" />
-              <SplitFlapUnit value={countdown.minutes} label="Minutes" />
-              <SplitFlapUnit value={countdown.seconds} label="Seconds" />
-            </div>
-            <p className={styles.hint}>Scroll to change the viewing angle.</p>
-          </div>
+      <div ref={shellRef} className={styles.shell}>
+        <div ref={clockRef} className={styles.clock} aria-hidden="true">
+          <PerspectiveUnit value={countdown.days} label="Days" />
+          <PerspectiveUnit value={countdown.hours} label="Hours" />
+          <PerspectiveUnit value={countdown.minutes} label="Minutes" />
+          <PerspectiveUnit value={countdown.seconds} label="Seconds" />
         </div>
       </div>
     </section>
