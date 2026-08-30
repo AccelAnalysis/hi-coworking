@@ -3,6 +3,7 @@
 .hc-countdown {
   overflow: visible !important;
   padding: clamp(1.65rem, 3.4vw, 2.5rem) 1rem clamp(1.5rem, 3vw, 2.25rem) !important;
+  background: transparent !important;
 }
 
 .hc-countdown__inner {
