@@ -20,7 +20,10 @@ const DEFAULT_SETTINGS: PublicSiteSettingsDoc = {
 
 function ComingSoonTopbar() {
   return (
-    <nav className="relative z-50 border-b border-slate-200/80 bg-white/95" aria-label="Primary navigation">
+    <nav
+      className="sticky top-0 z-[100] border-b border-slate-200/60 bg-white/75 shadow-[0_8px_30px_rgba(15,23,42,0.05)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/70"
+      aria-label="Primary navigation"
+    >
       <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 py-2.5 md:min-h-[4.5rem] md:px-12">
         <a href="#launch-countdown-title" className="inline-flex min-w-0 items-center gap-2 text-slate-900 no-underline">
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-sm font-bold text-white">
@@ -104,7 +107,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
       <div className="min-h-dvh bg-slate-50">
         <ComingSoonTopbar />
         <LaunchCountdown />
-        <div className="[&>div>nav]:hidden">
+        <div className="[&_nav]:hidden">
           <ComingSoonExperience />
         </div>
       </div>
