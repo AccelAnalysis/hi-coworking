@@ -1,101 +1,107 @@
 const HC_LAUNCH_AT = new Date("2026-10-01T00:00:00-04:00").getTime();
 
-function makeCountdownUnit(key, label, index) {
+function getCountdownValues() {
+  const remaining = Math.max(0, HC_LAUNCH_AT - Date.now());
+  return {
+    days: String(Math.floor(remaining / 86_400_000)).padStart(2, "0"),
+    hours: String(Math.floor((remaining % 86_400_000) / 3_600_000)).padStart(2, "0"),
+    minutes: String(Math.floor((remaining % 3_600_000) / 60_000)).padStart(2, "0"),
+    seconds: String(Math.floor((remaining % 60_000) / 1_000)).padStart(2, "0"),
+  };
+}
+
+function makeCountdownUnit(key, label) {
   const unit = document.createElement("div");
-  unit.className = "hc-countdown__unit";
+  unit.className = "hc-scroll-countdown__unit";
   unit.dataset.unit = key;
   unit.dataset.value = "";
-  unit.style.setProperty("--hc-index", String(index));
 
-  const plate = document.createElement("div");
-  plate.className = "hc-countdown__plate";
-
-  const valueStack = document.createElement("div");
-  valueStack.className = "hc-countdown__value-stack";
-
-  const value = document.createElement("span");
-  value.className = "hc-countdown__value";
-  value.textContent = "00";
-  valueStack.append(value);
+  const card = document.createElement("div");
+  card.className = "hc-scroll-countdown__card";
+  card.innerHTML = `
+    <div class="hc-scroll-countdown__half hc-scroll-countdown__top"><span>00</span></div>
+    <div class="hc-scroll-countdown__half hc-scroll-countdown__bottom"><span>00</span></div>
+  `;
 
   const caption = document.createElement("span");
-  caption.className = "hc-countdown__label";
+  caption.className = "hc-scroll-countdown__label";
   caption.textContent = label;
 
-  plate.append(valueStack, caption);
-  unit.append(plate);
+  unit.append(card, caption);
   return unit;
 }
 
 function setUnitValue(unit, nextValue, reducedMotion) {
   const previousValue = unit.dataset.value;
-  const stack = unit.querySelector(".hc-countdown__value-stack");
-  if (!stack) return;
+  const card = unit.querySelector(".hc-scroll-countdown__card");
+  const top = card?.querySelector(".hc-scroll-countdown__top span");
+  const bottom = card?.querySelector(".hc-scroll-countdown__bottom span");
+  if (!card || !top || !bottom) return;
 
   if (!previousValue) {
-    const current = stack.querySelector(".hc-countdown__value");
-    if (current) current.textContent = nextValue;
+    top.textContent = nextValue;
+    bottom.textContent = nextValue;
     unit.dataset.value = nextValue;
     return;
   }
 
   if (previousValue === nextValue) return;
 
+  card.querySelectorAll(".hc-scroll-countdown__flap").forEach((flap) => flap.remove());
+
   if (reducedMotion) {
-    const current = stack.querySelector(".hc-countdown__value");
-    if (current) current.textContent = nextValue;
+    top.textContent = nextValue;
+    bottom.textContent = nextValue;
     unit.dataset.value = nextValue;
     return;
   }
 
-  stack.querySelectorAll(".hc-countdown__value").forEach((node) => node.remove());
+  bottom.textContent = nextValue;
 
-  const leaving = document.createElement("span");
-  leaving.className = "hc-countdown__value hc-countdown__value--leaving";
-  leaving.textContent = previousValue;
+  const topFlap = document.createElement("div");
+  topFlap.className = "hc-scroll-countdown__flap hc-scroll-countdown__top-flap";
+  topFlap.innerHTML = `<span>${previousValue}</span>`;
 
-  const entering = document.createElement("span");
-  entering.className = "hc-countdown__value hc-countdown__value--entering";
-  entering.textContent = nextValue;
+  const bottomFlap = document.createElement("div");
+  bottomFlap.className = "hc-scroll-countdown__flap hc-scroll-countdown__bottom-flap";
+  bottomFlap.innerHTML = `<span>${nextValue}</span>`;
 
-  stack.append(leaving, entering);
+  card.append(topFlap, bottomFlap);
   unit.dataset.value = nextValue;
 
   window.setTimeout(() => {
-    if (unit.dataset.value !== nextValue) return;
-    stack.replaceChildren();
-    const current = document.createElement("span");
-    current.className = "hc-countdown__value";
-    current.textContent = nextValue;
-    stack.append(current);
-  }, 500);
+    if (unit.dataset.value === nextValue) top.textContent = nextValue;
+  }, 300);
+
+  window.setTimeout(() => {
+    topFlap.remove();
+    bottomFlap.remove();
+  }, 680);
 }
 
 function startScrollPerspective(reducedMotion) {
-  const stage = document.querySelector("[data-hc-perspective]");
-  if (!stage || reducedMotion) return;
+  const track = document.querySelector("[data-hc-scroll-track]");
+  const sticky = track?.querySelector(".hc-scroll-countdown__sticky");
+  const clock = document.querySelector("[data-hc-countdown-clock]");
+  if (!track || !sticky || !clock || reducedMotion) return;
 
   let frame = 0;
+  let lastScrollY = window.scrollY;
 
   const update = () => {
     frame = 0;
-    const rect = stage.getBoundingClientRect();
-    const viewportHeight = Math.max(window.innerHeight, 1);
-    const stageCenter = rect.top + rect.height / 2;
-    const viewportCenter = viewportHeight / 2;
-    const normalized = Math.max(-1, Math.min(1, (stageCenter - viewportCenter) / viewportHeight));
-    stage.style.setProperty("--hc-scroll", normalized.toFixed(4));
-    stage.style.setProperty("--hc-tilt", `${(-normalized * 9).toFixed(2)}deg`);
-    stage.style.setProperty("--hc-shift", `${(-normalized * 7).toFixed(2)}px`);
+    const rect = track.getBoundingClientRect();
+    const travel = Math.max(1, track.offsetHeight - sticky.offsetHeight);
+    const progress = Math.max(0, Math.min(1, -rect.top / travel));
+    const perspectiveProgress = progress * 2 - 1;
+    const delta = window.scrollY - lastScrollY;
+    lastScrollY = window.scrollY;
 
-    stage.querySelectorAll(".hc-countdown__unit").forEach((unit, index) => {
-      const side = index % 2 === 0 ? 1 : -1;
-      const spread = index < 2 ? -1 : 1;
-      unit.style.setProperty("--hc-yaw", `${(normalized * side * 4.5).toFixed(2)}deg`);
-      unit.style.setProperty("--hc-unit-depth", `${(Math.abs(normalized) * spread * 8).toFixed(2)}px`);
-      unit.style.setProperty("--hc-plate-depth", `${(16 + Math.abs(normalized) * 8).toFixed(2)}px`);
-      unit.style.setProperty("--hc-card-tilt", `${(-normalized * 3.5).toFixed(2)}deg`);
-    });
+    const tilt = -perspectiveProgress * 17;
+    const yaw = Math.max(-5, Math.min(5, delta * 0.08));
+
+    clock.style.setProperty("--hc-scroll-tilt", `${tilt.toFixed(2)}deg`);
+    clock.style.setProperty("--hc-scroll-yaw", `${yaw.toFixed(2)}deg`);
   };
 
   const requestUpdate = () => {
@@ -119,20 +125,14 @@ function startCountdown() {
     ["seconds", "Seconds"],
   ];
 
-  units.forEach(([key, label], index) => clock.append(makeCountdownUnit(key, label, index)));
+  units.forEach(([key, label]) => clock.append(makeCountdownUnit(key, label)));
 
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const accessible = document.querySelector("[data-hc-countdown-accessible]");
   startScrollPerspective(reducedMotion);
 
   const tick = () => {
-    const remaining = Math.max(0, HC_LAUNCH_AT - Date.now());
-    const values = {
-      days: String(Math.floor(remaining / 86_400_000)).padStart(2, "0"),
-      hours: String(Math.floor((remaining % 86_400_000) / 3_600_000)).padStart(2, "0"),
-      minutes: String(Math.floor((remaining % 3_600_000) / 60_000)).padStart(2, "0"),
-      seconds: String(Math.floor((remaining % 60_000) / 1_000)).padStart(2, "0"),
-    };
+    const values = getCountdownValues();
 
     Object.entries(values).forEach(([key, value]) => {
       const unit = clock.querySelector(`[data-unit="${key}"]`);
