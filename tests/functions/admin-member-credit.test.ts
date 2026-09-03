@@ -87,6 +87,16 @@ function easternEpoch(daysAhead: number, hour: number, minute = 0) {
   return guess;
 }
 
+function nextOpenWeekdayEpoch(hour: number, minute = 0) {
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
+  for (let daysAhead = 1; daysAhead <= 7; daysAhead += 1) {
+    const target = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+    const day = weekday.format(target);
+    if (day !== "Sat" && day !== "Sun") return easternEpoch(daysAhead, hour, minute);
+  }
+  throw new Error("Could not find an open weekday for the booking test.");
+}
+
 beforeAll(async () => {
   adminApp = initializeAdminApp({ projectId: PROJECT_ID }, "admin-member-operations-tests");
   db = getAdminFirestore(adminApp);
@@ -182,7 +192,7 @@ describe("Admin member authoritative operations", () => {
       role: "member", membershipStatus: "active", plan: "coworking", accountCreditCents: 0,
       createdAt: Date.now(),
     });
-    const start = easternEpoch(2, 10, 0);
+    const start = nextOpenWeekdayEpoch(10, 0);
     const end = start + 2 * 60 * 60 * 1000;
     const quote = await call<{
       membershipName: string | null;
