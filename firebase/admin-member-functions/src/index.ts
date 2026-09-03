@@ -4,7 +4,14 @@ export {
   admin_bookingForMemberGetAvailability,
   admin_bookingForMemberQuote,
   admin_bookingForMemberBeginCheckout,
-} from "../../../apps/functions/src/adminMemberOperations";
+} from "../../../apps/functions/src/adminBookingScheduledAuthority";
+
+export {
+  booking_adminGetOperatingCalendar,
+  booking_adminSetWeeklyHours,
+  booking_adminAddException,
+  booking_adminDeleteException,
+} from "../../../apps/functions/src/bookingOperatingCalendar";
 
 export {
   admin_membershipGetState,
@@ -13,7 +20,9 @@ export {
   admin_membershipReactivate,
 } from "../../../apps/functions/src/adminMembershipAuthority";
 
-export { admin_accountCreditAdjust } from "../../../apps/functions/src/adminMemberOperationsAuthority";
+export {
+  admin_accountCreditAdjust,
+} from "../../../apps/functions/src/adminMemberOperationsAuthority";
 
 export {
   admin_bookingForMemberFinalize,
