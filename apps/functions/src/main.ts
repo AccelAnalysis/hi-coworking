@@ -199,3 +199,18 @@ export {
 } from "./bookstoreCommerce";
 export { bookstore_cancelOrder } from "./bookstoreCancel";
 export { bookstore_refundOrder } from "./bookstoreRefund";
+
+// Full-cycle customer nurture: acquisition, active-customer development, renewal,
+// and re-engagement. These functions intentionally sit beside (not inside) the
+// authoritative booking/payment lifecycles and react only to committed records.
+export {
+  nurture_process,
+  nurture_scanLifecycle,
+  nurture_onLeadCreated,
+  nurture_onBookingCreated,
+  nurture_onMemberUpdated,
+  nurture_adminOverview,
+  nurture_adminSetCampaignStatus,
+  nurture_unsubscribe,
+  nurture_updateMyPreferences,
+} from "./nurture";
