@@ -54,9 +54,6 @@ function retiredEventEndpoint(message: string) {
   });
 }
 
-// Keep the legacy function names deployed as fail-closed compatibility shims.
-// Stale clients therefore cannot bypass Events v2 capacity holds, payment
-// reconciliation, cancellation policy, refunds, or waitlist promotion.
 export const events_createTicketCheckout = retiredEventEndpoint(
   "The legacy ticket checkout has been retired. Refresh the Events page and use the current registration flow.",
 );
@@ -70,8 +67,6 @@ export const events_joinWaitlist = retiredEventEndpoint(
   "The legacy waitlist endpoint has been retired. Refresh the Events page and join through the current event flow.",
 );
 
-// Advanced event commerce, recurring-series, marketing, and media functions
-// remain available while the registration lifecycle is fully Events v2.
 export const events_createSponsorshipCheckout = legacy.events_createSponsorshipCheckout;
 export const events_upsertSeries = legacy.events_upsertSeries;
 export const events_extendHorizon = legacy.events_extendHorizon;
@@ -127,9 +122,6 @@ export const notify_referralUpdate = legacy.notify_referralUpdate;
 export const notify_eventRegistration = legacy.notify_eventRegistration;
 export const notify_paymentCreated = legacy.notify_paymentCreated;
 
-// The original direct-booking callables could create confirmed bookings without
-// authoritative checkout. They remain deployed only as fail-closed compatibility
-// shims so stale clients cannot bypass the current availability/hold/payment flow.
 export const createBookingQuote = onCall(async () => {
   throw new HttpsError(
     "failed-precondition",
@@ -144,9 +136,6 @@ export const createBooking = onCall(async () => {
   );
 });
 
-// Booking creation, member rescheduling, and admin booking-for-member all flow
-// through the same authoritative operating calendar before the existing
-// availability/hold/payment lifecycle is allowed to run.
 export {
   booking_getAvailability,
   booking_createQuote,
@@ -199,3 +188,23 @@ export {
 } from "./bookstoreCommerce";
 export { bookstore_cancelOrder } from "./bookstoreCancel";
 export { bookstore_refundOrder } from "./bookstoreRefund";
+
+export {
+  nurture_process,
+  nurture_scanLifecycle,
+  nurture_onLeadCreated,
+  nurture_onBookingCreated,
+  nurture_onMemberUpdated,
+  nurture_adminOverview,
+  nurture_adminSetCampaignStatus,
+  nurture_unsubscribe,
+  nurture_updateMyPreferences,
+} from "./nurture";
+
+export {
+  space_getPublishedCatalog,
+  space_adminGetCatalog,
+  space_adminUpsertSetup,
+  space_adminUpsertAddOn,
+  space_adminSetSetupPublished,
+} from "./spaceCatalog";
