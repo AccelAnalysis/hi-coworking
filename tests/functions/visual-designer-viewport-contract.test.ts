@@ -10,15 +10,18 @@ const publicPath = resolve(
   process.cwd(),
   "apps/web/src/components/floorplan/FloorplanCanvas.tsx"
 );
-const previewPath = resolve(
+const primaryPreviewPath = resolve(
   process.cwd(),
   "apps/web/src/app/preview/visual-designer/page.tsx"
 );
-const globalStylesPath = resolve(process.cwd(), "apps/web/src/app/globals.css");
+const latestPreviewPath = resolve(
+  process.cwd(),
+  "apps/web/src/app/preview/visual-designer-latest/page.tsx"
+);
 const source = readFileSync(implementationPath, "utf8");
 const publicSource = readFileSync(publicPath, "utf8");
-const previewSource = readFileSync(previewPath, "utf8");
-const globalStyles = readFileSync(globalStylesPath, "utf8");
+const primaryPreviewSource = readFileSync(primaryPreviewPath, "utf8");
+const latestPreviewSource = readFileSync(latestPreviewPath, "utf8");
 
 describe("visual designer viewport isolation", () => {
   it("keeps the Konva Stage fixed and transforms only a non-draggable scene group", () => {
@@ -92,6 +95,8 @@ describe("visual designer viewport isolation", () => {
     expect(source).toContain("Grid · 1 square = 1 ft × 1 ft");
     expect(source).toContain('data-testid="floorplan-scale"');
     expect(source).toContain("formatImperialLength(elementWidth(selectedElement))");
+    expect(latestPreviewSource).toContain('data-testid="preview-physical-scale"');
+    expect(latestPreviewSource).toContain("1 grid square = 1 ft × 1 ft = 1 sq ft");
   });
 
   it("provides concise object and blank-canvas contextual actions", () => {
@@ -110,23 +115,31 @@ describe("visual designer viewport isolation", () => {
     expect(source).toContain("destructive");
   });
 
+  it("blocks native browser context menus at the DOM boundary", () => {
+    expect(publicSource).toContain('data-testid="floorplan-browser-context-guard"');
+    expect(publicSource).toContain("onContextMenu={(event) => event.preventDefault()}");
+    expect(publicSource).toContain(
+      'import { FloorplanCanvas as PointerStateCanvas } from "./FloorplanCanvasPointerState";'
+    );
+  });
+
   it("exposes Fit only as an explicit viewport command", () => {
     expect(source).not.toMatch(/useEffect\([\s\S]{0,900}fitView\(\)/);
     expect(source).toContain("onClick={() => viewportCommandsAllowed && fitView()}");
     expect(source).toContain("aria-label=\"Fit floor plan in view\"");
   });
 
-  it("makes the isolated preview desktop Add button reveal its Add palette", () => {
-    expect(previewSource).toContain('onClick={() => setMobilePanel("ADD")}');
-    expect(previewSource).toContain('aria-label={mobilePanel.toLowerCase()}');
-    expect(globalStyles).toContain('[role="dialog"][aria-label="add"]');
-    expect(globalStyles).toContain("display: flex !important");
-    expect(globalStyles).toContain("width: min(42rem, calc(100vw - 3rem))");
+  it("uses an explicit desktop Add dialog independent of mobile-sheet state", () => {
+    expect(latestPreviewSource).toContain("const [addOpen, setAddOpen] = useState(false)");
+    expect(latestPreviewSource).toContain("onClick={() => setAddOpen(true)}");
+    expect(latestPreviewSource).toContain('data-testid="desktop-add-button"');
+    expect(latestPreviewSource).toContain('data-testid="explicit-add-dialog"');
+    expect(latestPreviewSource).toContain('aria-label="Add to the space"');
   });
 
-  it("keeps the established import path pointed at the pointer-state implementation", () => {
-    expect(publicSource).toContain(
-      'export { FloorplanCanvas } from "./FloorplanCanvasPointerState";'
+  it("keeps the primary preview URL pointed at the cache-independent acceptance route", () => {
+    expect(primaryPreviewSource).toContain(
+      'export { default } from "../visual-designer-latest/page";'
     );
   });
 });
