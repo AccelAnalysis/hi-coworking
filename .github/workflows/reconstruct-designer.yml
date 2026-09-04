@@ -1,0 +1,54 @@
+name: Reconstruct visual designer source
+
+on:
+  push:
+    branches:
+      - feature/apple-hig-space-designer
+    paths:
+      - ".designer-staging-gz/READY"
+
+permissions:
+  contents: write
+
+jobs:
+  reconstruct:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/apple-hig-space-designer
+
+      - name: Reconstruct and verify source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            cat .designer-staging-gz/page.gzpart.00.*
+            cat .designer-staging-gz/page.gzpart.01
+            cat .designer-staging-gz/page.gzpart.02
+            cat .designer-staging-gz/page.gzpart.03
+            cat .designer-staging-gz/page.gzpart.04
+            cat .designer-staging-gz/page.gzpart.05
+            cat .designer-staging-gz/page.gzpart.06
+            cat .designer-staging-gz/page.gzpart.07
+          } | base64 --decode | gzip --decompress > apps/web/src/app/admin/builder/page.tsx
+
+          {
+            cat .designer-staging-gz/canvas.gzpart.00.*
+            cat .designer-staging-gz/canvas.gzpart.01.*
+            cat .designer-staging-gz/canvas.gzpart.02
+          } | base64 --decode | gzip --decompress > apps/web/src/components/floorplan/FloorplanCanvas.tsx
+
+          echo "844194106912883c114b126bcf9c39fafafea147907a5e247caddd903a7e01e1  apps/web/src/app/admin/builder/page.tsx" | sha256sum --check
+          echo "a1ed4d5652a3b40512094831bb97414ab16545fd057a1889ae9f84e4d69379b1  apps/web/src/components/floorplan/FloorplanCanvas.tsx" | sha256sum --check
+
+          rm -rf .designer-staging .designer-staging-gz
+          rm -f .github/workflows/reconstruct-designer.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: redesign visual space designer"
+          git push origin HEAD:feature/apple-hig-space-designer
