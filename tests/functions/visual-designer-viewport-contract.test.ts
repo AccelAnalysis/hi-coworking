@@ -10,8 +10,15 @@ const publicPath = resolve(
   process.cwd(),
   "apps/web/src/components/floorplan/FloorplanCanvas.tsx"
 );
+const previewPath = resolve(
+  process.cwd(),
+  "apps/web/src/app/preview/visual-designer/page.tsx"
+);
+const globalStylesPath = resolve(process.cwd(), "apps/web/src/app/globals.css");
 const source = readFileSync(implementationPath, "utf8");
 const publicSource = readFileSync(publicPath, "utf8");
+const previewSource = readFileSync(previewPath, "utf8");
+const globalStyles = readFileSync(globalStylesPath, "utf8");
 
 describe("visual designer viewport isolation", () => {
   it("keeps the Konva Stage fixed and transforms only a non-draggable scene group", () => {
@@ -57,11 +64,12 @@ describe("visual designer viewport isolation", () => {
     expect(source).toContain('style={{ touchAction: "none" }}');
   });
 
-  it("guards iOS touch interactions from synthesized follow-up mouse events", () => {
+  it("guards iOS touch interactions and reserves Control-click for a context menu", () => {
     expect(source).toContain("lastTouchStartRef");
     expect(source).toContain("SYNTHETIC_MOUSE_GUARD_MS");
     expect(source).toContain('window.addEventListener("touchend", finish)');
     expect(source).toContain('window.addEventListener("touchcancel", cancel)');
+    expect(source).toContain("nativeEvent.ctrlKey");
   });
 
   it("keeps object groups inside the logical floor-plan boundary", () => {
@@ -73,10 +81,47 @@ describe("visual designer viewport isolation", () => {
     expect(source).toContain("deltaY = clamp(deltaY, minimumDeltaY, maximumDeltaY)");
   });
 
+  it("locks the scene grid to one physical square foot per square", () => {
+    expect(source).toContain("const GRID_SIZE = 20");
+    expect(source).toContain("const INCHES_PER_GRID = 12");
+    expect(source).toContain("const MAJOR_GRID_EVERY = 5");
+    expect(source).toContain('data-grid-unit="12-inches"');
+    expect(source).toContain('data-grid-square-feet="1"');
+    expect(source).toContain("verticalGridLines.map");
+    expect(source).toContain("horizontalGridLines.map");
+    expect(source).toContain("Grid · 1 square = 1 ft × 1 ft");
+    expect(source).toContain('data-testid="floorplan-scale"');
+    expect(source).toContain("formatImperialLength(elementWidth(selectedElement))");
+  });
+
+  it("provides concise object and blank-canvas contextual actions", () => {
+    expect(source).toContain("const openContextMenu");
+    expect(source).toContain("onContextMenu={(event) =>");
+    expect(source).toContain('data-testid="floorplan-context-menu"');
+    expect(source).toContain('role="menu"');
+    expect(source).toContain('role="menuitem"');
+    expect(source).toContain("Add desk here");
+    expect(source).toContain("Add room setup here");
+    expect(source).toContain("Add wall here");
+    expect(source).toContain("Duplicate");
+    expect(source).toContain("Bring to front");
+    expect(source).toContain("Send to back");
+    expect(source).toContain("Delete");
+    expect(source).toContain("destructive");
+  });
+
   it("exposes Fit only as an explicit viewport command", () => {
     expect(source).not.toMatch(/useEffect\([\s\S]{0,900}fitView\(\)/);
     expect(source).toContain("onClick={() => viewportCommandsAllowed && fitView()}");
     expect(source).toContain("aria-label=\"Fit floor plan in view\"");
+  });
+
+  it("makes the isolated preview desktop Add button reveal its Add palette", () => {
+    expect(previewSource).toContain('onClick={() => setMobilePanel("ADD")}');
+    expect(previewSource).toContain('aria-label={mobilePanel.toLowerCase()}');
+    expect(globalStyles).toContain('[role="dialog"][aria-label="add"]');
+    expect(globalStyles).toContain("display: flex !important");
+    expect(globalStyles).toContain("max-width: 42rem");
   });
 
   it("keeps the established import path pointed at the pointer-state implementation", () => {
