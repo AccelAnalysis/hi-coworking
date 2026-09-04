@@ -115,9 +115,15 @@ describe("visual designer viewport isolation", () => {
     expect(source).toContain("destructive");
   });
 
-  it("blocks native browser context menus at the DOM boundary", () => {
+  it("blocks native browser context menus and supplies a Safari-safe fallback", () => {
     expect(publicSource).toContain('data-testid="floorplan-browser-context-guard"');
-    expect(publicSource).toContain("onContextMenu={(event) => event.preventDefault()}");
+    expect(publicSource).toContain("function handleNativeContextMenu");
+    expect(publicSource).toContain("event.preventDefault()");
+    expect(publicSource).toContain('data-testid="floorplan-native-context-fallback"');
+    expect(publicSource).toContain("Add desk here");
+    expect(publicSource).toContain("Add room setup here");
+    expect(publicSource).toContain("Duplicate");
+    expect(publicSource).toContain("Delete");
     expect(publicSource).toContain(
       'import { FloorplanCanvas as PointerStateCanvas } from "./FloorplanCanvasPointerState";'
     );
