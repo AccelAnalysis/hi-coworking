@@ -2,4 +2,4 @@
 
 import "./FloorplanCanvasViewportDiagnostic";
 
-export { FloorplanCanvas } from "./FloorplanCanvasStable";
+export { FloorplanCanvas } from "./FloorplanCanvasDirectManipulation";
