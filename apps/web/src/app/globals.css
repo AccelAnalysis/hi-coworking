@@ -24,3 +24,27 @@ body {
   background-color: #a7f3d0; /* emerald-200 */
   color: #064e3b; /* emerald-900 */
 }
+
+/*
+ * The isolated PR designer uses the same bottom-sheet state on mobile and
+ * desktop. Tailwind's lg:hidden class is appropriate for the mobile toolbar,
+ * but it previously made the desktop "+ Add" button appear inert because the
+ * Add sheet existed in the DOM while remaining display:none. On desktop we
+ * promote only that Add dialog into a compact centered palette. The production
+ * builder keeps its own anchored desktop Add palette.
+ */
+@media (min-width: 64rem) {
+  [role="dialog"][aria-label="add"] {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+
+  [role="dialog"][aria-label="add"] > section {
+    width: min(42rem, calc(100vw - 3rem));
+    max-height: min(82dvh, 46rem);
+    border-radius: 1.5rem;
+    overflow: auto;
+  }
+}
