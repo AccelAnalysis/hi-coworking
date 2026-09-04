@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
 import type Konva from "konva";
 import type { KonvaEventObject } from "konva/lib/Node";
@@ -10,8 +10,13 @@ import type { Floorplan, FloorplanElement } from "@hi/shared";
 type Mode = "EDIT" | "VIEW" | "SELECT";
 type ActiveLayer = "shell" | "layout";
 type CanvasTool = "SELECT" | "PAN";
+type Viewport = { x: number; y: number; scale: number };
+type AlignmentGuides = { vertical: number[]; horizontal: number[] };
+type AlignmentMatch = { delta: number; target: number };
 
 const GRID_SIZE = 20;
+const MIN_SCALE = 0.35;
+const MAX_SCALE = 3;
 
 function snap(n: number) {
   return Math.round(n / GRID_SIZE) * GRID_SIZE;
@@ -19,6 +24,30 @@ function snap(n: number) {
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
+}
+
+function findAlignment(
+  position: number,
+  size: number,
+  peers: Array<{ position: number; size: number }>,
+  threshold: number
+): AlignmentMatch | undefined {
+  const movingPoints = [position, position + size / 2, position + size];
+  let best: AlignmentMatch | undefined;
+
+  peers.forEach((peer) => {
+    const peerPoints = [peer.position, peer.position + peer.size / 2, peer.position + peer.size];
+    movingPoints.forEach((movingPoint) => {
+      peerPoints.forEach((target) => {
+        const delta = target - movingPoint;
+        if (Math.abs(delta) <= threshold && (!best || Math.abs(delta) < Math.abs(best.delta))) {
+          best = { delta, target };
+        }
+      });
+    });
+  });
+
+  return best;
 }
 
 function isBookable(el: FloorplanElement) {
@@ -35,6 +64,9 @@ export function FloorplanCanvas({
   layoutElements,
   backgroundUrl,
   backgroundOpacity,
+  backgroundScale = 1,
+  backgroundOffsetX = 0,
+  backgroundOffsetY = 0,
   stageWidth,
   stageHeight,
   activeLayer = "layout",
@@ -47,12 +79,18 @@ export function FloorplanCanvas({
   onChange,
   onShellElementsChange,
   onLayoutElementsChange,
+  showViewportControls = mode !== "VIEW",
+  canvasLabel = "Interactive floor plan",
+  onViewportChange,
 }: {
   floorplan?: Floorplan;
   shellElements?: FloorplanElement[];
   layoutElements?: FloorplanElement[];
   backgroundUrl?: string;
   backgroundOpacity?: number;
+  backgroundScale?: number;
+  backgroundOffsetX?: number;
+  backgroundOffsetY?: number;
   activeLayer?: ActiveLayer;
   activeTool?: CanvasTool;
   mode: Mode;
@@ -65,21 +103,23 @@ export function FloorplanCanvas({
   onLayoutElementsChange?: (elements: FloorplanElement[]) => void;
   stageWidth?: number;
   stageHeight?: number;
+  showViewportControls?: boolean;
+  canvasLabel?: string;
+  onViewportChange?: (viewport: Viewport) => void;
 }) {
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
-  const viewRef = useRef<{ x: number; y: number; scale: number }>({ x: 0, y: 0, scale: 1 });
+  const viewRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
   const wheelRafRef = useRef<number | null>(null);
   const dragOriginRef = useRef<Record<string, { x: number; y: number }>>({});
+  const lastFitKeyRef = useRef("");
 
-  const [view, setView] = useState<{ x: number; y: number; scale: number }>({ x: 0, y: 0, scale: 1 });
+  const [view, setView] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [spaceDown, setSpaceDown] = useState(false);
+  const [guides, setGuides] = useState<AlignmentGuides>({ vertical: [], horizontal: [] });
 
-  // Use provided stage dimensions or fallback to floorplan/default
-  const width = stageWidth ?? floorplan?.canvasWidth ?? 1100;
-  const height = stageHeight ?? floorplan?.canvasHeight ?? 650;
-
-  // Keep track of content bounds for background image if needed, but stage is the viewport
+  const width = Math.max(1, stageWidth ?? floorplan?.canvasWidth ?? 1100);
+  const height = Math.max(1, stageHeight ?? floorplan?.canvasHeight ?? 650);
   const contentWidth = floorplan?.canvasWidth ?? 1100;
   const contentHeight = floorplan?.canvasHeight ?? 650;
 
@@ -97,7 +137,6 @@ export function FloorplanCanvas({
 
   const resolvedBgUrl = backgroundUrl ?? floorplan?.backgroundImageDataUrl ?? "";
   const [bgImage] = useImage(resolvedBgUrl);
-
   const isPanMode = activeTool === "PAN" || spaceDown;
 
   const resolvedSelectedIds = useMemo(() => {
@@ -107,7 +146,6 @@ export function FloorplanCanvas({
   }, [selectedIds, selectedId]);
 
   const selectedIdSet = useMemo(() => new Set(resolvedSelectedIds), [resolvedSelectedIds]);
-
   const selectedEl = useMemo(() => {
     if (resolvedSelectedIds.length !== 1) return undefined;
     return allElements.find((e) => e.id === resolvedSelectedIds[0]);
@@ -122,9 +160,7 @@ export function FloorplanCanvas({
     }
 
     const stage = stageRef.current;
-    if (!stage) return;
-
-    if (!resolvedSelectedIds.length) {
+    if (!stage || !resolvedSelectedIds.length) {
       trRef.current.nodes([]);
       trRef.current.getLayer()?.batchDraw();
       return;
@@ -138,12 +174,6 @@ export function FloorplanCanvas({
       )
       .filter((node): node is Konva.Node => Boolean(node));
 
-    if (!nodes.length) {
-      trRef.current.nodes([]);
-      trRef.current.getLayer()?.batchDraw();
-      return;
-    }
-
     trRef.current.nodes(nodes);
     trRef.current.getLayer()?.batchDraw();
   }, [mode, resolvedSelectedIds]);
@@ -154,6 +184,8 @@ export function FloorplanCanvas({
 
   useEffect(() => {
     const onKeyDown = (evt: KeyboardEvent) => {
+      const target = evt.target as HTMLElement | null;
+      if (target?.matches("input, textarea, select, [contenteditable='true']")) return;
       if (evt.code === "Space") setSpaceDown(true);
     };
 
@@ -171,44 +203,75 @@ export function FloorplanCanvas({
 
   useEffect(() => {
     return () => {
-      if (wheelRafRef.current !== null) {
-        window.cancelAnimationFrame(wheelRafRef.current);
-      }
+      if (wheelRafRef.current !== null) window.cancelAnimationFrame(wheelRafRef.current);
     };
   }, []);
 
   const updateLegacyElement = (id: string, patch: Partial<FloorplanElement>) => {
-    if (!onChange) return;
-    if (!floorplan) return;
-    const next: Floorplan = {
+    if (!onChange || !floorplan) return;
+    onChange({
       ...floorplan,
       elements: floorplan.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)),
-    };
-    onChange(next);
+    });
   };
 
   const updateLayerElements = (layer: ActiveLayer, id: string, patch: Partial<FloorplanElement>) => {
     if (layer === "shell") {
-      if (!onShellElementsChange) return;
-      onShellElementsChange(resolvedShell.map((el) => (el.id === id ? { ...el, ...patch } : el)));
+      onShellElementsChange?.(resolvedShell.map((el) => (el.id === id ? { ...el, ...patch } : el)));
       return;
     }
-    if (!onLayoutElementsChange) return;
-    onLayoutElementsChange(resolvedLayout.map((el) => (el.id === id ? { ...el, ...patch } : el)));
+    onLayoutElementsChange?.(resolvedLayout.map((el) => (el.id === id ? { ...el, ...patch } : el)));
   };
 
-  const setViewSafe = (next: { x: number; y: number; scale: number }) => {
-    viewRef.current = next;
-    setView(next);
+  const setViewSafe = useCallback(
+    (next: Viewport) => {
+      viewRef.current = next;
+      setView(next);
+      onViewportChange?.(next);
+    },
+    [onViewportChange]
+  );
+
+  const fitView = useCallback(() => {
+    const padding = width < 640 ? 24 : 48;
+    const availableWidth = Math.max(1, width - padding * 2);
+    const availableHeight = Math.max(1, height - padding * 2);
+    const nextScale = clamp(Math.min(availableWidth / contentWidth, availableHeight / contentHeight), MIN_SCALE, MAX_SCALE);
+    setViewSafe({
+      x: (width - contentWidth * nextScale) / 2,
+      y: (height - contentHeight * nextScale) / 2,
+      scale: nextScale,
+    });
+  }, [contentHeight, contentWidth, height, setViewSafe, width]);
+
+  useEffect(() => {
+    const key = `${floorplan?.id ?? "floor"}:${Math.round(width)}:${Math.round(height)}`;
+    if (width <= 1 || height <= 1 || lastFitKeyRef.current === key) return;
+    lastFitKeyRef.current = key;
+    fitView();
+  }, [fitView, floorplan?.id, height, width]);
+
+  const zoomAtCenter = (factor: number) => {
+    const oldScale = viewRef.current.scale;
+    const nextScale = clamp(oldScale * factor, MIN_SCALE, MAX_SCALE);
+    const center = { x: width / 2, y: height / 2 };
+    const contentPoint = {
+      x: (center.x - viewRef.current.x) / oldScale,
+      y: (center.y - viewRef.current.y) / oldScale,
+    };
+    setViewSafe({
+      x: center.x - contentPoint.x * nextScale,
+      y: center.y - contentPoint.y * nextScale,
+      scale: nextScale,
+    });
   };
 
-  const handleStageMouseDown = (e: KonvaEventObject<MouseEvent>) => {
-    if (!onSelect && !onSelectIds) return;
-
-    if (isPanMode) return;
+  const handleStagePointerDown = (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if ((!onSelect && !onSelectIds) || isPanMode) return;
 
     const clickedOnEmpty = e.target === e.target.getStage();
     if (clickedOnEmpty) {
+      setGuides({ vertical: [], horizontal: [] });
       onSelect?.(undefined);
       onSelectIds?.([]);
       return;
@@ -218,26 +281,27 @@ export function FloorplanCanvas({
     const layer = e.target?.attrs?.elementLayer as ActiveLayer | "legacy" | undefined;
     if (!id || !layer) return;
 
-    if (mode === "SELECT") {
-      const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
-      const el = source.find((x) => x.id === id);
-      if (!el || !isBookable(el)) return;
-    }
+    const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
+    const selectedElement = source.find((candidate) => candidate.id === id);
+    if (!selectedElement) return;
+    if (mode === "SELECT" && !isBookable(selectedElement)) return;
 
-    const additive = e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey;
+    const mouseEvent = e.evt instanceof MouseEvent ? e.evt : null;
+    const additive = Boolean(mouseEvent && (mouseEvent.shiftKey || mouseEvent.metaKey || mouseEvent.ctrlKey));
     if (mode === "EDIT" && additive && onSelectIds) {
       const current = new Set(resolvedSelectedIds);
-      if (current.has(id)) {
-        current.delete(id);
-      } else {
-        current.add(id);
-      }
+      if (current.has(id)) current.delete(id);
+      else current.add(id);
       onSelectIds(Array.from(current));
       return;
     }
 
+    const groupIds =
+      mode === "EDIT" && selectedElement.groupId
+        ? source.filter((candidate) => candidate.groupId === selectedElement.groupId).map((candidate) => candidate.id)
+        : [id];
     onSelect?.(id);
-    onSelectIds?.([id]);
+    onSelectIds?.(groupIds);
   };
 
   const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
@@ -258,21 +322,17 @@ export function FloorplanCanvas({
         return;
       }
 
-      const scaleBy = 1.05;
-      const direction = e.evt.deltaY > 0 ? -1 : 1;
-      const nextScale = clamp(direction > 0 ? oldScale * scaleBy : oldScale / scaleBy, 0.5, 2.8);
-
-      const mousePointTo = {
+      const nextScale = clamp(e.evt.deltaY > 0 ? oldScale / 1.08 : oldScale * 1.08, MIN_SCALE, MAX_SCALE);
+      const contentPoint = {
         x: (pointer.x - viewRef.current.x) / oldScale,
         y: (pointer.y - viewRef.current.y) / oldScale,
       };
 
-      const nextPos = {
-        x: pointer.x - mousePointTo.x * nextScale,
-        y: pointer.y - mousePointTo.y * nextScale,
-      };
-
-      setViewSafe({ x: nextPos.x, y: nextPos.y, scale: nextScale });
+      setViewSafe({
+        x: pointer.x - contentPoint.x * nextScale,
+        y: pointer.y - contentPoint.y * nextScale,
+        scale: nextScale,
+      });
       wheelRafRef.current = null;
     });
   };
@@ -283,6 +343,8 @@ export function FloorplanCanvas({
   };
 
   const renderElement = (el: FloorplanElement, layer: ActiveLayer | "legacy") => {
+    if (el.visible === false || (mode === "SELECT" && el.meta?.customerVisible === false)) return null;
+
     const isSelected = selectedIdSet.has(el.id);
     const locked = !!el.locked;
     const isEditableLayer = layer === "legacy" || layer === activeLayer;
@@ -303,65 +365,53 @@ export function FloorplanCanvas({
 
     let displayFill = fill;
     if (mode === "SELECT") {
-      if (!selectableInSelectMode) {
-        displayFill = "#cbd5e1";
-      } else if (isSelected) {
-        displayFill = "#4f46e5";
-      }
+      if (!selectableInSelectMode) displayFill = "#cbd5e1";
+      else if (isSelected) displayFill = "#334155";
     }
 
-    const stroke = el.stroke ?? (isSelected ? "#4f46e5" : "#94a3b8");
-    const strokeWidth = el.strokeWidth ?? (isSelected ? 2 : 1);
-    const opacity = el.opacity ?? (mode === "SELECT" && !selectableInSelectMode ? 0.5 : 1);
+    const stroke = el.stroke ?? (isSelected ? "#0f172a" : "#94a3b8");
+    const strokeWidth = el.strokeWidth ?? (isSelected ? 3 : 1);
+    const opacity = el.opacity ?? (mode === "SELECT" && !selectableInSelectMode ? 0.45 : 1);
 
     const applyPatch = (patch: Partial<FloorplanElement>) => {
-      if (layer === "legacy") {
-        updateLegacyElement(el.id, patch);
-      } else {
-        updateLayerElements(layer, el.id, patch);
-      }
+      if (layer === "legacy") updateLegacyElement(el.id, patch);
+      else updateLayerElements(layer, el.id, patch);
     };
 
     const applyDeltaToSelection = (deltaX: number, deltaY: number) => {
-      if (resolvedSelectedIds.length <= 1 || mode !== "EDIT") {
+      const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
+      const movingIds = el.groupId
+        ? new Set(source.filter((candidate) => candidate.groupId === el.groupId).map((candidate) => candidate.id))
+        : selectedIdSet.has(el.id)
+          ? selectedIdSet
+          : new Set([el.id]);
+
+      if (movingIds.size <= 1 || mode !== "EDIT") {
         applyPatch({ x: snap(el.x + deltaX), y: snap(el.y + deltaY) });
         return;
       }
 
       if (layer === "legacy") {
         if (!onChange || !floorplan) return;
-        const next: Floorplan = {
+        onChange({
           ...floorplan,
           elements: floorplan.elements.map((candidate) => {
-            if (!selectedIdSet.has(candidate.id)) return candidate;
+            if (!movingIds.has(candidate.id)) return candidate;
             const origin = dragOriginRef.current[candidate.id] ?? { x: candidate.x, y: candidate.y };
-            return {
-              ...candidate,
-              x: snap(origin.x + deltaX),
-              y: snap(origin.y + deltaY),
-            };
+            return { ...candidate, x: snap(origin.x + deltaX), y: snap(origin.y + deltaY) };
           }),
-        };
-        onChange(next);
+        });
         return;
       }
 
-      const source = layer === "shell" ? resolvedShell : resolvedLayout;
       const next = source.map((candidate) => {
-        if (!selectedIdSet.has(candidate.id)) return candidate;
+        if (!movingIds.has(candidate.id)) return candidate;
         const origin = dragOriginRef.current[candidate.id] ?? { x: candidate.x, y: candidate.y };
-        return {
-          ...candidate,
-          x: snap(origin.x + deltaX),
-          y: snap(origin.y + deltaY),
-        };
+        return { ...candidate, x: snap(origin.x + deltaX), y: snap(origin.y + deltaY) };
       });
 
-      if (layer === "shell") {
-        onShellElementsChange?.(next);
-      } else {
-        onLayoutElementsChange?.(next);
-      }
+      if (layer === "shell") onShellElementsChange?.(next);
+      else onLayoutElementsChange?.(next);
     };
 
     const sharedProps = {
@@ -378,28 +428,62 @@ export function FloorplanCanvas({
       onDragMove: (evt: KonvaEventObject<DragEvent>) => {
         if (mode !== "EDIT") return;
         const node = evt.target;
-        node.x(snap(node.x()));
-        node.y(snap(node.y()));
+        const peers = allElements.filter(
+          (candidate) =>
+            !selectedIdSet.has(candidate.id) &&
+            candidate.visible !== false
+        );
+        const threshold = 6 / Math.max(viewRef.current.scale, MIN_SCALE);
+        const widthValue = Math.max(1, el.width ?? 120);
+        const heightValue = Math.max(1, el.height ?? 100);
+        let nextX = snap(node.x());
+        let nextY = snap(node.y());
+        const horizontalMatch = findAlignment(
+          nextX,
+          widthValue,
+          peers.map((candidate) => ({ position: candidate.x, size: Math.max(1, candidate.width ?? 120) })),
+          threshold
+        );
+        const verticalMatch = findAlignment(
+          nextY,
+          heightValue,
+          peers.map((candidate) => ({ position: candidate.y, size: Math.max(1, candidate.height ?? 100) })),
+          threshold
+        );
+        if (horizontalMatch) nextX += horizontalMatch.delta;
+        if (verticalMatch) nextY += verticalMatch.delta;
+        node.x(nextX);
+        node.y(nextY);
+        setGuides({
+          vertical: horizontalMatch ? [horizontalMatch.target] : [],
+          horizontal: verticalMatch ? [verticalMatch.target] : [],
+        });
       },
       onDragEnd: (evt: KonvaEventObject<DragEvent>) => {
         if (mode !== "EDIT") return;
+        setGuides({ vertical: [], horizontal: [] });
         const node = evt.target;
         const deltaX = node.x() - (dragOriginRef.current[el.id]?.x ?? el.x);
         const deltaY = node.y() - (dragOriginRef.current[el.id]?.y ?? el.y);
         applyDeltaToSelection(deltaX, deltaY);
       },
       onDragStart: () => {
+        setGuides({ vertical: [], horizontal: [] });
         const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
-        const dragSelection = selectedIdSet.has(el.id) ? selectedIdSet : new Set([el.id]);
+        const dragSelection = el.groupId
+          ? new Set(source.filter((candidate) => candidate.groupId === el.groupId).map((candidate) => candidate.id))
+          : selectedIdSet.has(el.id)
+            ? selectedIdSet
+            : new Set([el.id]);
         const origin: Record<string, { x: number; y: number }> = {};
         source.forEach((candidate) => {
-          if (!dragSelection.has(candidate.id)) return;
-          origin[candidate.id] = { x: candidate.x, y: candidate.y };
+          if (dragSelection.has(candidate.id)) origin[candidate.id] = { x: candidate.x, y: candidate.y };
         });
         dragOriginRef.current = origin;
       },
       onTransformEnd: (evt: KonvaEventObject<Event>) => {
         if (mode !== "EDIT") return;
+        setGuides({ vertical: [], horizontal: [] });
         const node = evt.target as Konva.Shape;
         const scaleX = node.scaleX();
         const scaleY = node.scaleY();
@@ -408,7 +492,7 @@ export function FloorplanCanvas({
 
         if (el.shape === "LINE" || el.shape === "POLY") {
           const lineNode = node as Konva.Line;
-          const points = lineNode.points().map((point, index) => (index % 2 === 0 ? snap(point) : snap(point)));
+          const points = lineNode.points().map((point) => snap(point));
           applyPatch({ x: snap(node.x()), y: snap(node.y()), points, rotation: node.rotation() });
           return;
         }
@@ -431,18 +515,11 @@ export function FloorplanCanvas({
             {...sharedProps}
             x={el.x}
             y={el.y}
-            points={el.points ?? [0, 0, (el.width ?? 80), 0]}
+            points={el.points ?? [0, 0, el.width ?? 80, 0]}
             closed={el.shape === "POLY" ? el.closed ?? true : false}
           />
         ) : el.shape === "TEXT" ? (
-          <Text
-            {...sharedProps}
-            x={el.x}
-            y={el.y}
-            width={el.width ?? 180}
-            text={el.label ?? "Text"}
-            fontSize={Number(el.meta?.fontSize ?? 14)}
-          />
+          <Text {...sharedProps} x={el.x} y={el.y} width={el.width ?? 180} text={el.label ?? "Text"} fontSize={Number(el.meta?.fontSize ?? 14)} />
         ) : el.shape === "ICON" ? (
           <Text
             {...sharedProps}
@@ -468,8 +545,10 @@ export function FloorplanCanvas({
           <Text
             x={el.x + 8}
             y={el.y + 8}
+            width={Math.max(40, (el.width ?? 120) - 16)}
             text={el.label}
-            fontSize={12}
+            fontSize={13}
+            fontStyle={isSelected ? "bold" : "normal"}
             fill={isSelected && mode === "SELECT" ? "#ffffff" : "#1e293b"}
             listening={false}
           />
@@ -479,14 +558,16 @@ export function FloorplanCanvas({
   };
 
   return (
-    <div className="rounded-xl bg-slate-100 border-2 border-slate-200 overflow-hidden shadow-inner relative">
-      {/* Grid Background Pattern */}
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-[0.03]" 
+    <div
+      className="relative h-full min-h-[280px] w-full overflow-hidden bg-slate-100 shadow-inner ring-1 ring-inset ring-slate-200"
+      role="group"
+      aria-label={canvasLabel}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.035]"
         style={{
-          backgroundImage:
-            "linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)",
-          backgroundSize: "20px 20px",
+          backgroundImage: "linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)",
+          backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
         }}
       />
       <Stage
@@ -494,7 +575,8 @@ export function FloorplanCanvas({
         width={width}
         height={height}
         className="bg-transparent"
-        onMouseDown={handleStageMouseDown}
+        onMouseDown={(event) => handleStagePointerDown(event)}
+        onTap={(event) => handleStagePointerDown(event as KonvaEventObject<TouchEvent>)}
         onWheel={handleWheel}
         x={view.x}
         y={view.y}
@@ -505,62 +587,83 @@ export function FloorplanCanvas({
       >
         <Layer>
           {bgImage ? (
-            <KonvaImage image={bgImage} width={width} height={height} opacity={backgroundOpacity ?? 1} />
+            <KonvaImage image={bgImage} x={backgroundOffsetX} y={backgroundOffsetY} width={contentWidth * backgroundScale} height={contentHeight * backgroundScale} opacity={backgroundOpacity ?? 1} />
           ) : null}
 
           {usingLegacyModel
-            ? legacyElements
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "legacy"))
+            ? legacyElements.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((el) => renderElement(el, "legacy"))
             : null}
 
           {!usingLegacyModel
-            ? resolvedShell
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "shell"))
+            ? resolvedShell.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((el) => renderElement(el, "shell"))
             : null}
 
           {!usingLegacyModel
-            ? resolvedLayout
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "layout"))
+            ? resolvedLayout.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)).map((el) => renderElement(el, "layout"))
+            : null}
+
+          {mode === "EDIT"
+            ? guides.vertical.map((guide) => (
+                <Line key={`guide-x-${guide}`} points={[guide, 0, guide, contentHeight]} stroke="#2563eb" strokeWidth={1} dash={[6, 5]} listening={false} />
+              ))
+            : null}
+          {mode === "EDIT"
+            ? guides.horizontal.map((guide) => (
+                <Line key={`guide-y-${guide}`} points={[0, guide, contentWidth, guide]} stroke="#2563eb" strokeWidth={1} dash={[6, 5]} listening={false} />
+              ))
             : null}
 
           {mode === "EDIT" ? (
             <Transformer
               ref={trRef}
               rotateEnabled
-              enabledAnchors={[
-                "top-left",
-                "top-right",
-                "bottom-left",
-                "bottom-right",
-                "middle-left",
-                "middle-right",
-                "top-center",
-                "bottom-center",
-              ]}
-              boundBoxFunc={(oldBox, newBox) => {
-                if (newBox.width < 10 || newBox.height < 10) return oldBox;
-                return newBox;
-              }}
+              borderStroke="#0f172a"
+              borderStrokeWidth={2}
+              anchorFill="#ffffff"
+              anchorStroke="#0f172a"
+              anchorSize={12}
+              enabledAnchors={["top-left", "top-right", "bottom-left", "bottom-right", "middle-left", "middle-right", "top-center", "bottom-center"]}
+              boundBoxFunc={(oldBox, newBox) => (newBox.width < 10 || newBox.height < 10 ? oldBox : newBox)}
             />
           ) : null}
         </Layer>
       </Stage>
 
       {mode === "EDIT" && resolvedSelectedIds.length > 0 ? (
-        <div className="border-t border-slate-200 bg-white/50 px-4 py-2 text-xs text-slate-500 backdrop-blur-sm absolute bottom-0 left-0 right-0">
-          Selected: <span className="text-slate-900 font-medium">{resolvedSelectedIds.length}</span>
-          {selectedEl?.resourceId ? (
-            <span>
-              {" "}
-              / resourceId: <span className="text-slate-900 font-medium">{selectedEl.resourceId}</span>
-            </span>
-          ) : null}
+        <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur">
+          {resolvedSelectedIds.length === 1 ? selectedEl?.label || "1 object selected" : `${resolvedSelectedIds.length} objects selected`}
+        </div>
+      ) : null}
+
+      {showViewportControls ? (
+        <div className="absolute bottom-3 right-3 flex items-center rounded-full bg-white/95 p-1 shadow-lg ring-1 ring-slate-200 backdrop-blur" aria-label="Canvas zoom controls">
+          <button
+            type="button"
+            onClick={() => zoomAtCenter(1 / 1.2)}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-lg font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
+            aria-label="Zoom out"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={fitView}
+            className="inline-flex min-h-11 items-center justify-center rounded-full px-3 text-xs font-semibold tabular-nums text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
+            aria-label={`Fit floor plan. Current zoom ${Math.round(view.scale * 100)} percent`}
+            title="Fit floor plan"
+          >
+            {Math.round(view.scale * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => zoomAtCenter(1.2)}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-lg font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
+            aria-label="Zoom in"
+            title="Zoom in"
+          >
+            +
+          </button>
         </div>
       ) : null}
     </div>
