@@ -371,8 +371,9 @@ export function FloorplanCanvas({
     });
   };
 
-  const handleDragEndStage = (e: KonvaEventObject<DragEvent>) => {
-    const stage = e.target;
+  const handleStageDragEnd = (e: KonvaEventObject<DragEvent>) => {
+    const stage = stageRef.current;
+    if (!stage || e.target !== stage) return;
     setViewSafe({ ...viewRef.current, x: stage.x(), y: stage.y() });
   };
 
@@ -495,6 +496,7 @@ export function FloorplanCanvas({
       },
       onDragEnd: (evt: KonvaEventObject<DragEvent>) => {
         if (mode !== "EDIT") return;
+        evt.cancelBubble = true;
         setGuides({ vertical: [], horizontal: [] });
         const node = evt.target;
         const deltaX = node.x() - (dragOriginRef.current[el.id]?.x ?? el.x);
@@ -617,7 +619,7 @@ export function FloorplanCanvas({
         scaleX={view.scale}
         scaleY={view.scale}
         draggable={isPanMode}
-        onDragEnd={handleDragEndStage}
+        onDragEnd={handleStageDragEnd}
       >
         <Layer>
           {bgImage ? (
