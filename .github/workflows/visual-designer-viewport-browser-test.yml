@@ -110,7 +110,7 @@ jobs:
             for expectation in \
               'data-viewport-self-test="pass"' \
               "data-viewport-self-test-input=\"${input_mode}\"" \
-              'data-viewport-self-test-drag-model="manual-client-delta"' \
+              'data-viewport-self-test-drag-model="react-pointer-delta"' \
               'data-viewport-self-test-drag-started="true"' \
               'data-viewport-self-test-viewport-stable="true"' \
               'data-viewport-self-test-scene-anchor-stable="true"' \
