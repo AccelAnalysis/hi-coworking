@@ -1,0 +1,12 @@
+{
+  "functions": [
+    {
+      "source": "firebase/admin-operating-calendar-functions",
+      "codebase": "admin-operating-calendar",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:admin-operating-calendar-deploy"
+      ]
+    }
+  ]
+}
