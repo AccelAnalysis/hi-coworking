@@ -1,5 +1,6 @@
 const SELF_TEST_PARAM = "viewportSelfTest";
 const RESULT_ATTRIBUTE = "data-viewport-self-test";
+const GRID_SIZE = 20;
 type InputMode = "mouse" | "touch";
 type ViewportSnapshot = { x: string; y: string; scale: string };
 
@@ -26,6 +27,21 @@ function dispatchMouse(
       view: window,
       button: 0,
       buttons,
+      clientX,
+      clientY,
+    })
+  );
+}
+
+function dispatchContextMenu(target: EventTarget, clientX: number, clientY: number) {
+  target.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      button: 2,
+      buttons: 0,
       clientX,
       clientY,
     })
@@ -146,6 +162,63 @@ function sampleCanvas(
   return hashPixels(context.getImageData(x, y, width, height).data);
 }
 
+function isVisible(element: HTMLElement | null) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden" && rect.width > 1 && rect.height > 1;
+}
+
+function findVisibleButton(label: string) {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.trim() === label && isVisible(button)
+  );
+}
+
+async function verifyScaleContextAndAdd(
+  root: HTMLElement,
+  wrapper: HTMLElement,
+  stage: HTMLElement,
+  viewport: ViewportSnapshot
+) {
+  const scaleCard = wrapper.querySelector<HTMLElement>("[data-testid='floorplan-scale']");
+  const scaleReady =
+    wrapper.dataset.gridUnit === "12-inches" &&
+    wrapper.dataset.gridSquareFeet === "1" &&
+    Boolean(scaleCard?.textContent?.includes("1 square = 1 ft × 1 ft"));
+  root.dataset.viewportSelfTestScale = scaleReady ? "true" : "false";
+
+  const stageRect = stage.getBoundingClientRect();
+  const scale = numberFrom(viewport.scale, 1);
+  const viewX = numberFrom(viewport.x);
+  const viewY = numberFrom(viewport.y);
+  const blankX = stageRect.left + viewX + 1060 * scale;
+  const blankY = stageRect.top + viewY + 610 * scale;
+  dispatchContextMenu(stage, blankX, blankY);
+  await delay(120);
+  const contextMenu = wrapper.querySelector<HTMLElement>("[data-testid='floorplan-context-menu']");
+  const contextReady =
+    isVisible(contextMenu) &&
+    Boolean(contextMenu?.textContent?.includes("Add desk here")) &&
+    Boolean(contextMenu?.textContent?.includes("Fit floor plan"));
+  root.dataset.viewportSelfTestContextMenu = contextReady ? "true" : "false";
+  wrapper.querySelector<HTMLButtonElement>("button[aria-label='Close context menu']")?.click();
+  await nextFrame();
+
+  const addButton = findVisibleButton("Add");
+  addButton?.click();
+  await delay(160);
+  const addDialog = document.querySelector<HTMLElement>("[role='dialog'][aria-label='add']");
+  const addReady =
+    Boolean(addButton) &&
+    isVisible(addDialog) &&
+    Boolean(addDialog?.textContent?.includes("Add to the space"));
+  root.dataset.viewportSelfTestAddVisible = addReady ? "true" : "false";
+  addDialog?.querySelector<HTMLButtonElement>("button[aria-label='Close']")?.click();
+
+  return { scaleReady, contextReady, addReady };
+}
+
 async function runViewportSelfTest(mode: InputMode) {
   const root = document.documentElement;
   root.setAttribute(RESULT_ATTRIBUTE, "running");
@@ -248,6 +321,7 @@ async function runViewportSelfTest(mode: InputMode) {
     Math.abs(stageBefore.top - stageAfter.top) < 0.1 &&
     Math.abs(stageBefore.width - stageAfter.width) < 0.1 &&
     Math.abs(stageBefore.height - stageAfter.height) < 0.1;
+  const featureChecks = await verifyScaleContextAndAdd(root, wrapper, stage, after);
 
   root.dataset.viewportSelfTestBefore = `${before.x},${before.y},${before.scale}`;
   root.dataset.viewportSelfTestDuring = `${during.x},${during.y},${during.scale}`;
@@ -269,6 +343,9 @@ async function runViewportSelfTest(mode: InputMode) {
   else if (!stageStable) root.setAttribute(RESULT_ATTRIBUTE, "fail-stage-moved");
   else if (!objectStateMoved) root.setAttribute(RESULT_ATTRIBUTE, "fail-object-state-did-not-move");
   else if (!objectPixelsMoved) root.setAttribute(RESULT_ATTRIBUTE, "fail-object-pixels-did-not-move");
+  else if (!featureChecks.scaleReady) root.setAttribute(RESULT_ATTRIBUTE, "fail-scale");
+  else if (!featureChecks.contextReady) root.setAttribute(RESULT_ATTRIBUTE, "fail-context-menu");
+  else if (!featureChecks.addReady) root.setAttribute(RESULT_ATTRIBUTE, "fail-add-panel");
   else root.setAttribute(RESULT_ATTRIBUTE, "pass");
 }
 
