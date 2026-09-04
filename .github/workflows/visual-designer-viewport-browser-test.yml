@@ -23,7 +23,7 @@ jobs:
   verify-object-drag:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - name: Checkout exact pull-request head
         uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
 
-      - name: Drag an object and assert the viewport does not move
+      - name: Drag objects with mouse and touch without moving the scene
         shell: bash
         run: |
           set -euo pipefail
@@ -68,7 +68,7 @@ jobs:
           server_pid=$!
           trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
 
-          for attempt in {1..30}; do
+          for attempt in {1..40}; do
             if curl --fail --silent "http://127.0.0.1:4173/${relative}" >/dev/null; then
               break
             fi
@@ -81,24 +81,56 @@ jobs:
             exit 1
           fi
 
-          timeout 45s "${chrome}" \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            --disable-background-networking \
-            --window-size=1200,800 \
-            --virtual-time-budget=12000 \
-            --run-all-compositor-stages-before-draw \
-            --dump-dom "http://127.0.0.1:4173/${relative}?viewportSelfTest=1" \
-            > /tmp/visual-designer-self-test.html \
-            2> /tmp/visual-designer-chrome.log
+          run_case() {
+            local input_mode="$1"
+            local window_size="$2"
+            local output="/tmp/visual-designer-${input_mode}.html"
+            local chrome_log="/tmp/visual-designer-${input_mode}-chrome.log"
+            local extra_flags=()
+            if [[ "${input_mode}" == "touch" ]]; then
+              extra_flags+=(--touch-events=enabled)
+            fi
 
-          if ! grep -q 'data-viewport-self-test="pass"' /tmp/visual-designer-self-test.html; then
-            echo "Visual designer viewport self-test failed." >&2
-            grep -o 'data-viewport-self-test[^ >]*\|data-viewport-self-test-before[^ >]*\|data-viewport-self-test-after[^ >]*\|data-viewport-self-test-drag-started[^ >]*' /tmp/visual-designer-self-test.html || true
-            cat /tmp/visual-designer-chrome.log >&2 || true
-            exit 1
-          fi
+            timeout 60s "${chrome}" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --disable-background-networking \
+              --force-device-scale-factor=1 \
+              --window-size="${window_size}" \
+              --virtual-time-budget=18000 \
+              --run-all-compositor-stages-before-draw \
+              "${extra_flags[@]}" \
+              --dump-dom "http://127.0.0.1:4173/${relative}?viewportSelfTest=${input_mode}" \
+              > "${output}" \
+              2> "${chrome_log}"
 
-          grep -o 'data-viewport-self-test[^ >]*\|data-viewport-self-test-before[^ >]*\|data-viewport-self-test-after[^ >]*\|data-viewport-self-test-drag-started[^ >]*' /tmp/visual-designer-self-test.html || true
+            local failed=false
+            for expectation in \
+              'data-viewport-self-test="pass"' \
+              "data-viewport-self-test-input=\"${input_mode}\"" \
+              'data-viewport-self-test-drag-model="manual-client-delta"' \
+              'data-viewport-self-test-drag-started="true"' \
+              'data-viewport-self-test-viewport-stable="true"' \
+              'data-viewport-self-test-scene-anchor-stable="true"' \
+              'data-viewport-self-test-object-moved="true"' \
+              'data-viewport-self-test-stage-stable="true"'; do
+              if ! grep -q "${expectation}" "${output}"; then
+                failed=true
+              fi
+            done
+
+            if [[ "${failed}" == "true" ]]; then
+              echo "Visual designer ${input_mode} viewport self-test failed." >&2
+              grep -o 'data-viewport-self-test[^ >]*' "${output}" || true
+              cat "${chrome_log}" >&2 || true
+              exit 1
+            fi
+
+            echo "${input_mode} drag stability: passed"
+            grep -o 'data-viewport-self-test[^ >]*' "${output}" || true
+          }
+
+          run_case mouse 1200,800
+          run_case touch 430,900
