@@ -93,13 +93,11 @@ if (
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get(SELF_TEST_PARAM) === "1"
 ) {
-  window.addEventListener(
-    "load",
-    () => {
-      void runViewportSelfTest();
-    },
-    { once: true }
-  );
+  const start = () => {
+    void runViewportSelfTest();
+  };
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start, { once: true });
 }
 
 export {};
