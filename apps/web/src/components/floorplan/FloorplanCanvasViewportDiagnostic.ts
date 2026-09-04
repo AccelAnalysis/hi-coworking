@@ -91,7 +91,8 @@ async function findCanvas(attempts = 240): Promise<HTMLElement | null> {
       stage &&
       canvas &&
       stage.getBoundingClientRect().width > 250 &&
-      stage.getBoundingClientRect().height > 250
+      stage.getBoundingClientRect().height > 250 &&
+      wrapper.dataset.referenceLayoutId
     ) {
       return wrapper;
     }
@@ -164,7 +165,7 @@ async function runViewportSelfTest(mode: InputMode) {
     root.setAttribute(RESULT_ATTRIBUTE, "fail-no-fit-control");
     return;
   }
-  if (wrapper.dataset.dragModel !== "manual-client-delta") {
+  if (wrapper.dataset.dragModel !== "react-pointer-delta") {
     root.dataset.viewportSelfTestDragModel = wrapper.dataset.dragModel ?? "missing";
     root.setAttribute(RESULT_ATTRIBUTE, "fail-wrong-drag-model");
     return;
@@ -178,24 +179,28 @@ async function runViewportSelfTest(mode: InputMode) {
   const scale = numberFrom(before.scale, 1);
   const viewX = numberFrom(before.x);
   const viewY = numberFrom(before.y);
+  const layoutXBefore = numberFrom(wrapper.dataset.referenceLayoutLogicalX);
+  const layoutYBefore = numberFrom(wrapper.dataset.referenceLayoutLogicalY);
+  const layoutScreenXBefore = numberFrom(wrapper.dataset.referenceLayoutScreenX);
+  const layoutScreenYBefore = numberFrom(wrapper.dataset.referenceLayoutScreenY);
   const stageRect = stage.getBoundingClientRect();
 
-  // The preview seed places the Boardroom mode zone at 250,130. Use an empty
-  // point near its upper-left corner so the event cannot land on a chair/table.
-  const targetLocalX = viewX + (250 + 30) * scale;
-  const targetLocalY = viewY + (130 + 30) * scale;
+  // Use an empty point just inside the reference room zone so the event cannot
+  // land on a chair or table rendered above it.
+  const targetLocalX = layoutScreenXBefore + 30 * scale;
+  const targetLocalY = layoutScreenYBefore + 30 * scale;
   const startX = stageRect.left + targetLocalX;
   const startY = stageRect.top + targetLocalY;
   const endX = startX + (mode === "touch" ? 72 : 96);
   const endY = startY + (mode === "touch" ? 48 : 56);
 
   // Sample an unmoving section of the north wall and a sliver of the original
-  // boardroom location. Comparing rendered pixels catches scene movement even
-  // when stored viewport state incorrectly claims it stayed unchanged.
-  const wallLocalX = viewX + (90 + 300) * scale;
-  const wallLocalY = viewY + (70 + 7) * scale;
-  const objectLocalX = viewX + (250 + 8) * scale;
-  const objectLocalY = viewY + (130 + 25) * scale;
+  // room location. Rendered pixels catch scene movement even if stored viewport
+  // state incorrectly claims it stayed unchanged.
+  const wallLocalX = numberFrom(wrapper.dataset.referenceShellScreenX) + 300 * scale;
+  const wallLocalY = numberFrom(wrapper.dataset.referenceShellScreenY) + 7 * scale;
+  const objectLocalX = layoutScreenXBefore + 8 * scale;
+  const objectLocalY = layoutScreenYBefore + 25 * scale;
   const wallHashBefore = sampleCanvas(canvas, wallLocalX, wallLocalY, 28, 6);
   const objectHashBefore = sampleCanvas(canvas, objectLocalX, objectLocalY, 10, 20);
   const stageBefore = stage.getBoundingClientRect();
@@ -222,17 +227,22 @@ async function runViewportSelfTest(mode: InputMode) {
   } else {
     dispatchMouse(window, "mouseup", endX, endY, 0);
   }
-  await delay(1650);
+  await delay(850);
 
   const after = readViewport(wrapper);
   const wallHashAfter = sampleCanvas(canvas, wallLocalX, wallLocalY, 28, 6);
   const objectHashAfter = sampleCanvas(canvas, objectLocalX, objectLocalY, 10, 20);
   const stageAfter = stage.getBoundingClientRect();
+  const layoutXAfter = numberFrom(wrapper.dataset.referenceLayoutLogicalX);
+  const layoutYAfter = numberFrom(wrapper.dataset.referenceLayoutLogicalY);
 
   const viewportStable = sameViewport(before, during) && sameViewport(before, after);
   const sceneAnchorStable =
     wallHashBefore === wallHashDuring && wallHashBefore === wallHashAfter;
-  const objectMoved = objectHashBefore !== objectHashAfter;
+  const objectStateMoved =
+    Math.abs(layoutXAfter - layoutXBefore) >= GRID_SIZE ||
+    Math.abs(layoutYAfter - layoutYBefore) >= GRID_SIZE;
+  const objectPixelsMoved = objectHashBefore !== objectHashAfter;
   const stageStable =
     Math.abs(stageBefore.left - stageAfter.left) < 0.1 &&
     Math.abs(stageBefore.top - stageAfter.top) < 0.1 &&
@@ -246,15 +256,19 @@ async function runViewportSelfTest(mode: InputMode) {
   root.dataset.viewportSelfTestDragStarted = dragStarted ? "true" : "false";
   root.dataset.viewportSelfTestViewportStable = viewportStable ? "true" : "false";
   root.dataset.viewportSelfTestSceneAnchorStable = sceneAnchorStable ? "true" : "false";
-  root.dataset.viewportSelfTestObjectMoved = objectMoved ? "true" : "false";
+  root.dataset.viewportSelfTestObjectMoved =
+    objectStateMoved && objectPixelsMoved ? "true" : "false";
   root.dataset.viewportSelfTestStageStable = stageStable ? "true" : "false";
   root.dataset.viewportSelfTestWallHash = `${wallHashBefore},${wallHashDuring},${wallHashAfter}`;
+  root.dataset.viewportSelfTestLayoutBefore = `${layoutXBefore},${layoutYBefore}`;
+  root.dataset.viewportSelfTestLayoutAfter = `${layoutXAfter},${layoutYAfter}`;
 
   if (!dragStarted) root.setAttribute(RESULT_ATTRIBUTE, "fail-drag-not-started");
   else if (!viewportStable) root.setAttribute(RESULT_ATTRIBUTE, "fail-viewport-moved");
   else if (!sceneAnchorStable) root.setAttribute(RESULT_ATTRIBUTE, "fail-scene-anchor-moved");
   else if (!stageStable) root.setAttribute(RESULT_ATTRIBUTE, "fail-stage-moved");
-  else if (!objectMoved) root.setAttribute(RESULT_ATTRIBUTE, "fail-object-did-not-move");
+  else if (!objectStateMoved) root.setAttribute(RESULT_ATTRIBUTE, "fail-object-state-did-not-move");
+  else if (!objectPixelsMoved) root.setAttribute(RESULT_ATTRIBUTE, "fail-object-pixels-did-not-move");
   else root.setAttribute(RESULT_ATTRIBUTE, "pass");
 }
 
