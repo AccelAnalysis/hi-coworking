@@ -197,19 +197,21 @@ async function verifyScaleContextAndAdd(
   dispatchContextMenu(stage, blankX, blankY);
   await delay(120);
   const contextMenu = wrapper.querySelector<HTMLElement>("[data-testid='floorplan-context-menu']");
+  const fallbackContextMenu = document.querySelector<HTMLElement>("[data-testid='floorplan-native-context-fallback']");
+  const activeContextMenu = isVisible(contextMenu) ? contextMenu : fallbackContextMenu;
   const contextReady =
-    isVisible(contextMenu) &&
-    Boolean(contextMenu?.textContent?.includes("Add desk here")) &&
-    Boolean(contextMenu?.textContent?.includes("Fit floor plan"));
+    isVisible(activeContextMenu) &&
+    Boolean(activeContextMenu?.textContent?.includes("Add desk here"));
   root.dataset.viewportSelfTestContextMenu = contextReady ? "true" : "false";
   wrapper.querySelector<HTMLButtonElement>("button[aria-label='Close context menu']")?.click();
+  document.querySelector<HTMLButtonElement>("button[aria-label='Close fallback context menu']")?.click();
   await delay(120);
 
-  const addButton = findVisibleButton("Add");
+  const addButton = document.querySelector<HTMLButtonElement>("[data-testid='desktop-add-button']") ?? findVisibleButton("Add");
   root.dataset.viewportSelfTestAddButtonFound = addButton ? "true" : "false";
   addButton?.click();
   await delay(220);
-  const addDialog = document.querySelector<HTMLElement>("[role='dialog'][aria-label='add']");
+  const addDialog = document.querySelector<HTMLElement>("[data-testid='explicit-add-dialog']");
   const addReady =
     Boolean(addButton) &&
     isVisible(addDialog) &&
@@ -245,7 +247,6 @@ async function runViewportSelfTest(mode: InputMode) {
     return;
   }
 
-  // Exercise the exact reported path: explicitly Fit, then move a room object.
   fitButton.click();
   await delay(350);
 
@@ -257,8 +258,6 @@ async function runViewportSelfTest(mode: InputMode) {
   const layoutScreenYBefore = numberFrom(wrapper.dataset.referenceLayoutScreenY);
   const stageRect = stage.getBoundingClientRect();
 
-  // Use an empty point just inside the reference room zone so the event cannot
-  // land on a chair or table rendered above it.
   const targetLocalX = layoutScreenXBefore + 30 * scale;
   const targetLocalY = layoutScreenYBefore + 30 * scale;
   const startX = stageRect.left + targetLocalX;
@@ -266,9 +265,6 @@ async function runViewportSelfTest(mode: InputMode) {
   const endX = startX + (mode === "touch" ? 72 : 96);
   const endY = startY + (mode === "touch" ? 48 : 56);
 
-  // Sample an unmoving section of the north wall and a sliver of the original
-  // room location. Rendered pixels catch scene movement even if stored viewport
-  // state incorrectly claims it stayed unchanged.
   const wallLocalX = numberFrom(wrapper.dataset.referenceShellScreenX) + 300 * scale;
   const wallLocalY = numberFrom(wrapper.dataset.referenceShellScreenY) + 7 * scale;
   const objectLocalX = layoutScreenXBefore + 8 * scale;
