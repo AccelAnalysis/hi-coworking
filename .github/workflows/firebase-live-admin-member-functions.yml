@@ -9,6 +9,8 @@ on:
       - "apps/functions/src/adminMembershipAuthority.ts"
       - "apps/functions/src/adminMemberOperationsAuthority.ts"
       - "apps/functions/src/adminMemberBookingAuthority.ts"
+      - "apps/functions/src/adminBookingScheduledAuthority.ts"
+      - "apps/functions/src/bookingOperatingCalendar.ts"
       - "apps/functions/src/access.ts"
       - "apps/functions/src/payments/**"
       - "apps/functions/package.json"
@@ -69,3 +71,23 @@ jobs:
 
       - name: Deploy Admin member transaction functions
         run: npm run deploy:admin-member -- --non-interactive
+
+      - name: Verify Admin operating-calendar endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/booking_adminGetOperatingCalendar"
+          response_file="${RUNNER_TEMP}/admin-operating-calendar-preflight.txt"
+          status="$({ curl --silent --show-error --location \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request OPTIONS \
+            --header 'Origin: https://hi-coworking-plat.web.app' \
+            --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: content-type' \
+            "${endpoint}"; } || true)"
+          if [[ "${status}" != "200" && "${status}" != "204" ]]; then
+            echo "booking_adminGetOperatingCalendar is not reachable after deployment (HTTP ${status})." >&2
+            cat "${response_file}" >&2 || true
+            exit 1
+          fi
