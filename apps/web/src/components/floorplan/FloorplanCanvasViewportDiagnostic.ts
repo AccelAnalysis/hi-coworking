@@ -40,22 +40,45 @@ async function findCanvas(attempts = 180): Promise<HTMLElement | null> {
   return null;
 }
 
+function readViewport(wrapper: HTMLElement) {
+  return {
+    x: wrapper.dataset.viewportX ?? "",
+    y: wrapper.dataset.viewportY ?? "",
+    scale: wrapper.dataset.viewportScale ?? "",
+  };
+}
+
+function sameViewport(
+  left: ReturnType<typeof readViewport>,
+  right: ReturnType<typeof readViewport>
+) {
+  return left.x === right.x && left.y === right.y && left.scale === right.scale;
+}
+
 async function runViewportSelfTest() {
   const root = document.documentElement;
   root.setAttribute(RESULT_ATTRIBUTE, "running");
 
   const wrapper = await findCanvas();
   const stage = wrapper?.querySelector<HTMLElement>(".konvajs-content");
+  const fitButton = document.querySelector<HTMLButtonElement>(
+    "button[aria-label='Fit floor plan in view']"
+  );
   if (!wrapper || !stage) {
     root.setAttribute(RESULT_ATTRIBUTE, "fail-no-canvas");
     return;
   }
+  if (!fitButton) {
+    root.setAttribute(RESULT_ATTRIBUTE, "fail-no-fit-control");
+    return;
+  }
 
-  const before = {
-    x: wrapper.dataset.viewportX ?? "",
-    y: wrapper.dataset.viewportY ?? "",
-    scale: wrapper.dataset.viewportScale ?? "",
-  };
+  // Reproduce the exact path reported by the user: explicitly Fit the scene,
+  // then drag an object and verify the scene transform remains unchanged.
+  fitButton.click();
+  await delay(250);
+  const before = readViewport(wrapper);
+
   const rect = stage.getBoundingClientRect();
   const startX = rect.left + 550;
   const startY = rect.top + 300;
@@ -72,25 +95,29 @@ async function runViewportSelfTest() {
   dispatchMouse(stage, "mouseup", endX, endY, 0);
   await delay(650);
 
-  const after = {
-    x: wrapper.dataset.viewportX ?? "",
-    y: wrapper.dataset.viewportY ?? "",
-    scale: wrapper.dataset.viewportScale ?? "",
-  };
-  const viewportStable =
-    before.x === after.x && before.y === after.y && before.scale === after.scale;
+  const after = readViewport(wrapper);
+  const viewportStable = sameViewport(before, after);
 
   root.dataset.viewportSelfTestBefore = `${before.x},${before.y},${before.scale}`;
   root.dataset.viewportSelfTestAfter = `${after.x},${after.y},${after.scale}`;
   root.dataset.viewportSelfTestDragStarted = dragStarted ? "true" : "false";
+  root.dataset.viewportSelfTestFitApplied =
+    before.x !== "0.00" || before.y !== "0.00" || before.scale !== "1.0000"
+      ? "true"
+      : "false";
   root.setAttribute(
     RESULT_ATTRIBUTE,
-    dragStarted && viewportStable ? "pass" : dragStarted ? "fail-viewport-moved" : "fail-drag-not-started"
+    dragStarted && viewportStable
+      ? "pass"
+      : dragStarted
+        ? "fail-viewport-moved"
+        : "fail-drag-not-started"
   );
 }
 
 if (
   typeof window !== "undefined" &&
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "demo-hi-coworking" &&
   new URLSearchParams(window.location.search).get(SELF_TEST_PARAM) === "1"
 ) {
   const start = () => {
