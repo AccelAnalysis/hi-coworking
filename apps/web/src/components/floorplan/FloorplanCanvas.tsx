@@ -265,25 +265,12 @@ export function FloorplanCanvas({
       return;
     }
 
-    if (previousSize.width === width && previousSize.height === height) {
-      previousViewportSourceRef.current = viewportSource;
-      return;
-    }
-
-    const currentView = viewRef.current;
-    const contentCenter = {
-      x: (previousSize.width / 2 - currentView.x) / currentView.scale,
-      y: (previousSize.height / 2 - currentView.y) / currentView.scale,
-    };
-
+    // Resizing the browser, opening an inspector, or any ResizeObserver update
+    // must not move or scale the design. Only the explicit Fit/zoom/pan controls
+    // are allowed to change the viewport after initialization.
     previousStageSizeRef.current = { width, height };
     previousViewportSourceRef.current = viewportSource;
-    setViewSafe({
-      x: width / 2 - contentCenter.x * currentView.scale,
-      y: height / 2 - contentCenter.y * currentView.scale,
-      scale: currentView.scale,
-    });
-  }, [fitView, floorplan?.id, height, setViewSafe, stageHeight, stageWidth, width]);
+  }, [fitView, floorplan?.id, height, stageHeight, stageWidth, width]);
 
   const zoomAtCenter = (factor: number) => {
     const oldScale = viewRef.current.scale;
