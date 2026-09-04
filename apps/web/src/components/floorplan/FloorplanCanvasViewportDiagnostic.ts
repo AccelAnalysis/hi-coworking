@@ -203,11 +203,12 @@ async function verifyScaleContextAndAdd(
     Boolean(contextMenu?.textContent?.includes("Fit floor plan"));
   root.dataset.viewportSelfTestContextMenu = contextReady ? "true" : "false";
   wrapper.querySelector<HTMLButtonElement>("button[aria-label='Close context menu']")?.click();
-  await nextFrame();
+  await delay(120);
 
   const addButton = findVisibleButton("Add");
+  root.dataset.viewportSelfTestAddButtonFound = addButton ? "true" : "false";
   addButton?.click();
-  await delay(160);
+  await delay(220);
   const addDialog = document.querySelector<HTMLElement>("[role='dialog'][aria-label='add']");
   const addReady =
     Boolean(addButton) &&
@@ -250,8 +251,6 @@ async function runViewportSelfTest(mode: InputMode) {
 
   const before = readViewport(wrapper);
   const scale = numberFrom(before.scale, 1);
-  const viewX = numberFrom(before.x);
-  const viewY = numberFrom(before.y);
   const layoutXBefore = numberFrom(wrapper.dataset.referenceLayoutLogicalX);
   const layoutYBefore = numberFrom(wrapper.dataset.referenceLayoutLogicalY);
   const layoutScreenXBefore = numberFrom(wrapper.dataset.referenceLayoutScreenX);
