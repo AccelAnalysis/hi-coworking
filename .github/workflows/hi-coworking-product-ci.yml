@@ -8,8 +8,10 @@ on:
       - "apps/web/**"
       - "packages/shared/**"
       - "firebase/admin-member-functions/**"
+      - "firebase/admin-operating-calendar-functions/**"
       - "firebase/payment-status-guard-functions/**"
       - "firebase.admin.json"
+      - "firebase.admin-calendar.json"
       - "firebase.payment-status-guard.json"
       - "tests/functions/**"
       - "tests/rules/**"
@@ -19,6 +21,7 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/hi-coworking-product-ci.yml"
+      - ".github/workflows/firebase-live-admin-operating-calendar.yml"
 
 permissions:
   contents: read
@@ -66,6 +69,9 @@ jobs:
       - name: Build isolated Admin member deploy bundle
         run: npm run build:admin-member-deploy
 
+      - name: Build isolated Admin operating-calendar deploy bundle
+        run: npm run build:admin-operating-calendar-deploy
+
       - name: Build isolated payment-status guard bundle
         run: npm run build:payment-status-guard-deploy
 
@@ -80,6 +86,7 @@ jobs:
           tests/functions/payment-ledger-authority.test.ts
           tests/functions/booking-policy.test.ts
           tests/functions/booking-operating-calendar.test.ts
+          tests/functions/booking-operating-calendar-deployment-source.test.ts
           tests/functions/event-policy-v2.test.ts
           tests/functions/event-v2-source-contract.test.ts
           tests/functions/event-cancellation-policy.test.ts

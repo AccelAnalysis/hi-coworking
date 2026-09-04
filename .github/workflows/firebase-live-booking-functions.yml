@@ -8,6 +8,9 @@ on:
       - "apps/functions/src/bookingJourney.ts"
       - "apps/functions/src/bookingManagement.ts"
       - "apps/functions/src/bookingPolicy.ts"
+      - "apps/functions/src/bookingOperatingCalendar.ts"
+      - "apps/functions/src/bookingPublicScheduledAuthority.ts"
+      - "apps/functions/src/bookingScheduledAuthority.ts"
       - "apps/functions/src/access.ts"
       - "apps/functions/src/payments/**"
       - "apps/functions/package.json"
@@ -69,3 +72,29 @@ jobs:
 
       - name: Deploy booking transaction functions
         run: npm run deploy:booking:transactions -- --non-interactive
+
+      - name: Verify public operating-calendar endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/booking_getDaySchedule"
+          response_file="${RUNNER_TEMP}/booking-day-schedule.json"
+          status="$({ curl --silent --show-error --location \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --header 'Content-Type: application/json' \
+            --data '{"data":{"date":"2030-01-07"}}' \
+            "${endpoint}"; } || true)"
+          if [[ "${status}" != "200" ]]; then
+            echo "booking_getDaySchedule did not respond successfully after deployment (HTTP ${status})." >&2
+            cat "${response_file}" >&2 || true
+            exit 1
+          fi
+          node - "${response_file}" <<'NODE'
+          const fs = require('fs');
+          const file = process.argv[2];
+          const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!payload?.result || payload.result.date !== '2030-01-07' || !Array.isArray(payload.result.intervals)) {
+            throw new Error('booking_getDaySchedule returned an unexpected callable payload');
+          }
+          NODE
