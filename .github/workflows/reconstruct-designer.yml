@@ -41,8 +41,8 @@ jobs:
             cat .designer-staging-gz/canvas.gzpart.02
           } | base64 --decode | gzip --decompress > apps/web/src/components/floorplan/FloorplanCanvas.tsx
 
-          echo "844194106912883c114b126bcf9c39fafafea147907a5e247caddd903a7e01e1  apps/web/src/app/admin/builder/page.tsx" | sha256sum --check
-          echo "a1ed4d5652a3b40512094831bb97414ab16545fd057a1889ae9f84e4d69379b1  apps/web/src/components/floorplan/FloorplanCanvas.tsx" | sha256sum --check
+          echo "6b3459b36c1825a7e1ee38776564978704809478771bd5d7f7200cece6e2b005  apps/web/src/app/admin/builder/page.tsx" | sha256sum --check
+          echo "d440691fb617b5fa8fe298a654bd438f034b8070757b9283349b2d86c1edf83b  apps/web/src/components/floorplan/FloorplanCanvas.tsx" | sha256sum --check
 
           rm -rf .designer-staging .designer-staging-gz
           rm -f .github/workflows/reconstruct-designer.yml
