@@ -25,6 +25,11 @@ body {
   color: #064e3b; /* emerald-900 */
 }
 
+/* Keep contextual canvas commands comfortable for pointer and touch users. */
+[data-testid="floorplan-context-menu"] [role="menuitem"] {
+  min-height: 44px;
+}
+
 /*
  * The isolated PR designer uses the same bottom-sheet state on mobile and
  * desktop. Tailwind's lg:hidden class is appropriate for the mobile toolbar,
