@@ -27,6 +27,7 @@ type PositionMap = Record<string, ElementPosition>;
 type AlignmentGuides = { vertical: number[]; horizontal: number[] };
 type AlignmentMatch = { delta: number; target: number };
 type CanvasInputEvent = MouseEvent | TouchEvent;
+type ContextElementType = "WALL" | "ROOM" | "SEAT" | "MODE_ZONE";
 
 type ObjectDragState = {
   layerName: ElementLayer;
@@ -44,12 +45,26 @@ type PanState = {
   viewport: Viewport;
 };
 
+type ContextMenuState = {
+  kind: "BACKGROUND" | "OBJECT";
+  x: number;
+  y: number;
+  logicalX: number;
+  logicalY: number;
+  layerName: ElementLayer;
+  targetIds: string[];
+};
+
 const GRID_SIZE = 20;
+const INCHES_PER_GRID = 12;
+const MAJOR_GRID_EVERY = 5;
 const MIN_SCALE = 0.35;
 const MAX_SCALE = 3;
 const MIN_VISIBLE_SCENE_PX = 72;
 const POST_OBJECT_VIEWPORT_GUARD_MS = 500;
 const SYNTHETIC_MOUSE_GUARD_MS = 900;
+const CONTEXT_MENU_WIDTH = 232;
+const CONTEXT_MENU_ESTIMATED_HEIGHT = 330;
 
 function snap(value: number) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
@@ -128,6 +143,48 @@ function elementHeight(element: FloorplanElement) {
   return Math.max(1, element.height ?? 100);
 }
 
+function logicalToInches(logicalValue: number) {
+  return (logicalValue / GRID_SIZE) * INCHES_PER_GRID;
+}
+
+function formatImperialLength(logicalValue: number) {
+  const inches = Math.max(0, Math.round(logicalToInches(logicalValue)));
+  const feet = Math.floor(inches / 12);
+  const remainder = inches % 12;
+  if (feet === 0) return `${remainder}″`;
+  if (remainder === 0) return `${feet}′`;
+  return `${feet}′ ${remainder}″`;
+}
+
+function areaSquareFeet(width: number, height: number) {
+  return (logicalToInches(width) / 12) * (logicalToInches(height) / 12);
+}
+
+function formatSquareFeet(width: number, height: number) {
+  return `${Math.round(areaSquareFeet(width, height)).toLocaleString()} sq ft`;
+}
+
+function makeContextToken(prefix: string) {
+  const token =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().slice(0, 8)
+      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `${prefix}-${token}`;
+}
+
+function contextElementDefaults(type: ContextElementType) {
+  if (type === "WALL") {
+    return { width: 240, height: 20, label: "Wall", fill: "rgba(148,163,184,0.65)" };
+  }
+  if (type === "ROOM") {
+    return { width: 260, height: 180, label: "Room", fill: "rgba(226,232,240,0.45)" };
+  }
+  if (type === "SEAT") {
+    return { width: 100, height: 60, label: "Bookable desk", fill: "rgba(186,230,253,0.72)" };
+  }
+  return { width: 300, height: 220, label: "Room setup", fill: "rgba(191,219,254,0.52)" };
+}
+
 export function FloorplanCanvas({
   floorplan,
   shellElements,
@@ -177,8 +234,10 @@ export function FloorplanCanvas({
   canvasLabel?: string;
   onViewportChange?: (viewport: Viewport) => void;
 }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
   const wheelFrameRef = useRef<number | null>(null);
   const objectDragRef = useRef<ObjectDragState | null>(null);
@@ -195,6 +254,7 @@ export function FloorplanCanvas({
   const [dragPositions, setDragPositions] = useState<PositionMap>({});
   const [objectDragging, setObjectDragging] = useState(false);
   const [viewportLocked, setViewportLocked] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const width = Math.max(1, stageWidth ?? floorplan?.canvasWidth ?? 1100);
   const height = Math.max(1, stageHeight ?? floorplan?.canvasHeight ?? 650);
@@ -232,6 +292,14 @@ export function FloorplanCanvas({
   const referenceLayoutElement = useMemo(
     () => resolvedLayout.find((element) => element.visible !== false && isBookable(element)),
     [resolvedLayout]
+  );
+  const verticalGridLines = useMemo(
+    () => Array.from({ length: Math.floor(contentWidth / GRID_SIZE) + 1 }, (_, index) => index * GRID_SIZE),
+    [contentWidth]
+  );
+  const horizontalGridLines = useMemo(
+    () => Array.from({ length: Math.floor(contentHeight / GRID_SIZE) + 1 }, (_, index) => index * GRID_SIZE),
+    [contentHeight]
   );
 
   const renderedPosition = useCallback(
@@ -348,6 +416,19 @@ export function FloorplanCanvas({
     [height, setViewport, width]
   );
 
+  const zoomTo100 = useCallback(() => {
+    const current = viewRef.current;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const contentX = (centerX - current.x) / current.scale;
+    const contentY = (centerY - current.y) / current.scale;
+    setViewport({
+      x: centerX - contentX,
+      y: centerY - contentY,
+      scale: 1,
+    });
+  }, [height, setViewport, width]);
+
   const sourceForLayer = useCallback(
     (layerName: ElementLayer) =>
       layerName === "legacy"
@@ -383,6 +464,8 @@ export function FloorplanCanvas({
     [commitLayerElements, sourceForLayer]
   );
 
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
   const selectElement = useCallback(
     (event: CanvasInputEvent, element: FloorplanElement, layerName: ElementLayer) => {
       const source = sourceForLayer(layerName);
@@ -414,6 +497,56 @@ export function FloorplanCanvas({
     [mode, onSelect, onSelectIds, resolvedSelectedIds, sourceForLayer]
   );
 
+  const openContextMenu = useCallback(
+    (
+      event: KonvaEventObject<MouseEvent>,
+      element?: FloorplanElement,
+      layerName?: ElementLayer
+    ) => {
+      if (mode !== "EDIT") return;
+      event.evt.preventDefault();
+      event.cancelBubble = true;
+      const wrapper = wrapperRef.current;
+      const stage = stageRef.current;
+      const pointer = stage?.getPointerPosition();
+      if (!wrapper || !stage || !pointer) return;
+
+      const rect = wrapper.getBoundingClientRect();
+      const current = viewRef.current;
+      const resolvedLayer: ElementLayer =
+        layerName ?? (usingLegacyModel ? "legacy" : activeLayer);
+      const source = sourceForLayer(resolvedLayer);
+      const targetIds = element
+        ? element.groupId
+          ? source
+              .filter((candidate) => candidate.groupId === element.groupId)
+              .map((candidate) => candidate.id)
+          : [element.id]
+        : [];
+
+      if (element) {
+        onSelect?.(element.id);
+        onSelectIds?.(targetIds);
+      } else {
+        onSelect?.(undefined);
+        onSelectIds?.([]);
+      }
+
+      const localX = event.evt.clientX - rect.left;
+      const localY = event.evt.clientY - rect.top;
+      setContextMenu({
+        kind: element ? "OBJECT" : "BACKGROUND",
+        x: clamp(localX, 8, Math.max(8, rect.width - CONTEXT_MENU_WIDTH - 8)),
+        y: clamp(localY, 8, Math.max(8, rect.height - CONTEXT_MENU_ESTIMATED_HEIGHT)),
+        logicalX: (pointer.x - current.x) / current.scale,
+        logicalY: (pointer.y - current.y) / current.scale,
+        layerName: resolvedLayer,
+        targetIds,
+      });
+    },
+    [activeLayer, mode, onSelect, onSelectIds, sourceForLayer, usingLegacyModel]
+  );
+
   const beginObjectDrag = useCallback(
     (
       event: KonvaEventObject<CanvasInputEvent>,
@@ -432,7 +565,12 @@ export function FloorplanCanvas({
       ) {
         return;
       }
-      if ("button" in nativeEvent && nativeEvent.button !== 0) return;
+      if (
+        "button" in nativeEvent &&
+        (nativeEvent.button !== 0 || ("ctrlKey" in nativeEvent && nativeEvent.ctrlKey))
+      ) {
+        return;
+      }
 
       const ids = selectElement(nativeEvent, element, layerName);
       if (
@@ -445,6 +583,7 @@ export function FloorplanCanvas({
       }
 
       nativeEvent.preventDefault();
+      closeContextMenu();
       const source = sourceForLayer(layerName);
       const requestedIds = element.groupId
         ? source
@@ -483,6 +622,7 @@ export function FloorplanCanvas({
     },
     [
       activeLayer,
+      closeContextMenu,
       isPanMode,
       lockViewport,
       mode,
@@ -620,6 +760,200 @@ export function FloorplanCanvas({
     [setViewport, viewportLocked]
   );
 
+  const contextTargets = useMemo(() => {
+    if (!contextMenu || contextMenu.kind !== "OBJECT") return [];
+    const ids = new Set(contextMenu.targetIds);
+    return sourceForLayer(contextMenu.layerName).filter((element) => ids.has(element.id));
+  }, [contextMenu, sourceForLayer]);
+  const contextTargetsAllLocked =
+    contextTargets.length > 0 && contextTargets.every((element) => element.locked);
+
+  const duplicateContextTargets = useCallback(() => {
+    if (!contextMenu || contextMenu.kind !== "OBJECT") return;
+    const source = sourceForLayer(contextMenu.layerName);
+    const targetSet = new Set(contextMenu.targetIds);
+    const groupMap = new Map<string, string>();
+    const duplicates = source
+      .filter((element) => targetSet.has(element.id))
+      .map((element) => {
+        let nextGroupId = element.groupId;
+        if (element.groupId) {
+          nextGroupId = groupMap.get(element.groupId);
+          if (!nextGroupId) {
+            nextGroupId = makeContextToken("group");
+            groupMap.set(element.groupId, nextGroupId);
+          }
+        }
+        return {
+          ...element,
+          id: makeContextToken(element.type.toLowerCase()),
+          groupId: nextGroupId,
+          resourceId: element.resourceId
+            ? `${element.resourceId}-copy-${Math.random().toString(36).slice(2, 6)}`
+            : undefined,
+          x: clamp(
+            snap(element.x + GRID_SIZE),
+            0,
+            Math.max(0, contentWidth - elementWidth(element))
+          ),
+          y: clamp(
+            snap(element.y + GRID_SIZE),
+            0,
+            Math.max(0, contentHeight - elementHeight(element))
+          ),
+          meta: element.meta ? { ...element.meta } : undefined,
+          points: element.points ? [...element.points] : undefined,
+        } satisfies FloorplanElement;
+      });
+    if (!duplicates.length) return;
+    commitLayerElements(contextMenu.layerName, [...source, ...duplicates]);
+    onSelect?.(duplicates[0]?.id);
+    onSelectIds?.(duplicates.map((element) => element.id));
+    closeContextMenu();
+  }, [
+    closeContextMenu,
+    commitLayerElements,
+    contentHeight,
+    contentWidth,
+    contextMenu,
+    onSelect,
+    onSelectIds,
+    sourceForLayer,
+  ]);
+
+  const setContextTargetsLocked = useCallback(() => {
+    if (!contextMenu || contextMenu.kind !== "OBJECT") return;
+    const source = sourceForLayer(contextMenu.layerName);
+    const targetSet = new Set(contextMenu.targetIds);
+    const nextLocked = !source
+      .filter((element) => targetSet.has(element.id))
+      .every((element) => element.locked);
+    commitLayerElements(
+      contextMenu.layerName,
+      source.map((element) =>
+        targetSet.has(element.id)
+          ? { ...element, locked: nextLocked ? true : undefined }
+          : element
+      )
+    );
+    closeContextMenu();
+  }, [closeContextMenu, commitLayerElements, contextMenu, sourceForLayer]);
+
+  const hideContextTargets = useCallback(() => {
+    if (!contextMenu || contextMenu.kind !== "OBJECT") return;
+    const source = sourceForLayer(contextMenu.layerName);
+    const targetSet = new Set(contextMenu.targetIds);
+    commitLayerElements(
+      contextMenu.layerName,
+      source.map((element) =>
+        targetSet.has(element.id) ? { ...element, visible: false } : element
+      )
+    );
+    onSelect?.(undefined);
+    onSelectIds?.([]);
+    closeContextMenu();
+  }, [closeContextMenu, commitLayerElements, contextMenu, onSelect, onSelectIds, sourceForLayer]);
+
+  const moveContextTargetsInLayer = useCallback(
+    (direction: "FRONT" | "BACK") => {
+      if (!contextMenu || contextMenu.kind !== "OBJECT") return;
+      const source = sourceForLayer(contextMenu.layerName);
+      const targetSet = new Set(contextMenu.targetIds);
+      const zValues = source.map((element) => element.zIndex ?? 0);
+      const anchor =
+        direction === "FRONT" ? Math.max(0, ...zValues) + 1 : Math.min(0, ...zValues) - contextMenu.targetIds.length;
+      let offset = 0;
+      commitLayerElements(
+        contextMenu.layerName,
+        source.map((element) => {
+          if (!targetSet.has(element.id)) return element;
+          const zIndex = anchor + offset;
+          offset += 1;
+          return { ...element, zIndex };
+        })
+      );
+      closeContextMenu();
+    },
+    [closeContextMenu, commitLayerElements, contextMenu, sourceForLayer]
+  );
+
+  const deleteContextTargets = useCallback(() => {
+    if (!contextMenu || contextMenu.kind !== "OBJECT") return;
+    const targetSet = new Set(contextMenu.targetIds);
+    commitLayerElements(
+      contextMenu.layerName,
+      sourceForLayer(contextMenu.layerName).filter((element) => !targetSet.has(element.id))
+    );
+    onSelect?.(undefined);
+    onSelectIds?.([]);
+    closeContextMenu();
+  }, [closeContextMenu, commitLayerElements, contextMenu, onSelect, onSelectIds, sourceForLayer]);
+
+  const addContextElement = useCallback(
+    (type: ContextElementType) => {
+      if (!contextMenu || contextMenu.kind !== "BACKGROUND") return;
+      const defaults = contextElementDefaults(type);
+      const x = clamp(
+        snap(contextMenu.logicalX - defaults.width / 2),
+        0,
+        Math.max(0, contentWidth - defaults.width)
+      );
+      const y = clamp(
+        snap(contextMenu.logicalY - defaults.height / 2),
+        0,
+        Math.max(0, contentHeight - defaults.height)
+      );
+      const element: FloorplanElement = {
+        id: makeContextToken(type.toLowerCase()),
+        type,
+        shape: "RECT",
+        label: defaults.label,
+        x,
+        y,
+        width: defaults.width,
+        height: defaults.height,
+        rotation: 0,
+        fill: defaults.fill,
+        visible: true,
+        resourceId:
+          type === "SEAT"
+            ? makeContextToken("seat-desk")
+            : type === "MODE_ZONE"
+              ? makeContextToken("mode-room")
+              : undefined,
+        meta:
+          type === "SEAT"
+            ? { capacity: 1, customerVisible: true, powerAvailable: true }
+            : type === "MODE_ZONE"
+              ? {
+                  capacity: 6,
+                  arrangement: "Boardroom",
+                  customerVisible: true,
+                  videoConferencing: false,
+                  display: false,
+                  whiteboard: false,
+                  addOnIds: [],
+                }
+              : undefined,
+      };
+      const source = sourceForLayer(contextMenu.layerName);
+      commitLayerElements(contextMenu.layerName, [...source, element]);
+      onSelect?.(element.id);
+      onSelectIds?.([element.id]);
+      closeContextMenu();
+    },
+    [
+      closeContextMenu,
+      commitLayerElements,
+      contentHeight,
+      contentWidth,
+      contextMenu,
+      onSelect,
+      onSelectIds,
+      sourceForLayer,
+    ]
+  );
+
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
       if (objectDragRef.current) {
@@ -674,9 +1008,27 @@ export function FloorplanCanvas({
         event.preventDefault();
         setSpaceDown(true);
       }
-      if (event.code === "Escape" && objectDragRef.current) {
+      if (event.code === "Escape") {
+        if (contextMenu) {
+          event.preventDefault();
+          closeContextMenu();
+          return;
+        }
+        if (objectDragRef.current) {
+          event.preventDefault();
+          finishObjectDrag(false);
+        }
+      }
+      if (contextMenu && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
         event.preventDefault();
-        finishObjectDrag(false);
+        const items = Array.from(
+          contextMenuRef.current?.querySelectorAll<HTMLButtonElement>("[role='menuitem']") ?? []
+        );
+        if (!items.length) return;
+        const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + items.length) % items.length;
+        items[nextIndex]?.focus();
       }
     };
     const handleKeyUp = (event: KeyboardEvent) => {
@@ -688,7 +1040,15 @@ export function FloorplanCanvas({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [finishObjectDrag]);
+  }, [closeContextMenu, contextMenu, finishObjectDrag]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const frame = window.requestAnimationFrame(() => {
+      contextMenuRef.current?.querySelector<HTMLButtonElement>("[role='menuitem']")?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [contextMenu]);
 
   useEffect(() => {
     return () => {
@@ -705,6 +1065,7 @@ export function FloorplanCanvas({
     panRef.current = null;
     setDragPositions({});
     setGuides({ vertical: [], horizontal: [] });
+    setContextMenu(null);
     viewportSuppressedUntilRef.current = 0;
     setViewportLocked(false);
     setViewport({ x: 0, y: 0, scale: 1 }, true);
@@ -737,6 +1098,7 @@ export function FloorplanCanvas({
     if (!point) return;
     if (isPanMode && !viewportLocked) {
       event.evt.preventDefault();
+      closeContextMenu();
       panRef.current = { start: point, viewport: { ...viewRef.current } };
       return;
     }
@@ -749,6 +1111,7 @@ export function FloorplanCanvas({
 
   const handleWheel = (event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
+    closeContextMenu();
     if (
       viewportLocked ||
       objectDragRef.current ||
@@ -783,6 +1146,7 @@ export function FloorplanCanvas({
 
   const beginTransform = (event: KonvaEventObject<Event>) => {
     event.cancelBubble = true;
+    closeContextMenu();
     transformViewportRef.current = { ...viewRef.current };
     lockViewport();
     setObjectDragging(true);
@@ -831,8 +1195,9 @@ export function FloorplanCanvas({
     const isSelected = selectedIdSet.has(element.id);
     const editableLayer = layerName === "legacy" || layerName === activeLayer;
     const canEdit = mode === "EDIT" && editableLayer && !element.locked;
+    const canContext = mode === "EDIT" && editableLayer;
     const canSelect = mode === "SELECT" ? isBookable(element) && layerName !== "shell" : canEdit;
-    const interactive = mode !== "VIEW" && (canEdit || canSelect || isPanMode);
+    const interactive = mode !== "VIEW" && (canEdit || canSelect || isPanMode || canContext);
     const baseFill =
       element.fill ??
       (element.type === "WALL"
@@ -876,6 +1241,9 @@ export function FloorplanCanvas({
         draggable={false}
         onMouseDown={(event) => pointerDown(event as KonvaEventObject<CanvasInputEvent>)}
         onTouchStart={(event) => pointerDown(event as KonvaEventObject<CanvasInputEvent>)}
+        onContextMenu={(event) =>
+          openContextMenu(event as KonvaEventObject<MouseEvent>, element, layerName)
+        }
         onTransformStart={beginTransform}
         onTransformEnd={(event) => finishTransform(event, element, layerName)}
       >
@@ -934,14 +1302,25 @@ export function FloorplanCanvas({
     ? renderedPosition(referenceLayoutElement)
     : undefined;
   const viewportCommandsAllowed = !viewportLocked && !objectDragging;
+  const scaleBarFeet = view.scale < 0.6 ? 10 : view.scale > 1.6 ? 2 : 5;
+  const scaleBarWidth = scaleBarFeet * GRID_SIZE * view.scale;
+  const designAreaLabel = `${formatImperialLength(contentWidth)} × ${formatImperialLength(contentHeight)} · ${formatSquareFeet(contentWidth, contentHeight)}`;
+  const selectedDimensionLabel =
+    selectedElement && selectedElement.shape !== "LINE" && selectedElement.shape !== "POLY"
+      ? `${formatImperialLength(elementWidth(selectedElement))} × ${formatImperialLength(elementHeight(selectedElement))} · ${formatSquareFeet(elementWidth(selectedElement), elementHeight(selectedElement))}`
+      : undefined;
+  const backgroundContextUsesShell = contextMenu?.layerName === "shell";
 
   return (
     <div
+      ref={wrapperRef}
       className="relative h-full min-h-[280px] w-full overflow-hidden bg-slate-100 shadow-inner ring-1 ring-inset ring-slate-200"
       role="group"
       aria-label={canvasLabel}
       data-testid="floorplan-canvas"
       data-drag-model="react-pointer-delta"
+      data-grid-unit="12-inches"
+      data-grid-square-feet="1"
       data-viewport-x={view.x.toFixed(2)}
       data-viewport-y={view.y.toFixed(2)}
       data-viewport-scale={view.scale.toFixed(4)}
@@ -971,15 +1350,6 @@ export function FloorplanCanvas({
       }
       style={{ touchAction: "none" }}
     >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.035]"
-        style={{
-          backgroundImage:
-            "linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)",
-          backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-        }}
-      />
-
       <Stage
         ref={stageRef}
         width={width}
@@ -991,6 +1361,7 @@ export function FloorplanCanvas({
         onTouchStart={(event) =>
           handleStagePointerDown(event as KonvaEventObject<CanvasInputEvent>)
         }
+        onContextMenu={(event) => openContextMenu(event as KonvaEventObject<MouseEvent>)}
         onWheel={handleWheel}
         style={{ cursor: isPanMode ? "grab" : "default", touchAction: "none" }}
       >
@@ -1013,6 +1384,57 @@ export function FloorplanCanvas({
                 listening={false}
               />
             ) : null}
+
+            {verticalGridLines.map((gridX, index) => {
+              const major = index % MAJOR_GRID_EVERY === 0;
+              return (
+                <React.Fragment key={`grid-v-${gridX}`}>
+                  <Line
+                    points={[gridX, 0, gridX, contentHeight]}
+                    stroke={major ? "#aeb9c8" : "#d8dee8"}
+                    strokeWidth={(major ? 1.15 : 0.7) / view.scale}
+                    opacity={major ? 0.78 : 0.72}
+                    listening={false}
+                  />
+                  {major && index > 0 ? (
+                    <Text
+                      x={gridX + 4 / view.scale}
+                      y={4 / view.scale}
+                      text={`${index}′`}
+                      fontSize={10 / view.scale}
+                      fill="#64748b"
+                      opacity={0.8}
+                      listening={false}
+                    />
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
+            {horizontalGridLines.map((gridY, index) => {
+              const major = index % MAJOR_GRID_EVERY === 0;
+              return (
+                <React.Fragment key={`grid-h-${gridY}`}>
+                  <Line
+                    points={[0, gridY, contentWidth, gridY]}
+                    stroke={major ? "#aeb9c8" : "#d8dee8"}
+                    strokeWidth={(major ? 1.15 : 0.7) / view.scale}
+                    opacity={major ? 0.78 : 0.72}
+                    listening={false}
+                  />
+                  {major && index > 0 ? (
+                    <Text
+                      x={4 / view.scale}
+                      y={gridY + 4 / view.scale}
+                      text={`${index}′`}
+                      fontSize={10 / view.scale}
+                      fill="#64748b"
+                      opacity={0.8}
+                      listening={false}
+                    />
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
 
             {usingLegacyModel
               ? legacyElements
@@ -1086,11 +1508,34 @@ export function FloorplanCanvas({
         </Layer>
       </Stage>
 
+      <div
+        className="pointer-events-none absolute bottom-3 left-3 max-w-[min(22rem,calc(100%-7rem))] rounded-2xl bg-white/94 px-3 py-2.5 text-xs text-slate-600 shadow-lg ring-1 ring-slate-200 backdrop-blur"
+        role="status"
+        aria-label={`Physical scale. Each grid square is one foot by one foot. Design area ${designAreaLabel}.`}
+        data-testid="floorplan-scale"
+      >
+        <div className="font-semibold text-slate-800">Grid · 1 square = 1 ft × 1 ft</div>
+        <div className="mt-1.5 flex items-end gap-2">
+          <span
+            className="block border-b-2 border-x border-slate-700"
+            style={{ width: `${scaleBarWidth}px`, height: "7px" }}
+            aria-hidden="true"
+          />
+          <span className="whitespace-nowrap font-medium text-slate-700">{scaleBarFeet} ft</span>
+        </div>
+        <div className="mt-1 text-[11px] leading-4 text-slate-500">Design area {designAreaLabel}</div>
+      </div>
+
       {mode === "EDIT" && resolvedSelectedIds.length > 0 ? (
-        <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-white/90 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur">
-          {resolvedSelectedIds.length === 1
-            ? selectedElement?.label || "1 object selected"
-            : `${resolvedSelectedIds.length} objects selected`}
+        <div className="pointer-events-none absolute left-3 top-3 max-w-[min(28rem,calc(100%-1.5rem))] rounded-2xl bg-white/92 px-3 py-2 text-xs font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur">
+          <div className="truncate">
+            {resolvedSelectedIds.length === 1
+              ? selectedElement?.label || "1 object selected"
+              : `${resolvedSelectedIds.length} objects selected`}
+          </div>
+          {resolvedSelectedIds.length === 1 && selectedDimensionLabel ? (
+            <div className="mt-0.5 text-[11px] font-normal text-slate-500">{selectedDimensionLabel}</div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1134,6 +1579,110 @@ export function FloorplanCanvas({
           </button>
         </div>
       ) : null}
+
+      {contextMenu ? (
+        <>
+          <button
+            type="button"
+            className="absolute inset-0 z-40 cursor-default"
+            onClick={closeContextMenu}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              closeContextMenu();
+            }}
+            aria-label="Close context menu"
+          />
+          <div
+            ref={contextMenuRef}
+            role="menu"
+            aria-label={contextMenu.kind === "OBJECT" ? "Object actions" : "Canvas actions"}
+            data-testid="floorplan-context-menu"
+            className="absolute z-50 w-[232px] overflow-hidden rounded-2xl bg-white/98 py-1.5 text-sm shadow-2xl ring-1 ring-slate-200 backdrop-blur"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {contextMenu.kind === "BACKGROUND" ? (
+              <>
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                  {backgroundContextUsesShell ? "Floor plan" : "Setup"}
+                </div>
+                {backgroundContextUsesShell ? (
+                  <>
+                    <ContextMenuButton onClick={() => addContextElement("WALL")}>Add wall here</ContextMenuButton>
+                    <ContextMenuButton onClick={() => addContextElement("ROOM")}>Add room here</ContextMenuButton>
+                  </>
+                ) : (
+                  <>
+                    <ContextMenuButton onClick={() => addContextElement("SEAT")}>Add desk here</ContextMenuButton>
+                    <ContextMenuButton onClick={() => addContextElement("MODE_ZONE")}>Add room setup here</ContextMenuButton>
+                  </>
+                )}
+                <ContextMenuSeparator />
+                <ContextMenuButton
+                  onClick={() => {
+                    fitView();
+                    closeContextMenu();
+                  }}
+                >
+                  Fit floor plan
+                </ContextMenuButton>
+                <ContextMenuButton
+                  onClick={() => {
+                    zoomTo100();
+                    closeContextMenu();
+                  }}
+                >
+                  Zoom to 100%
+                </ContextMenuButton>
+              </>
+            ) : (
+              <>
+                <ContextMenuButton onClick={duplicateContextTargets}>Duplicate</ContextMenuButton>
+                <ContextMenuButton onClick={setContextTargetsLocked}>
+                  {contextTargetsAllLocked ? "Unlock" : "Lock"}
+                </ContextMenuButton>
+                <ContextMenuButton onClick={() => moveContextTargetsInLayer("FRONT")}>
+                  Bring to front
+                </ContextMenuButton>
+                <ContextMenuButton onClick={() => moveContextTargetsInLayer("BACK")}>
+                  Send to back
+                </ContextMenuButton>
+                <ContextMenuButton onClick={hideContextTargets}>Hide</ContextMenuButton>
+                <ContextMenuSeparator />
+                <ContextMenuButton destructive onClick={deleteContextTargets}>Delete</ContextMenuButton>
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function ContextMenuSeparator() {
+  return <div className="my-1 border-t border-slate-100" role="separator" />;
+}
+
+function ContextMenuButton({
+  children,
+  onClick,
+  destructive = false,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex min-h-10 w-full items-center px-3 text-left text-sm font-medium outline-none transition focus:bg-slate-100 ${
+        destructive
+          ? "text-rose-700 hover:bg-rose-50 focus:bg-rose-50"
+          : "text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {children}
+    </button>
   );
 }
