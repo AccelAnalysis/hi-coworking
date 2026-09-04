@@ -112,7 +112,9 @@ export function FloorplanCanvas({
   const viewRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
   const wheelRafRef = useRef<number | null>(null);
   const dragOriginRef = useRef<Record<string, { x: number; y: number }>>({});
-  const lastFitKeyRef = useRef("");
+  const lastFittedFloorIdRef = useRef<string | undefined>(undefined);
+  const previousStageSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const previousViewportSourceRef = useRef<"fallback" | "external" | null>(null);
 
   const [view, setView] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
   const [spaceDown, setSpaceDown] = useState(false);
@@ -245,11 +247,43 @@ export function FloorplanCanvas({
   }, [contentHeight, contentWidth, height, setViewSafe, width]);
 
   useEffect(() => {
-    const key = `${floorplan?.id ?? "floor"}:${Math.round(width)}:${Math.round(height)}`;
-    if (width <= 1 || height <= 1 || lastFitKeyRef.current === key) return;
-    lastFitKeyRef.current = key;
-    fitView();
-  }, [fitView, floorplan?.id, height, width]);
+    if (width <= 1 || height <= 1) return;
+
+    const floorId = floorplan?.id ?? "floor";
+    const viewportSource: "fallback" | "external" =
+      typeof stageWidth === "number" && typeof stageHeight === "number" ? "external" : "fallback";
+    const previousSize = previousStageSizeRef.current;
+    const floorChanged = lastFittedFloorIdRef.current !== floorId;
+    const externalViewportBecameAvailable =
+      previousViewportSourceRef.current === "fallback" && viewportSource === "external";
+
+    if (!previousSize || floorChanged || externalViewportBecameAvailable) {
+      previousStageSizeRef.current = { width, height };
+      previousViewportSourceRef.current = viewportSource;
+      lastFittedFloorIdRef.current = floorId;
+      fitView();
+      return;
+    }
+
+    if (previousSize.width === width && previousSize.height === height) {
+      previousViewportSourceRef.current = viewportSource;
+      return;
+    }
+
+    const currentView = viewRef.current;
+    const contentCenter = {
+      x: (previousSize.width / 2 - currentView.x) / currentView.scale,
+      y: (previousSize.height / 2 - currentView.y) / currentView.scale,
+    };
+
+    previousStageSizeRef.current = { width, height };
+    previousViewportSourceRef.current = viewportSource;
+    setViewSafe({
+      x: width / 2 - contentCenter.x * currentView.scale,
+      y: height / 2 - contentCenter.y * currentView.scale,
+      scale: currentView.scale,
+    });
+  }, [fitView, floorplan?.id, height, setViewSafe, stageHeight, stageWidth, width]);
 
   const zoomAtCenter = (factor: number) => {
     const oldScale = viewRef.current.scale;
