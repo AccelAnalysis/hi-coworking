@@ -121,7 +121,7 @@ describe("visual designer viewport isolation", () => {
     expect(previewSource).toContain('aria-label={mobilePanel.toLowerCase()}');
     expect(globalStyles).toContain('[role="dialog"][aria-label="add"]');
     expect(globalStyles).toContain("display: flex !important");
-    expect(globalStyles).toContain("max-width: 42rem");
+    expect(globalStyles).toContain("width: min(42rem, calc(100vw - 3rem))");
   });
 
   it("keeps the established import path pointed at the pointer-state implementation", () => {
