@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./LaunchCountdown.module.css";
 
-export const PUBLIC_LAUNCH_AT = new Date("2026-10-05T08:00:00-04:00").getTime();
+export const PUBLIC_LAUNCH_AT = new Date("2026-10-15T08:00:00-04:00").getTime();
 
 type CountdownValue = {
   days: string;
