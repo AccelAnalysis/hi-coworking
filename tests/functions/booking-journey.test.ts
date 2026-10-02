@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteApp as deleteAdminApp,
   getApps as getAdminApps,
@@ -19,6 +21,7 @@ import {
   connectAuthEmulator,
   getAuth,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   type Auth,
 } from "firebase/auth";
 import {
@@ -46,6 +49,24 @@ let adminApp: AdminApp;
 let db: Firestore;
 const clientApps: FirebaseApp[] = [];
 let clientSequence = 0;
+let localFunctionsApp: AdminApp | undefined;
+
+function localFinalizer() {
+  // Resolve the same Admin SDK copy used by the compiled Functions workspace.
+  const require = createRequire(new URL(
+    "../../apps/functions/lib/bookingFlexTransaction.js", import.meta.url,
+  ));
+  const admin = require("firebase-admin");
+  localFunctionsApp ??= admin.apps.find((app: AdminApp) => app.name === "[DEFAULT]")
+    ?? admin.initializeApp({ projectId: PROJECT_ID });
+  return {
+    auth: admin.auth(localFunctionsApp) as ReturnType<typeof getAdminAuth>,
+    finalize: require("./bookingFlexTransaction.js")
+      .booking_finalizeCheckout.run as (request: {
+        data: { holdId: string; holdSecret: string };
+      }) => Promise<FinalizeResult>,
+  };
+}
 
 function facilityDateValue(timestamp: number) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -218,6 +239,56 @@ async function callFunction<Result>(
   ).data;
 }
 
+// Seed the server's paid ledger and hold to exercise finalization without
+// charging Stripe or programming a physical lock.
+async function createPaidGuestHold(email: string, userId?: string) {
+  const holdId = "paid-guest-hold";
+  const holdSecret = "test-guest-hold-secret";
+  const window = futureFacilityWindow("09:00", 1);
+  await db.collection("payments").doc("guest-payment").set({
+    id: "guest-payment",
+    uid: userId || `guest:${holdId}`,
+    provider: "stripe",
+    amount: 1750,
+    currency: "usd",
+    purpose: "booking",
+    purposeRefId: holdId,
+    status: "paid",
+  });
+  await db.collection("bookingHolds").doc(holdId).set({
+    id: holdId,
+    resourceId: "seat-1",
+    resourceName: "Desk 1",
+    bookingKind: "single",
+    ...window,
+    userId: userId || `guest:${holdId}`,
+    guest: userId ? null : {
+      name: "Submitted Guest Name",
+      email,
+      phone: "555-0100",
+    },
+    quote: {
+      totalCents: 1750,
+      subtotalCents: 1750,
+      accountCreditAppliedCents: 0,
+      includedHoursApplied: 0,
+    },
+    status: "HELD",
+    secretHash: createHash("sha256").update(holdSecret).digest("hex"),
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    paymentId: "guest-payment",
+  });
+  return { holdId, holdSecret };
+}
+
+type FinalizeResult = {
+  success: boolean;
+  bookingId: string;
+  customToken?: string;
+  alreadyFinalized?: boolean;
+};
+
 beforeAll(() => {
   adminApp = getAdminApps().find(
     (app) => app.name === "booking-journey-tests",
@@ -238,9 +309,205 @@ afterAll(async () => {
     clientApps.map((app) => deleteApp(app)),
   );
   await deleteAdminApp(adminApp);
+  if (localFunctionsApp) {
+    const require = createRequire(new URL(
+      "../../apps/functions/lib/bookingFlexTransaction.js", import.meta.url,
+    ));
+    await require("firebase-admin/app").deleteApp(localFunctionsApp);
+  }
 });
 
 describe("booking journey", () => {
+  it("preserves an account created between the guest lookup and Auth creation", async () => {
+    await createMember("signup-race-owner");
+    const before = (await db.collection("users").doc("signup-race-owner").get()).data();
+    const hold = await createPaidGuestHold("signup-race-owner@example.test");
+    const { auth, finalize } = localFinalizer();
+    // The real createUser below then reports email-already-exists.
+    vi.spyOn(auth, "getUserByEmail").mockRejectedValueOnce({
+      code: "auth/user-not-found",
+    });
+    const result = await finalize({ data: hold });
+    expect(result.success).toBe(true);
+    expect(result.customToken).toBeUndefined();
+    expect((await db.collection("users").doc("signup-race-owner").get()).data())
+      .toEqual(before);
+    expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+      .toBe("signup-race-owner");
+  });
+
+  it("preserves a profile created concurrently for a genuinely new Auth user", async () => {
+    const hold = await createPaidGuestHold("profile-race@example.test");
+    const { auth, finalize } = localFinalizer();
+    const createUser = auth.createUser.bind(auth);
+    const concurrentProfile = {
+      displayName: "Concurrent Profile",
+      phone: "555-0111",
+      role: "admin",
+      membershipStatus: "active",
+      plan: "coworking",
+      accountCreditCents: 9000,
+      createdAt: 123,
+      updatedAt: 456,
+    };
+    vi.spyOn(auth, "createUser").mockImplementationOnce(async (input) => {
+      const record = await createUser(input);
+      await db.collection("users").doc(record.uid).set(concurrentProfile);
+      return record;
+    });
+    const result = await finalize({ data: hold });
+    const record = await getAdminAuth(adminApp).getUserByEmail("profile-race@example.test");
+    expect(result.success).toBe(true);
+    expect((await db.collection("users").doc(record.uid).get()).data())
+      .toEqual(concurrentProfile);
+  });
+
+  it.each(["member", "staff", "admin"])(
+    "preserves every existing %s account field during paid guest checkout",
+    async (role) => {
+      const uid = `existing-${role}`;
+      const email = `${uid}@example.test`;
+      await getAdminAuth(adminApp).createUser({
+        uid, email, displayName: "Original Auth Name", emailVerified: true,
+      });
+      await getAdminAuth(adminApp).setCustomUserClaims(uid, { role });
+      const profile = {
+        uid, email, role,
+        membershipStatus: "active",
+        plan: "coworking",
+        displayName: "Original Profile Name",
+        phone: "555-0199",
+        accountCreditCents: 5000,
+        accountCreditReservations: {
+          otherHold: { amountCents: 1000, expiresAt: Date.now() + 60_000 },
+        },
+        membershipExpiresAt: Date.now() + 30 * DAY_MS,
+        createdAt: 123,
+        updatedAt: 456,
+      };
+      await db.collection("users").doc(uid).set(profile);
+      const usage = {
+        uid, usedHours: 3, reservations: {}, updatedAt: 789,
+      };
+      await db.collection("membershipUsage").doc("existing-usage").set(usage);
+      const hold = await createPaidGuestHold(`  ${email.toUpperCase()}  `);
+      const { functions } = createClient(`guest-for-${role}`);
+      const result = await callFunction<FinalizeResult>(
+        functions, "booking_finalizeCheckout", hold,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.customToken).toBeUndefined();
+      expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+        .toBe(uid);
+      expect((await db.collection("users").doc(uid).get()).data()).toEqual(profile);
+      expect((await db.collection("membershipUsage").doc("existing-usage").get()).data())
+        .toEqual(usage);
+      const authUser = await getAdminAuth(adminApp).getUser(uid);
+      expect(authUser.displayName).toBe("Original Auth Name");
+      expect(authUser.emailVerified).toBe(true);
+      expect(authUser.customClaims).toEqual({ role });
+
+      const repeat = await callFunction<FinalizeResult>(
+        functions, "booking_finalizeCheckout", hold,
+      );
+      expect(repeat.bookingId).toBe(result.bookingId);
+      expect(repeat.alreadyFinalized).toBe(true);
+      expect(repeat.customToken).toBeUndefined();
+      expect((await db.collection("bookings").get()).size).toBe(1);
+      expect((await db.collection("users").doc(uid).get()).data()).toEqual(profile);
+    },
+  );
+
+  it("does not initialize a profile for an existing Auth account with no user document", async () => {
+    const email = "auth-only@example.test";
+    await getAdminAuth(adminApp).createUser({ uid: "auth-only", email });
+    const hold = await createPaidGuestHold(email);
+    const { functions } = createClient("auth-only-guest");
+    const result = await callFunction<FinalizeResult>(
+      functions, "booking_finalizeCheckout", hold,
+    );
+    expect(result.success).toBe(true);
+    expect(result.customToken).toBeUndefined();
+    expect((await db.collection("users").doc("auth-only").get()).exists).toBe(false);
+    expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+      .toBe("auth-only");
+  });
+
+  it("initializes a genuinely new guest account and returns its sign-in token", async () => {
+    const email = "new-guest@example.test";
+    const hold = await createPaidGuestHold(email);
+    const { app, functions } = createClient("new-guest");
+    const result = await callFunction<FinalizeResult>(
+      functions, "booking_finalizeCheckout", hold,
+    );
+    expect(result.success).toBe(true);
+    expect(result.customToken).toBeTypeOf("string");
+    const authUser = await getAdminAuth(adminApp).getUserByEmail(email);
+    expect(authUser.emailVerified).toBe(false);
+    const profile = (await db.collection("users").doc(authUser.uid).get()).data();
+    expect(profile).toMatchObject({
+      uid: authUser.uid, email,
+      displayName: "Submitted Guest Name",
+      phone: "555-0100",
+      role: "member",
+      membershipStatus: "none",
+    });
+    expect(profile?.createdAt).toBeTypeOf("number");
+    expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+      .toBe(authUser.uid);
+
+    const auth = getAuth(app);
+    connectAuthEmulator(auth, AUTH_EMULATOR_URL, { disableWarnings: true });
+    const signedIn = await signInWithCustomToken(auth, result.customToken!);
+    expect(signedIn.user.uid).toBe(authUser.uid);
+  });
+
+  it("keeps a guest booking with its email owner when a different account is signed in", async () => {
+    await createMember("guest-email-owner");
+    const other = await createMember("other-signed-in-member");
+    const ownerBefore = (await db.collection("users").doc("guest-email-owner").get()).data();
+    const otherBefore = (await db.collection("users").doc("other-signed-in-member").get()).data();
+    const hold = await createPaidGuestHold("guest-email-owner@example.test");
+    const result = await callFunction<FinalizeResult>(
+      other.functions, "booking_finalizeCheckout", hold,
+    );
+    expect(result.customToken).toBeUndefined();
+    expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+      .toBe("guest-email-owner");
+    expect((await db.collection("users").doc("guest-email-owner").get()).data())
+      .toEqual(ownerBefore);
+    expect((await db.collection("users").doc("other-signed-in-member").get()).data())
+      .toEqual(otherBefore);
+  });
+
+  it("keeps an authenticated hold with its original owner on a secret-based return", async () => {
+    await createMember("authenticated-hold-owner");
+    const other = await createMember("other-returning-member");
+    const hold = await createPaidGuestHold(
+      "authenticated-hold-owner@example.test", "authenticated-hold-owner",
+    );
+    const result = await callFunction<FinalizeResult>(
+      other.functions, "booking_finalizeCheckout", hold,
+    );
+    expect(result.customToken).toBeUndefined();
+    expect((await db.collection("bookings").doc(result.bookingId).get()).data()?.userId)
+      .toBe("authenticated-hold-owner");
+  });
+
+  it("rejects an invalid guest hold secret before touching an existing account", async () => {
+    await createMember("invalid-secret-owner");
+    const before = (await db.collection("users").doc("invalid-secret-owner").get()).data();
+    const hold = await createPaidGuestHold("invalid-secret-owner@example.test");
+    const { functions } = createClient("invalid-guest-secret");
+    await expect(callFunction(
+      functions, "booking_finalizeCheckout", { ...hold, holdSecret: "incorrect" },
+    )).rejects.toMatchObject({ code: "functions/permission-denied" });
+    expect((await db.collection("bookings").get()).empty).toBe(true);
+    expect((await db.collection("users").doc("invalid-secret-owner").get()).data())
+      .toEqual(before);
+  });
+
   it("shows only options that are available for the full requested stay", async () => {
     const { functions } = createClient(
       "booking-public-availability",
