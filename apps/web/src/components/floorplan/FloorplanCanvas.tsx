@@ -1,568 +1,295 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Image as KonvaImage, Layer, Line, Rect, Stage, Text, Transformer } from "react-konva";
-import type Konva from "konva";
-import type { KonvaEventObject } from "konva/lib/Node";
-import useImage from "use-image";
-import type { Floorplan, FloorplanElement } from "@hi/shared";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import type { FloorplanElement } from "@hi/shared";
+import "./FloorplanCanvasViewportDiagnostic";
+import { FloorplanCanvas as PointerStateCanvas } from "./FloorplanCanvasPointerState";
 
-type Mode = "EDIT" | "VIEW" | "SELECT";
-type ActiveLayer = "shell" | "layout";
-type CanvasTool = "SELECT" | "PAN";
+type FloorplanCanvasProps = ComponentProps<typeof PointerStateCanvas>;
+type FallbackMenu = {
+  x: number;
+  y: number;
+  logicalX: number;
+  logicalY: number;
+};
 
 const GRID_SIZE = 20;
+const FALLBACK_MENU_WIDTH = 232;
+const FALLBACK_MENU_HEIGHT = 360;
 
-function snap(n: number) {
-  return Math.round(n / GRID_SIZE) * GRID_SIZE;
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(maximum, value));
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function snap(value: number) {
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
 
-function isBookable(el: FloorplanElement) {
-  return (el.type === "SEAT" || el.type === "MODE_ZONE") && typeof el.resourceId === "string" && el.resourceId.length > 0;
+function uid(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function normalizeElements(elements?: FloorplanElement[]) {
-  return elements ?? [];
+function elementWidth(element: FloorplanElement) {
+  return Math.max(1, element.width ?? 120);
 }
 
-export function FloorplanCanvas({
-  floorplan,
-  shellElements,
-  layoutElements,
-  backgroundUrl,
-  backgroundOpacity,
-  stageWidth,
-  stageHeight,
-  activeLayer = "layout",
-  activeTool = "SELECT",
-  mode,
-  selectedId,
-  selectedIds,
-  onSelect,
-  onSelectIds,
-  onChange,
-  onShellElementsChange,
-  onLayoutElementsChange,
-}: {
-  floorplan?: Floorplan;
-  shellElements?: FloorplanElement[];
-  layoutElements?: FloorplanElement[];
-  backgroundUrl?: string;
-  backgroundOpacity?: number;
-  activeLayer?: ActiveLayer;
-  activeTool?: CanvasTool;
-  mode: Mode;
-  selectedId?: string;
-  selectedIds?: string[];
-  onSelect?: (id?: string) => void;
-  onSelectIds?: (ids: string[]) => void;
-  onChange?: (next: Floorplan) => void;
-  onShellElementsChange?: (elements: FloorplanElement[]) => void;
-  onLayoutElementsChange?: (elements: FloorplanElement[]) => void;
-  stageWidth?: number;
-  stageHeight?: number;
-}) {
-  const stageRef = useRef<Konva.Stage>(null);
-  const trRef = useRef<Konva.Transformer>(null);
-  const viewRef = useRef<{ x: number; y: number; scale: number }>({ x: 0, y: 0, scale: 1 });
-  const wheelRafRef = useRef<number | null>(null);
-  const dragOriginRef = useRef<Record<string, { x: number; y: number }>>({});
+function elementHeight(element: FloorplanElement) {
+  return Math.max(1, element.height ?? 100);
+}
 
-  const [view, setView] = useState<{ x: number; y: number; scale: number }>({ x: 0, y: 0, scale: 1 });
-  const [spaceDown, setSpaceDown] = useState(false);
+export function FloorplanCanvas(props: FloorplanCanvasProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const fallbackTimerRef = useRef<number | null>(null);
+  const [fallbackMenu, setFallbackMenu] = useState<FallbackMenu | null>(null);
 
-  // Use provided stage dimensions or fallback to floorplan/default
-  const width = stageWidth ?? floorplan?.canvasWidth ?? 1100;
-  const height = stageHeight ?? floorplan?.canvasHeight ?? 650;
-
-  // Keep track of content bounds for background image if needed, but stage is the viewport
-  const contentWidth = floorplan?.canvasWidth ?? 1100;
-  const contentHeight = floorplan?.canvasHeight ?? 650;
-
-  const shellEls = useMemo(() => normalizeElements(shellElements), [shellElements]);
-  const layoutEls = useMemo(() => normalizeElements(layoutElements), [layoutElements]);
-  const legacyElements = useMemo(() => floorplan?.elements ?? [], [floorplan?.elements]);
-  const usingLegacyModel = !shellElements && !layoutElements;
-
-  const resolvedShell = useMemo(() => (usingLegacyModel ? [] : shellEls), [usingLegacyModel, shellEls]);
-  const resolvedLayout = useMemo(() => (usingLegacyModel ? [] : layoutEls), [usingLegacyModel, layoutEls]);
-  const allElements = useMemo(
-    () => (usingLegacyModel ? legacyElements : [...resolvedShell, ...resolvedLayout]),
-    [usingLegacyModel, legacyElements, resolvedShell, resolvedLayout]
-  );
-
-  const resolvedBgUrl = backgroundUrl ?? floorplan?.backgroundImageDataUrl ?? "";
-  const [bgImage] = useImage(resolvedBgUrl);
-
-  const isPanMode = activeTool === "PAN" || spaceDown;
-
-  const resolvedSelectedIds = useMemo(() => {
-    if (selectedIds?.length) return selectedIds;
-    if (selectedId) return [selectedId];
-    return [];
-  }, [selectedIds, selectedId]);
-
-  const selectedIdSet = useMemo(() => new Set(resolvedSelectedIds), [resolvedSelectedIds]);
-
-  const selectedEl = useMemo(() => {
-    if (resolvedSelectedIds.length !== 1) return undefined;
-    return allElements.find((e) => e.id === resolvedSelectedIds[0]);
-  }, [allElements, resolvedSelectedIds]);
+  const selectedIds = props.selectedIds?.length
+    ? props.selectedIds
+    : props.selectedId
+      ? [props.selectedId]
+      : [];
+  const usingLegacyModel = !props.shellElements && !props.layoutElements;
+  const activeLayer = usingLegacyModel ? "legacy" : props.activeLayer ?? "layout";
+  const source =
+    activeLayer === "legacy"
+      ? props.floorplan?.elements ?? []
+      : activeLayer === "shell"
+        ? props.shellElements ?? []
+        : props.layoutElements ?? [];
+  const selectedElements = source.filter((element) => selectedIds.includes(element.id));
 
   useEffect(() => {
-    if (!trRef.current) return;
-    if (mode !== "EDIT") {
-      trRef.current.nodes([]);
-      trRef.current.getLayer()?.batchDraw();
-      return;
-    }
-
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    if (!resolvedSelectedIds.length) {
-      trRef.current.nodes([]);
-      trRef.current.getLayer()?.batchDraw();
-      return;
-    }
-
-    const nodes = resolvedSelectedIds
-      .map((id) =>
-        stage.findOne<Konva.Node>(`#node-shell-${id}`) ??
-        stage.findOne<Konva.Node>(`#node-layout-${id}`) ??
-        stage.findOne<Konva.Node>(`#node-legacy-${id}`)
-      )
-      .filter((node): node is Konva.Node => Boolean(node));
-
-    if (!nodes.length) {
-      trRef.current.nodes([]);
-      trRef.current.getLayer()?.batchDraw();
-      return;
-    }
-
-    trRef.current.nodes(nodes);
-    trRef.current.getLayer()?.batchDraw();
-  }, [mode, resolvedSelectedIds]);
-
-  useEffect(() => {
-    viewRef.current = view;
-  }, [view]);
-
-  useEffect(() => {
-    const onKeyDown = (evt: KeyboardEvent) => {
-      if (evt.code === "Space") setSpaceDown(true);
+    const close = () => setFallbackMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
     };
-
-    const onKeyUp = (evt: KeyboardEvent) => {
-      if (evt.code === "Space") setSpaceDown(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (fallbackTimerRef.current !== null) window.clearTimeout(fallbackTimerRef.current);
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (wheelRafRef.current !== null) {
-        window.cancelAnimationFrame(wheelRafRef.current);
-      }
-    };
-  }, []);
-
-  const updateLegacyElement = (id: string, patch: Partial<FloorplanElement>) => {
-    if (!onChange) return;
-    if (!floorplan) return;
-    const next: Floorplan = {
-      ...floorplan,
-      elements: floorplan.elements.map((el) => (el.id === id ? { ...el, ...patch } : el)),
-    };
-    onChange(next);
-  };
-
-  const updateLayerElements = (layer: ActiveLayer, id: string, patch: Partial<FloorplanElement>) => {
-    if (layer === "shell") {
-      if (!onShellElementsChange) return;
-      onShellElementsChange(resolvedShell.map((el) => (el.id === id ? { ...el, ...patch } : el)));
+  function commit(next: FloorplanElement[]) {
+    if (activeLayer === "legacy") {
+      if (props.onChange && props.floorplan) props.onChange({ ...props.floorplan, elements: next });
       return;
     }
-    if (!onLayoutElementsChange) return;
-    onLayoutElementsChange(resolvedLayout.map((el) => (el.id === id ? { ...el, ...patch } : el)));
-  };
+    if (activeLayer === "shell") props.onShellElementsChange?.(next);
+    else props.onLayoutElementsChange?.(next);
+  }
 
-  const setViewSafe = (next: { x: number; y: number; scale: number }) => {
-    viewRef.current = next;
-    setView(next);
-  };
+  function select(ids: string[]) {
+    props.onSelect?.(ids[0]);
+    props.onSelectIds?.(ids);
+  }
 
-  const handleStageMouseDown = (e: KonvaEventObject<MouseEvent>) => {
-    if (!onSelect && !onSelectIds) return;
-
-    if (isPanMode) return;
-
-    const clickedOnEmpty = e.target === e.target.getStage();
-    if (clickedOnEmpty) {
-      onSelect?.(undefined);
-      onSelectIds?.([]);
-      return;
-    }
-
-    const id = e.target?.attrs?.elementId as string | undefined;
-    const layer = e.target?.attrs?.elementLayer as ActiveLayer | "legacy" | undefined;
-    if (!id || !layer) return;
-
-    if (mode === "SELECT") {
-      const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
-      const el = source.find((x) => x.id === id);
-      if (!el || !isBookable(el)) return;
-    }
-
-    const additive = e.evt.shiftKey || e.evt.metaKey || e.evt.ctrlKey;
-    if (mode === "EDIT" && additive && onSelectIds) {
-      const current = new Set(resolvedSelectedIds);
-      if (current.has(id)) {
-        current.delete(id);
-      } else {
-        current.add(id);
-      }
-      onSelectIds(Array.from(current));
-      return;
-    }
-
-    onSelect?.(id);
-    onSelectIds?.([id]);
-  };
-
-  const handleWheel = (e: KonvaEventObject<WheelEvent>) => {
-    e.evt.preventDefault();
-    if (wheelRafRef.current !== null) return;
-
-    wheelRafRef.current = window.requestAnimationFrame(() => {
-      const stage = stageRef.current;
-      if (!stage) {
-        wheelRafRef.current = null;
-        return;
-      }
-
-      const oldScale = viewRef.current.scale;
-      const pointer = stage.getPointerPosition();
-      if (!pointer) {
-        wheelRafRef.current = null;
-        return;
-      }
-
-      const scaleBy = 1.05;
-      const direction = e.evt.deltaY > 0 ? -1 : 1;
-      const nextScale = clamp(direction > 0 ? oldScale * scaleBy : oldScale / scaleBy, 0.5, 2.8);
-
-      const mousePointTo = {
-        x: (pointer.x - viewRef.current.x) / oldScale,
-        y: (pointer.y - viewRef.current.y) / oldScale,
-      };
-
-      const nextPos = {
-        x: pointer.x - mousePointTo.x * nextScale,
-        y: pointer.y - mousePointTo.y * nextScale,
-      };
-
-      setViewSafe({ x: nextPos.x, y: nextPos.y, scale: nextScale });
-      wheelRafRef.current = null;
-    });
-  };
-
-  const handleDragEndStage = (e: KonvaEventObject<DragEvent>) => {
-    const stage = e.target;
-    setViewSafe({ ...viewRef.current, x: stage.x(), y: stage.y() });
-  };
-
-  const renderElement = (el: FloorplanElement, layer: ActiveLayer | "legacy") => {
-    const isSelected = selectedIdSet.has(el.id);
-    const locked = !!el.locked;
-    const isEditableLayer = layer === "legacy" || layer === activeLayer;
-    const selectable = mode !== "VIEW" && !locked && isEditableLayer;
-    const selectableInSelectMode = mode === "SELECT" ? isBookable(el) && layer !== "shell" : true;
-    const isInteractive = mode === "EDIT" ? selectable && !isPanMode : mode === "SELECT" ? selectableInSelectMode : false;
-
-    const fill = el.fill ??
-      (el.type === "WALL"
-        ? "#94a3b8"
-        : el.type === "DOOR"
-          ? "#cbd5e1"
-          : el.type === "WINDOW"
-            ? "#e2e8f0"
-            : el.type === "SEAT"
-              ? "#d1fae5"
-              : "#e0e7ff");
-
-    let displayFill = fill;
-    if (mode === "SELECT") {
-      if (!selectableInSelectMode) {
-        displayFill = "#cbd5e1";
-      } else if (isSelected) {
-        displayFill = "#4f46e5";
-      }
-    }
-
-    const stroke = el.stroke ?? (isSelected ? "#4f46e5" : "#94a3b8");
-    const strokeWidth = el.strokeWidth ?? (isSelected ? 2 : 1);
-    const opacity = el.opacity ?? (mode === "SELECT" && !selectableInSelectMode ? 0.5 : 1);
-
-    const applyPatch = (patch: Partial<FloorplanElement>) => {
-      if (layer === "legacy") {
-        updateLegacyElement(el.id, patch);
-      } else {
-        updateLayerElements(layer, el.id, patch);
-      }
-    };
-
-    const applyDeltaToSelection = (deltaX: number, deltaY: number) => {
-      if (resolvedSelectedIds.length <= 1 || mode !== "EDIT") {
-        applyPatch({ x: snap(el.x + deltaX), y: snap(el.y + deltaY) });
-        return;
-      }
-
-      if (layer === "legacy") {
-        if (!onChange || !floorplan) return;
-        const next: Floorplan = {
-          ...floorplan,
-          elements: floorplan.elements.map((candidate) => {
-            if (!selectedIdSet.has(candidate.id)) return candidate;
-            const origin = dragOriginRef.current[candidate.id] ?? { x: candidate.x, y: candidate.y };
-            return {
-              ...candidate,
-              x: snap(origin.x + deltaX),
-              y: snap(origin.y + deltaY),
-            };
-          }),
-        };
-        onChange(next);
-        return;
-      }
-
-      const source = layer === "shell" ? resolvedShell : resolvedLayout;
-      const next = source.map((candidate) => {
-        if (!selectedIdSet.has(candidate.id)) return candidate;
-        const origin = dragOriginRef.current[candidate.id] ?? { x: candidate.x, y: candidate.y };
-        return {
-          ...candidate,
-          x: snap(origin.x + deltaX),
-          y: snap(origin.y + deltaY),
-        };
-      });
-
-      if (layer === "shell") {
-        onShellElementsChange?.(next);
-      } else {
-        onLayoutElementsChange?.(next);
-      }
-    };
-
-    const sharedProps = {
-      id: `node-${layer}-${el.id}`,
-      elementId: el.id,
-      elementLayer: layer,
-      rotation: el.rotation,
-      fill: displayFill,
-      stroke,
-      strokeWidth,
-      draggable: mode === "EDIT" && selectable && !isPanMode,
-      listening: isInteractive,
-      opacity,
-      onDragMove: (evt: KonvaEventObject<DragEvent>) => {
-        if (mode !== "EDIT") return;
-        const node = evt.target;
-        node.x(snap(node.x()));
-        node.y(snap(node.y()));
-      },
-      onDragEnd: (evt: KonvaEventObject<DragEvent>) => {
-        if (mode !== "EDIT") return;
-        const node = evt.target;
-        const deltaX = node.x() - (dragOriginRef.current[el.id]?.x ?? el.x);
-        const deltaY = node.y() - (dragOriginRef.current[el.id]?.y ?? el.y);
-        applyDeltaToSelection(deltaX, deltaY);
-      },
-      onDragStart: () => {
-        const source = layer === "legacy" ? legacyElements : layer === "shell" ? resolvedShell : resolvedLayout;
-        const dragSelection = selectedIdSet.has(el.id) ? selectedIdSet : new Set([el.id]);
-        const origin: Record<string, { x: number; y: number }> = {};
-        source.forEach((candidate) => {
-          if (!dragSelection.has(candidate.id)) return;
-          origin[candidate.id] = { x: candidate.x, y: candidate.y };
-        });
-        dragOriginRef.current = origin;
-      },
-      onTransformEnd: (evt: KonvaEventObject<Event>) => {
-        if (mode !== "EDIT") return;
-        const node = evt.target as Konva.Shape;
-        const scaleX = node.scaleX();
-        const scaleY = node.scaleY();
-        node.scaleX(1);
-        node.scaleY(1);
-
-        if (el.shape === "LINE" || el.shape === "POLY") {
-          const lineNode = node as Konva.Line;
-          const points = lineNode.points().map((point, index) => (index % 2 === 0 ? snap(point) : snap(point)));
-          applyPatch({ x: snap(node.x()), y: snap(node.y()), points, rotation: node.rotation() });
-          return;
+  function duplicateSelected() {
+    if (!selectedElements.length) return;
+    const groupMap = new Map<string, string>();
+    const duplicates = selectedElements.map((element) => {
+      let groupId = element.groupId;
+      if (element.groupId) {
+        groupId = groupMap.get(element.groupId);
+        if (!groupId) {
+          groupId = uid("group");
+          groupMap.set(element.groupId, groupId);
         }
+      }
+      return {
+        ...element,
+        id: uid(element.type.toLowerCase()),
+        groupId,
+        resourceId: element.resourceId ? `${element.resourceId}-copy-${Math.random().toString(36).slice(2, 6)}` : undefined,
+        x: element.x + GRID_SIZE,
+        y: element.y + GRID_SIZE,
+        meta: element.meta ? { ...element.meta } : undefined,
+        points: element.points ? [...element.points] : undefined,
+      } satisfies FloorplanElement;
+    });
+    commit([...source, ...duplicates]);
+    select(duplicates.map((element) => element.id));
+    setFallbackMenu(null);
+  }
 
-        const rectNode = node as Konva.Rect;
-        applyPatch({
-          x: snap(node.x()),
-          y: snap(node.y()),
-          width: Math.max(10, snap(rectNode.width() * scaleX)),
-          height: Math.max(10, snap(rectNode.height() * scaleY)),
-          rotation: node.rotation(),
-        });
-      },
-    };
+  function deleteSelected() {
+    if (!selectedIds.length) return;
+    const targetIds = new Set(selectedIds);
+    commit(source.filter((element) => !targetIds.has(element.id)));
+    select([]);
+    setFallbackMenu(null);
+  }
 
-    return (
-      <React.Fragment key={`${layer}-${el.id}`}>
-        {el.shape === "LINE" || el.shape === "POLY" ? (
-          <Line
-            {...sharedProps}
-            x={el.x}
-            y={el.y}
-            points={el.points ?? [0, 0, (el.width ?? 80), 0]}
-            closed={el.shape === "POLY" ? el.closed ?? true : false}
-          />
-        ) : el.shape === "TEXT" ? (
-          <Text
-            {...sharedProps}
-            x={el.x}
-            y={el.y}
-            width={el.width ?? 180}
-            text={el.label ?? "Text"}
-            fontSize={Number(el.meta?.fontSize ?? 14)}
-          />
-        ) : el.shape === "ICON" ? (
-          <Text
-            {...sharedProps}
-            x={el.x}
-            y={el.y}
-            width={el.width ?? 40}
-            height={el.height ?? 40}
-            text={String(el.meta?.icon ?? "⬤")}
-            fontSize={Number(el.meta?.fontSize ?? 22)}
-          />
-        ) : (
-          <Rect
-            {...sharedProps}
-            x={el.x}
-            y={el.y}
-            width={el.width ?? 120}
-            height={el.height ?? 100}
-            cornerRadius={el.type === "WALL" ? 2 : 10}
-          />
-        )}
-
-        {el.label ? (
-          <Text
-            x={el.x + 8}
-            y={el.y + 8}
-            text={el.label}
-            fontSize={12}
-            fill={isSelected && mode === "SELECT" ? "#ffffff" : "#1e293b"}
-            listening={false}
-          />
-        ) : null}
-      </React.Fragment>
+  function toggleSelectedLocked() {
+    if (!selectedElements.length) return;
+    const targetIds = new Set(selectedIds);
+    const nextLocked = !selectedElements.every((element) => element.locked);
+    commit(
+      source.map((element) =>
+        targetIds.has(element.id)
+          ? { ...element, locked: nextLocked ? true : undefined }
+          : element
+      )
     );
-  };
+    setFallbackMenu(null);
+  }
+
+  function addAtContext(type: "WALL" | "ROOM" | "SEAT" | "MODE_ZONE") {
+    if (!fallbackMenu) return;
+    const defaults =
+      type === "WALL"
+        ? { width: 240, height: 20, label: "Wall", fill: "rgba(148,163,184,0.65)" }
+        : type === "ROOM"
+          ? { width: 260, height: 180, label: "Room", fill: "rgba(226,232,240,0.45)" }
+          : type === "SEAT"
+            ? { width: 100, height: 60, label: "Bookable desk", fill: "rgba(186,230,253,0.72)" }
+            : { width: 300, height: 220, label: "Room setup", fill: "rgba(191,219,254,0.52)" };
+    const contentWidth = props.floorplan?.canvasWidth ?? 1100;
+    const contentHeight = props.floorplan?.canvasHeight ?? 650;
+    const element: FloorplanElement = {
+      id: uid(type.toLowerCase()),
+      type,
+      shape: "RECT",
+      label: defaults.label,
+      x: clamp(snap(fallbackMenu.logicalX - defaults.width / 2), 0, Math.max(0, contentWidth - defaults.width)),
+      y: clamp(snap(fallbackMenu.logicalY - defaults.height / 2), 0, Math.max(0, contentHeight - defaults.height)),
+      width: defaults.width,
+      height: defaults.height,
+      rotation: 0,
+      fill: defaults.fill,
+      visible: true,
+      resourceId:
+        type === "SEAT"
+          ? uid("seat-desk")
+          : type === "MODE_ZONE"
+            ? uid("mode-room")
+            : undefined,
+      meta:
+        type === "SEAT"
+          ? { capacity: 1, customerVisible: true, powerAvailable: true }
+          : type === "MODE_ZONE"
+            ? {
+                capacity: 6,
+                arrangement: "Boardroom",
+                customerVisible: true,
+                videoConferencing: false,
+                display: false,
+                whiteboard: false,
+                addOnIds: [],
+              }
+            : undefined,
+    };
+    commit([...source, element]);
+    select([element.id]);
+    setFallbackMenu(null);
+  }
+
+  function handleNativeContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (props.mode !== "EDIT") return;
+    const wrapper = wrapperRef.current;
+    const canvas = wrapper?.querySelector<HTMLElement>("[data-testid='floorplan-canvas']");
+    if (!wrapper || !canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const viewX = Number(canvas.dataset.viewportX ?? 0);
+    const viewY = Number(canvas.dataset.viewportY ?? 0);
+    const scale = Number(canvas.dataset.viewportScale ?? 1) || 1;
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    const logicalX = (localX - viewX) / scale;
+    const logicalY = (localY - viewY) / scale;
+
+    if (fallbackTimerRef.current !== null) window.clearTimeout(fallbackTimerRef.current);
+    fallbackTimerRef.current = window.setTimeout(() => {
+      fallbackTimerRef.current = null;
+      if (wrapper.querySelector("[data-testid='floorplan-context-menu']")) return;
+      setFallbackMenu({
+        x: clamp(localX, 8, Math.max(8, rect.width - FALLBACK_MENU_WIDTH - 8)),
+        y: clamp(localY, 8, Math.max(8, rect.height - FALLBACK_MENU_HEIGHT)),
+        logicalX,
+        logicalY,
+      });
+    }, 32);
+  }
+
+  const selectedAllLocked = selectedElements.length > 0 && selectedElements.every((element) => element.locked);
+  const shellContext = activeLayer === "shell";
 
   return (
-    <div className="rounded-xl bg-slate-100 border-2 border-slate-200 overflow-hidden shadow-inner relative">
-      {/* Grid Background Pattern */}
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-[0.03]" 
-        style={{
-          backgroundImage:
-            "linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)",
-          backgroundSize: "20px 20px",
-        }}
-      />
-      <Stage
-        ref={stageRef}
-        width={width}
-        height={height}
-        className="bg-transparent"
-        onMouseDown={handleStageMouseDown}
-        onWheel={handleWheel}
-        x={view.x}
-        y={view.y}
-        scaleX={view.scale}
-        scaleY={view.scale}
-        draggable={isPanMode}
-        onDragEnd={handleDragEndStage}
-      >
-        <Layer>
-          {bgImage ? (
-            <KonvaImage image={bgImage} width={width} height={height} opacity={backgroundOpacity ?? 1} />
-          ) : null}
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full"
+      data-testid="floorplan-browser-context-guard"
+      onContextMenu={handleNativeContextMenu}
+    >
+      <PointerStateCanvas {...props} />
 
-          {usingLegacyModel
-            ? legacyElements
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "legacy"))
-            : null}
+      {fallbackMenu ? (
+        <>
+          <button
+            type="button"
+            className="absolute inset-0 z-[60] cursor-default"
+            onClick={() => setFallbackMenu(null)}
+            aria-label="Close fallback context menu"
+          />
+          <div
+            role="menu"
+            aria-label="Canvas context actions"
+            data-testid="floorplan-native-context-fallback"
+            className="absolute z-[70] w-[232px] overflow-hidden rounded-2xl bg-white py-1.5 text-sm shadow-2xl ring-1 ring-slate-200"
+            style={{ left: fallbackMenu.x, top: fallbackMenu.y }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {selectedElements.length ? (
+              <>
+                <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Selected object</div>
+                <FallbackItem onClick={duplicateSelected}>Duplicate</FallbackItem>
+                <FallbackItem onClick={toggleSelectedLocked}>{selectedAllLocked ? "Unlock" : "Lock"}</FallbackItem>
+                <FallbackItem destructive onClick={deleteSelected}>Delete</FallbackItem>
+                <div className="my-1 border-t border-slate-100" role="separator" />
+              </>
+            ) : null}
 
-          {!usingLegacyModel
-            ? resolvedShell
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "shell"))
-            : null}
-
-          {!usingLegacyModel
-            ? resolvedLayout
-                .slice()
-                .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-                .map((el) => renderElement(el, "layout"))
-            : null}
-
-          {mode === "EDIT" ? (
-            <Transformer
-              ref={trRef}
-              rotateEnabled
-              enabledAnchors={[
-                "top-left",
-                "top-right",
-                "bottom-left",
-                "bottom-right",
-                "middle-left",
-                "middle-right",
-                "top-center",
-                "bottom-center",
-              ]}
-              boundBoxFunc={(oldBox, newBox) => {
-                if (newBox.width < 10 || newBox.height < 10) return oldBox;
-                return newBox;
-              }}
-            />
-          ) : null}
-        </Layer>
-      </Stage>
-
-      {mode === "EDIT" && resolvedSelectedIds.length > 0 ? (
-        <div className="border-t border-slate-200 bg-white/50 px-4 py-2 text-xs text-slate-500 backdrop-blur-sm absolute bottom-0 left-0 right-0">
-          Selected: <span className="text-slate-900 font-medium">{resolvedSelectedIds.length}</span>
-          {selectedEl?.resourceId ? (
-            <span>
-              {" "}
-              / resourceId: <span className="text-slate-900 font-medium">{selectedEl.resourceId}</span>
-            </span>
-          ) : null}
-        </div>
+            <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{shellContext ? "Floor plan" : "Setup"}</div>
+            {shellContext ? (
+              <>
+                <FallbackItem onClick={() => addAtContext("WALL")}>Add wall here</FallbackItem>
+                <FallbackItem onClick={() => addAtContext("ROOM")}>Add room here</FallbackItem>
+              </>
+            ) : (
+              <>
+                <FallbackItem onClick={() => addAtContext("SEAT")}>Add desk here</FallbackItem>
+                <FallbackItem onClick={() => addAtContext("MODE_ZONE")}>Add room setup here</FallbackItem>
+              </>
+            )}
+          </div>
+        </>
       ) : null}
     </div>
+  );
+}
+
+function FallbackItem({
+  children,
+  onClick,
+  destructive = false,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex min-h-11 w-full items-center px-3 text-left text-sm font-medium outline-none transition focus-visible:bg-slate-100 ${
+        destructive ? "text-rose-700 hover:bg-rose-50" : "text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

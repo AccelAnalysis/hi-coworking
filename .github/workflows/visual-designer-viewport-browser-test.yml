@@ -1,0 +1,140 @@
+name: Visual designer viewport browser test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/src/app/admin/builder/**"
+      - "apps/web/src/app/preview/visual-designer/**"
+      - "apps/web/src/components/floorplan/**"
+      - "apps/web/src/app/globals.css"
+      - "tests/functions/visual-designer-viewport-contract.test.ts"
+      - ".github/workflows/visual-designer-viewport-browser-test.yml"
+      - "package.json"
+      - "package-lock.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-designer-viewport-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify-object-drag:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build isolated visual designer preview
+        run: npm run build
+        env:
+          SKIP_BOOKSTORE_SYNC: "true"
+          NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "false"
+          NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+
+      - name: Verify designer drag, scale, context menu, and Add palette
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          page="$(find apps/web/out -type f \( -path '*/preview/visual-designer.html' -o -path '*/preview/visual-designer/index.html' \) | head -n 1)"
+          if [[ -z "${page}" ]]; then
+            echo "Visual designer preview export was not found." >&2
+            exit 1
+          fi
+
+          relative="${page#apps/web/out/}"
+          python3 -m http.server 4173 --directory apps/web/out >/tmp/visual-designer-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
+
+          for attempt in {1..40}; do
+            if curl --fail --silent "http://127.0.0.1:4173/${relative}" >/dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          chrome="$(command -v google-chrome || command -v chromium-browser || command -v chromium || true)"
+          if [[ -z "${chrome}" ]]; then
+            echo "A Chromium browser is required for the visual designer interaction test." >&2
+            exit 1
+          fi
+
+          run_case() {
+            local input_mode="$1"
+            local window_size="$2"
+            local output="/tmp/visual-designer-${input_mode}.html"
+            local chrome_log="/tmp/visual-designer-${input_mode}-chrome.log"
+            local extra_flags=()
+            if [[ "${input_mode}" == "touch" ]]; then
+              extra_flags+=(--touch-events=enabled)
+            fi
+
+            timeout 60s "${chrome}" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --disable-background-networking \
+              --force-device-scale-factor=1 \
+              --window-size="${window_size}" \
+              --virtual-time-budget=20000 \
+              --run-all-compositor-stages-before-draw \
+              "${extra_flags[@]}" \
+              --dump-dom "http://127.0.0.1:4173/${relative}?viewportSelfTest=${input_mode}" \
+              > "${output}" \
+              2> "${chrome_log}"
+
+            local failed=false
+            for expectation in \
+              'data-viewport-self-test="pass"' \
+              "data-viewport-self-test-input=\"${input_mode}\"" \
+              'data-viewport-self-test-drag-model="react-pointer-delta"' \
+              'data-viewport-self-test-drag-started="true"' \
+              'data-viewport-self-test-viewport-stable="true"' \
+              'data-viewport-self-test-scene-anchor-stable="true"' \
+              'data-viewport-self-test-object-moved="true"' \
+              'data-viewport-self-test-stage-stable="true"' \
+              'data-viewport-self-test-scale="true"' \
+              'data-viewport-self-test-context-menu="true"' \
+              'data-viewport-self-test-add-visible="true"'; do
+              if ! grep -q "${expectation}" "${output}"; then
+                failed=true
+              fi
+            done
+
+            if [[ "${failed}" == "true" ]]; then
+              echo "Visual designer ${input_mode} interaction self-test failed." >&2
+              grep -o 'data-viewport-self-test[^ >]*' "${output}" || true
+              cat "${chrome_log}" >&2 || true
+              exit 1
+            fi
+
+            echo "${input_mode} designer interactions: passed"
+            grep -o 'data-viewport-self-test[^ >]*' "${output}" || true
+          }
+
+          run_case mouse 1200,800
+          run_case touch 430,900

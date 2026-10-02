@@ -92,6 +92,7 @@ jobs:
           tests/functions/event-cancellation-policy.test.ts
           tests/functions/event-series-timezone.test.ts
           tests/functions/admin-member-operations-source.test.ts
+          tests/functions/visual-designer-viewport-contract.test.ts
 
       - name: Run active transaction integration tests
         run: >-
