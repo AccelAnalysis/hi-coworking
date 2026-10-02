@@ -1,4 +1,4 @@
-const HC_LAUNCH_AT = new Date("2026-10-01T00:00:00-04:00").getTime();
+const HC_LAUNCH_AT = new Date("2026-10-15T08:00:00-04:00").getTime();
 
 function getCountdownValues() {
   const remaining = Math.max(0, HC_LAUNCH_AT - Date.now());
