@@ -2198,3 +2198,33 @@ export const accessEventDocSchema = z.object({
   createdAt: z.number(),
 });
 export type AccessEventDoc = z.infer<typeof accessEventDocSchema>;
+
+export {
+  ANNUAL_MONTHS_BILLED,
+  BOOKING_STEP_MS,
+  MIN_DESK_CHANGE_SEGMENT_MS,
+  annualSavingsCents,
+  defaultCoworkingFloor,
+  findSeatChangePlans,
+  freeBlocksForSeat,
+  freeBlocksForSeats,
+  isKnownBookableSeat,
+  membershipChargeCents,
+  overlaps,
+  resolveBookingSelection,
+  resourceConflicts,
+  seatsAvailableForWindow,
+  seatsFromLayoutElements,
+} from "./customerSelection";
+export type {
+  BillingInterval,
+  BookingResolution,
+  FloorSeat,
+  FloorShape,
+  LayoutElementLike,
+  NamedSeat,
+  OccupancyInterval,
+  SeatChangePlan,
+  SeatChangeSegment,
+  TimeWindow,
+} from "./customerSelection";

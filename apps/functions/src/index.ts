@@ -6,7 +6,7 @@ import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
-import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
+import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, resolveMembershipCheckout, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
 
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
 const recaptchaSecret = defineSecret("RECAPTCHA_SECRET_KEY");
@@ -701,6 +701,8 @@ interface CreateCheckoutInput {
   tierId: string;
   successUrl: string;
   cancelUrl: string;
+  /** Defaults to the existing monthly price so older clients keep working. */
+  interval?: "month" | "year";
 }
 
 /**
@@ -715,6 +717,7 @@ export const stripe_createCheckoutSession = onCall(
     }
 
     const { tierId, successUrl, cancelUrl } = request.data as CreateCheckoutInput;
+    const interval = request.data?.interval === "year" ? "year" : "month";
 
     if (!tierId || !successUrl || !cancelUrl) {
       throw new HttpsError("invalid-argument", "tierId, successUrl, and cancelUrl are required");
@@ -725,6 +728,7 @@ export const stripe_createCheckoutSession = onCall(
       throw new HttpsError("not-found", `Unknown tier: ${tierId}`);
     }
 
+    const charge = resolveMembershipCheckout(tier, interval);
     const uid = request.auth.uid;
     const email = request.auth.token.email || "";
 
@@ -732,7 +736,7 @@ export const stripe_createCheckoutSession = onCall(
     const payment = await createPayment({
       uid,
       provider: "stripe",
-      amount: tier.amountCents,
+      amount: charge.amountCents,
       currency: tier.currency,
       purpose: "membership",
       purposeRefId: tier.id,
@@ -747,23 +751,31 @@ export const stripe_createCheckoutSession = onCall(
 
     const session = await provider.createCheckoutSession({
       uid,
-      amount: tier.amountCents,
+      amount: charge.amountCents,
       currency: tier.currency,
       purpose: "membership",
       purposeRefId: tier.id,
       successUrl,
       cancelUrl,
+      mode: "subscription",
+      lineItemLabel: `${tier.name} (${charge.interval === "year" ? "annual" : "monthly"})`,
       metadata: {
         email,
-        stripePriceId: tier.stripePriceId,
+        stripePriceId: charge.stripePriceId,
+        pricingMode: charge.pricingMode,
+        recurringInterval: charge.interval,
         paymentId: payment.id,
         plan: tier.id,
+        billingInterval: charge.interval,
       },
     });
 
     logger.info("Checkout session created", {
       uid,
       tierId,
+      interval: charge.interval,
+      pricingMode: charge.pricingMode,
+      amountCents: charge.amountCents,
       sessionId: session.sessionId,
       paymentId: payment.id,
     });
@@ -772,6 +784,8 @@ export const stripe_createCheckoutSession = onCall(
       sessionId: session.sessionId,
       url: session.url,
       paymentId: payment.id,
+      amountCents: charge.amountCents,
+      interval: charge.interval,
     };
   }
 );

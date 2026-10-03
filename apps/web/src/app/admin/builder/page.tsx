@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FloorplanCanvas } from "@/components/floorplan/FloorplanCanvas";
+import { FloorplanCanvas } from "@/components/floorplan/FloorplanCanvasDynamic";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
@@ -11,6 +11,7 @@ import {
   type FloorDoc,
   type FloorplanElement,
   type FloorplanElementType,
+  defaultCoworkingFloor,
   type LayoutVariant,
   type LocationDoc,
   type ShellDoc,
@@ -58,13 +59,14 @@ function slugify(value: string) {
 }
 
 function makeDefaultFloor(locationId: string, levelIndex: number): FloorDoc {
+  const floor = defaultCoworkingFloor();
   return {
     id: uid("floor"),
     locationId,
     name: levelIndex === 0 ? "Level 1" : `Level ${levelIndex + 1}`,
     levelIndex,
-    canvasWidth: 1100,
-    canvasHeight: 650,
+    canvasWidth: floor.canvasWidth,
+    canvasHeight: floor.canvasHeight,
     background: {
       opacity: 1,
       scale: 1,
@@ -76,75 +78,49 @@ function makeDefaultFloor(locationId: string, levelIndex: number): FloorDoc {
 }
 
 function makeDefaultShell(floorId: string): ShellDoc {
+  const floor = defaultCoworkingFloor();
   return {
     id: "main",
     floorId,
     updatedAt: Date.now(),
-    elements: [
-      {
-        id: uid("wall"),
-        type: "WALL",
-        label: "Main wall",
-        shape: "RECT",
-        x: 80,
-        y: 80,
-        width: 920,
-        height: 20,
-        rotation: 0,
-        fill: "rgba(255,255,255,0.25)",
-      },
-      {
-        id: uid("door"),
-        type: "DOOR",
-        label: "Entry Door",
-        shape: "RECT",
-        x: 90,
-        y: 100,
-        width: 90,
-        height: 14,
-        rotation: 0,
-        fill: "rgba(99,102,241,0.35)",
-        meta: { doorType: "STANDARD", isAdaAccessible: true },
-      },
-    ],
+    elements: floor.shell.map((shape) => ({
+      id: uid(shape.type.toLowerCase()),
+      type: shape.type as FloorplanElement["type"],
+      shape: "RECT",
+      label: shape.label,
+      x: shape.x,
+      y: shape.y,
+      width: shape.width,
+      height: shape.height,
+      rotation: shape.rotation,
+      fill: shape.fill,
+      ...(shape.type === "DOOR" ? { meta: { doorType: "STANDARD", isAdaAccessible: true } } : {}),
+    })),
   };
 }
 
 function makeDefaultLayout(floorId: string): LayoutVariant {
+  const floor = defaultCoworkingFloor();
   return {
     id: uid("layout"),
     floorId,
     name: "Default Layout",
     status: "PUBLISHED",
     updatedAt: Date.now(),
-    elements: [
-      {
-        id: uid("seat"),
-        type: "SEAT",
-        shape: "RECT",
-        label: "Seat 1",
-        resourceId: "seat-1",
-        x: 140,
-        y: 180,
-        width: 120,
-        height: 90,
-        rotation: 0,
-        fill: "rgba(16,185,129,0.18)",
-      },
-      {
-        id: uid("mode"),
-        type: "MODE_ZONE",
-        shape: "RECT",
-        label: "Conference",
-        resourceId: "mode-conference",
-        x: 380,
-        y: 160,
-        width: 260,
-        height: 160,
-        rotation: 0,
-        fill: "rgba(99,102,241,0.20)",
-      },
-    ],
+    elements: floor.seats.map((seat) => ({
+      id: uid("seat"),
+      type: "SEAT" as const,
+      shape: "RECT" as const,
+      label: seat.label,
+      resourceId: seat.resourceId,
+      x: seat.x,
+      y: seat.y,
+      width: seat.width,
+      height: seat.height,
+      rotation: 0,
+      fill: "rgba(16,185,129,0.18)",
+      meta: { capacity: 1 },
+    })),
   };
 }
 
@@ -240,12 +216,13 @@ function createElement(type: FloorplanElementType): FloorplanElement {
   return base;
 }
 
-function useMeasure() {
+function useMeasure(active: boolean) {
   const ref = useRef<HTMLDivElement>(null);
   const [bounds, setBounds] = useState({ width: 0, height: 0 });
 
   useLayoutEffect(() => {
-    if (!ref.current) return;
+    if (!active || !ref.current) return;
+    const element = ref.current;
     const observer = new ResizeObserver(([entry]) => {
       if (entry) {
         setBounds({
@@ -254,9 +231,9 @@ function useMeasure() {
         });
       }
     });
-    observer.observe(ref.current);
+    observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [active]);
 
   return { ref, bounds };
 }
@@ -288,9 +265,11 @@ function BuilderContent() {
     future: [],
   });
   const [isInitializing, setIsInitializing] = useState(true);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const pasteCounterRef = useRef(0);
 
-  const { ref: canvasContainerRef, bounds: canvasBounds } = useMeasure();
+  const { ref: canvasContainerRef, bounds: canvasBounds } = useMeasure(!isInitializing);
 
   const activeFloor = useMemo(
     () => floors.find((f) => f.id === activeFloorId) ?? floors[0],
@@ -434,6 +413,19 @@ function BuilderContent() {
     load();
   }, [user]);
 
+  const reportSave = async (work: () => Promise<void>) => {
+    setSaveState("saving");
+    setSaveMessage(null);
+    try {
+      await work();
+      setSaveState("saved");
+    } catch (error) {
+      console.error(error);
+      setSaveState("error");
+      setSaveMessage("The layout could not be saved. Confirm you are signed in as an admin and try again.");
+    }
+  };
+
   const updateShell = async (elements: FloorplanElement[]) => {
     if (!selectedLocationId || !activeFloor || !shellDoc) return;
     const next: ShellDoc = {
@@ -444,7 +436,7 @@ function BuilderContent() {
       updatedBy: user?.uid,
     };
     setShellDoc(next);
-    await saveShell(selectedLocationId, activeFloor.id, next);
+    await reportSave(() => saveShell(selectedLocationId, activeFloor.id, next));
   };
 
   const updateLayout = async (nextLayout: LayoutVariant) => {
@@ -456,7 +448,7 @@ function BuilderContent() {
       updatedBy: user?.uid,
     };
     setLayouts((prev) => prev.map((layout) => (layout.id === updatedLayout.id ? updatedLayout : layout)));
-    await saveLayout(selectedLocationId, activeFloor.id, updatedLayout);
+    await reportSave(() => saveLayout(selectedLocationId, activeFloor.id, updatedLayout));
   };
 
   const applyElements = (nextElements: FloorplanElement[], options?: { recordHistory?: boolean }) => {
@@ -707,6 +699,18 @@ function BuilderContent() {
 
   useEffect(() => {
     const onKeyDown = (evt: KeyboardEvent) => {
+      const target = evt.target as HTMLElement | null;
+      const typing = Boolean(
+        target
+        && (
+          target.tagName === "INPUT"
+          || target.tagName === "TEXTAREA"
+          || target.tagName === "SELECT"
+          || target.isContentEditable
+        ),
+      );
+      if (typing) return;
+
       const key = evt.key.toLowerCase();
       const mod = evt.metaKey || evt.ctrlKey;
 
@@ -735,6 +739,7 @@ function BuilderContent() {
       }
 
       if (key === "delete" || key === "backspace") {
+        evt.preventDefault();
         handleDeleteSelected();
       }
     };
@@ -753,9 +758,9 @@ function BuilderContent() {
 
   return (
     <AppShell fullWidth>
-      <div className="flex flex-col h-[calc(100dvh-4rem)]">
+      <div className="flex h-[calc(100dvh-4rem)] min-h-0 flex-col overflow-hidden">
         {/* ── Top Toolbar ── */}
-        <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
           {/* Location selector */}
           <div className="flex items-center gap-2 border-r border-slate-200 pr-3 mr-1">
             <MapPin className="h-3.5 w-3.5 text-slate-400" />
@@ -868,7 +873,7 @@ function BuilderContent() {
           </div>
 
           {/* Add element dropdown area */}
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full items-center gap-1 overflow-x-auto">
             {elementOptions.map((t) => (
               <button
                 key={t}
@@ -881,16 +886,24 @@ function BuilderContent() {
           </div>
 
           {/* Right-aligned spacer + zoom indicator */}
-          <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400 font-medium">
+          <div className="ml-auto flex items-center gap-2 text-[11px] font-medium text-slate-400">
             <Layers className="h-3.5 w-3.5" />
             {activeTab === "SHELL" ? "Shell" : activeLayout?.name ?? "Layout"}
+            <span className={saveState === "error" ? "text-rose-600" : "text-emerald-600"}>
+              {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Not saved" : ""}
+            </span>
           </div>
         </div>
+        {saveMessage ? (
+          <div className="border-b border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+            {saveMessage}
+          </div>
+        ) : null}
 
         {/* ── Main Content Area ── */}
-        <div className="flex flex-1 min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
           {/* ─ Left Sidebar: Project Tree ─ */}
-          <div className="w-56 shrink-0 bg-white border-r border-slate-200 overflow-y-auto">
+          <div className="max-h-40 w-full shrink-0 overflow-y-auto border-b border-slate-200 bg-white lg:max-h-none lg:w-56 lg:border-b-0 lg:border-r">
             <div className="p-3 space-y-4">
               {/* Floors */}
               <div>
@@ -999,7 +1012,7 @@ function BuilderContent() {
           </div>
 
           {/* ─ Center: Canvas ─ */}
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex min-h-[320px] min-w-0 flex-1 flex-col">
             <div ref={canvasContainerRef} className="flex-1 min-h-0 relative">
               {activeFloor && shellDoc ? (
                 <FloorplanCanvas
@@ -1056,13 +1069,13 @@ function BuilderContent() {
                 {normalizedSelectedIds.length > 0 ? (
                   <span className="text-indigo-600 font-medium">{normalizedSelectedIds.length} selected</span>
                 ) : null}
-                <span>⌘Z undo · ⌘⇧Z redo · ⌘C copy · ⌘V paste · ⌫ delete</span>
+                <span className="hidden md:inline">⌘Z undo · ⌘⇧Z redo · ⌘C copy · ⌘V paste · ⌫ delete</span>
               </div>
             </div>
           </div>
 
           {/* ─ Right Sidebar: Inspector ─ */}
-          <div className="w-64 shrink-0 bg-white border-l border-slate-200 overflow-y-auto">
+          <div className="max-h-72 w-full shrink-0 overflow-y-auto border-t border-slate-200 bg-white lg:max-h-none lg:w-64 lg:border-l lg:border-t-0">
             <div className="p-3 space-y-4">
               {/* Properties */}
               <div>
@@ -1088,10 +1101,22 @@ function BuilderContent() {
 
                     <label className="block">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">Resource ID</span>
+                      <select
+                        value={["seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "mode-conference"].includes(selectedEl.resourceId ?? "") ? selectedEl.resourceId : "custom"}
+                        onChange={(e) => {
+                          if (e.target.value !== "custom") updateSelected({ resourceId: e.target.value });
+                        }}
+                        className="mt-0.5 w-full rounded-md border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-900"
+                      >
+                        {["seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6", "mode-conference"].map((resourceId) => (
+                          <option key={resourceId} value={resourceId}>{resourceId}</option>
+                        ))}
+                        <option value="custom">Custom</option>
+                      </select>
                       <input
                         value={selectedEl.resourceId ?? ""}
                         onChange={(e) => updateSelected({ resourceId: e.target.value || undefined })}
-                        className="mt-0.5 w-full rounded-md border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-900 focus:border-indigo-500 focus:ring-indigo-500"
+                        className="mt-1 w-full rounded-md border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-900 focus:border-indigo-500 focus:ring-indigo-500"
                         placeholder="seat-1 / mode-conference"
                       />
                     </label>

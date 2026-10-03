@@ -17,10 +17,21 @@
 
 export type MembershipTierId = "virtual" | "coworking" | "coworking_plus";
 
+export type BillingInterval = "month" | "year";
+
+/** Annual checkout charges 10 months (2 months included). Keep in sync with @hi/shared. */
+export const ANNUAL_MONTHS_BILLED = 10;
+
 export interface MembershipTier {
   id: MembershipTierId;
   name: string;
   stripePriceId: string;
+  /**
+   * Optional Stripe Price for annual billing. Leave empty until the Price
+   * exists in the Stripe dashboard. Checkout then uses a recurring price_data
+   * line on the existing Stripe secret instead of inventing a charge.
+   */
+  stripeAnnualPriceId?: string;
   interval: "month";
   /** Amount in cents */
   amountCents: number;
@@ -101,7 +112,39 @@ export const CONFERENCE_ROOM_MAX_CAPACITY = 10;
 // --- Lookup Helpers ---
 
 export function getTierByPriceId(priceId: string): MembershipTier | undefined {
-  return MEMBERSHIP_TIERS.find((t) => t.stripePriceId === priceId);
+  return MEMBERSHIP_TIERS.find((t) => t.stripePriceId === priceId || t.stripeAnnualPriceId === priceId);
+}
+
+export function membershipAmountCents(tier: MembershipTier, interval: BillingInterval) {
+  if (interval === "year") return tier.amountCents * ANNUAL_MONTHS_BILLED;
+  return tier.amountCents;
+}
+
+export function resolveMembershipCheckout(tier: MembershipTier, interval: BillingInterval) {
+  const amountCents = membershipAmountCents(tier, interval);
+  if (interval === "year") {
+    const annualPriceId = tier.stripeAnnualPriceId?.trim() || "";
+    if (annualPriceId) {
+      return {
+        interval,
+        amountCents,
+        pricingMode: "price" as const,
+        stripePriceId: annualPriceId,
+      };
+    }
+    return {
+      interval,
+      amountCents,
+      pricingMode: "price_data" as const,
+      stripePriceId: "",
+    };
+  }
+  return {
+    interval: "month" as const,
+    amountCents,
+    pricingMode: "price" as const,
+    stripePriceId: tier.stripePriceId,
+  };
 }
 
 export function getTierById(tierId: string): MembershipTier | undefined {
