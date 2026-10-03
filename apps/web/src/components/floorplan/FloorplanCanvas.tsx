@@ -470,7 +470,13 @@ export function FloorplanCanvas({
             y={el.y}
             width={el.width ?? 120}
             height={el.height ?? 100}
-            cornerRadius={el.type === "WALL" ? 2 : 10}
+            cornerRadius={
+              el.meta?.shape === "ellipse"
+                ? Math.min(el.width ?? 120, el.height ?? 100) / 2
+                : el.type === "WALL"
+                  ? 2
+                  : 10
+            }
           />
         )}
 

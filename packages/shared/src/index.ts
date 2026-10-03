@@ -2208,13 +2208,17 @@ export {
   findSeatChangePlans,
   freeBlocksForSeat,
   freeBlocksForSeats,
+  furnitureFromLayoutElements,
   isKnownBookableSeat,
+  layoutHasOfficeDesks,
   membershipChargeCents,
   overlaps,
   resolveBookingSelection,
   resourceConflicts,
   seatsAvailableForWindow,
   seatsFromLayoutElements,
+  shellHasOfficeRoom,
+  withConferenceArrangement,
 } from "./customerSelection";
 export type {
   BillingInterval,

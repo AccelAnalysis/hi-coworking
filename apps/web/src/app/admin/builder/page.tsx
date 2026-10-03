@@ -12,6 +12,10 @@ import {
   type FloorplanElement,
   type FloorplanElementType,
   defaultCoworkingFloor,
+  layoutHasOfficeDesks,
+  shellHasOfficeRoom,
+  withConferenceArrangement,
+  type FloorShape,
   type LayoutVariant,
   type LocationDoc,
   type ShellDoc,
@@ -58,6 +62,42 @@ function slugify(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+function shapeElement(shape: FloorShape): FloorplanElement {
+  return {
+    id: shape.id,
+    type: shape.type as FloorplanElement["type"],
+    shape: "RECT",
+    label: shape.label,
+    resourceId: shape.resourceId,
+    x: shape.x,
+    y: shape.y,
+    width: shape.width,
+    height: shape.height,
+    rotation: shape.rotation,
+    fill: shape.fill,
+    meta: {
+      plan: "carrollton-1050",
+      ...(shape.role ? { role: shape.role } : {}),
+      ...(shape.shape === "ellipse" ? { shape: "ellipse" } : {}),
+      ...(shape.conferenceX != null ? { conferenceX: shape.conferenceX, conferenceY: shape.conferenceY } : {}),
+      ...(shape.type === "DOOR" ? { doorType: "STANDARD", isAdaAccessible: true } : {}),
+      ...(shape.type === "SEAT" ? { capacity: 1 } : {}),
+      ...(shape.type === "MODE_ZONE" ? { capacity: 10 } : {}),
+    },
+  };
+}
+
+function officeBackground(floor = defaultCoworkingFloor()) {
+  return {
+    downloadUrl: floor.backgroundPath,
+    opacity: 0.92,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
+    locked: true,
+  };
+}
+
 function makeDefaultFloor(locationId: string, levelIndex: number): FloorDoc {
   const floor = defaultCoworkingFloor();
   return {
@@ -67,13 +107,7 @@ function makeDefaultFloor(locationId: string, levelIndex: number): FloorDoc {
     levelIndex,
     canvasWidth: floor.canvasWidth,
     canvasHeight: floor.canvasHeight,
-    background: {
-      opacity: 1,
-      scale: 1,
-      offsetX: 0,
-      offsetY: 0,
-      locked: true,
-    },
+    background: officeBackground(floor),
   };
 }
 
@@ -83,34 +117,18 @@ function makeDefaultShell(floorId: string): ShellDoc {
     id: "main",
     floorId,
     updatedAt: Date.now(),
-    elements: floor.shell.map((shape) => ({
-      id: uid(shape.type.toLowerCase()),
-      type: shape.type as FloorplanElement["type"],
-      shape: "RECT",
-      label: shape.label,
-      x: shape.x,
-      y: shape.y,
-      width: shape.width,
-      height: shape.height,
-      rotation: shape.rotation,
-      fill: shape.fill,
-      ...(shape.type === "DOOR" ? { meta: { doorType: "STANDARD", isAdaAccessible: true } } : {}),
-    })),
+    elements: floor.shell.map(shapeElement),
   };
 }
 
-function makeDefaultLayout(floorId: string): LayoutVariant {
+function layoutElementsFor(arrangement: "open" | "conference"): FloorplanElement[] {
   const floor = defaultCoworkingFloor();
-  return {
-    id: uid("layout"),
-    floorId,
-    name: "Default Layout",
-    status: "PUBLISHED",
-    updatedAt: Date.now(),
-    elements: floor.seats.map((seat) => ({
-      id: uid("seat"),
-      type: "SEAT" as const,
-      shape: "RECT" as const,
+  const furniture = arrangement === "conference" ? withConferenceArrangement(floor.furniture) : floor.furniture;
+  return [
+    ...furniture.map(shapeElement),
+    ...floor.seats.map((seat) => shapeElement({
+      id: seat.resourceId,
+      type: "SEAT",
       label: seat.label,
       resourceId: seat.resourceId,
       x: seat.x,
@@ -118,9 +136,99 @@ function makeDefaultLayout(floorId: string): LayoutVariant {
       width: seat.width,
       height: seat.height,
       rotation: 0,
-      fill: "rgba(16,185,129,0.18)",
-      meta: { capacity: 1 },
+      fill: "rgba(16,185,129,0.28)",
     })),
+  ];
+}
+
+function makeDefaultLayout(floorId: string): LayoutVariant {
+  return {
+    id: uid("layout"),
+    floorId,
+    name: "Open floor",
+    status: "PUBLISHED",
+    updatedAt: Date.now(),
+    elements: layoutElementsFor("open"),
+  };
+}
+
+function makeConferenceLayout(floorId: string): LayoutVariant {
+  return {
+    id: uid("layout"),
+    floorId,
+    name: "Conference mode",
+    status: "DRAFT",
+    updatedAt: Date.now(),
+    elements: layoutElementsFor("conference"),
+  };
+}
+
+async function ensureOfficePlan(
+  locationId: string,
+  floor: FloorDoc,
+  shell: ShellDoc | null,
+  floorLayouts: LayoutVariant[],
+) {
+  const ready = Boolean(
+    shell
+    && shellHasOfficeRoom(shell.elements)
+    && floorLayouts.some((layout) => layoutHasOfficeDesks(layout.elements)),
+  );
+  if (ready && shell) {
+    return { floor, shell, layouts: floorLayouts };
+  }
+
+  const plan = defaultCoworkingFloor();
+  const nextFloor: FloorDoc = {
+    ...floor,
+    canvasWidth: plan.canvasWidth,
+    canvasHeight: plan.canvasHeight,
+    background: officeBackground(plan),
+  };
+  const nextShell = makeDefaultShell(floor.id);
+  const published = floorLayouts.find((layout) => layout.status === "PUBLISHED") ?? floorLayouts[0];
+  const openLayout: LayoutVariant = published
+    ? {
+        ...published,
+        name: "Open floor",
+        status: "PUBLISHED",
+        updatedAt: Date.now(),
+        elements: layoutElementsFor("open"),
+      }
+    : makeDefaultLayout(floor.id);
+  const existingConference = floorLayouts.find((layout) => layout.id !== openLayout.id && /conference/i.test(layout.name));
+  const conferenceLayout: LayoutVariant = existingConference
+    ? {
+        ...existingConference,
+        name: "Conference mode",
+        status: "DRAFT",
+        updatedAt: Date.now(),
+        elements: layoutElementsFor("conference"),
+      }
+    : makeConferenceLayout(floor.id);
+  const retired = floorLayouts
+    .filter((layout) => layout.id !== openLayout.id && layout.id !== conferenceLayout.id)
+    .map((layout) => (
+      layout.status === "PUBLISHED"
+        ? { ...layout, status: "DRAFT" as const, updatedAt: Date.now() }
+        : layout
+    ));
+
+  await saveFloor(locationId, nextFloor);
+  await saveShell(locationId, floor.id, nextShell);
+  await saveLayout(locationId, floor.id, openLayout);
+  await saveLayout(locationId, floor.id, conferenceLayout);
+  for (const layout of retired) {
+    const previous = floorLayouts.find((item) => item.id === layout.id);
+    if (previous && previous.status !== layout.status) {
+      await saveLayout(locationId, floor.id, layout);
+    }
+  }
+
+  return {
+    floor: nextFloor,
+    shell: nextShell,
+    layouts: [openLayout, conferenceLayout, ...retired],
   };
 }
 
@@ -337,24 +445,13 @@ function BuilderContent() {
       getShell(locationId, floor.id),
       getLayouts(locationId, floor.id),
     ]);
-
-    if (shell) {
-      setShellDoc(shell);
-    } else {
-      const nextShell = makeDefaultShell(floor.id);
-      await saveShell(locationId, floor.id, nextShell);
-      setShellDoc(nextShell);
-    }
-
-    if (floorLayouts.length) {
-      setLayouts(floorLayouts);
-      setActiveLayoutId(floorLayouts[0].id);
-    } else {
-      const nextLayout = makeDefaultLayout(floor.id);
-      await saveLayout(locationId, floor.id, nextLayout);
-      setLayouts([nextLayout]);
-      setActiveLayoutId(nextLayout.id);
-    }
+    const prepared = await ensureOfficePlan(locationId, floor, shell, floorLayouts);
+    setFloors(loadedFloors.map((item) => (item.id === prepared.floor.id ? prepared.floor : item)));
+    setShellDoc(prepared.shell);
+    setLayouts(prepared.layouts);
+    setActiveLayoutId(
+      prepared.layouts.find((layout) => layout.status === "PUBLISHED")?.id ?? prepared.layouts[0]?.id,
+    );
 
     resetSelection();
     resetHistory();
@@ -390,15 +487,17 @@ function BuilderContent() {
           const firstFloor = makeDefaultFloor(firstLocationId, 0);
           const firstShell = makeDefaultShell(firstFloor.id);
           const firstLayout = makeDefaultLayout(firstFloor.id);
+          const conferenceLayout = makeConferenceLayout(firstFloor.id);
 
           await saveFloor(firstLocationId, firstFloor);
           await saveShell(firstLocationId, firstFloor.id, firstShell);
           await saveLayout(firstLocationId, firstFloor.id, firstLayout);
+          await saveLayout(firstLocationId, firstFloor.id, conferenceLayout);
 
           setFloors([firstFloor]);
           setActiveFloorIdState(firstFloor.id);
           setShellDoc(firstShell);
-          setLayouts([firstLayout]);
+          setLayouts([firstLayout, conferenceLayout]);
           setActiveLayoutId(firstLayout.id);
         } else {
           await loadFloorContext(firstLocationId, loadedFloors[0]?.id);
@@ -531,14 +630,16 @@ function BuilderContent() {
     const next = makeDefaultFloor(selectedLocationId, floors.length);
     const nextShell = makeDefaultShell(next.id);
     const nextLayout = makeDefaultLayout(next.id);
+    const conferenceLayout = makeConferenceLayout(next.id);
     await saveFloor(selectedLocationId, next);
     await saveShell(selectedLocationId, next.id, nextShell);
     await saveLayout(selectedLocationId, next.id, nextLayout);
+    await saveLayout(selectedLocationId, next.id, conferenceLayout);
 
     setFloors((prev) => [...prev, next]);
     setActiveFloorIdState(next.id);
     setShellDoc(nextShell);
-    setLayouts([nextLayout]);
+    setLayouts([nextLayout, conferenceLayout]);
     setActiveLayoutId(nextLayout.id);
     resetSelection();
     resetHistory();

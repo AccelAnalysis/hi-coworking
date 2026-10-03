@@ -10,6 +10,7 @@ import {
   resolveBookingSelection,
   seatsAvailableForWindow,
   seatsFromLayoutElements,
+  withConferenceArrangement,
 } from "@hi/shared";
 import {
   ANNUAL_MONTHS_BILLED as FUNCTION_ANNUAL_MONTHS,
@@ -63,17 +64,33 @@ describe("floor layout seats", () => {
     ]);
   });
 
-  it("falls back to a six-seat floor when no layout has been published", () => {
+  it("starts from the 1,050 sq. ft. office plan with four storefront desks", () => {
     const floor = defaultCoworkingFloor();
-    expect(floor.seats.map((seat) => seat.resourceId)).toEqual([
-      "seat-1",
-      "seat-2",
-      "seat-3",
-      "seat-4",
-      "seat-5",
-      "seat-6",
-    ]);
-    expect(floor.shell.some((shape) => shape.type === "DOOR")).toBe(true);
+    expect(floor.planId).toBe("carrollton-1050");
+    expect(floor.seats.map((seat) => seat.label)).toEqual(["Desk 4", "Desk 3", "Desk 2", "Desk 1"]);
+    expect(floor.seats.map((seat) => seat.resourceId)).toEqual(["seat-4", "seat-3", "seat-2", "seat-1"]);
+    const xs = floor.seats.map((seat) => seat.x);
+    expect(xs).toEqual([...xs].sort((a, b) => a - b));
+    expect(floor.shell.some((shape) => shape.label === "Office")).toBe(true);
+    expect(floor.shell.some((shape) => shape.label === "Customers")).toBe(true);
+    expect(floor.shell.some((shape) => shape.label === "To Storage")).toBe(true);
+    expect(floor.furniture.some((piece) => piece.label === "Reception Station")).toBe(true);
+    expect(floor.furniture.some((piece) => piece.label === "Print Station")).toBe(true);
+    expect(floor.furniture.some((piece) => piece.label === "Ref")).toBe(true);
+    expect(floor.furniture.some((piece) => /5' radius/.test(piece.label || ""))).toBe(true);
+
+    const openTable = floor.furniture.find((piece) => piece.role === "conference-table");
+    const conference = withConferenceArrangement(floor.furniture);
+    const movedTable = conference.find((piece) => piece.role === "conference-table");
+    expect(openTable && movedTable).toBeTruthy();
+    expect(movedTable!.y).toBeGreaterThan(openTable!.y + 40);
+    expect(movedTable!.x + movedTable!.width / 2).toBeLessThan(floor.shell.find((shape) => shape.id === "wall-partition")!.x);
+    const chairs = conference.filter((piece) => piece.role === "conference-chair");
+    expect(chairs.length).toBeGreaterThanOrEqual(8);
+    const north = chairs.filter((chair) => chair.y + chair.height < movedTable!.y);
+    const south = chairs.filter((chair) => chair.y > movedTable!.y + movedTable!.height);
+    expect(north.length).toBeGreaterThan(0);
+    expect(south.length).toBeGreaterThan(0);
   });
 });
 
@@ -147,7 +164,7 @@ describe("seat and time selection", () => {
     expect(resolved).toEqual({
       kind: "single",
       resourceId: "seat-3",
-      resourceName: "Seat 3",
+      resourceName: "Desk 3",
     });
     expect(findSeatChangePlans(floorSeats, start, end, busy)).toEqual([]);
   });

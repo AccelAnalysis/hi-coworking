@@ -19,9 +19,13 @@ import { useAuth } from "@/lib/authContext";
 import {
   defaultCoworkingFloor,
   freeBlocksForSeats,
+  furnitureFromLayoutElements,
   isKnownBookableSeat,
+  layoutHasOfficeDesks,
   resolveBookingSelection,
   seatsFromLayoutElements,
+  shellHasOfficeRoom,
+  withConferenceArrangement,
   type FloorSeat,
   type FloorShape,
   type OccupancyInterval,
@@ -92,6 +96,7 @@ type PublishedFloor = {
   canvasWidth: number;
   canvasHeight: number;
   shell: FloorShape[];
+  furniture: FloorShape[];
   seats: FloorSeat[];
   fromLayout: boolean;
 };
@@ -342,8 +347,9 @@ function shellShapes(elements: Array<{
   rotation?: number;
   fill?: string;
 }>): FloorShape[] {
+  const shellTypes = new Set(["WALL", "DOOR", "WINDOW", "ROOM", "COLUMN"]);
   return elements
-    .filter((element) => element.type === "WALL" || element.type === "DOOR" || element.type === "WINDOW")
+    .filter((element) => shellTypes.has(element.type))
     .map((element) => ({
       id: element.id,
       type: element.type,
@@ -532,20 +538,31 @@ export default function BookingExperienceWithDeskChange() {
           getShell(location.id, floor.id),
           resolvePublishedLayout(location.id, floor.id),
         ]);
-        const seats = seatsFromLayoutElements(layout?.elements ?? []);
-        if (!seats.length) throw new Error("Layout has no seats");
+        const layoutElements = layout?.elements ?? [];
+        const shellElements = shell?.elements ?? [];
+        const seats = seatsFromLayoutElements(layoutElements);
+        const matchesOffice = layoutHasOfficeDesks(layoutElements) && shellHasOfficeRoom(shellElements);
+        if (!matchesOffice || !seats.length) throw new Error("Published layout is not the office plan");
         if (!active) return;
         setFloorPlan({
           canvasWidth: floor.canvasWidth || fallback.canvasWidth,
           canvasHeight: floor.canvasHeight || fallback.canvasHeight,
-          shell: shellShapes(shell?.elements ?? []),
+          shell: shellShapes(shellElements),
+          furniture: furnitureFromLayoutElements(layoutElements),
           seats,
           fromLayout: true,
         });
       } catch (caught) {
-        console.warn("Using the default floor plan.", caught);
+        console.warn("Using the Carrollton office plan.", caught);
         if (!active) return;
-        setFloorPlan({ ...fallback, fromLayout: false });
+        setFloorPlan({
+          canvasWidth: fallback.canvasWidth,
+          canvasHeight: fallback.canvasHeight,
+          shell: fallback.shell,
+          furniture: fallback.furniture,
+          seats: fallback.seats,
+          fromLayout: false,
+        });
       }
     })();
     return () => {
@@ -1099,20 +1116,45 @@ export default function BookingExperienceWithDeskChange() {
                   canvasWidth={floorPlan.canvasWidth}
                   canvasHeight={floorPlan.canvasHeight}
                   shell={floorPlan.shell}
+                  furniture={floorPlan.furniture}
                   seats={floorPlan.seats}
                   status={seatStatus}
                   comboMarks={comboMarks}
                   onToggle={toggleSeat}
+                  heading="Carrollton office"
+                  hint="Tap a desk"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  {floorPlan.fromLayout
-                    ? `This is the published floor layout${bookableSeats.length < 6 ? ` (${bookableSeats.length} bookable ${bookableSeats.length === 1 ? "seat" : "seats"}). Add the other desks in the layout editor and publish to show them here.` : "."}`
-                    : "Showing the standard six-seat floor until an admin publishes a layout."}
+                  Desk 4, Desk 3, Desk 2, and Desk 1 line the storefront. Reception and the print station stay put.
+                  {floorPlan.fromLayout ? " This is the published layout." : " This is the 1,050 sq. ft. office plan."}
                 </p>
               </div>
             ) : (
               <p className="mt-4 text-sm text-slate-500">Loading the floor plan…</p>
             )}
+          </section>
+        ) : null}
+
+        {intent === "MEETING" && floorPlan ? (
+          <section className="mt-9 border-t border-slate-200 pt-7">
+            <h2 className="text-xl font-semibold text-slate-950">2. Conference layout</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              The modular table moves to the middle of the room, with chairs around it.
+            </p>
+            <div className="mt-5">
+              <SeatMap
+                canvasWidth={floorPlan.canvasWidth}
+                canvasHeight={floorPlan.canvasHeight}
+                shell={floorPlan.shell}
+                furniture={withConferenceArrangement(floorPlan.furniture)}
+                seats={floorPlan.seats}
+                status={{}}
+                onToggle={() => undefined}
+                interactive={false}
+                heading="Conference mode"
+                hint="Table centered"
+              />
+            </div>
           </section>
         ) : null}
 

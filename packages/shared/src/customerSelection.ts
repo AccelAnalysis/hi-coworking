@@ -42,6 +42,13 @@ export type FloorShape = {
   height: number;
   rotation: number;
   fill?: string;
+  /** Ellipse furniture, such as the round table, is drawn from the same box. */
+  shape?: "rect" | "ellipse";
+  /** Groups pieces the conference arrangement moves together. */
+  role?: string;
+  /** Where a conference table sits once the room is in conference mode. */
+  conferenceX?: number;
+  conferenceY?: number;
 };
 
 export type SeatChangeSegment = {
@@ -69,6 +76,7 @@ export type BookingResolution =
   | { kind: "unavailable" };
 
 export type LayoutElementLike = {
+  id?: string;
   type: string;
   resourceId?: string;
   label?: string;
@@ -78,6 +86,14 @@ export type LayoutElementLike = {
   height?: number;
   rotation?: number;
   visible?: boolean;
+  fill?: string;
+  meta?: {
+    role?: string;
+    shape?: string;
+    conferenceX?: number;
+    conferenceY?: number;
+    [key: string]: unknown;
+  };
 };
 
 const KNOWN_BOOKABLE_SEATS = ["seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6"] as const;
@@ -137,47 +153,217 @@ export function seatsFromLayoutElements(elements: LayoutElementLike[]): FloorSea
   return seats;
 }
 
+const FURNITURE_ELEMENT_TYPES = new Set([
+  "FURNITURE",
+  "AMENITY",
+  "RECEPTION",
+  "MODE_ZONE",
+  "SIGNAGE",
+]);
+
+export function furnitureFromLayoutElements(elements: LayoutElementLike[]): FloorShape[] {
+  const furniture: FloorShape[] = [];
+  for (const element of elements) {
+    if (!FURNITURE_ELEMENT_TYPES.has(element.type)) continue;
+    if (element.visible === false) continue;
+    const role = typeof element.meta?.role === "string" ? element.meta.role : undefined;
+    const shape = element.meta?.shape === "ellipse" ? "ellipse" : "rect";
+    furniture.push({
+      id: element.id || element.resourceId || `${element.type}-${furniture.length}`,
+      type: element.type,
+      label: element.label,
+      resourceId: element.resourceId,
+      x: element.x,
+      y: element.y,
+      width: element.width && element.width > 0 ? element.width : 80,
+      height: element.height && element.height > 0 ? element.height : 60,
+      rotation: element.rotation ?? 0,
+      fill: element.fill,
+      shape,
+      role,
+      conferenceX: typeof element.meta?.conferenceX === "number" ? element.meta.conferenceX : undefined,
+      conferenceY: typeof element.meta?.conferenceY === "number" ? element.meta.conferenceY : undefined,
+    });
+  }
+  return furniture;
+}
+
+export function layoutHasOfficeDesks(elements: Array<{ type: string; resourceId?: string }>) {
+  const ids = new Set(
+    elements
+      .filter((element) => element.type === "SEAT" || element.type === "DESK")
+      .map((element) => element.resourceId),
+  );
+  return ["seat-1", "seat-2", "seat-3", "seat-4"].every((resourceId) => ids.has(resourceId));
+}
+
+export function shellHasOfficeRoom(elements: Array<{ type: string; label?: string }>) {
+  return elements.some((element) => element.type === "ROOM" && /office/i.test(element.label || ""));
+}
+
+function chair(id: string, x: number, y: number, width: number, height: number): FloorShape {
+  return {
+    id,
+    type: "FURNITURE",
+    label: "",
+    x,
+    y,
+    width,
+    height,
+    rotation: 0,
+    fill: "#94a3b8",
+    role: "conference-chair",
+  };
+}
+
+function chairsAroundTable(table: FloorShape): FloorShape[] {
+  const width = 44;
+  const depth = 30;
+  const gap = 12;
+  const count = 4;
+  const chairs: FloorShape[] = [];
+  const span = table.width - 72;
+  for (let index = 0; index < count; index += 1) {
+    const x = table.x + 36 + (span * index) / (count - 1) - width / 2;
+    chairs.push(chair(`conference-chair-n-${index}`, x, table.y - depth - gap, width, depth));
+    chairs.push(chair(`conference-chair-s-${index}`, x, table.y + table.height + gap, width, depth));
+  }
+  const sideY = table.y + table.height / 2 - width / 2;
+  chairs.push(chair("conference-chair-w", table.x - depth - gap, sideY, depth, width));
+  chairs.push(chair("conference-chair-e", table.x + table.width + gap, sideY, depth, width));
+  return chairs;
+}
+
+/** Pull the modular conference table into the middle of the open room and seat it. */
+export function withConferenceArrangement(furniture: FloorShape[]): FloorShape[] {
+  const table = furniture.find((piece) => piece.role === "conference-table");
+  if (!table || table.conferenceX == null || table.conferenceY == null) return furniture;
+  const movedTable: FloorShape = {
+    ...table,
+    x: table.conferenceX,
+    y: table.conferenceY,
+  };
+  const pad = 52;
+  return [
+    ...furniture
+      .filter((piece) => piece.role !== "conference-chair")
+      .map((piece) => {
+        if (piece.role === "conference-table") return movedTable;
+        if (piece.role === "conference-zone") {
+          return {
+            ...piece,
+            x: movedTable.x - pad,
+            y: movedTable.y - pad,
+            width: movedTable.width + pad * 2,
+            height: movedTable.height + pad * 2,
+          };
+        }
+        return piece;
+      }),
+    ...chairsAroundTable(movedTable),
+  ];
+}
+
+/**
+ * Carrollton office, traced from the 1,050 sq. ft. architectural plan.
+ * The storefront is the bottom edge. Desk 4 through Desk 1 run left to right.
+ * Coordinates match `public/floor/carrollton-1050-plan.png`.
+ */
 export function defaultCoworkingFloor(): {
+  planId: "carrollton-1050";
   canvasWidth: number;
   canvasHeight: number;
+  backgroundPath: string;
   shell: FloorShape[];
+  furniture: FloorShape[];
   seats: FloorSeat[];
 } {
-  const seats: FloorSeat[] = [
-    { resourceId: "seat-1", label: "Seat 1", x: 70, y: 130, width: 200, height: 130 },
-    { resourceId: "seat-2", label: "Seat 2", x: 390, y: 130, width: 200, height: 130 },
-    { resourceId: "seat-3", label: "Seat 3", x: 710, y: 130, width: 200, height: 130 },
-    { resourceId: "seat-4", label: "Seat 4", x: 70, y: 380, width: 200, height: 130 },
-    { resourceId: "seat-5", label: "Seat 5", x: 390, y: 380, width: 200, height: 130 },
-    { resourceId: "seat-6", label: "Seat 6", x: 710, y: 380, width: 200, height: 130 },
+  const wall = "#334155";
+  const shell: FloorShape[] = [
+    { id: "room-open", type: "ROOM", label: "", x: 49, y: 60, width: 989, height: 936, rotation: 0, fill: "rgba(255,255,255,0.2)" },
+    { id: "room-storage", type: "ROOM", label: "To Storage", x: 1038, y: 60, width: 598, height: 148, rotation: 0, fill: "rgba(226,232,240,0.55)" },
+    { id: "room-office", type: "ROOM", label: "Office", x: 1038, y: 208, width: 598, height: 302, rotation: 0, fill: "rgba(224,231,255,0.55)" },
+    { id: "room-customers", type: "ROOM", label: "Customers", x: 1038, y: 510, width: 598, height: 486, rotation: 0, fill: "rgba(241,245,249,0.72)" },
+    { id: "wall-north", type: "WALL", x: 49, y: 60, width: 1587, height: 14, rotation: 0, fill: wall },
+    { id: "wall-south", type: "WALL", label: "Storefront", x: 49, y: 982, width: 1587, height: 14, rotation: 0, fill: wall },
+    { id: "wall-west", type: "WALL", x: 49, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
+    { id: "wall-east", type: "WALL", x: 1622, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
+    { id: "wall-partition", type: "WALL", x: 1038, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
+    { id: "wall-storage", type: "WALL", x: 1038, y: 208, width: 598, height: 12, rotation: 0, fill: wall },
+    { id: "wall-office", type: "WALL", x: 1038, y: 510, width: 598, height: 12, rotation: 0, fill: wall },
+    { id: "window-storefront", type: "WINDOW", x: 300, y: 984, width: 720, height: 10, rotation: 0, fill: "#7dd3fc" },
+    { id: "door-storefront", type: "DOOR", label: "Storefront", x: 130, y: 978, width: 130, height: 18, rotation: 0, fill: "#818cf8" },
+    { id: "door-office", type: "DOOR", label: "Office", x: 1032, y: 300, width: 22, height: 86, rotation: 0, fill: "#818cf8" },
+    { id: "door-customers", type: "DOOR", label: "Customers", x: 1032, y: 640, width: 22, height: 96, rotation: 0, fill: "#818cf8" },
+    { id: "door-storage", type: "DOOR", label: "To Storage", x: 1280, y: 54, width: 120, height: 20, rotation: 0, fill: "#818cf8" },
   ];
+
+  const seats: FloorSeat[] = [
+    { resourceId: "seat-4", label: "Desk 4", x: 306, y: 870, width: 168, height: 86 },
+    { resourceId: "seat-3", label: "Desk 3", x: 490, y: 870, width: 168, height: 86 },
+    { resourceId: "seat-2", label: "Desk 2", x: 670, y: 870, width: 176, height: 86 },
+    { resourceId: "seat-1", label: "Desk 1", x: 862, y: 870, width: 168, height: 86 },
+  ];
+
+  const furniture: FloorShape[] = [
+    {
+      id: "zone-conference",
+      type: "MODE_ZONE",
+      label: "Conference",
+      resourceId: "mode-conference",
+      x: 380,
+      y: 370,
+      width: 360,
+      height: 140,
+      rotation: 0,
+      fill: "rgba(191,219,254,0.35)",
+      role: "conference-zone",
+    },
+    { id: "ref", type: "FURNITURE", label: "Ref", x: 105, y: 95, width: 100, height: 110, rotation: 0, fill: "#e2e8f0" },
+    {
+      id: "round-table",
+      type: "FURNITURE",
+      label: "Round table · 5' radius",
+      x: 430,
+      y: 90,
+      width: 300,
+      height: 190,
+      rotation: 0,
+      fill: "#f8fafc",
+      shape: "ellipse",
+    },
+    { id: "work-nook", type: "FURNITURE", label: "Work nook", x: 790, y: 110, width: 200, height: 90, rotation: 0, fill: "#f1f5f9" },
+    { id: "tv", type: "FURNITURE", label: "Flat Screen TV", x: 450, y: 308, width: 260, height: 26, rotation: 0, fill: "#0f172a" },
+    {
+      id: "conference-table",
+      type: "FURNITURE",
+      label: "Conference table",
+      x: 380,
+      y: 370,
+      width: 360,
+      height: 140,
+      rotation: 0,
+      fill: "#dbeafe",
+      role: "conference-table",
+      conferenceX: 364,
+      conferenceY: 458,
+    },
+    { id: "open-chair-1", type: "FURNITURE", x: 430, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
+    { id: "open-chair-2", type: "FURNITURE", x: 536, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
+    { id: "open-chair-3", type: "FURNITURE", x: 642, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
+    { id: "reception", type: "FURNITURE", label: "Reception Station", x: 94, y: 584, width: 150, height: 186, rotation: 0, fill: "#e0e7ff" },
+    { id: "print", type: "FURNITURE", label: "Print Station", x: 906, y: 522, width: 122, height: 122, rotation: 0, fill: "#fef3c7" },
+    { id: "counter-32", type: "FURNITURE", label: "32\" counter", x: 1100, y: 560, width: 460, height: 40, rotation: 0, fill: "#cbd5e1" },
+    { id: "counter-42", type: "FURNITURE", label: "42\" counter", x: 1100, y: 630, width: 460, height: 44, rotation: 0, fill: "#94a3b8" },
+  ];
+
   return {
-    canvasWidth: 980,
-    canvasHeight: 640,
-    shell: [
-      {
-        id: "wall-north",
-        type: "WALL",
-        label: "Front of room",
-        x: 40,
-        y: 36,
-        width: 900,
-        height: 18,
-        rotation: 0,
-        fill: "#cbd5e1",
-      },
-      {
-        id: "door-entry",
-        type: "DOOR",
-        label: "Entrance",
-        x: 430,
-        y: 54,
-        width: 120,
-        height: 28,
-        rotation: 0,
-        fill: "#818cf8",
-      },
-    ],
+    planId: "carrollton-1050",
+    canvasWidth: 1690,
+    canvasHeight: 1060,
+    backgroundPath: "/floor/carrollton-1050-plan.png",
+    shell,
+    furniture,
     seats,
   };
 }
