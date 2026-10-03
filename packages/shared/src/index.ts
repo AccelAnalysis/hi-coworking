@@ -1980,8 +1980,8 @@ export const RESOURCE_CATALOG: Record<string, Resource> = {
   "seat-2": { id: "seat-2", name: "Seat 2", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-3": { id: "seat-3", name: "Seat 3", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-4": { id: "seat-4", name: "Seat 4", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-5": { id: "seat-5", name: "Seat 5", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-6": { id: "seat-6", name: "Seat 6", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
+  "seat-5": { id: "seat-5", name: "Table 1", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
+  "seat-6": { id: "seat-6", name: "Table 2", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 10, guestRateHourly: 99 },
 };
 
@@ -2216,6 +2216,7 @@ export {
   resolveBookingSelection,
   resourceConflicts,
   seatsAvailableForWindow,
+  seatsForConference,
   seatsFromLayoutElements,
   shellHasOfficeRoom,
   withConferenceArrangement,

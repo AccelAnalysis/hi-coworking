@@ -13,6 +13,7 @@ import {
   type FloorplanElementType,
   defaultCoworkingFloor,
   layoutHasOfficeDesks,
+  seatsForConference,
   shellHasOfficeRoom,
   withConferenceArrangement,
   type FloorShape,
@@ -124,9 +125,10 @@ function makeDefaultShell(floorId: string): ShellDoc {
 function layoutElementsFor(arrangement: "open" | "conference"): FloorplanElement[] {
   const floor = defaultCoworkingFloor();
   const furniture = arrangement === "conference" ? withConferenceArrangement(floor.furniture) : floor.furniture;
+  const seats = arrangement === "conference" ? seatsForConference(floor.seats) : floor.seats;
   return [
     ...furniture.map(shapeElement),
-    ...floor.seats.map((seat) => shapeElement({
+    ...seats.map((seat) => shapeElement({
       id: seat.resourceId,
       type: "SEAT",
       label: seat.label,
@@ -137,6 +139,8 @@ function layoutElementsFor(arrangement: "open" | "conference"): FloorplanElement
       height: seat.height,
       rotation: 0,
       fill: "rgba(16,185,129,0.28)",
+      conferenceX: seat.conferenceX,
+      conferenceY: seat.conferenceY,
     })),
   ];
 }

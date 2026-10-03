@@ -29,6 +29,9 @@ export type FloorSeat = {
   width: number;
   height: number;
   rotation?: number;
+  /** Where this seat sits once the modular table is pulled into the room. */
+  conferenceX?: number;
+  conferenceY?: number;
 };
 
 export type FloorShape = {
@@ -140,6 +143,8 @@ export function seatsFromLayoutElements(elements: LayoutElementLike[]): FloorSea
     const resourceId = element.resourceId?.trim();
     if (!resourceId || seen.has(resourceId)) continue;
     seen.add(resourceId);
+    const conferenceX = typeof element.meta?.conferenceX === "number" ? element.meta.conferenceX : undefined;
+    const conferenceY = typeof element.meta?.conferenceY === "number" ? element.meta.conferenceY : undefined;
     seats.push({
       resourceId,
       label: element.label?.trim() || resourceId,
@@ -148,6 +153,7 @@ export function seatsFromLayoutElements(elements: LayoutElementLike[]): FloorSea
       width: element.width && element.width > 0 ? element.width : 120,
       height: element.height && element.height > 0 ? element.height : 100,
       rotation: element.rotation,
+      ...(conferenceX != null && conferenceY != null ? { conferenceX, conferenceY } : {}),
     });
   }
   return seats;
@@ -194,11 +200,15 @@ export function layoutHasOfficeDesks(elements: Array<{ type: string; resourceId?
       .filter((element) => element.type === "SEAT" || element.type === "DESK")
       .map((element) => element.resourceId),
   );
-  return ["seat-1", "seat-2", "seat-3", "seat-4"].every((resourceId) => ids.has(resourceId));
+  return ["seat-1", "seat-2", "seat-3", "seat-4", "seat-5", "seat-6"].every((resourceId) => ids.has(resourceId));
 }
 
+/** The traced plan has the office, the customer room, and the bathrooms. */
 export function shellHasOfficeRoom(elements: Array<{ type: string; label?: string }>) {
-  return elements.some((element) => element.type === "ROOM" && /office/i.test(element.label || ""));
+  const hasOffice = elements.some((element) => element.type === "ROOM" && /office/i.test(element.label || ""));
+  const hasCustomers = elements.some((element) => element.type === "ROOM" && /customer/i.test(element.label || ""));
+  const hasBathroom = elements.some((element) => element.type === "BATHROOM");
+  return hasOffice && hasCustomers && hasBathroom;
 }
 
 function chair(id: string, x: number, y: number, width: number, height: number): FloorShape {
@@ -220,18 +230,28 @@ function chairsAroundTable(table: FloorShape): FloorShape[] {
   const width = 44;
   const depth = 30;
   const gap = 12;
-  const count = 4;
   const chairs: FloorShape[] = [];
   const span = table.width - 72;
-  for (let index = 0; index < count; index += 1) {
-    const x = table.x + 36 + (span * index) / (count - 1) - width / 2;
+  for (let index = 0; index < 4; index += 1) {
+    const x = table.x + 36 + (span * index) / 3 - width / 2;
     chairs.push(chair(`conference-chair-n-${index}`, x, table.y - depth - gap, width, depth));
-    chairs.push(chair(`conference-chair-s-${index}`, x, table.y + table.height + gap, width, depth));
   }
+  // The two bookable table seats occupy the middle of the near side.
+  chairs.push(chair("conference-chair-s-0", table.x + 8, table.y + table.height + gap, width, depth));
+  chairs.push(chair("conference-chair-s-1", table.x + table.width - width - 8, table.y + table.height + gap, width, depth));
   const sideY = table.y + table.height / 2 - width / 2;
   chairs.push(chair("conference-chair-w", table.x - depth - gap, sideY, depth, width));
   chairs.push(chair("conference-chair-e", table.x + table.width + gap, sideY, depth, width));
   return chairs;
+}
+
+/** Move the two conference-table seats onto the centered table. Desks stay put. */
+export function seatsForConference(seats: FloorSeat[]): FloorSeat[] {
+  return seats.map((seat) => (
+    seat.conferenceX == null || seat.conferenceY == null
+      ? seat
+      : { ...seat, x: seat.conferenceX, y: seat.conferenceY }
+  ));
 }
 
 /** Pull the modular conference table into the middle of the open room and seat it. */
@@ -266,8 +286,9 @@ export function withConferenceArrangement(furniture: FloorShape[]): FloorShape[]
 
 /**
  * Carrollton office, traced from the 1,050 sq. ft. architectural plan.
+ * Coordinates match `public/floor/carrollton-1050-plan.png` (drawing cropped at 350, 160).
  * The storefront is the bottom edge. Desk 4 through Desk 1 run left to right.
- * Coordinates match `public/floor/carrollton-1050-plan.png`.
+ * The two table seats stay at the wall-mounted conference table until conference mode.
  */
 export function defaultCoworkingFloor(): {
   planId: "carrollton-1050";
@@ -279,82 +300,151 @@ export function defaultCoworkingFloor(): {
   seats: FloorSeat[];
 } {
   const wall = "#334155";
+  const door = "#818cf8";
+  const partition = 1035;
+  const east = 1636;
+  const south = 992;
   const shell: FloorShape[] = [
-    { id: "room-open", type: "ROOM", label: "", x: 49, y: 60, width: 989, height: 936, rotation: 0, fill: "rgba(255,255,255,0.2)" },
-    { id: "room-storage", type: "ROOM", label: "To Storage", x: 1038, y: 60, width: 598, height: 148, rotation: 0, fill: "rgba(226,232,240,0.55)" },
-    { id: "room-office", type: "ROOM", label: "Office", x: 1038, y: 208, width: 598, height: 302, rotation: 0, fill: "rgba(224,231,255,0.55)" },
-    { id: "room-customers", type: "ROOM", label: "Customers", x: 1038, y: 510, width: 598, height: 486, rotation: 0, fill: "rgba(241,245,249,0.72)" },
-    { id: "wall-north", type: "WALL", x: 49, y: 60, width: 1587, height: 14, rotation: 0, fill: wall },
-    { id: "wall-south", type: "WALL", label: "Storefront", x: 49, y: 982, width: 1587, height: 14, rotation: 0, fill: wall },
-    { id: "wall-west", type: "WALL", x: 49, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
-    { id: "wall-east", type: "WALL", x: 1622, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
-    { id: "wall-partition", type: "WALL", x: 1038, y: 60, width: 14, height: 936, rotation: 0, fill: wall },
-    { id: "wall-storage", type: "WALL", x: 1038, y: 208, width: 598, height: 12, rotation: 0, fill: wall },
-    { id: "wall-office", type: "WALL", x: 1038, y: 510, width: 598, height: 12, rotation: 0, fill: wall },
-    { id: "window-storefront", type: "WINDOW", x: 300, y: 984, width: 720, height: 10, rotation: 0, fill: "#7dd3fc" },
-    { id: "door-storefront", type: "DOOR", label: "Storefront", x: 130, y: 978, width: 130, height: 18, rotation: 0, fill: "#818cf8" },
-    { id: "door-office", type: "DOOR", label: "Office", x: 1032, y: 300, width: 22, height: 86, rotation: 0, fill: "#818cf8" },
-    { id: "door-customers", type: "DOOR", label: "Customers", x: 1032, y: 640, width: 22, height: 96, rotation: 0, fill: "#818cf8" },
-    { id: "door-storage", type: "DOOR", label: "To Storage", x: 1280, y: 54, width: 120, height: 20, rotation: 0, fill: "#818cf8" },
+    { id: "room-open", type: "ROOM", label: "", x: 63, y: 74, width: partition - 63, height: south - 74, rotation: 0, fill: "rgba(255,255,255,0.2)" },
+    { id: "room-ref", type: "ROOM", label: "Ref", x: 99, y: 83, width: 163, height: 79, rotation: 0, fill: "rgba(226,232,240,0.9)" },
+    { id: "bath-ref", type: "BATHROOM", label: "Bathroom", x: 274, y: 83, width: 78, height: 79, rotation: 0, fill: "rgba(186,230,253,0.72)" },
+    { id: "bath-round", type: "BATHROOM", label: "Bathroom", x: 586, y: 83, width: 122, height: 223, rotation: 0, fill: "rgba(186,230,253,0.72)" },
+    { id: "room-upper", type: "ROOM", label: "", x: 720, y: 83, width: partition - 720, height: 223, rotation: 0, fill: "rgba(241,245,249,0.45)" },
+    { id: "room-storage", type: "ROOM", label: "To Storage", x: partition + 14, y: 74, width: east - partition - 14, height: 136, rotation: 0, fill: "rgba(226,232,240,0.55)" },
+    { id: "room-office", type: "ROOM", label: "Office", x: partition + 14, y: 222, width: east - partition - 14, height: 278, rotation: 0, fill: "rgba(224,231,255,0.55)" },
+    { id: "room-customers", type: "ROOM", label: "Customers", x: partition + 14, y: 512, width: east - partition - 14, height: 240, rotation: 0, fill: "rgba(241,245,249,0.72)" },
+    { id: "room-storefront", type: "ROOM", label: "Storefront", x: partition + 14, y: 764, width: east - partition - 14, height: south - 764, rotation: 0, fill: "rgba(255,251,235,0.55)" },
+    { id: "wall-north-open", type: "WALL", x: 49, y: 60, width: partition - 49, height: 14, rotation: 0, fill: wall },
+    { id: "wall-north-storage", type: "WALL", x: partition, y: 60, width: 250, height: 14, rotation: 0, fill: wall },
+    { id: "wall-north-storage-b", type: "WALL", x: 1405, y: 60, width: east + 14 - 1405, height: 14, rotation: 0, fill: wall },
+    { id: "wall-south-open", type: "WALL", x: 49, y: south, width: partition - 49, height: 14, rotation: 0, fill: wall },
+    { id: "wall-south-right-a", type: "WALL", x: partition, y: south, width: 98, height: 14, rotation: 0, fill: wall },
+    { id: "wall-south-right-b", type: "WALL", x: 1245, y: south, width: east + 14 - 1245, height: 14, rotation: 0, fill: wall },
+    { id: "wall-west-a", type: "WALL", x: 49, y: 60, width: 14, height: 410, rotation: 0, fill: wall },
+    { id: "wall-west-b", type: "WALL", x: 49, y: 583, width: 14, height: south + 14 - 583, rotation: 0, fill: wall },
+    { id: "wall-east", type: "WALL", x: east, y: 60, width: 14, height: south + 14 - 60, rotation: 0, fill: wall },
+    { id: "wall-partition-a", type: "WALL", x: partition, y: 60, width: 14, height: 250, rotation: 0, fill: wall },
+    { id: "wall-partition-b", type: "WALL", x: partition, y: 396, width: 14, height: 180, rotation: 0, fill: wall },
+    { id: "wall-partition-c", type: "WALL", x: partition, y: 680, width: 14, height: south + 14 - 680, rotation: 0, fill: wall },
+    { id: "wall-ref-bottom", type: "WALL", x: 99, y: 154, width: 175, height: 10, rotation: 0, fill: wall },
+    { id: "wall-ref-right", type: "WALL", x: 262, y: 74, width: 12, height: 90, rotation: 0, fill: wall },
+    { id: "wall-bath-ref-bottom", type: "WALL", x: 274, y: 154, width: 90, height: 10, rotation: 0, fill: wall },
+    { id: "wall-round-left", type: "WALL", x: 352, y: 74, width: 12, height: 244, rotation: 0, fill: wall },
+    { id: "wall-bath-left", type: "WALL", x: 574, y: 74, width: 12, height: 244, rotation: 0, fill: wall },
+    { id: "wall-bath-right", type: "WALL", x: 708, y: 74, width: 12, height: 244, rotation: 0, fill: wall },
+    { id: "wall-tv", type: "WALL", x: 352, y: 306, width: 222, height: 12, rotation: 0, fill: wall },
+    { id: "wall-tv-b", type: "WALL", x: 708, y: 306, width: 40, height: 12, rotation: 0, fill: wall },
+    { id: "wall-tv-c", type: "WALL", x: 830, y: 306, width: partition + 14 - 830, height: 12, rotation: 0, fill: wall },
+    { id: "wall-storage", type: "WALL", x: partition, y: 210, width: 220, height: 12, rotation: 0, fill: wall },
+    { id: "wall-storage-b", type: "WALL", x: 1365, y: 210, width: east + 14 - 1365, height: 12, rotation: 0, fill: wall },
+    { id: "wall-office", type: "WALL", x: partition, y: 500, width: east + 14 - partition, height: 12, rotation: 0, fill: wall },
+    { id: "wall-customers", type: "WALL", x: partition, y: 752, width: 180, height: 12, rotation: 0, fill: wall },
+    { id: "wall-customers-b", type: "WALL", x: 1325, y: 752, width: east + 14 - 1325, height: 12, rotation: 0, fill: wall },
+    { id: "window-storefront", type: "WINDOW", x: 180, y: south + 2, width: 780, height: 10, rotation: 0, fill: "#7dd3fc" },
+    { id: "door-entrance", type: "DOOR", label: "Entrance", x: 63, y: 508, width: 113, height: 22, rotation: 0, fill: door },
+    { id: "door-storefront", type: "DOOR", label: "Storefront", x: 1133, y: south - 4, width: 112, height: 22, rotation: 0, fill: door },
+    { id: "door-office", type: "DOOR", label: "Office", x: partition - 4, y: 310, width: 22, height: 86, rotation: 0, fill: door },
+    { id: "door-customers", type: "DOOR", label: "Customers", x: partition - 4, y: 576, width: 22, height: 104, rotation: 0, fill: door },
+    { id: "door-storage", type: "DOOR", x: 1285, y: 54, width: 120, height: 22, rotation: 0, fill: door },
+    { id: "door-storage-office", type: "DOOR", x: 1255, y: 204, width: 110, height: 22, rotation: 0, fill: door },
+    { id: "door-upper", type: "DOOR", x: 748, y: 300, width: 82, height: 22, rotation: 0, fill: door },
+    { id: "door-store-room", type: "DOOR", x: 1215, y: 746, width: 110, height: 22, rotation: 0, fill: door },
+    { id: "column-storefront", type: "COLUMN", x: 1311, y: 820, width: 16, height: 150, rotation: 0, fill: "#475569" },
+    { id: "elect-panel", type: "UTILITY", label: "Elect panel", x: 1548, y: 108, width: 88, height: 56, rotation: 0, fill: "#fcd34d" },
   ];
+
+  const tableX = 370;
+  const tableY = 378;
+  const tableW = 380;
+  const tableH = 112;
+  const centeredX = 400;
+  const centeredY = 560;
+  const seatW = 108;
+  const seatH = 52;
 
   const seats: FloorSeat[] = [
-    { resourceId: "seat-4", label: "Desk 4", x: 306, y: 870, width: 168, height: 86 },
-    { resourceId: "seat-3", label: "Desk 3", x: 490, y: 870, width: 168, height: 86 },
-    { resourceId: "seat-2", label: "Desk 2", x: 670, y: 870, width: 176, height: 86 },
-    { resourceId: "seat-1", label: "Desk 1", x: 862, y: 870, width: 168, height: 86 },
+    { resourceId: "seat-4", label: "Desk 4", x: 304, y: 875, width: 172, height: 78 },
+    { resourceId: "seat-3", label: "Desk 3", x: 489, y: 875, width: 172, height: 78 },
+    { resourceId: "seat-2", label: "Desk 2", x: 674, y: 875, width: 172, height: 78 },
+    { resourceId: "seat-1", label: "Desk 1", x: 861, y: 875, width: 172, height: 78 },
+    {
+      resourceId: "seat-5",
+      label: "Table 1",
+      x: tableX + 70,
+      y: tableY + tableH + 10,
+      width: seatW,
+      height: seatH,
+      conferenceX: centeredX + 70,
+      conferenceY: centeredY + tableH + 10,
+    },
+    {
+      resourceId: "seat-6",
+      label: "Table 2",
+      x: tableX + tableW - 70 - seatW,
+      y: tableY + tableH + 10,
+      width: seatW,
+      height: seatH,
+      conferenceX: centeredX + tableW - 70 - seatW,
+      conferenceY: centeredY + tableH + 10,
+    },
   ];
 
+  const roundX = 379;
+  const roundY = 112;
+  const roundD = 184;
   const furniture: FloorShape[] = [
     {
       id: "zone-conference",
       type: "MODE_ZONE",
       label: "Conference",
       resourceId: "mode-conference",
-      x: 380,
-      y: 370,
-      width: 360,
-      height: 140,
+      x: tableX,
+      y: tableY,
+      width: tableW,
+      height: tableH,
       rotation: 0,
       fill: "rgba(191,219,254,0.35)",
       role: "conference-zone",
     },
-    { id: "ref", type: "FURNITURE", label: "Ref", x: 105, y: 95, width: 100, height: 110, rotation: 0, fill: "#e2e8f0" },
+    { id: "ref-unit", type: "FURNITURE", x: 124, y: 98, width: 70, height: 42, rotation: 0, fill: "#cbd5e1", role: "fixture" },
+    { id: "bath-ref-wc", type: "FURNITURE", x: 292, y: 98, width: 36, height: 46, rotation: 0, fill: "#e2e8f0", role: "fixture" },
+    { id: "bath-round-wc", type: "FURNITURE", x: 608, y: 110, width: 42, height: 52, rotation: 0, fill: "#e2e8f0", role: "fixture" },
+    { id: "bath-round-chair", type: "FURNITURE", x: 648, y: 200, width: 36, height: 36, rotation: 0, fill: "#94a3b8", role: "fixture" },
     {
       id: "round-table",
       type: "FURNITURE",
       label: "Round table · 5' radius",
-      x: 430,
-      y: 90,
-      width: 300,
-      height: 190,
+      x: roundX,
+      y: roundY,
+      width: roundD,
+      height: roundD,
       rotation: 0,
-      fill: "#f8fafc",
+      fill: "#fde68a",
       shape: "ellipse",
     },
-    { id: "work-nook", type: "FURNITURE", label: "Work nook", x: 790, y: 110, width: 200, height: 90, rotation: 0, fill: "#f1f5f9" },
-    { id: "tv", type: "FURNITURE", label: "Flat Screen TV", x: 450, y: 308, width: 260, height: 26, rotation: 0, fill: "#0f172a" },
+    { id: "round-chair-n", type: "FURNITURE", x: roundX + roundD / 2 - 16, y: roundY - 8, width: 32, height: 22, rotation: 0, fill: "#94a3b8", role: "round-chair" },
+    { id: "round-chair-s", type: "FURNITURE", x: roundX + roundD / 2 - 16, y: roundY + roundD - 16, width: 32, height: 22, rotation: 0, fill: "#94a3b8", role: "round-chair" },
+    { id: "round-chair-w", type: "FURNITURE", x: roundX - 6, y: roundY + roundD / 2 - 16, width: 22, height: 32, rotation: 0, fill: "#94a3b8", role: "round-chair" },
+    { id: "round-chair-e", type: "FURNITURE", x: roundX + roundD - 16, y: roundY + roundD / 2 - 16, width: 22, height: 32, rotation: 0, fill: "#94a3b8", role: "round-chair" },
+    { id: "tv", type: "FURNITURE", label: "Flat Screen TV", x: 470, y: 324, width: 210, height: 28, rotation: 0, fill: "#0f172a" },
     {
       id: "conference-table",
       type: "FURNITURE",
-      label: "Conference table",
-      x: 380,
-      y: 370,
-      width: 360,
-      height: 140,
+      label: "Modular conference table",
+      x: tableX,
+      y: tableY,
+      width: tableW,
+      height: tableH,
       rotation: 0,
       fill: "#dbeafe",
       role: "conference-table",
-      conferenceX: 364,
-      conferenceY: 458,
+      conferenceX: centeredX,
+      conferenceY: centeredY,
     },
-    { id: "open-chair-1", type: "FURNITURE", x: 430, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
-    { id: "open-chair-2", type: "FURNITURE", x: 536, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
-    { id: "open-chair-3", type: "FURNITURE", x: 642, y: 522, width: 48, height: 28, rotation: 0, fill: "#94a3b8", role: "conference-chair" },
-    { id: "reception", type: "FURNITURE", label: "Reception Station", x: 94, y: 584, width: 150, height: 186, rotation: 0, fill: "#e0e7ff" },
+    { id: "reception", type: "FURNITURE", label: "Reception Station", x: 94, y: 592, width: 142, height: 169, rotation: 0, fill: "#e0e7ff" },
     { id: "print", type: "FURNITURE", label: "Print Station", x: 906, y: 522, width: 122, height: 122, rotation: 0, fill: "#fef3c7" },
-    { id: "counter-32", type: "FURNITURE", label: "32\" counter", x: 1100, y: 560, width: 460, height: 40, rotation: 0, fill: "#cbd5e1" },
-    { id: "counter-42", type: "FURNITURE", label: "42\" counter", x: 1100, y: 630, width: 460, height: 44, rotation: 0, fill: "#94a3b8" },
+    { id: "counter-32", type: "FURNITURE", label: "32\" counter", x: 1108, y: 430, width: 470, height: 36, rotation: 0, fill: "#cbd5e1" },
+    { id: "counter-42", type: "FURNITURE", label: "42\" counter", x: 1108, y: 528, width: 470, height: 44, rotation: 0, fill: "#94a3b8" },
   ];
 
   return {

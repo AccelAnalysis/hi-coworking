@@ -22,6 +22,7 @@ import {
   furnitureFromLayoutElements,
   isKnownBookableSeat,
   layoutHasOfficeDesks,
+  seatsForConference,
   resolveBookingSelection,
   seatsFromLayoutElements,
   shellHasOfficeRoom,
@@ -347,7 +348,7 @@ function shellShapes(elements: Array<{
   rotation?: number;
   fill?: string;
 }>): FloorShape[] {
-  const shellTypes = new Set(["WALL", "DOOR", "WINDOW", "ROOM", "COLUMN"]);
+  const shellTypes = new Set(["WALL", "DOOR", "WINDOW", "ROOM", "COLUMN", "BATHROOM", "UTILITY"]);
   return elements
     .filter((element) => shellTypes.has(element.type))
     .map((element) => ({
@@ -1122,10 +1123,10 @@ export default function BookingExperienceWithDeskChange() {
                   comboMarks={comboMarks}
                   onToggle={toggleSeat}
                   heading="Carrollton office"
-                  hint="Tap a desk"
+                  hint="Tap a seat"
                 />
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  Desk 4, Desk 3, Desk 2, and Desk 1 line the storefront. Reception and the print station stay put.
+                  Desk 4, Desk 3, Desk 2, and Desk 1 line the storefront. Table 1 and Table 2 stay at the conference table.
                   {floorPlan.fromLayout ? " This is the published layout." : " This is the 1,050 sq. ft. office plan."}
                 </p>
               </div>
@@ -1147,7 +1148,7 @@ export default function BookingExperienceWithDeskChange() {
                 canvasHeight={floorPlan.canvasHeight}
                 shell={floorPlan.shell}
                 furniture={withConferenceArrangement(floorPlan.furniture)}
-                seats={floorPlan.seats}
+                seats={seatsForConference(floorPlan.seats)}
                 status={{}}
                 onToggle={() => undefined}
                 interactive={false}

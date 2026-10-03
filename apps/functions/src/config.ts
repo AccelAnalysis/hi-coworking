@@ -103,7 +103,7 @@ export const RESOURCE_CONFIG: Record<string, {
   "seat-2": { name: "Seat 2", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-3": { name: "Seat 3", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-4": { name: "Seat 4", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-5": { name: "Seat 5", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-6": { name: "Seat 6", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
+  "seat-5": { name: "Table 1", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
+  "seat-6": { name: "Table 2", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 99, exclusiveGroupId: "main_space", capacity: 10 },
 };
