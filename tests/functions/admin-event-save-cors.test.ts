@@ -184,8 +184,11 @@ describe("admin event save CORS", () => {
     expect(deployIndex).toContain("events_v2AdminPublishEvent");
     expect(deployIndex).toContain("events_v2ListPublicEvents");
     expect(deployIndex).toContain("events_v2GetPublicEvent");
+    expect(deployIndex).toContain("events_v2BeginRegistration");
+    expect(deployIndex).toContain("events_v2SubmitEventInterest");
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventSave"');
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicEventRead"');
+    expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicRegistration"');
     expect(deployIndex).not.toContain("eventsV2/management");
     expect(deployIndex).not.toContain("events_v2AdminCancelEvent");
     expect(packageJson.scripts["build:admin-event-deploy"]).toContain("firebase/admin-event-functions/tsconfig.json");
@@ -195,6 +198,8 @@ describe("admin event save CORS", () => {
     expect(deployWorkflow).toContain("events_v2AdminPublishEvent");
     expect(deployWorkflow).toContain("events_v2ListPublicEvents");
     expect(deployWorkflow).toContain("events_v2GetPublicEvent");
+    expect(deployWorkflow).toContain("events_v2BeginRegistration");
+    expect(deployWorkflow).toContain("events_v2SubmitEventInterest");
     expect(deployWorkflow).toContain("https://hi-coworking.com");
     expect(deployWorkflow).toContain("https://hi-coworking-plat.web.app");
     expect(deployWorkflow).toContain("https://evil.example");
