@@ -109,7 +109,9 @@ jobs:
 
           save_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminSaveEvent"
           publish_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminPublishEvent"
-          for endpoint in "${save_endpoint}" "${publish_endpoint}"; do
+          list_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2ListPublicEvents"
+          detail_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2GetPublicEvent"
+          for endpoint in "${save_endpoint}" "${publish_endpoint}" "${list_endpoint}" "${detail_endpoint}"; do
             check_origin "${endpoint}" "https://hi-coworking.com" yes
             check_origin "${endpoint}" "https://hi-coworking-plat.web.app" yes
             check_origin "${endpoint}" "https://evil.example" no
