@@ -68,11 +68,27 @@ describe("public Power NOW event actions", () => {
     expect(detail).toContain("PitchEventActions");
     expect(detail).toContain("publicEventDescription");
 
+    const interest = registration.slice(registration.indexOf("export const events_v2SubmitEventInterest"));
+    expect(interest).toContain("SMS consent and third-party advertising consent are required.");
+    expect(interest).not.toContain("enqueue");
+    expect(registration).toContain("Reply STOP to opt out");
+    expect(registration).toContain("participating businesses");
+    expect(registration).not.toContain("pre-screen");
+
     const actions = readFileSync("apps/web/src/components/events/PitchEventActions.tsx", "utf8");
     expect(actions).toContain("Attend the event");
     expect(actions).toContain("Offer your business’s product as a prize");
     expect(actions).toContain("Apply to pitch");
+    expect(actions).toContain("First name");
+    expect(actions).toContain("Last name");
+    expect(actions).toContain("Business description");
+    expect(actions).toContain("What are you offering?");
     expect(actions).toContain("does not reserve a pitch slot");
+    expect(actions).toContain('href="/privacy"');
+    expect(actions).toContain('href="/terms"');
+    expect(actions).toContain("disabled={!canSubmit}");
+    expect(actions).toContain("smsConsent && advertisingConsent");
+    expect(actions).not.toContain("pre-screen");
     expect(actions).not.toContain("bookings.cloud.microsoft");
     expect(actions).not.toMatch(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/);
   });
