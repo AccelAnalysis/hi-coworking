@@ -10,8 +10,10 @@ on:
       - "firebase/admin-member-functions/**"
       - "firebase/admin-operating-calendar-functions/**"
       - "firebase/payment-status-guard-functions/**"
+      - "firebase/admin-event-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-calendar.json"
+      - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
       - "tests/functions/**"
       - "tests/rules/**"
@@ -22,6 +24,7 @@ on:
       - "package-lock.json"
       - ".github/workflows/hi-coworking-product-ci.yml"
       - ".github/workflows/firebase-live-admin-operating-calendar.yml"
+      - ".github/workflows/firebase-live-admin-event-functions.yml"
 
 permissions:
   contents: read
@@ -75,6 +78,9 @@ jobs:
       - name: Build isolated payment-status guard bundle
         run: npm run build:payment-status-guard-deploy
 
+      - name: Build isolated admin event deploy bundle
+        run: npm run build:admin-event-deploy
+
       - name: Lint web application
         run: npm run lint
 
@@ -92,6 +98,7 @@ jobs:
           tests/functions/event-cancellation-policy.test.ts
           tests/functions/event-series-timezone.test.ts
           tests/functions/admin-member-operations-source.test.ts
+          tests/functions/admin-event-save-cors.test.ts
 
       - name: Run active transaction integration tests
         run: >-

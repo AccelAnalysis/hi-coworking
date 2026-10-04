@@ -16,6 +16,7 @@ dist/
 apps/functions/lib/
 firebase/booking-public-functions/lib/
 firebase/booking-transaction-functions/lib/
+firebase/admin-event-functions/lib/
 
 # Production
 *.log

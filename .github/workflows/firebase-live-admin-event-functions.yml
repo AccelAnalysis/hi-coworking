@@ -1,0 +1,116 @@
+name: Hi Coworking Firebase admin event functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/functions/src/eventsV2/**"
+      - "apps/functions/src/payments/**"
+      - "apps/functions/src/providers/emailProvider.ts"
+      - "firebase/admin-event-functions/**"
+      - "firebase.admin-events.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".firebaserc"
+      - ".github/workflows/firebase-live-admin-event-functions.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-admin-event-functions
+  cancel-in-progress: false
+
+jobs:
+  deploy-admin-event-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            echo "Add a Firebase/Google Cloud service-account JSON with permission to deploy Gen 2 Functions, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build isolated admin event bundle
+        run: npm run build:admin-event-deploy
+
+      - name: Deploy admin event save and publish functions
+        run: npm run deploy:admin-event -- --non-interactive
+
+      - name: Verify admin event save and publish CORS
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_origin() {
+            local endpoint="$1"
+            local origin="$2"
+            local expect_allow="$3"
+            local header_file="${RUNNER_TEMP}/admin-event-cors.txt"
+            local status
+            status="$(curl --silent --show-error --location \
+              --dump-header "${header_file}" \
+              --output /dev/null \
+              --write-out '%{http_code}' \
+              --request OPTIONS \
+              --header "Origin: ${origin}" \
+              --header 'Access-Control-Request-Method: POST' \
+              --header 'Access-Control-Request-Headers: authorization,content-type' \
+              "${endpoint}")"
+            local allow_origin
+            allow_origin="$(awk 'BEGIN{IGNORECASE=1} /^access-control-allow-origin:/ { print $2 }' "${header_file}" | tr -d '\r')"
+            if [[ "${expect_allow}" == "yes" ]]; then
+              if [[ "${status}" != "200" && "${status}" != "204" ]]; then
+                echo "${endpoint} rejected ${origin} (HTTP ${status})." >&2
+                cat "${header_file}" >&2 || true
+                exit 1
+              fi
+              if [[ "${allow_origin}" != "${origin}" ]]; then
+                echo "${endpoint} did not allow ${origin} (Access-Control-Allow-Origin: ${allow_origin:-<missing>})." >&2
+                cat "${header_file}" >&2 || true
+                exit 1
+              fi
+            else
+              if [[ "${allow_origin}" == "${origin}" || "${allow_origin}" == "*" ]]; then
+                echo "${endpoint} reflected a disallowed origin (${allow_origin})." >&2
+                cat "${header_file}" >&2 || true
+                exit 1
+              fi
+            fi
+          }
+
+          save_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminSaveEvent"
+          publish_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminPublishEvent"
+          for endpoint in "${save_endpoint}" "${publish_endpoint}"; do
+            check_origin "${endpoint}" "https://hi-coworking.com" yes
+            check_origin "${endpoint}" "https://hi-coworking-plat.web.app" yes
+            check_origin "${endpoint}" "https://evil.example" no
+          done

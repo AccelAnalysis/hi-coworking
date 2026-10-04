@@ -1,0 +1,12 @@
+{
+  "functions": [
+    {
+      "source": "firebase/admin-event-functions",
+      "codebase": "admin-event-save",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:admin-event-deploy"
+      ]
+    }
+  ]
+}
