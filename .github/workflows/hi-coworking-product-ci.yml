@@ -99,6 +99,7 @@ jobs:
           tests/functions/event-series-timezone.test.ts
           tests/functions/admin-member-operations-source.test.ts
           tests/functions/admin-event-save-cors.test.ts
+          tests/functions/public-event-location.test.ts
 
       - name: Run active transaction integration tests
         run: >-

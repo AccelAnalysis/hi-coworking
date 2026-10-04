@@ -306,7 +306,7 @@ export function publicEvent(event: EventDocV2) {
     title: event.title,
     description: event.description,
     format: event.format,
-    location: event.location,
+    location: event.format === "virtual" ? undefined : event.location,
     startTime: event.startTime,
     endTime: event.endTime,
     timezone: event.timezone || "America/New_York",

@@ -216,6 +216,7 @@ describe("Events v2", () => {
   it("does not expose a virtual meeting URL through the public event projection", async () => {
     await db.collection("events").doc("private-link").set(futureEvent("private-link", {
       format: "virtual",
+      location: "15373 Carrollton Blvd, Carrollton, VA",
       virtualUrl: "https://meet.example.test/private-secret",
     }));
     const functions = createClient("public-projection").functions;
@@ -228,6 +229,24 @@ describe("Events v2", () => {
 
     expect(result.event.title).toBe("Event private-link");
     expect(result.event.virtualUrl).toBeUndefined();
+    expect(result.event.location).toBeUndefined();
+    expect(JSON.stringify(result.event)).not.toContain("Carrollton");
+  });
+
+  it("keeps an in-person street address on the public event projection", async () => {
+    await db.collection("events").doc("in-person-address").set(futureEvent("in-person-address", {
+      format: "in-person",
+      location: "15373 Carrollton Blvd, Carrollton, VA",
+    }));
+    const functions = createClient("in-person-address").functions;
+
+    const result = await callFunction<{ event: Record<string, unknown> }>(
+      functions,
+      "events_v2GetPublicEvent",
+      { identifier: "in-person-address" },
+    );
+
+    expect(result.event.location).toBe("15373 Carrollton Blvd, Carrollton, VA");
   });
 
   it("fails closed when a stale client calls the retired free-registration endpoint", async () => {

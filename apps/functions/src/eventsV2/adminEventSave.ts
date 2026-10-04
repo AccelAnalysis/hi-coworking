@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { adminEventCallableOptions } from "./adminEventCors";
@@ -15,6 +16,12 @@ import {
 import { DEFAULT_REFUND_CUTOFF_HOURS, type EventDocV2 } from "./types";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
+
+export function locationWriteForSave(format: string, location: unknown) {
+  if (format === "virtual") return FieldValue.delete();
+  const trimmed = String(location || "").trim();
+  return trimmed || undefined;
+}
 
 async function uniqueSlug(title: string, eventId?: string) {
   const base = slugify(title);
@@ -44,14 +51,15 @@ export const events_v2AdminSaveEvent = onCall(adminEventCallableOptions, async (
   const title = String(input.title).trim();
   const slug = await uniqueSlug(title, id);
   const now = Date.now();
+  const format = String(input.format || "in-person") as EventDocV2["format"];
   const ticketTypes = sanitizeTicketTypes(input.ticketTypes, existing?.ticketTypes || []);
   const event: EventDocV2 = {
     id,
     slug,
     title,
     description: String(input.description).trim(),
-    format: String(input.format || "in-person") as EventDocV2["format"],
-    location: String(input.location || "").trim() || undefined,
+    format,
+    location: format === "virtual" ? undefined : (String(input.location || "").trim() || undefined),
     virtualUrl: String(input.virtualUrl || "").trim() || undefined,
     startTime: Number(input.startTime),
     endTime: Number(input.endTime),
@@ -85,7 +93,11 @@ export const events_v2AdminSaveEvent = onCall(adminEventCallableOptions, async (
     updatedAt: now,
     publishedAt: existing?.publishedAt,
   };
-  await ref.set(event, { merge: true });
+  const write: FirebaseFirestore.DocumentData = {
+    ...event,
+    location: locationWriteForSave(format, input.location),
+  };
+  await ref.set(write, { merge: true });
   return { success: true, eventId: id, slug, status: event.status };
 });
 

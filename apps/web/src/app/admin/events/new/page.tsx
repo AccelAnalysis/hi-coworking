@@ -143,7 +143,7 @@ function EventEditorContent() {
         title: title.trim(),
         description: description.trim(),
         format,
-        location: location.trim() || undefined,
+        location: format === "virtual" ? undefined : (location.trim() || undefined),
         virtualUrl: virtualUrl.trim() || undefined,
         startTime: new Date(start).getTime(),
         endTime: new Date(end).getTime(),
