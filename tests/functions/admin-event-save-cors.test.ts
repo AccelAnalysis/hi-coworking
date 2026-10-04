@@ -11,6 +11,10 @@ import {
   events_v2AdminPublishEvent,
   events_v2AdminSaveEvent,
 } from "../../apps/functions/src/eventsV2/adminEventSave";
+import {
+  events_v2GetPublicEvent,
+  events_v2ListPublicEvents,
+} from "../../apps/functions/src/eventsV2/publicEventRead";
 
 const saveSource = readFileSync(
   "apps/functions/src/eventsV2/adminEventSave.ts",
@@ -111,6 +115,8 @@ async function invoke(handler: CallableHandler, method: string, origin: string, 
 
 const saveHandler = events_v2AdminSaveEvent as unknown as CallableHandler;
 const publishHandler = events_v2AdminPublishEvent as unknown as CallableHandler;
+const listHandler = events_v2ListPublicEvents as unknown as CallableHandler;
+const detailHandler = events_v2GetPublicEvent as unknown as CallableHandler;
 
 describe("admin event save CORS", () => {
   it("allows only the live site, Firebase Hosting hosts, and local Next.js origins", () => {
@@ -133,7 +139,7 @@ describe("admin event save CORS", () => {
   });
 
   it("reflects the production and web.app origins on save and publish preflight", async () => {
-    for (const handler of [saveHandler, publishHandler]) {
+    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler]) {
       for (const origin of ["https://hi-coworking.com", "https://hi-coworking-plat.web.app"]) {
         const result = await invoke(handler, "OPTIONS", origin);
         expect(result.statusCode).toBe(204);
@@ -143,7 +149,7 @@ describe("admin event save CORS", () => {
   });
 
   it("does not reflect a foreign origin", async () => {
-    for (const handler of [saveHandler, publishHandler]) {
+    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler]) {
       const result = await invoke(handler, "OPTIONS", "https://evil.example");
       expect(result.allowOrigin).not.toBe("https://evil.example");
       expect(result.allowOrigin).not.toBe("*");
@@ -176,7 +182,10 @@ describe("admin event save CORS", () => {
     expect(deployConfig.functions[0].region).toBe("us-central1");
     expect(deployIndex).toContain("events_v2AdminSaveEvent");
     expect(deployIndex).toContain("events_v2AdminPublishEvent");
+    expect(deployIndex).toContain("events_v2ListPublicEvents");
+    expect(deployIndex).toContain("events_v2GetPublicEvent");
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventSave"');
+    expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicEventRead"');
     expect(deployIndex).not.toContain("eventsV2/management");
     expect(deployIndex).not.toContain("events_v2AdminCancelEvent");
     expect(packageJson.scripts["build:admin-event-deploy"]).toContain("firebase/admin-event-functions/tsconfig.json");
@@ -184,6 +193,8 @@ describe("admin event save CORS", () => {
     expect(packageJson.scripts["deploy:admin-event"]).toContain("functions:admin-event-save");
     expect(deployWorkflow).toContain("events_v2AdminSaveEvent");
     expect(deployWorkflow).toContain("events_v2AdminPublishEvent");
+    expect(deployWorkflow).toContain("events_v2ListPublicEvents");
+    expect(deployWorkflow).toContain("events_v2GetPublicEvent");
     expect(deployWorkflow).toContain("https://hi-coworking.com");
     expect(deployWorkflow).toContain("https://hi-coworking-plat.web.app");
     expect(deployWorkflow).toContain("https://evil.example");
@@ -216,6 +227,13 @@ describe("admin event save CORS", () => {
       }
     `], { encoding: "utf8" });
     expect(probe.status, probe.stderr || probe.stdout).toBe(0);
+
+    const publicRead = readFileSync("apps/functions/src/eventsV2/publicEventRead.ts", "utf8");
+    expect(publicRead).toContain('where("slug", "==", identifier)');
+    expect(publicRead).toContain('event.status === "published"');
+    expect(publicRead).not.toContain("requireAdmin");
+    expect(publicRead).not.toContain("SENDGRID_API_KEY");
+    expect(publicRead).toContain("adminEventCallableOptions");
   });
 });
 
