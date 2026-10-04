@@ -1,5 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ADMIN_EVENT_SAVE_ALLOWED_ORIGINS,
@@ -8,10 +10,14 @@ import {
 import {
   events_v2AdminPublishEvent,
   events_v2AdminSaveEvent,
-} from "../../apps/functions/src/eventsV2/management";
+} from "../../apps/functions/src/eventsV2/adminEventSave";
 
-const managementSource = readFileSync(
-  "apps/functions/src/eventsV2/management.ts",
+const saveSource = readFileSync(
+  "apps/functions/src/eventsV2/adminEventSave.ts",
+  "utf8",
+);
+const notificationsSource = readFileSync(
+  "apps/functions/src/eventsV2/notifications.ts",
   "utf8",
 );
 const deployIndex = readFileSync(
@@ -151,14 +157,11 @@ describe("admin event save CORS", () => {
     expect(result.body).toMatchObject({
       error: { status: "UNAUTHENTICATED" },
     });
-    const saveBlock = managementSource.slice(
-      managementSource.indexOf("export const events_v2AdminSaveEvent"),
-      managementSource.indexOf("export const events_v2AdminPublishEvent"),
+    const saveBlock = saveSource.slice(
+      saveSource.indexOf("export const events_v2AdminSaveEvent"),
+      saveSource.indexOf("export const events_v2AdminPublishEvent"),
     );
-    const publishBlock = managementSource.slice(
-      managementSource.indexOf("export const events_v2AdminPublishEvent"),
-      managementSource.indexOf("export const events_v2AdminCancelEvent"),
-    );
+    const publishBlock = saveSource.slice(saveSource.indexOf("export const events_v2AdminPublishEvent"));
     for (const block of [saveBlock, publishBlock]) {
       expect(block).toContain("if (!request.auth) throw new HttpsError(\"unauthenticated\", \"Sign in required.\");");
       expect(block).toContain("requireAdmin(request.auth);");
@@ -173,6 +176,8 @@ describe("admin event save CORS", () => {
     expect(deployConfig.functions[0].region).toBe("us-central1");
     expect(deployIndex).toContain("events_v2AdminSaveEvent");
     expect(deployIndex).toContain("events_v2AdminPublishEvent");
+    expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventSave"');
+    expect(deployIndex).not.toContain("eventsV2/management");
     expect(deployIndex).not.toContain("events_v2AdminCancelEvent");
     expect(packageJson.scripts["build:admin-event-deploy"]).toContain("firebase/admin-event-functions/tsconfig.json");
     expect(packageJson.scripts["deploy:admin-event"]).toContain("firebase.admin-events.json");
@@ -184,4 +189,50 @@ describe("admin event save CORS", () => {
     expect(deployWorkflow).toContain("https://evil.example");
     expect(deployWorkflow).not.toContain("functions:booking");
   });
+
+  it("loads save and publish without the SendGrid secret, and leaves mail delivery on the notification worker", () => {
+    const loaded = sourceFilesReachableFrom("firebase/admin-event-functions/src/index.ts");
+    expect(loaded.length).toBeGreaterThan(1);
+    for (const file of loaded) {
+      expect(readFileSync(file, "utf8")).not.toContain("SENDGRID_API_KEY");
+    }
+    expect(notificationsSource).toContain('defineSecret("SENDGRID_API_KEY")');
+    expect(notificationsSource).toContain("new SendGridProvider(apiKey)");
+    expect(notificationsSource).toContain("events_v2ProcessNotificationJobs");
+
+    const entry = resolve("firebase/admin-event-functions/lib/firebase/admin-event-functions/src/index.js");
+    expect(existsSync(entry), "Build the admin-event deploy bundle before asserting secret registration.").toBe(true);
+    const probe = spawnSync(process.execPath, ["-e", `
+      const { declaredParams } = require("firebase-functions/params");
+      require(${JSON.stringify(entry)});
+      const names = declaredParams.map((param) => param.name);
+      if (names.includes("SENDGRID_API_KEY")) {
+        console.error(names.join(","));
+        process.exit(2);
+      }
+      if (!names.includes("STRIPE_SECRET_KEY")) {
+        console.error(names.join(",") || "<no params>");
+        process.exit(3);
+      }
+    `], { encoding: "utf8" });
+    expect(probe.status, probe.stderr || probe.stdout).toBe(0);
+  });
 });
+
+function sourceFilesReachableFrom(entry: string) {
+  const seen = new Set<string>();
+  const pending = [resolve(entry)];
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(/from\s+["'](\.[^"']+)["']/g)) {
+      const base = resolve(dirname(file), match[1]);
+      const candidate = [base, `${base}.ts`, `${base}.tsx`, resolve(base, "index.ts")]
+        .find((path) => existsSync(path) && !path.endsWith(".ts.ts"));
+      if (candidate?.endsWith(".ts") || candidate?.endsWith(".tsx")) pending.push(candidate);
+    }
+  }
+  return [...seen];
+}
