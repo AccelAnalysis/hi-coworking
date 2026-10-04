@@ -169,10 +169,17 @@ export const cancelEventRegistrationV2 = httpsCallable<
 export const submitEventInterest = httpsCallable<{
   eventId: string;
   kind: "pitch" | "prize";
-  name: string;
+  firstName?: string;
+  lastName?: string;
+  name?: string;
   email: string;
+  phone: string;
   businessName: string;
-  note?: string;
+  businessDescription?: string;
+  website: string;
+  offer?: string;
+  smsConsent: boolean;
+  advertisingConsent: boolean;
 }, { success: boolean; interestId: string; kind: "pitch" | "prize" }>(functions, "events_v2SubmitEventInterest");
 
 export const joinEventWaitlistV2 = httpsCallable<{

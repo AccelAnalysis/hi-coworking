@@ -165,14 +165,49 @@ export const events_v2BeginRegistration = onCall(adminEventCallableOptions, asyn
   return { kind: "confirmed" as const, registrationId: registration.registration.id };
 });
 
+export const SMS_CONSENT_TEXT = "I agree to receive SMS text messages from Hi Coworking at the phone number I provided about this event. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help.";
+
+export const ADVERTISING_CONSENT_TEXT = "I agree that Hi Coworking may share my contact information with participating businesses so they can contact me about their products, services, or offerings.";
+
+function requiredText(value: unknown, label: string, max = 500) {
+  const text = String(value || "").trim();
+  if (!text) throw new HttpsError("invalid-argument", `${label} is required.`);
+  if (text.length > max) throw new HttpsError("invalid-argument", `${label} is too long.`);
+  return text;
+}
+
+function requiredPhone(value: unknown) {
+  const phone = String(value || "").trim();
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 15) {
+    throw new HttpsError("invalid-argument", "A valid phone number is required.");
+  }
+  return phone;
+}
+
+function requiredWebsite(value: unknown) {
+  const website = String(value || "").trim();
+  const withProtocol = /^https?:\/\/\S+$/i.test(website);
+  const bareDomain = /^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(\/\S*)?$/.test(website);
+  if (!withProtocol && !bareDomain) throw new HttpsError("invalid-argument", "A website is required.");
+  return website;
+}
+
 export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, async (request) => {
   const input = (request.data || {}) as {
     eventId?: string;
     kind?: string;
+    firstName?: string;
+    lastName?: string;
     name?: string;
     email?: string;
+    phone?: string;
     businessName?: string;
-    note?: string;
+    businessDescription?: string;
+    website?: string;
+    offer?: string;
+    smsConsent?: boolean;
+    advertisingConsent?: boolean;
   };
   const eventId = String(input.eventId || "").trim();
   const kind = String(input.kind || "").trim();
@@ -180,15 +215,27 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
   if (kind !== "pitch" && kind !== "prize") {
     throw new HttpsError("invalid-argument", "Choose pitch or prize.");
   }
-  const name = String(input.name || "").trim();
-  const email = normalizeEmail(input.email);
-  const businessName = String(input.businessName || "").trim();
-  const note = String(input.note || "").trim();
-  if (!name || !email || !email.includes("@")) {
-    throw new HttpsError("invalid-argument", "Name and a valid email are required.");
+  if (input.smsConsent !== true || input.advertisingConsent !== true) {
+    throw new HttpsError("invalid-argument", "SMS consent and third-party advertising consent are required.");
   }
-  if (!businessName) throw new HttpsError("invalid-argument", "Business name is required.");
-  if (note.length > 2000) throw new HttpsError("invalid-argument", "Please keep the note under 2000 characters.");
+  const email = normalizeEmail(input.email);
+  if (!email.includes("@")) throw new HttpsError("invalid-argument", "A valid email is required.");
+  const phone = requiredPhone(input.phone);
+  const businessName = requiredText(input.businessName, "Business name");
+  const website = requiredWebsite(input.website);
+
+  let name = "";
+  let record: Record<string, unknown>;
+  if (kind === "pitch") {
+    const firstName = requiredText(input.firstName, "First name");
+    const lastName = requiredText(input.lastName, "Last name");
+    const businessDescription = requiredText(input.businessDescription, "Business description", 2000);
+    name = `${firstName} ${lastName}`;
+    record = { firstName, lastName, businessDescription };
+  } else {
+    name = requiredText(input.name, "Name");
+    record = { offer: requiredText(input.offer, "Offer", 2000) };
+  }
 
   const eventSnap = await db().collection("events").doc(eventId).get();
   if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
@@ -203,8 +250,14 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
     kind,
     name,
     email,
+    phone,
     businessName,
-    note: note || undefined,
+    website,
+    smsConsent: true,
+    smsConsentText: SMS_CONSENT_TEXT,
+    advertisingConsent: true,
+    advertisingConsentText: ADVERTISING_CONSENT_TEXT,
+    ...record,
     createdAt: Date.now(),
   });
   return { success: true, interestId: ref.id, kind };
