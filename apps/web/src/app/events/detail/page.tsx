@@ -8,7 +8,8 @@ import { ArrowLeft, CalendarDays, Clock3, Loader2, MapPin, Play, Video } from "l
 import { AddToCalendar } from "@/components/AddToCalendar";
 import { AppShell } from "@/components/AppShell";
 import { EventRegistrationPanel } from "@/components/events/EventRegistrationPanel";
-import { eventPrimaryImage, getPublicEvent, type EventPublic } from "@/lib/eventsV2";
+import { PitchEventActions } from "@/components/events/PitchEventActions";
+import { eventPrimaryImage, getPublicEvent, isPitchCompetitionEvent, publicEventDescription, type EventPublic } from "@/lib/eventsV2";
 
 function dateLabel(event: EventPublic) {
   return new Intl.DateTimeFormat("en-US", {
@@ -95,16 +96,16 @@ function EventDetailContent() {
           </Link>
         </div>
 
-        <section className="mx-auto mt-6 grid w-full max-w-6xl gap-8 px-4 sm:px-6 lg:grid-cols-[1.45fr_0.8fr] lg:gap-10">
-          <div>
-            <div className="relative aspect-[16/10] overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-100 via-sky-50 to-slate-200">
+        <section className="mx-auto mt-6 grid w-full max-w-6xl min-w-0 gap-8 px-4 sm:px-6 lg:grid-cols-[1.45fr_0.8fr] lg:gap-10">
+          <div className="min-w-0">
+            <div className="relative aspect-video w-full min-w-0 max-w-full overflow-hidden rounded-[2rem] bg-slate-100">
               {hero?.downloadUrl && (
                 <Image
                   src={hero.downloadUrl}
                   alt={hero.alt || event.title}
                   fill
                   priority
-                  className="object-cover"
+                  className="object-contain"
                   sizes="(max-width: 1024px) 100vw, 65vw"
                 />
               )}
@@ -123,7 +124,7 @@ function EventDetailContent() {
                 {event.format !== "in-person" && <span className="inline-flex items-center gap-2"><Video className="h-4 w-4" /> {event.format === "virtual" ? "Online" : "In person + online"}</span>}
               </div>
 
-              <div className="mt-8 max-w-3xl whitespace-pre-wrap text-base leading-8 text-slate-650">{event.description}</div>
+              <div className="mt-8 max-w-3xl whitespace-pre-wrap break-words text-base leading-8 text-slate-650">{publicEventDescription(event.description)}</div>
 
               {!completed && (
                 <div className="mt-8">
@@ -166,7 +167,7 @@ function EventDetailContent() {
           <aside className="lg:pt-2">
             <div className="lg:sticky lg:top-24">
               {!completed && event.status === "published" ? (
-                <EventRegistrationPanel event={event} />
+                isPitchCompetitionEvent(event) ? <PitchEventActions event={event} /> : <EventRegistrationPanel event={event} />
               ) : (
                 <div className="rounded-3xl bg-slate-100 p-6">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">This event has ended</p>

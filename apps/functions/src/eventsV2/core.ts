@@ -299,12 +299,21 @@ export function validateEventForSave(input: Record<string, unknown>) {
   }
 }
 
+export function publicDescription(value: string) {
+  const withoutRegistrationLine = value
+    .split("\n")
+    .filter((line) => !/^\s*register:\s*https?:\/\/\S+\s*$/i.test(line))
+    .join("\n")
+    .replace(/https?:\/\/[\w.-]*bookings\.cloud\.microsoft\S*/gi, "");
+  return withoutRegistrationLine.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 export function publicEvent(event: EventDocV2) {
   return {
     id: event.id,
     slug: event.slug,
     title: event.title,
-    description: event.description,
+    description: publicDescription(event.description || ""),
     format: event.format,
     location: event.format === "virtual" ? undefined : event.location,
     startTime: event.startTime,

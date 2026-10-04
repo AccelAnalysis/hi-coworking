@@ -74,20 +74,41 @@ const getPublicEventFn = httpsCallable<
   { event: EventPublic }
 >(functions, "events_v2GetPublicEvent");
 
+export function publicEventDescription(value: string) {
+  return value
+    .split("\n")
+    .filter((line) => !/^\s*register:\s*https?:\/\/\S+\s*$/i.test(line))
+    .join("\n")
+    .replace(/https?:\/\/[\w.-]*bookings\.cloud\.microsoft\S*/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+export function isPitchCompetitionEvent(event: { slug?: string; title?: string }) {
+  const slug = (event.slug || "").toLowerCase();
+  const title = (event.title || "").toLowerCase();
+  return slug.startsWith("power-now-pitch-competition") || title.includes("power now pitch");
+}
+
+function withPublicCopy(event: EventPublic): EventPublic {
+  return { ...event, description: publicEventDescription(event.description || "") };
+}
+
 export async function listPublishedEvents(options?: { includePast?: boolean }) {
-  const upcoming = (await listPublicEventsFn({ scope: "upcoming" })).data.events;
+  const upcoming = (await listPublicEventsFn({ scope: "upcoming" })).data.events.map(withPublicCopy);
   if (!options?.includePast) return upcoming;
-  const past = (await listPublicEventsFn({ scope: "past" })).data.events;
+  const past = (await listPublicEventsFn({ scope: "past" })).data.events.map(withPublicCopy);
   return [...upcoming, ...past].sort((a, b) => a.startTime - b.startTime);
 }
 
 export async function listPastEvents() {
-  return (await listPublicEventsFn({ scope: "past" })).data.events;
+  return (await listPublicEventsFn({ scope: "past" })).data.events.map(withPublicCopy);
 }
 
 export async function getPublicEvent(identifier: string): Promise<EventPublic | null> {
   try {
-    return (await getPublicEventFn({ identifier })).data.event;
+    return withPublicCopy((await getPublicEventFn({ identifier })).data.event);
   } catch (error) {
     const code = (error as { code?: string } | null)?.code;
     if (code === "functions/not-found" || code === "not-found") return null;
@@ -144,6 +165,15 @@ export const cancelEventRegistrationV2 = httpsCallable<
   { registrationId: string; manageToken?: string },
   { success: boolean; refundCents: number; refundPending: boolean }
 >(functions, "events_v2CancelRegistration");
+
+export const submitEventInterest = httpsCallable<{
+  eventId: string;
+  kind: "pitch" | "prize";
+  name: string;
+  email: string;
+  businessName: string;
+  note?: string;
+}, { success: boolean; interestId: string; kind: "pitch" | "prize" }>(functions, "events_v2SubmitEventInterest");
 
 export const joinEventWaitlistV2 = httpsCallable<{
   eventId: string;

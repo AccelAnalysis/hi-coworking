@@ -50,7 +50,7 @@ function EventImage({ event, priority = false }: { event: EventPublic; priority?
         alt={image.alt || event.title}
         fill
         priority={priority}
-        className="object-cover"
+        className="object-contain"
         sizes={priority ? "(max-width: 1024px) 100vw, 62vw" : "(max-width: 768px) 100vw, 33vw"}
       />
     );
@@ -159,15 +159,15 @@ export default function EventsPage() {
         )}
 
         {!loading && !error && featured && (
-          <Link href={hrefFor(featured)} className="group mt-10 grid overflow-hidden rounded-[2rem] bg-slate-950 text-white lg:grid-cols-[1.45fr_1fr]">
-            <div className="relative min-h-72 lg:min-h-[28rem]">
+          <Link href={hrefFor(featured)} className="group mt-10 grid min-w-0 overflow-hidden rounded-[2rem] bg-slate-950 text-white lg:grid-cols-[1.45fr_1fr]">
+            <div className="relative aspect-video w-full min-w-0 overflow-hidden bg-slate-900">
               <EventImage event={featured} priority />
             </div>
             <div className="flex flex-col justify-between p-7 sm:p-9">
               <div>
                 <p className="text-sm font-medium text-sky-200">Next up · {dateLabel(featured.startTime)}</p>
                 <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{featured.title}</h2>
-                <p className="mt-4 line-clamp-3 text-sm leading-6 text-slate-300">{featured.description}</p>
+                <p className="mt-4 line-clamp-3 break-words text-sm leading-6 text-slate-300">{featured.description}</p>
               </div>
               <div className="mt-8 space-y-2 text-sm text-slate-300">
                 <p>{timeLabel(featured.startTime)} · {priceLabel(featured)}</p>
@@ -193,13 +193,13 @@ export default function EventsPage() {
                 const available = eventAvailableSeats(event);
                 return (
                   <Link key={event.id} href={hrefFor(event)} className="group block">
-                    <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-100">
+                    <div className="relative aspect-video w-full min-w-0 overflow-hidden rounded-3xl bg-slate-100">
                       <EventImage event={event} />
                     </div>
                     <div className="pt-4">
                       <p className="text-sm font-medium text-sky-700">{dateLabel(event.startTime)} · {timeLabel(event.startTime)}</p>
                       <h3 className="mt-1 text-xl font-semibold text-slate-950 transition group-hover:text-sky-800">{event.title}</h3>
-                      <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">{event.description}</p>
+                      <p className="mt-2 line-clamp-2 break-words text-sm leading-6 text-slate-500">{event.description}</p>
                       <div className="mt-3 flex items-center gap-3 text-sm text-slate-600">
                         <span>{priceLabel(event)}</span>
                         {available === 0 && <span className="text-amber-700">Waitlist</span>}
