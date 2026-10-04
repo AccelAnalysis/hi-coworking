@@ -85,6 +85,9 @@ function AdminEventsContent() {
             <p className="mt-3 max-w-xl text-sm leading-6 text-slate-600">Create, publish, and operate community events without exposing the underlying event machinery.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Link href="/admin/events/submissions" className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+              Submissions
+            </Link>
             <Link href="/staff/events" className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
               <Users className="h-4 w-4" /> Check-in
             </Link>

@@ -52,6 +52,12 @@ describe("Events v2 Firestore boundary", () => {
         status: "HELD",
         secretHash: "server-only",
       });
+      await setDoc(doc(context.firestore(), "eventInterests/interest-one"), {
+        id: "interest-one",
+        eventId: "private-link",
+        kind: "pitch",
+        email: "pitch@example.test",
+      });
     });
   });
 
@@ -79,6 +85,8 @@ describe("Events v2 Firestore boundary", () => {
     await assertFails(getDoc(doc(admin, "eventRegistrations/reg-one")));
     await assertFails(getDoc(doc(member, "eventHolds/hold-one")));
     await assertFails(getDoc(doc(admin, "eventHolds/hold-one")));
+    await assertFails(getDoc(doc(member, "eventInterests/interest-one")));
+    await assertFails(getDoc(doc(admin, "eventInterests/interest-one")));
     await assertFails(updateDoc(doc(admin, "events/private-link"), { status: "cancelled" }));
   });
 });

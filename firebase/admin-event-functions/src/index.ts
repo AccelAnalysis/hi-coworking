@@ -14,3 +14,5 @@ export {
   events_v2BeginRegistration,
   events_v2SubmitEventInterest,
 } from "../../../apps/functions/src/eventsV2/publicRegistration";
+
+export { events_v2AdminListEventSubmissions } from "../../../apps/functions/src/eventsV2/adminEventSubmissions";

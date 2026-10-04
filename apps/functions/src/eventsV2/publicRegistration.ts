@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { adminEventCallableOptions } from "./adminEventCors";
+import { notifyEventSubmission } from "./eventSubmissionNotify";
 import {
   availableSeats,
   db,
@@ -162,6 +163,12 @@ export const events_v2BeginRegistration = onCall(adminEventCallableOptions, asyn
       error: error instanceof Error ? error.message : String(error),
     });
   }
+  await notifyEventSubmission({
+    eventName: registration.event.title || registration.event.id,
+    action: "attend",
+    name: registration.registration.displayName,
+    email: registration.registration.email,
+  });
   return { kind: "confirmed" as const, registrationId: registration.registration.id };
 });
 
@@ -259,6 +266,12 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
     advertisingConsentText: ADVERTISING_CONSENT_TEXT,
     ...record,
     createdAt: Date.now(),
+  });
+  await notifyEventSubmission({
+    eventName: event.title || event.id,
+    action: kind === "pitch" ? "apply_to_pitch" : "offer_prize",
+    name,
+    email,
   });
   return { success: true, interestId: ref.id, kind };
 });
