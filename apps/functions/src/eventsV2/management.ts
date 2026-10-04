@@ -26,6 +26,7 @@ import {
 } from "./core";
 import { enqueueNotification, enqueueRegistrationNotifications } from "./notifications";
 import { promoteWaitlist } from "./registration";
+import { adminEventCallableOptions } from "./adminEventCors";
 import {
   DEFAULT_REFUND_CUTOFF_HOURS,
   type AttendanceStatusV2,
@@ -235,7 +236,7 @@ async function uniqueSlug(title: string, eventId?: string) {
   return `${base}-${Date.now().toString(36)}`;
 }
 
-export const events_v2AdminSaveEvent = onCall(async (request) => {
+export const events_v2AdminSaveEvent = onCall(adminEventCallableOptions, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
   requireAdmin(request.auth);
   const input = (request.data || {}) as Record<string, unknown>;
@@ -298,7 +299,7 @@ export const events_v2AdminSaveEvent = onCall(async (request) => {
 });
 
 export const events_v2AdminPublishEvent = onCall(
-  { secrets: [stripeSecretKey] },
+  { ...adminEventCallableOptions, secrets: [stripeSecretKey] },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
     requireAdmin(request.auth);
