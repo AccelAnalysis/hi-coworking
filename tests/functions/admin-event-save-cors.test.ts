@@ -15,6 +15,7 @@ import {
   events_v2GetPublicEvent,
   events_v2ListPublicEvents,
 } from "../../apps/functions/src/eventsV2/publicEventRead";
+import { events_v2AdminListEventSubmissions } from "../../apps/functions/src/eventsV2/adminEventSubmissions";
 
 const saveSource = readFileSync(
   "apps/functions/src/eventsV2/adminEventSave.ts",
@@ -117,6 +118,7 @@ const saveHandler = events_v2AdminSaveEvent as unknown as CallableHandler;
 const publishHandler = events_v2AdminPublishEvent as unknown as CallableHandler;
 const listHandler = events_v2ListPublicEvents as unknown as CallableHandler;
 const detailHandler = events_v2GetPublicEvent as unknown as CallableHandler;
+const submissionsHandler = events_v2AdminListEventSubmissions as unknown as CallableHandler;
 
 describe("admin event save CORS", () => {
   it("allows only the live site, Firebase Hosting hosts, and local Next.js origins", () => {
@@ -139,7 +141,7 @@ describe("admin event save CORS", () => {
   });
 
   it("reflects the production and web.app origins on save and publish preflight", async () => {
-    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler]) {
+    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler, submissionsHandler]) {
       for (const origin of ["https://hi-coworking.com", "https://hi-coworking-plat.web.app"]) {
         const result = await invoke(handler, "OPTIONS", origin);
         expect(result.statusCode).toBe(204);
@@ -149,7 +151,7 @@ describe("admin event save CORS", () => {
   });
 
   it("does not reflect a foreign origin", async () => {
-    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler]) {
+    for (const handler of [saveHandler, publishHandler, listHandler, detailHandler, submissionsHandler]) {
       const result = await invoke(handler, "OPTIONS", "https://evil.example");
       expect(result.allowOrigin).not.toBe("https://evil.example");
       expect(result.allowOrigin).not.toBe("*");
@@ -162,6 +164,12 @@ describe("admin event save CORS", () => {
     expect(result.statusCode).toBe(401);
     expect(result.body).toMatchObject({
       error: { status: "UNAUTHENTICATED" },
+    });
+    const submissions = await invoke(submissionsHandler, "POST", "https://hi-coworking.com", { data: {} });
+    expect(submissions.allowOrigin).toBe("https://hi-coworking.com");
+    expect(submissions.statusCode).toBe(401);
+    expect(submissions.body).toMatchObject({
+      error: { message: "Sign in required.", status: "UNAUTHENTICATED" },
     });
     const saveBlock = saveSource.slice(
       saveSource.indexOf("export const events_v2AdminSaveEvent"),
@@ -186,6 +194,8 @@ describe("admin event save CORS", () => {
     expect(deployIndex).toContain("events_v2GetPublicEvent");
     expect(deployIndex).toContain("events_v2BeginRegistration");
     expect(deployIndex).toContain("events_v2SubmitEventInterest");
+    expect(deployIndex).toContain("events_v2AdminListEventSubmissions");
+    expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventSubmissions"');
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventSave"');
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicEventRead"');
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicRegistration"');
@@ -200,6 +210,8 @@ describe("admin event save CORS", () => {
     expect(deployWorkflow).toContain("events_v2GetPublicEvent");
     expect(deployWorkflow).toContain("events_v2BeginRegistration");
     expect(deployWorkflow).toContain("events_v2SubmitEventInterest");
+    expect(deployWorkflow).toContain("events_v2AdminListEventSubmissions");
+    expect(deployWorkflow).toContain("scripts/remove-test-event-submissions.mjs");
     expect(deployWorkflow).toContain("https://hi-coworking.com");
     expect(deployWorkflow).toContain("https://hi-coworking-plat.web.app");
     expect(deployWorkflow).toContain("https://evil.example");
@@ -229,6 +241,10 @@ describe("admin event save CORS", () => {
       if (!names.includes("STRIPE_SECRET_KEY")) {
         console.error(names.join(",") || "<no params>");
         process.exit(3);
+      }
+      if (!names.includes("EVENT_SUBMISSION_WEBHOOK_URL")) {
+        console.error(names.join(",") || "<no params>");
+        process.exit(4);
       }
     `], { encoding: "utf8" });
     expect(probe.status, probe.stderr || probe.stdout).toBe(0);

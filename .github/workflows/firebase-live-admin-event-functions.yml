@@ -10,6 +10,7 @@ on:
       - "apps/functions/src/providers/emailProvider.ts"
       - "firebase/admin-event-functions/**"
       - "firebase.admin-events.json"
+      - "scripts/remove-test-event-submissions.mjs"
       - "package.json"
       - "package-lock.json"
       - ".firebaserc"
@@ -113,8 +114,44 @@ jobs:
           detail_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2GetPublicEvent"
           register_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2BeginRegistration"
           interest_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2SubmitEventInterest"
-          for endpoint in "${save_endpoint}" "${publish_endpoint}" "${list_endpoint}" "${detail_endpoint}" "${register_endpoint}" "${interest_endpoint}"; do
+          submissions_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminListEventSubmissions"
+          for endpoint in "${save_endpoint}" "${publish_endpoint}" "${list_endpoint}" "${detail_endpoint}" "${register_endpoint}" "${interest_endpoint}" "${submissions_endpoint}"; do
             check_origin "${endpoint}" "https://hi-coworking.com" yes
             check_origin "${endpoint}" "https://hi-coworking-plat.web.app" yes
             check_origin "${endpoint}" "https://evil.example" no
           done
+
+          submissions_body="${RUNNER_TEMP}/admin-event-submissions.json"
+          submissions_headers="${RUNNER_TEMP}/admin-event-submissions-headers.txt"
+          submissions_status="$(curl --silent --show-error --location \
+            --dump-header "${submissions_headers}" \
+            --output "${submissions_body}" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header 'Origin: https://hi-coworking.com' \
+            --header 'Content-Type: application/json' \
+            --data '{"data":{}}' \
+            "${submissions_endpoint}")"
+          submissions_allow="$(awk 'BEGIN{IGNORECASE=1} /^access-control-allow-origin:/ { print $2 }' "${submissions_headers}" | tr -d '\r')"
+          if [[ "${submissions_status}" == "404" ]] || grep -q '<html' "${submissions_body}"; then
+            echo "events_v2AdminListEventSubmissions is not deployed." >&2
+            cat "${submissions_body}" >&2
+            exit 1
+          fi
+          if [[ "${submissions_status}" != "401" ]]; then
+            echo "Unsigned submissions list returned HTTP ${submissions_status}, expected 401." >&2
+            cat "${submissions_body}" >&2
+            exit 1
+          fi
+          if [[ "${submissions_allow}" != "https://hi-coworking.com" ]]; then
+            echo "Submissions list did not allow https://hi-coworking.com." >&2
+            exit 1
+          fi
+          if ! grep -q 'Sign in required' "${submissions_body}"; then
+            echo "Unsigned submissions list did not require sign-in." >&2
+            cat "${submissions_body}" >&2
+            exit 1
+          fi
+
+      - name: Remove TEST Cody event submissions
+        run: node scripts/remove-test-event-submissions.mjs

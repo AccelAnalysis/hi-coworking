@@ -254,6 +254,22 @@ export const adminCompleteEventV2 = httpsCallable<{ eventId: string }, { success
   "events_v2AdminCompleteEvent",
 );
 
+export type EventSubmissionReview = {
+  id: string;
+  action: "attend" | "apply_to_pitch" | "offer_prize";
+  name: string;
+  email: string;
+  phone?: string;
+  eventId: string;
+  eventTitle: string;
+  eventSlug: string;
+  submittedAt: number;
+};
+
+export const adminListEventSubmissions = httpsCallable<Record<string, never>, {
+  submissions: EventSubmissionReview[];
+}>(functions, "events_v2AdminListEventSubmissions");
+
 export const staffGetEventRoster = httpsCallable<{ eventId: string }, {
   event: EventPublic;
   registrations: EventRegistrationV2[];

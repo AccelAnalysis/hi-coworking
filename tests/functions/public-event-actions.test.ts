@@ -71,6 +71,48 @@ describe("public Power NOW event actions", () => {
     const interest = registration.slice(registration.indexOf("export const events_v2SubmitEventInterest"));
     expect(interest).toContain("SMS consent and third-party advertising consent are required.");
     expect(interest).not.toContain("enqueue");
+    expect(interest).toContain("notifyEventSubmission");
+    expect(registration).toContain('action: "attend"');
+
+    const notify = readFileSync("apps/functions/src/eventsV2/eventSubmissionNotify.ts", "utf8");
+    expect(notify).toContain('defineString("EVENT_SUBMISSION_WEBHOOK_URL"');
+    expect(notify).toContain('default: ""');
+    expect(notify).toContain("if (!url) return");
+    expect(notify).toContain("adminReviewUrl");
+    expect(notify).toContain('"/admin/events/submissions"');
+    expect(notify).not.toContain("SENDGRID_API_KEY");
+    expect(notify).not.toContain("defineSecret");
+
+    const submissions = readFileSync("apps/functions/src/eventsV2/adminEventSubmissions.ts", "utf8");
+    expect(submissions).toContain("if (!request.auth) throw new HttpsError(\"unauthenticated\", \"Sign in required.\");");
+    expect(submissions).toContain("requireAdmin(request.auth);");
+    expect(submissions).toContain('action: "attend"');
+    expect(submissions).toContain('"apply_to_pitch"');
+    expect(submissions).toContain('"offer_prize"');
+    expect(submissions).not.toContain("manageSecret");
+    expect(submissions).not.toContain("SENDGRID_API_KEY");
+
+    const adminPage = readFileSync("apps/web/src/app/admin/events/page.tsx", "utf8");
+    const reviewPage = readFileSync("apps/web/src/app/admin/events/submissions/page.tsx", "utf8");
+    expect(adminPage).toContain('href="/admin/events/submissions"');
+    expect(reviewPage).toContain('requiredRole="admin"');
+    expect(reviewPage).toContain("adminListEventSubmissions");
+    expect(reviewPage).toContain("Apply to pitch");
+    expect(reviewPage).toContain("Offer a prize");
+
+    const cleanup = readFileSync("scripts/remove-test-event-submissions.mjs", "utf8");
+    expect(cleanup).toContain("AVChU3SxGzsicKtukWor");
+    expect(cleanup).toContain("K38AA9T1I8U1PZd94tDm");
+    expect(cleanup).toContain("o6mlov4spCfUb1pk8ZIw");
+    expect(cleanup).toContain("event_confirm_o6mlov4spCfUb1pk8ZIw");
+    const updateAt = cleanup.indexOf("eventRef.update");
+    const countUpdate = cleanup.slice(updateAt, cleanup.indexOf("for (const id of INTEREST_IDS)", updateAt));
+    expect(countUpdate).toContain("confirmedQuantity: count");
+    expect(countUpdate).toContain("registrationCount: count");
+    expect(countUpdate).not.toContain("startTime");
+    expect(countUpdate).not.toContain("title");
+    expect(countUpdate).not.toContain("format");
+    expect(cleanup).not.toContain("SENDGRID");
     expect(registration).toContain("Reply STOP to opt out");
     expect(registration).toContain("participating businesses");
     expect(registration).not.toContain("pre-screen");
