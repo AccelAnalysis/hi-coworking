@@ -246,6 +246,10 @@ describe("admin event save CORS", () => {
         console.error(names.join(",") || "<no params>");
         process.exit(4);
       }
+      if (!names.includes("EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION")) {
+        console.error(names.join(",") || "<no params>");
+        process.exit(5);
+      }
     `], { encoding: "utf8" });
     expect(probe.status, probe.stderr || probe.stdout).toBe(0);
 

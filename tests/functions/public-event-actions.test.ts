@@ -76,11 +76,19 @@ describe("public Power NOW event actions", () => {
 
     const notify = readFileSync("apps/functions/src/eventsV2/eventSubmissionNotify.ts", "utf8");
     expect(notify).toContain('defineString("EVENT_SUBMISSION_WEBHOOK_URL"');
+    expect(notify).toContain('defineString("EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION"');
     expect(notify).toContain('default: ""');
     expect(notify).toContain("if (!url) return");
+    expect(notify).toContain("if (authorization) headers.Authorization = authorization");
     const webhookEnv = readFileSync("firebase/admin-event-functions/.env.hi-coworking-plat", "utf8");
     expect(webhookEnv).toMatch(/^EVENT_SUBMISSION_WEBHOOK_URL=$/m);
+    expect(webhookEnv).toMatch(/^EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION=$/m);
     expect(webhookEnv).not.toMatch(/EVENT_SUBMISSION_WEBHOOK_URL=https?:/i);
+    expect(webhookEnv).not.toMatch(/^EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION=.+/m);
+    for (const call of notify.match(/logger\.error\([\s\S]*?\}\);/g) || []) {
+      expect(call).not.toMatch(/\bauthorization\b\s*[,:]/);
+      expect(call).not.toContain("headers");
+    }
     expect(notify).toContain("adminReviewUrl");
     expect(notify).toContain('"/admin/events/submissions"');
     expect(notify).not.toContain("SENDGRID_API_KEY");

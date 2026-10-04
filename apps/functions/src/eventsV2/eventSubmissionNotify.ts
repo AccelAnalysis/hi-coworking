@@ -11,6 +11,11 @@ export const EVENT_SUBMISSION_WEBHOOK_URL = defineString("EVENT_SUBMISSION_WEBHO
   description: "Optional URL that receives a JSON POST after a successful event submission. Leave empty to skip.",
 });
 
+export const EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION = defineString("EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION", {
+  default: "",
+  description: "Optional Authorization header for the submission webhook. Leave empty to POST without that header.",
+});
+
 export const ADMIN_EVENT_SUBMISSIONS_PATH = "/admin/events/submissions";
 
 export type EventSubmissionAction = "attend" | "apply_to_pitch" | "offer_prize";
@@ -35,10 +40,20 @@ export async function notifyEventSubmission(input: {
     return;
   }
   if (!url) return;
+  let authorization = "";
+  try {
+    authorization = EVENT_SUBMISSION_WEBHOOK_AUTHORIZATION.value().trim();
+  } catch (error) {
+    logger.error("Event submission webhook authorization param could not be read", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (authorization) headers.Authorization = authorization;
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({
         eventName: input.eventName,
         action: input.action,
