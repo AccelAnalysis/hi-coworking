@@ -7,7 +7,6 @@ import { httpsCallable } from "firebase/functions";
 import {
   AlertCircle,
   ArrowRight,
-  BarChart3,
   BookOpen,
   CalendarClock,
   CalendarDays,
@@ -51,7 +50,6 @@ const MODULES = [
   { href: "/admin/leads", label: "Leads", description: "New inquiries, follow-up context, and conversion", icon: UserCog },
   { href: "/admin/products", label: "Pricing & memberships", description: "Canonical plans, prices, and purchase paths", icon: Package },
   { href: "/admin/roles", label: "Roles & permissions", description: "Staff authority and protected operations", icon: UserCog },
-  { href: "/admin/analytics", label: "Analytics", description: "Trends, conversion, revenue, and utilization", icon: BarChart3 },
 ] as const;
 
 function createdAt(row: Row) {

@@ -12,7 +12,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
   Coffee,
   Loader2,
   Mail,
@@ -179,7 +178,7 @@ export function ComingSoonExperience() {
           <div className="hidden md:flex gap-6 text-sm font-medium text-slate-600">
             <button onClick={() => scrollToSection("concept")} className="hover:text-slate-900 transition-colors">Concept</button>
             <button onClick={() => scrollToSection("impact")} className="hover:text-slate-900 transition-colors">Local Impact</button>
-            <button onClick={() => scrollToSection("ecosystem")} className="hover:text-slate-900 transition-colors">Ecosystem</button>
+            <button onClick={() => scrollToSection("ecosystem")} className="hover:text-slate-900 transition-colors">What&apos;s Open</button>
             <button onClick={() => scrollToSection("access")} className="hover:text-slate-900 transition-colors">Early Access</button>
           </div>
           <button
@@ -201,8 +200,8 @@ export function ComingSoonExperience() {
             <span className="text-slate-400">Intimate space.</span>
           </h1>
           <p className="text-lg md:text-2xl text-slate-600 max-w-3xl mx-auto leading-relaxed">
-            Space rentals are launching when the physical space is fully operational. While we build the space,
-            you can start using the ecosystem now.
+            Space rentals launch when the physical space is fully operational. Events and the bookstore
+            are open while we build.
           </p>
           <MapComponent />
           <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
@@ -210,7 +209,7 @@ export function ComingSoonExperience() {
               onClick={() => scrollToSection("ecosystem")}
               className="inline-flex items-center justify-center px-6 py-3 rounded-full font-medium bg-slate-900 text-white hover:bg-slate-800 shadow-xl shadow-slate-900/10 transition-all"
             >
-              Explore the Ecosystem <ArrowRight size={18} className="ml-2" />
+              See What&apos;s Open <ArrowRight size={18} className="ml-2" />
             </button>
             <button
               onClick={() => setSurveyOpen(true)}
@@ -421,20 +420,13 @@ export function ComingSoonExperience() {
 
       <section id="ecosystem" className="py-16 md:py-24 px-6 md:px-12 max-w-7xl mx-auto relative z-10">
         <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">While We Build the Space, You Can Start Using the Ecosystem Now</h2>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">While We Build the Space, Events and the Bookstore Are Open</h2>
           <p className="text-slate-600 max-w-3xl mx-auto">
-            Hi Coworking is opening soon - and you do not have to wait to plug in.
+            Hi Coworking is opening soon. You can reserve a seat or browse the bookstore now.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
-          <Card
-            icon={ClipboardList}
-            title="Explore the RFx Exchange"
-            description="Register now to build and schedule RFx releases. Pre-launch access is private - get ready. Browsing and responding to RFx opportunities begins March 16th."
-            ctaLabel="Register for the RFx Exchange"
-            href="/rfx"
-          />
+        <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
           <Card
             icon={Calendar}
             title="Register for Upcoming Events"

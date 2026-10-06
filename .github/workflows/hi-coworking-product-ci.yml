@@ -101,6 +101,7 @@ jobs:
           tests/functions/admin-event-save-cors.test.ts
           tests/functions/public-event-location.test.ts
           tests/functions/public-event-actions.test.ts
+          tests/web/public-rfx-quarantine.test.ts
 
       - name: Run active transaction integration tests
         run: >-

@@ -19,26 +19,23 @@ export default function PrivacyPage() {
           <p>We collect information you provide directly, including:</p>
           <ul className="list-disc pl-5 space-y-1">
             <li>Account information (name, email, password)</li>
-            <li>Business profile data (business name, NAICS codes, certifications)</li>
-            <li>Booking and payment information</li>
+            <li>Booking, membership, and payment information</li>
+            <li>Event registration details</li>
             <li>Communications you send to us</li>
           </ul>
 
           <h2 className="text-lg font-bold text-slate-900">2. How We Use Your Information</h2>
           <p>We use your information to:</p>
           <ul className="list-disc pl-5 space-y-1">
-            <li>Provide and manage your membership and bookings</li>
+            <li>Provide and manage your membership, bookings, and event registrations</li>
             <li>Process payments through Stripe</li>
-            <li>Display your business profile in the Member Directory (if you opt in)</li>
-            <li>Match you with relevant RFx opportunities</li>
-            <li>Send notifications about bookings, events, and platform activity</li>
+            <li>Send notifications about bookings, events, and your account</li>
           </ul>
 
           <h2 className="text-lg font-bold text-slate-900">3. Data Sharing</h2>
           <p>
             We do not sell your personal information. We share data only with service providers
-            necessary to operate the platform (e.g., Stripe for payments, Firebase for hosting).
-            Published business profiles are visible to other authenticated members.
+            necessary to operate Hi Coworking (e.g., Stripe for payments, Firebase for hosting).
           </p>
 
           <h2 className="text-lg font-bold text-slate-900">4. Data Security</h2>

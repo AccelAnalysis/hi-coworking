@@ -4,11 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
-  Briefcase,
   Calendar,
   ChevronDown,
   LayoutDashboard,
-  Loader2,
   LogOut,
   Menu,
   User,
@@ -28,45 +26,6 @@ const publicLinks = [
   { href: "/contact", label: "Contact" },
 ];
 
-function integratedRfxchangeRedirect(pathname: string): string | null {
-  if (
-    pathname === "/admin/rfx"
-    || pathname.startsWith("/admin/rfx/")
-    || pathname === "/admin/territories"
-    || pathname.startsWith("/admin/territories/")
-    || pathname === "/admin/verification"
-    || pathname.startsWith("/admin/verification/")
-    || pathname === "/admin/orgs"
-    || pathname.startsWith("/admin/orgs/")
-  ) {
-    return "/admin/dashboard";
-  }
-
-  if (
-    pathname === "/platform"
-    || pathname === "/exchange"
-    || pathname.startsWith("/exchange/")
-  ) {
-    return "/";
-  }
-
-  if (
-    pathname === "/dashboard"
-    || pathname === "/rfx"
-    || pathname.startsWith("/rfx/")
-    || pathname === "/directory"
-    || pathname.startsWith("/directory/")
-    || pathname === "/referrals"
-    || pathname.startsWith("/referrals/")
-    || pathname === "/org"
-    || pathname.startsWith("/org/")
-  ) {
-    return "/account/bookings";
-  }
-
-  return null;
-}
-
 export function AppShell({
   children,
   fullWidth = false,
@@ -81,7 +40,6 @@ export function AppShell({
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
-  const hiddenRouteDestination = integratedRfxchangeRedirect(pathname);
 
   useEffect(() => {
     if (!user) return;
@@ -105,12 +63,6 @@ export function AppShell({
     setDrawerOpen(false);
     setAvatarOpen(false);
   }, [pathname]);
-
-  useEffect(() => {
-    if (hiddenRouteDestination) {
-      router.replace(hiddenRouteDestination);
-    }
-  }, [hiddenRouteDestination, router]);
 
   async function handleSignOut() {
     setAvatarOpen(false);
@@ -150,21 +102,6 @@ export function AppShell({
       >
         {label}
       </Link>
-    );
-  }
-
-  if (hiddenRouteDestination) {
-    return (
-      <div
-        className="flex min-h-dvh items-center justify-center bg-slate-50"
-        role="status"
-        aria-live="polite"
-      >
-        <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
-          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-          Returning to Hi Coworking…
-        </div>
-      </div>
     );
   }
 
@@ -247,13 +184,6 @@ export function AppShell({
                         >
                           <Calendar className="h-4 w-4 text-slate-400" />
                           Bookings
-                        </Link>
-                        <Link
-                          href="/profile"
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50"
-                        >
-                          <Briefcase className="h-4 w-4 text-slate-400" />
-                          Profile
                         </Link>
                         <Link
                           href="/notifications"
@@ -396,13 +326,6 @@ export function AppShell({
                   >
                     <Calendar className="h-4 w-4 text-slate-400" />
                     Bookings
-                  </Link>
-                  <Link
-                    href="/profile"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
-                  >
-                    <Briefcase className="h-4 w-4 text-slate-400" />
-                    Profile
                   </Link>
                   <Link
                     href="/notifications"
