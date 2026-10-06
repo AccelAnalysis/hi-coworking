@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import {
@@ -35,7 +34,7 @@ function ComingSoonTopbar() {
         <div className="ml-auto hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
           <a href="#concept" className="transition-colors hover:text-slate-900">Concept</a>
           <a href="#impact" className="transition-colors hover:text-slate-900">Local Impact</a>
-          <a href="#ecosystem" className="transition-colors hover:text-slate-900">Ecosystem</a>
+          <a href="#ecosystem" className="transition-colors hover:text-slate-900">What&apos;s Open</a>
           <a href="#access" className="transition-colors hover:text-slate-900">Early Access</a>
         </div>
 
@@ -51,7 +50,6 @@ function ComingSoonTopbar() {
 }
 
 export function PublicSiteGate({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
   const { loading: authLoading, role } = useAuth();
   const [settings, setSettings] = useState<PublicSiteSettingsDoc>(DEFAULT_SETTINGS);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -87,11 +85,9 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
     };
   }, [launchReached]);
 
-  // Allow /platform route to bypass Coming Soon mode.
-  // Disabling comingSoonEnabled still permits an earlier soft opening, while
-  // the October 1 launch time guarantees the gate expires automatically.
-  const isAllowedRoute = pathname === "/platform";
-  const bypassComingSoon = role === "staff" || role === "admin" || role === "master" || isAllowedRoute;
+  // Staff can preview the live site while Coming Soon is on for visitors.
+  // The launch time expires the gate automatically.
+  const bypassComingSoon = role === "staff" || role === "admin" || role === "master";
   const showComingSoon = settings.comingSoonEnabled && !bypassComingSoon && !launchReached;
 
   if (authLoading || settingsLoading) {

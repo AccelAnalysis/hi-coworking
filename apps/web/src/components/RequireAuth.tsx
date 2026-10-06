@@ -42,14 +42,14 @@ export function RequireAuth({ children, requiredRole, requiredMembershipStatus }
     }
 
     if (requiredRole && !hasMinimumRole(role, requiredRole)) {
-      router.push("/dashboard");
+      router.push("/account/bookings");
       return;
     }
 
     if (requiredMembershipStatus && requiredMembershipStatus.length > 0) {
       const status = userDoc?.membershipStatus ?? "none";
       if (!requiredMembershipStatus.includes(status)) {
-        router.push("/dashboard");
+        router.push("/account/bookings");
         return;
       }
     }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/firestore";
 import type { NotificationDoc, NotificationType } from "@hi/shared";
 import Link from "next/link";
+import { isQuarantinedRfxPath } from "@/lib/rfxQuarantine";
 import {
   Bell,
   Loader2,
@@ -26,9 +27,9 @@ import {
 } from "lucide-react";
 
 const TYPE_CONFIG: Record<NotificationType, { icon: typeof Bell; color: string; label: string }> = {
-  rfx_new: { icon: ClipboardList, color: "text-indigo-600 bg-indigo-50", label: "New RFx" },
-  rfx_response: { icon: MessageSquare, color: "text-blue-600 bg-blue-50", label: "RFx Response" },
-  referral: { icon: Users, color: "text-emerald-600 bg-emerald-50", label: "Referral" },
+  rfx_new: { icon: ClipboardList, color: "text-slate-600 bg-slate-100", label: "Notice" },
+  rfx_response: { icon: MessageSquare, color: "text-slate-600 bg-slate-100", label: "Notice" },
+  referral: { icon: Users, color: "text-slate-600 bg-slate-100", label: "Notice" },
   event_registration: { icon: Calendar, color: "text-purple-600 bg-purple-50", label: "Event" },
   payment: { icon: CreditCard, color: "text-amber-600 bg-amber-50", label: "Payment" },
   system: { icon: Info, color: "text-slate-600 bg-slate-100", label: "System" },
@@ -176,7 +177,7 @@ function NotificationsContent() {
                 </div>
               );
 
-              if (notif.linkTo) {
+              if (notif.linkTo && !isQuarantinedLink(notif.linkTo)) {
                 return (
                   <Link key={notif.id} href={notif.linkTo} onClick={() => !notif.read && handleMarkRead(notif.id)}>
                     {content}
@@ -190,6 +191,18 @@ function NotificationsContent() {
       </div>
     </AppShell>
   );
+}
+
+function isQuarantinedLink(linkTo: string): boolean {
+  let path = linkTo;
+  try {
+    if (linkTo.startsWith("http://") || linkTo.startsWith("https://")) {
+      path = new URL(linkTo).pathname;
+    }
+  } catch {
+    return false;
+  }
+  return isQuarantinedRfxPath(path);
 }
 
 function getTimeAgo(timestamp: number): string {
