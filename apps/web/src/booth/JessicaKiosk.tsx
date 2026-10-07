@@ -207,14 +207,14 @@ export function JessicaKiosk() {
           className="pointer-events-none absolute inset-0"
           style={{
             background: [
-              "radial-gradient(circle at 50% 46%, rgba(242,246,255,0.20), transparent 36%)",
-              "radial-gradient(circle at 50% 52%, rgba(3,201,255,0.14), transparent 46%)",
-              "radial-gradient(circle at 72% 78%, rgba(1,99,253,0.18), transparent 40%)",
-              "linear-gradient(180deg, #07133f 0%, #00072E 48%, #0b1738 100%)",
+              "radial-gradient(circle at 50% 46%, rgba(242,246,255,0.32), transparent 38%)",
+              "radial-gradient(circle at 50% 54%, rgba(3,201,255,0.20), transparent 48%)",
+              "radial-gradient(circle at 70% 80%, rgba(1,99,253,0.24), transparent 42%)",
+              "linear-gradient(180deg, #122454 0%, #00072E 50%, #14264f 100%)",
             ].join(", "),
           }}
         />
-        <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.16] mix-blend-soft-light" aria-hidden="true">
+        <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.11] mix-blend-screen" aria-hidden="true">
           <filter id="jessica-ambient-grain">
             <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" />
           </filter>
