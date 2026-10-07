@@ -714,5 +714,11 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create, update, delete: if false; // Cloud Functions only
     }
+
+    // --- powerNowConsentLog/{submissionId} ---
+    // Power NOW consent log of record. Admin SDK only. Clients cannot read or write it.
+    match /powerNowConsentLog/{submissionId} {
+      allow read, write: if false;
+    }
   }
 }
