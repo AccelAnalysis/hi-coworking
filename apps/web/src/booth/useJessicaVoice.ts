@@ -31,8 +31,6 @@ import {
   resampleLinear,
   rms,
 } from "@/booth/pcm";
-import type { AvatarMode } from "@/booth/JessicaAvatar";
-
 export type KioskStatus =
   | "needs-start"
   | "connecting"
@@ -596,21 +594,10 @@ export function useJessicaVoice() {
     if (statusRef.current === "listening") setStatus("ready");
   }, [send, setStatus]);
 
-  const avatar: AvatarMode = status === "listening"
-    ? "listening"
-    : status === "thinking" || status === "connecting"
-      ? "thinking"
-      : status === "speaking"
-        ? "speaking"
-        : status === "stopped" || status === "handoff" || status === "error"
-          ? "attention"
-          : "idle";
-
   return {
     status,
     caption,
     mouth,
-    avatar,
     errorMessage,
     vadFallback,
     setVadFallback,

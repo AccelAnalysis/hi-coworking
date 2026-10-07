@@ -26,6 +26,7 @@ import {
   parseClientSecret,
   scrubAssistantCaption,
 } from "../../apps/web/src/booth/jessicaSession";
+import { jessicaEmotion } from "../../apps/web/src/booth/jessicaEmotion";
 import { base64Pcm16ToFloat32, floatToPcm16, pcm16ToBase64, resampleLinear, rms } from "../../apps/web/src/booth/pcm";
 import {
   BOOTH_ALLOWED_ORIGINS,
@@ -259,6 +260,23 @@ describe("ephemeral voice token", () => {
     expect(handler).not.toContain("console.");
     expect(readFileSync("firebase.booth-kiosk.json", "utf8")).toContain("booth-kiosk");
     expect(readFileSync("firebase.json", "utf8")).not.toContain("booth-kiosk");
+  });
+});
+
+describe("Jessica pebble emotion", () => {
+  it("follows the booth line instead of one repeating face", () => {
+    expect(jessicaEmotion("speaking", GREETING_LINE)).toBe("happy");
+    expect(jessicaEmotion("speaking", "Who else is involved in solving that?")).toBe("curious");
+    expect(jessicaEmotion("speaking", "What timeline are you working toward?")).toBe("curious");
+    expect(jessicaEmotion("speaking", "So the need is a clearer way to review proposals this quarter.")).toBe("engaged");
+    expect(jessicaEmotion("speaking", HANDOFF_LINE)).toBe("happy");
+    expect(jessicaEmotion("speaking", STT_RETRY_LINE)).toBe("concerned");
+    expect(jessicaEmotion("speaking", STT_STOP_LINE)).toBe("concerned");
+    expect(jessicaEmotion("listening", "")).toBe("curious");
+    expect(jessicaEmotion("thinking", "")).toBe("curious");
+    expect(jessicaEmotion("ready", "")).toBe("calm");
+    expect(jessicaEmotion("error", "Voice service is unavailable. A greeter and the iPad can still help.")).toBe("concerned");
+    expect(jessicaEmotion("handoff", "")).toBe("happy");
   });
 });
 
