@@ -130,9 +130,13 @@ export function JessicaKiosk() {
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center gap-8 px-8 pb-8 lg:flex-row lg:px-14">
         <section className="flex w-full max-w-xl flex-col items-center lg:w-[46%]">
           <div className="aspect-square w-full max-w-[28rem]">
-            <JessicaAvatar mode={voice.avatar} mouth={voice.mouth} />
+            <JessicaAvatar
+              status={voice.status}
+              caption={voice.errorMessage || voice.caption}
+              mouth={voice.mouth}
+            />
           </div>
-          <p className="mt-2 text-center text-lg text-[#d5ddd6]">Booth assistant</p>
+          <p className="mt-2 text-center text-lg text-[#d5ddd6]">Accel Analysis booth assistant</p>
           <p className="mt-4 min-h-8 text-center text-2xl font-medium" aria-live="polite">
             {statusLabel(voice.status, voice.vadFallback)}
           </p>
