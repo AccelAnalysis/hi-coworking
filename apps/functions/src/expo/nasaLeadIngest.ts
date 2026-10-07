@@ -6,6 +6,8 @@ import {
   validateExpoLeadPayload,
   type NormalizedExpoLead,
 } from "./nasaLeadModel";
+import { POWER_NOW_FORM } from "./powerNowModel";
+import { handlePowerNowHttp, type PowerNowConsentLog, type PowerNowRateLimiter } from "./powerNowIngest";
 
 const ATTIO_BASE = "https://api.attio.com/v2";
 
@@ -108,6 +110,9 @@ export async function handleExpoLeadHttp(request: {
   apiKey?: string | null;
   fetchImpl?: FetchLike;
   now?: Date;
+  ip?: string | null;
+  rateLimiter?: PowerNowRateLimiter;
+  consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
 }): Promise<ExpoHttpResult> {
   const headers = corsHeaders(request.origin);
   if (request.origin && !isAllowedOrigin(request.origin)) {
@@ -130,8 +135,28 @@ export async function handleExpoLeadHttp(request: {
   const record = request.body && typeof request.body === "object"
     ? (request.body as Record<string, unknown>)
     : null;
-  if (record && typeof record.expo_hp === "string" && record.expo_hp.trim()) {
+  const honeypot = [record?.expo_hp, record?.pn_hp].some(
+    (value) => typeof value === "string" && value.trim().length > 0,
+  );
+  if (honeypot) {
     return { status: 200, headers, body: { ok: true, accepted: true } };
+  }
+
+  if (record?.form === POWER_NOW_FORM) {
+    const powerNow = await handlePowerNowHttp({
+      body: request.body,
+      apiKey: request.apiKey,
+      fetchImpl: request.fetchImpl,
+      now: request.now,
+      ip: request.ip,
+      rateLimiter: request.rateLimiter,
+      consentLog: request.consentLog,
+    });
+    return {
+      status: powerNow.status,
+      headers: { ...headers, ...powerNow.extraHeaders },
+      body: powerNow.body,
+    };
   }
 
   const validated = validateExpoLeadPayload(request.body, request.now ?? new Date());
