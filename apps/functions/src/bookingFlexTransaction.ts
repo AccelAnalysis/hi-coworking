@@ -144,25 +144,43 @@ async function ensureGuestAccount(guest?: GuestDetails) {
   } catch (error: unknown) {
     const coded = error as { code?: string };
     if (coded.code !== "auth/user-not-found") throw error;
-    userRecord = await admin.auth().createUser({
-      email,
-      displayName: guest?.name?.trim() || undefined,
-      emailVerified: false,
-    });
-    created = true;
+    try {
+      userRecord = await admin.auth().createUser({
+        email,
+        displayName: guest?.name?.trim() || undefined,
+        emailVerified: false,
+      });
+      created = true;
+    } catch (createError: unknown) {
+      // Another checkout or signup may create the account after our lookup.
+      if ((createError as { code?: string }).code !== "auth/email-already-exists") {
+        throw createError;
+      }
+      userRecord = await admin.auth().getUserByEmail(email);
+    }
   }
 
+  // An email entered at checkout does not prove ownership of an existing
+  // account. Keep its profile, role, membership, and credits untouched.
+  if (!created) return { uid: userRecord.uid, created: false };
+
   const userRef = db().collection("users").doc(userRecord.uid);
-  await userRef.set({
-    uid: userRecord.uid,
-    email,
-    displayName: guest?.name?.trim() || userRecord.displayName || "",
-    phone: guest?.phone?.trim() || "",
-    role: "member",
-    membershipStatus: "none",
-    ...(created ? { createdAt: Date.now() } : {}),
-    updatedAt: Date.now(),
-  }, { merge: true });
+  await db().runTransaction(async (tx) => {
+    const userSnap = await tx.get(userRef);
+    // Preserve a profile created concurrently by another account workflow.
+    if (userSnap.exists) return;
+    const now = Date.now();
+    tx.create(userRef, {
+      uid: userRecord.uid,
+      email,
+      displayName: guest?.name?.trim() || userRecord.displayName || "",
+      phone: guest?.phone?.trim() || "",
+      role: "member",
+      membershipStatus: "none",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
 
   return { uid: userRecord.uid, created };
 }
@@ -721,9 +739,11 @@ export const booking_finalizeCheckout = onCall(
       throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
     }
 
-    const guestAccount = request.auth
-      ? { uid: request.auth.uid, created: false }
-      : await ensureGuestAccount(hold.guest || undefined);
+    // Resolve ownership from the hold, not from whichever account happens to
+    // be signed in when a guest returns from Stripe with the hold secret.
+    const guestAccount = hold.userId.startsWith("guest:")
+      ? await ensureGuestAccount(hold.guest || undefined)
+      : { uid: hold.userId, created: false };
     const finalUserId = guestAccount.uid;
     const result = await finalizeHeldBooking(
       holdId,
