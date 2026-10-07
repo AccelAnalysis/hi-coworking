@@ -7,7 +7,7 @@ TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points th
 - Previous TV address: `/expo/nasa-2026/kiosk` redirects here
 - Intake form: `/intake` (NASA Expo iPads can stay on `/expo/nasa-2026`, which adds the event and redirects)
 
-Jessica is a soft magenta pebble with a round chin, big eyes, and no cleft. The face is drawn on a `requestAnimationFrame` loop locked to the display refresh and eased with an exponential lerp, so a 60 Hz panel gets a new frame every refresh. Poses follow the kiosk status and the line she is speaking: idle, wake, listen, thinking, speaking, happy, curious, concerned, engaged, celebrate, unavailable, and push-to-talk press.
+Jessica is a flat magenta circle with two white eyes. There is no drawn mouth, brow, shine, or drop shadow. Expression comes from the eye shape and position, and from the circle squashing and stretching like a balloon. The picture is drawn on a `requestAnimationFrame` loop locked to the display refresh and eased with an exponential lerp, so a 60 Hz panel gets a new frame every refresh. The voice level drives that squash while she speaks, and the same status picks the eye pose for listening, idle, and emotion. Poses follow the kiosk status and the line she is speaking: idle, wake, listen, thinking, speaking, happy, curious, concerned, engaged, celebrate, unavailable, and push-to-talk press.
 - Voice: xAI Speech-to-Speech, `grok-voice-latest`
 - Default listen mode: push-to-talk
 

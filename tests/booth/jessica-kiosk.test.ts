@@ -26,7 +26,7 @@ import {
   parseClientSecret,
   scrubAssistantCaption,
 } from "../../apps/web/src/booth/jessicaSession";
-import { JESSICA_ANIMATION, JESSICA_POSES, jessicaPose } from "../../apps/web/src/booth/jessicaEmotion";
+import { JESSICA_ANIMATION, JESSICA_POSES, jessicaPose, poseSprings } from "../../apps/web/src/booth/jessicaEmotion";
 import { base64Pcm16ToFloat32, floatToPcm16, pcm16ToBase64, resampleLinear, rms } from "../../apps/web/src/booth/pcm";
 import {
   BOOTH_ALLOWED_ORIGINS,
@@ -265,7 +265,7 @@ describe("ephemeral voice token", () => {
   });
 });
 
-describe("Jessica pebble animation", () => {
+describe("Jessica blob animation", () => {
   it("maps booth status and the spoken line onto a wide pose library", () => {
     expect(JESSICA_POSES).toEqual([
       "idle",
@@ -284,7 +284,7 @@ describe("Jessica pebble animation", () => {
     expect(JESSICA_ANIMATION).toMatchObject({
       driver: "requestAnimationFrame",
       targetFps: 60,
-      chin: "smooth-ellipse",
+      body: "flat-blob",
     });
     expect(jessicaPose("speaking", GREETING_LINE)).toBe("happy");
     expect(jessicaPose("speaking", "Who else is involved in solving that?")).toBe("curious");
@@ -304,13 +304,31 @@ describe("Jessica pebble animation", () => {
     expect(jessicaPose("handoff", "")).toBe("celebrate");
   });
 
-  it("paints the face from a display-refresh loop and a smooth chin", () => {
+  it("squashes the circle from the voice level and keeps pleasure in the eyes", () => {
+    const quiet = poseSprings("speaking", 0);
+    const loud = poseSprings("speaking", 1);
+    expect(loud.squash).toBeGreaterThan(quiet.squash + 0.5);
+    expect(loud.voice).toBe(1);
+    expect(poseSprings("engaged", 0.82).squash).toBeGreaterThan(poseSprings("idle", 0).squash + 0.5);
+    expect(poseSprings("happy", 0).cheer).toBeGreaterThan(poseSprings("idle", 0).cheer);
+    expect(poseSprings("listen", 0).squash).toBeLessThan(0);
+    expect(poseSprings("press", 0).squash).toBeGreaterThan(0.5);
+  });
+
+  it("paints a flat circle and white eyes from a display-refresh loop", () => {
     const avatar = readFileSync("apps/web/src/booth/JessicaAvatar.tsx", "utf8");
     const kiosk = readFileSync("apps/web/src/booth/JessicaKiosk.tsx", "utf8");
     expect(avatar).toContain("requestAnimationFrame");
     expect(avatar).toContain("ellipse");
+    expect(avatar).toContain("#e21886");
+    expect(avatar).toContain("#ffffff");
     expect(avatar).not.toContain("bezierCurveTo");
+    expect(avatar).not.toContain("quadraticCurveTo");
+    expect(avatar).not.toContain("createRadialGradient");
+    expect(avatar).not.toContain("shadowBlur");
     expect(avatar.toLowerCase()).not.toContain("cleft");
+    expect(avatar.toLowerCase()).not.toContain("eyebrow");
+    expect(avatar.toLowerCase()).not.toContain("pupil");
     expect(kiosk).not.toContain("NASA");
     expect(kiosk).toContain("#0163FD");
     expect(kiosk).toContain("#00072E");

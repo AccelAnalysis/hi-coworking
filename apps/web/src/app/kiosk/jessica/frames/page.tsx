@@ -11,21 +11,21 @@ export const metadata: Metadata = {
 const FRAMES = [
   {
     title: "Idle",
-    note: "Soft rounded chin, gentle smile, breathing.",
+    note: "Flat circle and white eyes. The blob keeps a slow balloon wobble.",
     status: "ready",
     caption: "",
     mouth: 0,
   },
   {
     title: "Happy",
-    note: "Greeting. Big eyes, open smile, small nod.",
+    note: "Greeting. Eyes squint and tilt. The circle stretches with the mood.",
     status: "speaking",
     caption: GREETING_LINE,
     mouth: 0,
   },
   {
     title: "Speaking",
-    note: "Mouth follows the voice level. No cleft.",
+    note: "Voice level squashes the circle. Eyes stay open and follow the line.",
     status: "speaking",
     caption: "So the need is a clearer way to review the work this quarter.",
     mouth: 0.82,
@@ -41,9 +41,9 @@ export default function JessicaFramesPage() {
         </span>
         <h1 className="mt-4 text-4xl font-bold [font-family:var(--font-aa-display),Georgia,serif]">Jessica, for review</h1>
         <p className="mt-2 max-w-3xl text-lg text-white/85">
-          Abstract pebble. Cute, feminine-leaning, no hair or clothes, no chin cleft.
-          Motion is a requestAnimationFrame loop aimed at 60 fps, with exponential easing between poses.
-          These three frames are concepts to pick from before the face is locked.
+          A flat magenta circle and two white eyes. Expression is the eye shape and where the eyes sit,
+          plus the circle squashing and stretching like a balloon. Motion is a requestAnimationFrame loop
+          aimed at 60 fps, and the voice level drives that squash while she speaks.
         </p>
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           {FRAMES.map((frame) => (
