@@ -312,8 +312,7 @@
 }
 
 .pn-field > label,
-.pn-choice-field > legend,
-.pn-consent > legend {
+.pn-choice-field > legend {
   display: block;
   font-weight: 600;
   font-size: 16px;
@@ -414,11 +413,32 @@
 }
 
 .pn-consent {
+  display: flow-root;
   background: var(--ice);
   border: 0;
   border-radius: 10px;
   padding: 20px 20px 8px;
   margin: 8px 0 24px;
+  min-inline-size: 0;
+}
+
+/*
+  A static legend is painted across the fieldset’s top border. Floating it
+  (and clearing the first checkbox) puts the intro fully inside the Ice card.
+*/
+.pn-consent > legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 0;
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--midnight);
+}
+
+.pn-consent > legend + * {
+  clear: left;
 }
 
 .pn-consent .pn-check {
