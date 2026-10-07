@@ -46,16 +46,27 @@ export class StripeProvider implements PaymentProvider {
       purpose: input.purpose,
       purposeRefId: input.purposeRefId || "",
     };
-    const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = isSubscription
-      ? { price: input.metadata?.stripePriceId, quantity: 1 }
-      : {
+    const recurringInterval = input.metadata?.recurringInterval === "year" ? "year" : "month";
+    const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = isSubscription && input.metadata?.pricingMode === "price_data"
+      ? {
           price_data: {
             currency: input.currency,
-            product_data: { name: input.lineItemLabel || "Payment" },
+            product_data: { name: input.lineItemLabel || "Hi Coworking membership" },
             unit_amount: input.amount,
+            recurring: { interval: recurringInterval },
           },
           quantity: 1,
-        };
+        }
+      : isSubscription
+        ? { price: input.metadata?.stripePriceId, quantity: 1 }
+        : {
+            price_data: {
+              currency: input.currency,
+              product_data: { name: input.lineItemLabel || "Payment" },
+              unit_amount: input.amount,
+            },
+            quantity: 1,
+          };
 
     const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       mode: isSubscription ? "subscription" : "payment",

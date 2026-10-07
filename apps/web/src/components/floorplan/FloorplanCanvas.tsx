@@ -202,6 +202,16 @@ export function FloorplanCanvas({
     setView(next);
   };
 
+  useEffect(() => {
+    if (!width || !height || !contentWidth || !contentHeight) return;
+    const scale = Math.min(width / contentWidth, height / contentHeight);
+    setViewSafe({
+      x: Math.max(0, (width - contentWidth * scale) / 2),
+      y: Math.max(0, (height - contentHeight * scale) / 2),
+      scale: Math.max(0.2, scale),
+    });
+  }, [width, height, contentWidth, contentHeight]);
+
   const handleStageMouseDown = (e: KonvaEventObject<MouseEvent>) => {
     if (!onSelect && !onSelectIds) return;
 
@@ -460,7 +470,13 @@ export function FloorplanCanvas({
             y={el.y}
             width={el.width ?? 120}
             height={el.height ?? 100}
-            cornerRadius={el.type === "WALL" ? 2 : 10}
+            cornerRadius={
+              el.meta?.shape === "ellipse"
+                ? Math.min(el.width ?? 120, el.height ?? 100) / 2
+                : el.type === "WALL"
+                  ? 2
+                  : 10
+            }
           />
         )}
 
@@ -505,7 +521,7 @@ export function FloorplanCanvas({
       >
         <Layer>
           {bgImage ? (
-            <KonvaImage image={bgImage} width={width} height={height} opacity={backgroundOpacity ?? 1} />
+            <KonvaImage image={bgImage} width={contentWidth} height={contentHeight} opacity={backgroundOpacity ?? 1} />
           ) : null}
 
           {usingLegacyModel
