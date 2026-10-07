@@ -3,9 +3,12 @@
 TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points them at the intake form. The TV does not collect name, email, or phone, and the voice path does not write to Attio. The screen is not event-branded. An event query on the URL is not shown.
 
 - Kiosk: `/kiosk/jessica`
+- Always-on presentation: `/kiosk/jessica?mode=ambient` (alias `?display=solo`)
 - Review frames: `/kiosk/jessica/frames` (idle, happy, speaking)
-- Previous TV address: `/expo/nasa-2026/kiosk` redirects here
+- Previous TV address: `/expo/nasa-2026/kiosk` redirects here and keeps the query
 - Intake form: `/intake` (NASA Expo iPads can stay on `/expo/nasa-2026`, which adds the event and redirects)
+
+Presentation mode is the TV loop. Jessica is already idle and animating. There is no tap-to-wake screen, no wordmark, and no iPad card. The background is Midnight with a soft Ice and Cyan glow and a little grain. Hold anywhere, or hold the space bar, to talk. Press **B** to return to the booth controls. The booth page also has a **Presentation** button, which sets `mode=ambient` and asks the browser to go fullscreen.
 
 Jessica is a flat magenta circle with two white eyes. There is no drawn mouth, brow, shine, or drop shadow. Expression comes from the eye shape and position, and from the circle squashing and stretching like a balloon. The picture is drawn on a `requestAnimationFrame` loop locked to the display refresh and eased with an exponential lerp, so a 60 Hz panel gets a new frame every refresh. The voice level drives that squash while she speaks, and the same status picks the eye pose for listening, idle, and emotion. Poses follow the kiosk status and the line she is speaking: idle, wake, listen, thinking, speaking, happy, curious, concerned, engaged, celebrate, unavailable, and push-to-talk press.
 - Voice: xAI Speech-to-Speech, `grok-voice-latest`
@@ -73,7 +76,7 @@ Unattended Chrome, after the mic permission is saved in this profile. Replace th
   --kiosk \
   --window-position=1512,0 \
   --window-size=1920,1080 \
-  "https://hi-coworking.com/kiosk/jessica"
+  "https://hi-coworking.com/kiosk/jessica?mode=ambient"
 ```
 
 Edge is the same flags with:

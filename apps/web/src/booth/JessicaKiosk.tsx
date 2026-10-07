@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { JessicaAvatar } from "@/booth/JessicaAvatar";
 import { AccelWordmark } from "@/components/AccelWordmark";
+import { ambientAvatarStatus, jessicaDisplayFromSearch } from "@/booth/jessicaDisplay";
 import { IPAD_FORM_PATH } from "@/booth/jessicaSession";
 import { useJessicaVoice, type KioskStatus } from "@/booth/useJessicaVoice";
 
@@ -33,9 +34,18 @@ function statusLabel(status: KioskStatus, vadFallback: boolean): string {
   }
 }
 
+function requestFullscreen() {
+  if (document.fullscreenElement) return;
+  void document.documentElement.requestFullscreen().catch(() => {
+    // A booth launch with --kiosk is already fullscreen. A normal tab needs a gesture.
+  });
+}
+
 export function JessicaKiosk() {
   const voice = useJessicaVoice();
   const { start, pttDown, pttUp } = voice;
+  const [ambient, setAmbient] = useState<boolean | null>(null);
+  const ambientStarted = useRef(false);
   const [hideCursor, setHideCursor] = useState(true);
   const [cursorHint, setCursorHint] = useState(true);
   const talkLocked = voice.status === "needs-start"
@@ -46,15 +56,26 @@ export function JessicaKiosk() {
     || voice.vadFallback;
   const showWake = voice.status === "needs-start" || voice.status === "connecting" || voice.status === "error";
 
+  const readDisplay = useCallback(() => {
+    setAmbient(jessicaDisplayFromSearch(window.location.search) === "ambient");
+  }, []);
+
+  useEffect(() => {
+    readDisplay();
+    window.addEventListener("popstate", readDisplay);
+    return () => window.removeEventListener("popstate", readDisplay);
+  }, [readDisplay]);
+
   useEffect(() => {
     document.documentElement.classList.toggle("jessica-kiosk-cursor-hidden", hideCursor);
     return () => document.documentElement.classList.remove("jessica-kiosk-cursor-hidden");
   }, [hideCursor]);
 
   useEffect(() => {
+    if (ambient) return;
     const hint = window.setTimeout(() => setCursorHint(false), 6000);
     return () => window.clearTimeout(hint);
-  }, []);
+  }, [ambient]);
 
   useEffect(() => {
     let lock: WakeLockSentinel | null = null;
@@ -84,7 +105,47 @@ export function JessicaKiosk() {
   }, []);
 
   useEffect(() => {
+    if (ambient !== true) {
+      ambientStarted.current = false;
+      return;
+    }
+    if (ambientStarted.current) return;
+    ambientStarted.current = true;
+    start();
+  }, [ambient, start]);
+
+  useEffect(() => {
+    if (ambient !== true) return;
+    requestFullscreen();
+    const onGesture = () => requestFullscreen();
+    window.addEventListener("pointerdown", onGesture, { once: true });
+    return () => window.removeEventListener("pointerdown", onGesture);
+  }, [ambient]);
+
+  const enterAmbient = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", "ambient");
+    url.searchParams.delete("display");
+    window.history.pushState({}, "", url);
+    setAmbient(true);
+    requestFullscreen();
+  }, []);
+
+  const leaveAmbient = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("mode");
+    url.searchParams.delete("display");
+    window.history.pushState({}, "", url);
+    setAmbient(false);
+    if (document.fullscreenElement) void document.exitFullscreen();
+  }, []);
+
+  useEffect(() => {
     const down = (event: KeyboardEvent) => {
+      if (event.code === "KeyB" && ambient && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        leaveAmbient();
+        return;
+      }
       if (event.code === "KeyC" && !event.repeat && !event.metaKey && !event.ctrlKey && !event.altKey) {
         setHideCursor((value) => !value);
         setCursorHint(true);
@@ -106,16 +167,77 @@ export function JessicaKiosk() {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
-  }, [start, pttDown, pttUp]);
+  }, [ambient, leaveAmbient, start, pttDown, pttUp]);
 
   const fullscreen = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
-    else void document.documentElement.requestFullscreen();
+    else requestFullscreen();
   };
+
+  const holdDown = (event: PointerEvent<HTMLElement>) => {
+    event.preventDefault();
+    if ("setPointerCapture" in event.currentTarget) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    start();
+    pttDown();
+  };
+
+  if (ambient === null) {
+    return <main className="h-dvh min-h-dvh w-full bg-[#00072E]" />;
+  }
+
+  if (ambient) {
+    const poseStatus = ambientAvatarStatus(voice.status);
+    const poseCaption = voice.status === "error" || voice.status === "needs-start" || voice.status === "connecting"
+      ? ""
+      : voice.caption;
+    return (
+      <main
+        className="relative h-dvh min-h-dvh w-full select-none overflow-hidden bg-[#00072E] text-white"
+        data-display="ambient"
+        aria-label="Jessica"
+        onContextMenu={(event) => event.preventDefault()}
+        onPointerDown={holdDown}
+        onPointerUp={() => pttUp()}
+        onPointerCancel={() => pttUp()}
+        style={{ touchAction: "none" }}
+      >
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: [
+              "radial-gradient(circle at 50% 46%, rgba(242,246,255,0.20), transparent 36%)",
+              "radial-gradient(circle at 50% 52%, rgba(3,201,255,0.14), transparent 46%)",
+              "radial-gradient(circle at 72% 78%, rgba(1,99,253,0.18), transparent 40%)",
+              "linear-gradient(180deg, #07133f 0%, #00072E 48%, #0b1738 100%)",
+            ].join(", "),
+          }}
+        />
+        <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.16] mix-blend-soft-light" aria-hidden="true">
+          <filter id="jessica-ambient-grain">
+            <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" />
+          </filter>
+          <rect width="100%" height="100%" filter="url(#jessica-ambient-grain)" />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="aspect-square h-[min(78vh,78vw)] w-[min(78vh,78vw)]">
+            <JessicaAvatar
+              status={poseStatus}
+              caption={poseCaption}
+              mouth={voice.mouth}
+              pressed={voice.status === "listening" && !voice.vadFallback}
+            />
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main
       className="relative flex h-dvh min-h-dvh w-full select-none flex-col overflow-x-hidden overflow-y-auto bg-[#00072E] text-white [font-family:var(--font-aa-body),Arial,sans-serif]"
+      data-display="booth"
       onContextMenu={(event) => event.preventDefault()}
     >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(3,201,255,0.16),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(1,99,253,0.2),transparent_36%)]" />
@@ -208,6 +330,13 @@ export function JessicaKiosk() {
               onClick={fullscreen}
             >
               Fullscreen this display
+            </button>
+            <button
+              type="button"
+              className="min-h-14 rounded-full border-2 border-[#03C9FF] px-6 text-lg text-white"
+              onClick={enterAmbient}
+            >
+              Presentation
             </button>
             <button
               type="button"

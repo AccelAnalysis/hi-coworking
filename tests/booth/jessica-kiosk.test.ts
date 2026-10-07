@@ -27,6 +27,7 @@ import {
   scrubAssistantCaption,
 } from "../../apps/web/src/booth/jessicaSession";
 import { JESSICA_ANIMATION, JESSICA_POSES, jessicaPose, poseSprings } from "../../apps/web/src/booth/jessicaEmotion";
+import { ambientAvatarStatus, jessicaDisplayFromSearch } from "../../apps/web/src/booth/jessicaDisplay";
 import { base64Pcm16ToFloat32, floatToPcm16, pcm16ToBase64, resampleLinear, rms } from "../../apps/web/src/booth/pcm";
 import {
   BOOTH_ALLOWED_ORIGINS,
@@ -332,6 +333,24 @@ describe("Jessica blob animation", () => {
     expect(kiosk).not.toContain("NASA");
     expect(kiosk).toContain("#0163FD");
     expect(kiosk).toContain("#00072E");
+    expect(kiosk).toContain('set("mode", "ambient")');
+    expect(kiosk).toContain("requestFullscreen");
+    expect(kiosk).toContain('data-display="ambient"');
+  });
+
+  it("opens an always-on solo display from the URL and keeps the wake screen off", () => {
+    expect(jessicaDisplayFromSearch("")).toBe("booth");
+    expect(jessicaDisplayFromSearch("?mode=booth")).toBe("booth");
+    expect(jessicaDisplayFromSearch("?mode=ambient")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?mode=AMBIENT")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?display=solo")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?display=solo&event=nasa-expo-2026-10-20")).toBe("ambient");
+    expect(ambientAvatarStatus("needs-start")).toBe("ready");
+    expect(ambientAvatarStatus("connecting")).toBe("ready");
+    expect(ambientAvatarStatus("error")).toBe("ready");
+    expect(ambientAvatarStatus("listening")).toBe("listening");
+    expect(ambientAvatarStatus("speaking")).toBe("speaking");
+    expect(jessicaPose(ambientAvatarStatus("needs-start"), "")).toBe("idle");
     expect(readFileSync("apps/web/src/app/kiosk/jessica/page.tsx", "utf8")).toContain("JessicaKiosk");
     expect(readFileSync("apps/web/src/app/expo/nasa-2026/kiosk/page.tsx", "utf8")).toContain("/kiosk/jessica");
   });
