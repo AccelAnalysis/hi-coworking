@@ -17,6 +17,8 @@ apps/functions/lib/
 firebase/booking-public-functions/lib/
 firebase/booking-transaction-functions/lib/
 firebase/admin-event-functions/lib/
+firebase/booth-kiosk-functions/lib/
+firebase/booth-kiosk-functions/.secret.local
 
 # Production
 *.log

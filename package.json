@@ -18,6 +18,8 @@
     "build:admin-operating-calendar-deploy": "node -e \"require('fs').rmSync('firebase/admin-operating-calendar-functions/lib',{recursive:true,force:true})\" && npm run build --workspace functions -- --project ../../firebase/admin-operating-calendar-functions/tsconfig.json",
     "build:payment-status-guard-deploy": "node -e \"require('fs').rmSync('firebase/payment-status-guard-functions/lib',{recursive:true,force:true})\" && npm run build --workspace functions -- --project ../../firebase/payment-status-guard-functions/tsconfig.json",
     "build:admin-event-deploy": "node -e \"require('fs').rmSync('firebase/admin-event-functions/lib',{recursive:true,force:true})\" && npm run build --workspace functions -- --project ../../firebase/admin-event-functions/tsconfig.json",
+    "build:booth-kiosk-deploy": "node -e \"require('fs').rmSync('firebase/booth-kiosk-functions/lib',{recursive:true,force:true})\" && npm install --prefix firebase/booth-kiosk-functions && npm run build --prefix firebase/booth-kiosk-functions",
+    "deploy:booth-kiosk": "firebase deploy --config firebase.booth-kiosk.json --project hi-coworking-plat --only functions:booth-kiosk",
     "lint": "npm run lint --workspace web",
     "emulators": "firebase emulators:start",
     "deploy:booking:public": "firebase deploy --config firebase.booking.json --project hi-coworking-plat --only functions:booking-public",

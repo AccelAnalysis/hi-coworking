@@ -1,0 +1,12 @@
+{
+  "functions": [
+    {
+      "source": "firebase/booth-kiosk-functions",
+      "codebase": "booth-kiosk",
+      "region": "us-central1",
+      "predeploy": [
+        "npm run build:booth-kiosk-deploy"
+      ]
+    }
+  ]
+}
