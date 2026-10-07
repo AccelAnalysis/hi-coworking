@@ -139,12 +139,24 @@
   touch-action: manipulation;
 }
 
-.pn-btn-primary {
+/*
+  The hero CTA is a link. `.pn a` is more specific than a single class, so
+  without these states the label stays website blue on Accel Blue.
+*/
+.pn .pn-btn-primary,
+.pn .pn-btn-primary:hover,
+.pn .pn-btn-primary:focus,
+.pn .pn-btn-primary:focus-visible,
+.pn .pn-btn-primary:active,
+.pn .pn-btn-primary:visited {
   background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
+  text-decoration: none;
 }
 
-.pn-btn-primary:hover {
+.pn .pn-btn-primary:hover,
+.pn .pn-btn-primary:active {
   background: var(--blue-hover);
   border-color: var(--blue-hover);
   color: #fff;
@@ -155,10 +167,18 @@
   color: var(--blue);
 }
 
-.pn-btn-outline:hover,
-.pn-card-active .pn-btn-outline {
+.pn .pn-btn-outline:hover,
+.pn .pn-btn-outline:active,
+.pn .pn-card-active .pn-btn-outline,
+.pn .pn-card-active .pn-btn-outline:hover,
+.pn .pn-card-active .pn-btn-outline:focus,
+.pn .pn-card-active .pn-btn-outline:focus-visible,
+.pn .pn-card-active .pn-btn-outline:active,
+.pn .pn-card-active .pn-btn-outline:visited {
   background: var(--blue);
+  border-color: var(--blue);
   color: #fff;
+  text-decoration: none;
 }
 
 .pn-btn:disabled {
