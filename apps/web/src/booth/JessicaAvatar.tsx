@@ -180,7 +180,7 @@ function drawEye(
 ) {
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(side * cheer * 0.55);
+  ctx.rotate(-side * cheer * 0.5);
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
   ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
