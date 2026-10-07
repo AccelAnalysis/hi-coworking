@@ -1,9 +1,13 @@
-# Jessica booth kiosk — NASA Expo, October 20
+# Jessica booth kiosk
 
-TV page for the Accel Analysis booth. Jessica qualifies a visitor by voice, then points them at the iPad form. The TV does not collect name, email, or phone, and the voice path does not write to Attio.
+TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points them at the intake form. The TV does not collect name, email, or phone, and the voice path does not write to Attio. The screen is not event-branded. An event query on the URL is not shown.
 
-- Kiosk: `/expo/nasa-2026/kiosk`
-- iPad form: `/expo/nasa-2026` (separate page; this work does not change it)
+- Kiosk: `/kiosk/jessica`
+- Review frames: `/kiosk/jessica/frames` (idle, happy, speaking)
+- Previous TV address: `/expo/nasa-2026/kiosk` redirects here
+- Intake form: `/intake` (NASA Expo iPads can stay on `/expo/nasa-2026`, which adds the event and redirects)
+
+Jessica is a soft magenta pebble with a round chin, big eyes, and no cleft. The face is drawn on a `requestAnimationFrame` loop locked to the display refresh and eased with an exponential lerp, so a 60 Hz panel gets a new frame every refresh. Poses follow the kiosk status and the line she is speaking: idle, wake, listen, thinking, speaking, happy, curious, concerned, engaged, celebrate, unavailable, and push-to-talk press.
 - Voice: xAI Speech-to-Speech, `grok-voice-latest`
 - Default listen mode: push-to-talk
 
@@ -53,7 +57,7 @@ Use the Mac's speakers and built-in microphone. System Settings → Sound → Ou
 
 Reliable path for show day:
 
-1. Open Chrome or Edge to `https://hi-coworking.com/expo/nasa-2026/kiosk` (or the `web.app` host).
+1. Open Chrome or Edge to `https://hi-coworking.com/kiosk/jessica` (or the `web.app` host). `/expo/nasa-2026/kiosk` still redirects there.
 2. Allow the microphone for that site.
 3. Drag the window onto the TV.
 4. Tap **Fullscreen on the TV**. Fullscreen stays on the display that holds the window. The Mac screen stays free.
@@ -69,7 +73,7 @@ Unattended Chrome, after the mic permission is saved in this profile. Replace th
   --kiosk \
   --window-position=1512,0 \
   --window-size=1920,1080 \
-  "https://hi-coworking.com/expo/nasa-2026/kiosk"
+  "https://hi-coworking.com/kiosk/jessica"
 ```
 
 Edge is the same flags with:
@@ -104,7 +108,7 @@ Say a fake email during rehearsal. Jessica should not repeat it, and it should n
 - [ ] Two empty holds produce the apology, then the greeter line. No invented summary.
 - [ ] A volunteered email or phone is not repeated and not shown on the TV.
 - [ ] Attio has no new record from the voice session.
-- [ ] The iPad still opens `/expo/nasa-2026`.
+- [ ] The iPad still opens `/expo/nasa-2026` or `/intake?event=nasa-expo-2026-10-20`.
 
 ## Dress rehearsal — October 19
 

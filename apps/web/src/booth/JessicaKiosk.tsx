@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { JessicaAvatar } from "@/booth/JessicaAvatar";
+import { AccelWordmark } from "@/components/AccelWordmark";
 import { IPAD_FORM_PATH } from "@/booth/jessicaSession";
 import { useJessicaVoice, type KioskStatus } from "@/booth/useJessicaVoice";
 
@@ -114,17 +115,20 @@ export function JessicaKiosk() {
 
   return (
     <main
-      className="relative flex h-dvh min-h-dvh w-full select-none flex-col overflow-x-hidden overflow-y-auto bg-[#0c1210] text-[#f4f1ea]"
+      className="relative flex h-dvh min-h-dvh w-full select-none flex-col overflow-x-hidden overflow-y-auto bg-[#00072E] text-white [font-family:var(--font-aa-body),Arial,sans-serif]"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(228,177,90,0.16),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(125,206,160,0.08),transparent_32%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(3,201,255,0.16),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(1,99,253,0.2),transparent_36%)]" />
 
-      <header className="relative z-10 flex items-center justify-between gap-6 px-8 pt-7 sm:px-12">
-        <div>
-          <p className="text-sm font-semibold tracking-[0.22em] text-[#e4b15a] uppercase">Accel Analysis</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">Jessica</h1>
+      <header className="relative z-10 flex items-center justify-between gap-6 border-b border-white/15 px-8 py-5 sm:px-12">
+        <div className="min-w-0">
+          <span className="inline-flex rounded-xl bg-white px-3 py-1.5">
+            <AccelWordmark height={36} />
+          </span>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-white [font-family:var(--font-aa-display),Georgia,serif] sm:text-4xl">Jessica</h1>
+          <p className="mt-1 text-base text-white/80">Put AI to work without overwhelming your team.</p>
         </div>
-        <p className="text-right text-sm text-[#c9d2cb] sm:text-base">NASA Expo · October 20</p>
+        <p className="text-right text-sm text-white/80 sm:text-base">Booth assistant</p>
       </header>
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center gap-8 px-8 pb-8 lg:flex-row lg:px-14">
@@ -134,13 +138,14 @@ export function JessicaKiosk() {
               status={voice.status}
               caption={voice.errorMessage || voice.caption}
               mouth={voice.mouth}
+              pressed={voice.status === "listening" && !voice.vadFallback}
             />
           </div>
-          <p className="mt-2 text-center text-lg text-[#d5ddd6]">Accel Analysis booth assistant</p>
-          <p className="mt-4 min-h-8 text-center text-2xl font-medium" aria-live="polite">
+          <p className="mt-2 text-center text-lg text-white/80">Accel Analysis assistant</p>
+          <p className="mt-4 min-h-8 text-center text-2xl font-semibold" aria-live="polite">
             {statusLabel(voice.status, voice.vadFallback)}
           </p>
-          <p className="mt-3 max-w-lg text-center text-xl leading-snug text-[#f4f1ea]/90" aria-live="polite">
+          <p className="mt-3 max-w-lg text-center text-xl leading-snug text-white" aria-live="polite">
             {voice.errorMessage || voice.caption}
           </p>
         </section>
@@ -149,7 +154,7 @@ export function JessicaKiosk() {
           {showWake ? (
             <button
               type="button"
-              className="flex h-64 w-64 items-center justify-center rounded-full bg-[#e4b15a] text-center text-3xl font-semibold text-[#1b1408] shadow-2xl transition active:scale-[0.98] disabled:opacity-60 sm:h-72 sm:w-72"
+              className="flex h-64 w-64 items-center justify-center rounded-full bg-[#0163FD] text-center text-3xl font-semibold text-white shadow-2xl transition active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#03C9FF] sm:h-72 sm:w-72"
               onClick={voice.start}
               disabled={voice.status === "connecting"}
             >
@@ -158,10 +163,10 @@ export function JessicaKiosk() {
           ) : (
             <button
               type="button"
-              className={`flex h-64 w-64 items-center justify-center rounded-full text-3xl font-semibold shadow-2xl transition active:scale-[0.98] sm:h-72 sm:w-72 ${
+              className={`flex h-64 w-64 items-center justify-center rounded-full text-3xl font-semibold shadow-2xl transition active:scale-[0.98] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#03C9FF] sm:h-72 sm:w-72 ${
                 voice.status === "listening"
-                  ? "bg-[#c4564a] text-white"
-                  : "bg-[#e4b15a] text-[#1b1408]"
+                  ? "bg-white text-[#00072E] ring-8 ring-[#03C9FF]"
+                  : "bg-[#0163FD] text-white"
               } ${talkLocked ? "opacity-50" : ""}`}
               style={{ touchAction: "none" }}
               aria-pressed={voice.status === "listening"}
@@ -177,14 +182,14 @@ export function JessicaKiosk() {
               {voice.vadFallback ? "Listening" : voice.status === "listening" ? "Release" : "Hold to talk"}
             </button>
           )}
-          <p className="max-w-md text-center text-base text-[#c9d2cb]">
+          <p className="max-w-md text-center text-base text-white/80">
             Press and hold, speak, then release. The space bar does the same thing.
           </p>
 
-          <div className="w-full max-w-xl rounded-3xl border border-white/10 bg-white/5 px-8 py-6 text-center">
-            <p className="text-sm font-semibold tracking-[0.18em] text-[#e4b15a] uppercase">iPad form</p>
-            <p className="mt-2 font-mono text-3xl font-semibold tracking-tight sm:text-4xl">{IPAD_FORM_PATH}</p>
-            <p className="mt-3 text-lg text-[#d5ddd6]">
+          <div className="w-full max-w-xl rounded-3xl border-2 border-white/20 bg-white px-8 py-6 text-center text-[#1B1B1B]">
+            <p className="text-sm font-semibold tracking-[0.18em] text-[#0163FD] uppercase">iPad form</p>
+            <p className="mt-2 font-mono text-3xl font-semibold tracking-tight text-[#00072E] sm:text-4xl">{IPAD_FORM_PATH}</p>
+            <p className="mt-3 text-lg text-[#1B1B1B]">
               Enter details on the iPad. This screen does not collect them.
             </p>
           </div>
@@ -192,21 +197,21 @@ export function JessicaKiosk() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               type="button"
-              className="min-h-14 rounded-full bg-white px-6 text-lg font-semibold text-[#14201b]"
+              className="min-h-14 rounded-full bg-white px-6 text-lg font-semibold text-[#00072E]"
               onClick={voice.reset}
             >
               Next visitor
             </button>
             <button
               type="button"
-              className="min-h-14 rounded-full border border-white/20 px-6 text-lg text-[#f4f1ea]"
+              className="min-h-14 rounded-full border-2 border-white/40 px-6 text-lg text-white"
               onClick={fullscreen}
             >
               Fullscreen this display
             </button>
             <button
               type="button"
-              className={`min-h-14 rounded-full border px-6 text-lg ${voice.vadFallback ? "border-[#e4b15a] text-[#e4b15a]" : "border-white/20 text-[#c9d2cb]"}`}
+              className={`min-h-14 rounded-full border-2 px-6 text-lg ${voice.vadFallback ? "border-[#03C9FF] text-white" : "border-white/40 text-white/80"}`}
               aria-pressed={voice.vadFallback}
               onClick={() => voice.setVadFallback(!voice.vadFallback)}
             >
@@ -217,7 +222,7 @@ export function JessicaKiosk() {
       </div>
 
       {cursorHint && (
-        <p className="absolute bottom-4 left-8 z-10 text-sm text-[#c9d2cb]">
+        <p className="absolute bottom-4 left-8 z-10 text-sm text-white/80">
           {hideCursor ? "Pointer hidden. Press C to show it." : "Pointer visible. Press C to hide it."}
         </p>
       )}

@@ -2,14 +2,23 @@
 
 import { useEffect, useId, useState } from "react";
 import {
+  ACCEL_DISPLAY_NAME,
+  ACCEL_EMAIL,
+  ACCEL_ONE_LINER,
+  ACCEL_PHONE_DISPLAY,
+  ACCEL_TAGLINE,
   EXPO_CONSENT_CATALOG,
   EXPO_CONSENT_KEYS,
   EXPO_ORG_TYPES,
+  INTAKE_PRIVACY_NOTICE,
+  resolveIntakeProfile,
   validateExpoLeadPayload,
   type ExpoConsentKey,
   type ExpoLeadPayload,
   type ExpoOrgType,
+  type IntakeProfile,
 } from "@/lib/expoNasaLead";
+import { AccelWordmark } from "@/components/AccelWordmark";
 import {
   EXPO_OFFLINE_SAVED_MESSAGE,
   enqueueExpoLead,
@@ -22,7 +31,7 @@ import {
   type QueuedExpoLead,
 } from "@/lib/expoLeadQueue";
 
-const DRAFT_KEY = "accel-nasa-expo-2026-draft";
+const DRAFT_KEY = "accel-analysis-intake-draft";
 
 type Draft = {
   fullName: string;
@@ -39,10 +48,9 @@ type Draft = {
 };
 
 const EMPTY_CONSENT: Record<ExpoConsentKey, boolean> = {
-  sms: false,
-  marketing: false,
-  contact: false,
   email: false,
+  sms: false,
+  phone: false,
 };
 
 const EMPTY_DRAFT: Draft = {
@@ -65,9 +73,28 @@ type Receipt = {
   name: string;
 };
 
-export function ExpoLeadForm() {
+type UrlContext = {
+  event: string;
+  eventId: string;
+  list: string;
+};
+
+function readUrlContext(): UrlContext {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    event: params.get("event")?.trim() ?? "",
+    eventId: params.get("event_id")?.trim() ?? "",
+    list: params.get("list")?.trim() ?? "",
+  };
+}
+
+export function IntakeForm() {
   const formId = useId();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [profile, setProfile] = useState<IntakeProfile>(() =>
+    resolveIntakeProfile({ explicit: true }),
+  );
+  const [urlContext, setUrlContext] = useState<UrlContext>({ event: "", eventId: "", list: "" });
   const [honeypot, setHoneypot] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -77,6 +104,10 @@ export function ExpoLeadForm() {
   const [memoryWarning, setMemoryWarning] = useState(false);
 
   useEffect(() => {
+    const context = readUrlContext();
+    setUrlContext(context);
+    setProfile(resolveIntakeProfile({ ...context, explicit: true }));
+
     const stored = window.sessionStorage.getItem(DRAFT_KEY);
     if (stored) {
       try {
@@ -142,6 +173,7 @@ export function ExpoLeadForm() {
 
   const pending = queue.filter((lead) => lead.status === "pending");
   const needsAttention = queue.filter((lead) => lead.status === "needs_attention");
+  const nasaFields = profile.fieldSet === "nasa-expo";
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -190,12 +222,15 @@ export function ExpoLeadForm() {
       need: draft.need,
       timing: draft.timing,
       interests: {
-        powerNow: draft.powerNow,
-        hiCoworkingEarlyAccess: draft.hiCoworkingEarlyAccess,
+        powerNow: nasaFields ? draft.powerNow : false,
+        hiCoworkingEarlyAccess: nasaFields ? draft.hiCoworkingEarlyAccess : false,
       },
       consent: draft.consent,
       submittedAt: new Date().toISOString(),
       clientSubmissionId: crypto.randomUUID(),
+      event: urlContext.event,
+      eventId: urlContext.eventId,
+      list: urlContext.list,
       expo_hp: honeypot,
     };
     const validated = validateExpoLeadPayload(payload);
@@ -232,7 +267,7 @@ export function ExpoLeadForm() {
       }
       setError(outcome.error || "Could not save this lead.");
     } catch {
-      setError("This iPad could not store the lead. Keep the page open and try again.");
+      setError("This device could not store the lead. Keep the page open and try again.");
     } finally {
       setSaving(false);
       setQueue(await listExpoLeads());
@@ -240,35 +275,41 @@ export function ExpoLeadForm() {
   }
 
   return (
-    <div className="min-h-dvh bg-[#f4f0e7] text-[#142033] touch-manipulation">
-      <header className="bg-[#0c1b2a] px-6 pb-6 pt-[max(1.25rem,env(safe-area-inset-top))] text-white">
+    <div className="min-h-dvh bg-[#F2F6FF] text-[#1B1B1B] touch-manipulation [font-family:var(--font-aa-body),Arial,sans-serif]">
+      <header className="border-b border-[#5E5E5E]/20 bg-white px-5 pb-5 pt-[max(1rem,env(safe-area-inset-top))] sm:px-8">
         <div className="mx-auto flex max-w-3xl items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#e6d3b0]">Accel Analysis</p>
-            <h1 className="mt-2 text-4xl font-semibold leading-tight md:text-5xl">NASA Business Vendor Expo</h1>
-            <p className="mt-2 text-xl text-white/80">October 20, 2026 · Lead capture</p>
+          <div className="min-w-0">
+            <AccelWordmark height={48} />
+            <h1 className="mt-4 text-[2rem] leading-tight font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
+              Tell us how to follow up
+            </h1>
+            <p className="mt-3 max-w-xl text-lg leading-snug text-[#1B1B1B] sm:text-xl">{ACCEL_TAGLINE}</p>
+            <p className="mt-1 max-w-xl text-base leading-snug text-[#5E5E5E]">{ACCEL_ONE_LINER}</p>
           </div>
           <button
             type="button"
             onClick={resetForm}
-            className="mt-1 min-h-14 shrink-0 rounded-full border border-white/30 px-5 text-lg font-semibold"
+            className="mt-1 min-h-14 shrink-0 rounded-full border-2 border-[#0163FD] px-5 text-lg font-semibold text-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
           >
             Clear
           </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-5 py-6 pb-12">
-        <div className="mb-5 rounded-2xl border border-[#e2d8c8] bg-white px-5 py-4 text-lg leading-snug text-[#3d4a5c]" aria-live="polite">
+      <main className="mx-auto max-w-3xl px-4 py-6 pb-16 sm:px-8">
+        <div
+          className="mb-5 rounded-2xl border-2 border-[#5E5E5E]/25 bg-white px-5 py-4 text-lg leading-snug text-[#1B1B1B]"
+          aria-live="polite"
+        >
           {pending.length > 0
-            ? `${pending.length} waiting to sync. ${syncing ? "Syncing now." : "They stay on this iPad until the network returns."}`
-            : "Consent stays off until the visitor agrees. Unchecked means no consent."}
+            ? `${pending.length} waiting to sync. ${syncing ? "Syncing now." : "They stay on this device until the network returns."}`
+            : "Each consent box starts off. Leave it off unless the person agrees to that sentence."}
           {pending.length > 0 && (
             <button
               type="button"
               onClick={() => void syncNow()}
               disabled={syncing}
-              className="ml-3 inline-flex min-h-12 items-center rounded-full bg-[#0c1b2a] px-4 text-base font-semibold text-white disabled:opacity-60"
+              className="mt-3 flex min-h-12 items-center rounded-full bg-[#0163FD] px-5 text-base font-semibold text-white disabled:opacity-60 sm:mt-0 sm:ml-3 sm:inline-flex"
             >
               {syncing ? "Syncing…" : "Sync now"}
             </button>
@@ -278,15 +319,15 @@ export function ExpoLeadForm() {
         {needsAttention.length > 0 && (
           <div className="mb-5 space-y-3">
             {needsAttention.map((lead) => (
-              <div key={lead.clientSubmissionId} className="rounded-2xl border border-[#e7c1c1] bg-[#fff6f6] px-5 py-4 text-lg">
-                <p className="font-semibold">{lead.payload.fullName || "A saved lead"} needs a correction.</p>
-                <p className="mt-1 text-[#6d3030]">{lead.lastError}</p>
+              <div key={lead.clientSubmissionId} role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-lg">
+                <p className="font-semibold">Needs a correction. {lead.payload.fullName || "A saved lead"} is still on this device.</p>
+                <p className="mt-1 text-[#1B1B1B]">{lead.lastError}</p>
                 <button
                   type="button"
                   onClick={() => void removeExpoLead(lead.clientSubmissionId).then(() => listExpoLeads().then(setQueue))}
-                  className="mt-3 min-h-12 rounded-full border border-[#6d3030] px-4 font-semibold"
+                  className="mt-3 min-h-12 rounded-full border-2 border-[#1B1B1B] px-4 font-semibold"
                 >
-                  Remove from iPad
+                  Remove from this device
                 </button>
               </div>
             ))}
@@ -295,74 +336,80 @@ export function ExpoLeadForm() {
 
         {receipt ? (
           <section className="rounded-3xl bg-white px-6 py-10 text-center shadow-sm" aria-live="polite">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-[#9c7340]">Accel Analysis</p>
-            <h2 className="mt-3 text-5xl font-semibold tracking-tight">
+            <p className="text-sm font-semibold tracking-[0.16em] text-[#0163FD] uppercase">{ACCEL_DISPLAY_NAME}</p>
+            <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
               {receipt.state === "synced" ? "Lead saved" : EXPO_OFFLINE_SAVED_MESSAGE}
             </h2>
-            <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#3d4a5c]">
+            <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
               {receipt.state === "synced"
-                ? `${receipt.name} is in the NASA Expo list.`
-                : `${receipt.name} is stored on this iPad and will sync when the connection returns.`}
+                ? `${receipt.name} is with the Accel Analysis team.`
+                : `${receipt.name} is stored on this device and will sync when the connection returns.`}
             </p>
             {memoryWarning && receipt.state === "queued" && (
-              <p className="mt-3 text-lg text-[#6d3030]">Keep this page open until the lead syncs.</p>
+              <p className="mt-3 text-lg font-semibold">Keep this page open until the lead syncs.</p>
             )}
             <button
               type="button"
               onClick={resetForm}
-              className="mt-8 min-h-16 w-full rounded-2xl bg-[#0c1b2a] px-6 text-2xl font-semibold text-white"
+              className="mt-8 min-h-16 w-full rounded-2xl bg-[#0163FD] px-6 text-2xl font-semibold text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
             >
-              Next visitor
+              Next person
             </button>
           </section>
         ) : (
-          <form id={formId} onSubmit={(event) => void onSubmit(event)} className="space-y-8" noValidate>
+          <form id={formId} onSubmit={(event) => void onSubmit(event)} className="space-y-6" noValidate>
             {error && (
-              <div role="alert" className="rounded-2xl border border-[#e7c1c1] bg-[#fff6f6] px-5 py-4 text-xl text-[#6d3030]">
+              <div role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-xl text-[#1B1B1B]">
+                <span className="font-semibold">Needs a correction. </span>
                 {error}
               </div>
             )}
 
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold">Visitor</h2>
+            <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Person</h2>
               <Field label="Full name" required value={draft.fullName} autoComplete="name" onChange={(value) => update("fullName", value)} />
               <Field label="Email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={(value) => update("email", value)} hint="Email or phone is required." />
-              <Field label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={(value) => update("phone", value)} />
+              <Field label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={(value) => update("phone", value)} hint="Optional when email is filled in." />
             </section>
 
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold">Organization</h2>
+            <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Organization</h2>
               <Field label="Organization" required autoComplete="organization" value={draft.organization} onChange={(value) => update("organization", value)} />
               <Field label="Role / title" required autoComplete="organization-title" value={draft.roleTitle} onChange={(value) => update("roleTitle", value)} />
-              <div>
-                <p className="text-xl font-semibold">Organization type <span className="text-[#9c7340]">*</span></p>
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {EXPO_ORG_TYPES.map((orgType) => {
-                    const selected = draft.orgType === orgType.id;
-                    return (
-                      <button
-                        key={orgType.id}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => update("orgType", orgType.id)}
-                        className={`min-h-16 rounded-2xl border-2 px-4 text-left text-xl font-semibold ${
-                          selected
-                            ? "border-[#0c1b2a] bg-[#0c1b2a] text-white"
-                            : "border-[#e2d8c8] bg-white text-[#142033]"
-                        }`}
-                      >
-                        {orgType.label}
-                      </button>
-                    );
-                  })}
+              {nasaFields && (
+                <div>
+                  <p className="text-xl font-semibold" id={`${formId}-org-type`}>
+                    Organization type <span className="text-[#0163FD]">Required</span>
+                  </p>
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" role="group" aria-labelledby={`${formId}-org-type`}>
+                    {EXPO_ORG_TYPES.map((orgType) => {
+                      const selected = draft.orgType === orgType.id;
+                      return (
+                        <button
+                          key={orgType.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => update("orgType", orgType.id)}
+                          className={`min-h-16 rounded-2xl border-2 px-4 text-left text-xl font-semibold focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF] ${
+                            selected
+                              ? "border-[#0163FD] bg-[#0163FD] text-white"
+                              : "border-[#5E5E5E]/35 bg-white text-[#1B1B1B]"
+                          }`}
+                        >
+                          {orgType.label}
+                          {selected ? <span className="mt-1 block text-base font-semibold">Selected</span> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </section>
 
-            <section className="space-y-4">
-              <h2 className="text-2xl font-semibold">Need</h2>
+            <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">What they need</h2>
               <label className="block text-xl font-semibold" htmlFor={`${formId}-need`}>
-                In their words <span className="text-[#9c7340]">*</span>
+                In their words <span className="text-[#0163FD]">Required</span>
               </label>
               <textarea
                 id={`${formId}-need`}
@@ -371,31 +418,35 @@ export function ExpoLeadForm() {
                 maxLength={500}
                 value={draft.need}
                 onChange={(event) => update("need", event.target.value)}
-                className="mt-2 w-full rounded-2xl border-2 border-[#e2d8c8] bg-white px-4 py-4 text-xl leading-snug outline-none focus:border-[#0c1b2a]"
+                className="mt-2 w-full rounded-2xl border-2 border-[#5E5E5E]/35 bg-white px-4 py-4 text-xl leading-snug outline-none focus:border-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
               />
-              <Field label="Timing" value={draft.timing} onChange={(value) => update("timing", value)} hint="Optional. This quarter, FY27, or whenever." />
+              <Field label="Timing" value={draft.timing} onChange={(value) => update("timing", value)} hint="Optional. This quarter, next fiscal year, or whenever." />
             </section>
 
-            <section className="space-y-3">
-              <h2 className="text-2xl font-semibold">Only if they ask</h2>
-              <p className="text-lg text-[#3d4a5c]">Leave these off unless the visitor asks about them.</p>
-              <CheckRow
-                checked={draft.powerNow}
-                onChange={(checked) => update("powerNow", checked)}
-                label="Power NOW"
-                detail="They asked about Power NOW."
-              />
-              <CheckRow
-                checked={draft.hiCoworkingEarlyAccess}
-                onChange={(checked) => update("hiCoworkingEarlyAccess", checked)}
-                label="Hi Coworking Early Access"
-                detail="They asked about Hi Coworking early access."
-              />
-            </section>
+            {nasaFields && (
+              <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+                <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Only if they ask</h2>
+                <p className="text-lg text-[#5E5E5E]">Leave these off unless the person asks about them.</p>
+                <CheckRow
+                  checked={draft.powerNow}
+                  onChange={(checked) => update("powerNow", checked)}
+                  label="Power NOW"
+                  detail="They asked about Power NOW."
+                />
+                <CheckRow
+                  checked={draft.hiCoworkingEarlyAccess}
+                  onChange={(checked) => update("hiCoworkingEarlyAccess", checked)}
+                  label="Hi Coworking Early Access"
+                  detail="They asked about Hi Coworking early access."
+                />
+              </section>
+            )}
 
-            <section className="space-y-3">
-              <h2 className="text-2xl font-semibold">Consent</h2>
-              <p className="text-lg text-[#3d4a5c]">All four start unchecked. Check a box only after the visitor agrees to that text.</p>
+            <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Consent</h2>
+              <p className="text-lg text-[#1B1B1B]">
+                Three choices: email, text, and phone. All start unchecked. Check a box only after the person agrees to that sentence.
+              </p>
               {EXPO_CONSENT_KEYS.map((key) => {
                 const item = EXPO_CONSENT_CATALOG[key];
                 return (
@@ -408,6 +459,10 @@ export function ExpoLeadForm() {
                   />
                 );
               })}
+              <div className="rounded-2xl bg-[#F2F6FF] p-4">
+                <h3 className="text-lg font-semibold">Privacy</h3>
+                <p className="mt-2 text-base leading-relaxed text-[#1B1B1B]">{INTAKE_PRIVACY_NOTICE}</p>
+              </div>
             </section>
 
             <div className="absolute -left-[9999px] h-0 overflow-hidden" aria-hidden="true">
@@ -423,14 +478,21 @@ export function ExpoLeadForm() {
               </label>
             </div>
 
-            <div className="border-t border-[#e2d8c8] pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="pb-[max(1rem,env(safe-area-inset-bottom))]">
               <button
                 type="submit"
                 disabled={saving}
-                className="min-h-16 w-full rounded-2xl bg-[#9c7340] text-2xl font-semibold text-[#0c1b2a] disabled:opacity-60"
+                className="min-h-16 w-full rounded-2xl bg-[#0163FD] text-2xl font-semibold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
               >
                 {saving ? "Saving…" : "Save lead"}
               </button>
+              <p className="mt-4 text-center text-base text-[#5E5E5E]">
+                {ACCEL_DISPLAY_NAME}
+                {" · "}
+                <a className="font-semibold text-[#0163FD] underline" href="tel:+17572360651">{ACCEL_PHONE_DISPLAY}</a>
+                {" · "}
+                <a className="font-semibold text-[#0163FD] underline" href={`mailto:${ACCEL_EMAIL}`}>{ACCEL_EMAIL}</a>
+              </p>
             </div>
           </form>
         )}
@@ -462,7 +524,7 @@ function Field({
   return (
     <div>
       <label htmlFor={id} className="text-xl font-semibold">
-        {label} {required && <span className="text-[#9c7340]">*</span>}
+        {label} {required ? <span className="text-[#0163FD]">Required</span> : null}
       </label>
       <input
         id={id}
@@ -472,9 +534,9 @@ function Field({
         required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 min-h-16 w-full rounded-2xl border-2 border-[#e2d8c8] bg-white px-4 text-xl outline-none focus:border-[#0c1b2a]"
+        className="mt-2 min-h-16 w-full rounded-2xl border-2 border-[#5E5E5E]/35 bg-white px-4 text-xl outline-none focus:border-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
       />
-      {hint && <p className="mt-2 text-lg text-[#3d4a5c]">{hint}</p>}
+      {hint ? <p className="mt-2 text-base text-[#5E5E5E]">{hint}</p> : null}
     </div>
   );
 }
@@ -491,16 +553,19 @@ function CheckRow({
   detail: string;
 }) {
   return (
-    <label className="flex min-h-16 items-start gap-4 rounded-2xl border-2 border-[#e2d8c8] bg-white p-4">
+    <label className={`flex min-h-16 items-start gap-4 rounded-2xl border-2 bg-white p-4 ${checked ? "border-[#0163FD]" : "border-[#5E5E5E]/35"}`}>
       <input
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}
-        className="mt-1 h-8 w-8 shrink-0 accent-[#0c1b2a]"
+        className="mt-1 h-8 w-8 shrink-0 accent-[#0163FD]"
       />
       <span>
-        <span className="block text-xl font-semibold">{label}</span>
-        <span className="mt-1 block text-lg leading-snug text-[#3d4a5c]">{detail}</span>
+        <span className="block text-xl font-semibold">
+          {label}
+          {checked ? <span className="ml-2 text-base font-semibold text-[#0163FD]">Checked</span> : <span className="ml-2 text-base font-semibold text-[#5E5E5E]">Unchecked</span>}
+        </span>
+        <span className="mt-1 block text-lg leading-snug text-[#1B1B1B]">{detail}</span>
       </span>
     </label>
   );

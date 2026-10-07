@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   EXPO_CONSENT_CATALOG,
+  EXPO_CONSENT_KEYS,
   EXPO_DESCRIPTION_MARKER,
   EXPO_LIST,
   EXPO_SOURCE,
+  INTAKE_PRIVACY_NOTICE,
+  NASA_EXPO_EVENT,
   formatIsoEastern,
+  resolveIntakeProfile,
   type ExpoLeadPayload,
 } from "../../apps/functions/src/expo/nasaLeadModel";
 import { decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE } from "../../apps/web/src/lib/expoLeadQueue";
@@ -165,16 +169,15 @@ function payload(overrides: Partial<ExpoLeadPayload> = {}): ExpoLeadPayload {
     need: "A faster way to staff surge proposals.",
     timing: "FY27",
     interests: { powerNow: false, hiCoworkingEarlyAccess: false },
-    consent: { sms: false, marketing: false, contact: false, email: false },
+    consent: { email: false, sms: false, phone: false },
     submittedAt: NOW.toISOString(),
     clientSubmissionId: "11111111-1111-4111-8111-111111111111",
     ...overrides,
     interests: { powerNow: false, hiCoworkingEarlyAccess: false, ...overrides.interests },
     consent: {
-      sms: false,
-      marketing: false,
-      contact: false,
       email: false,
+      sms: false,
+      phone: false,
       ...overrides.consent,
     },
   };
@@ -204,7 +207,7 @@ describe("NASA expo lead capture", () => {
     const first = await handleExpoLeadHttp({
       method: "POST",
       body: payload({
-        consent: { sms: true, marketing: false, contact: true, email: false },
+        consent: { email: false, sms: true, phone: true },
       }),
       apiKey: API_KEY,
       fetchImpl,
@@ -215,7 +218,7 @@ describe("NASA expo lead capture", () => {
       body: payload({
         clientSubmissionId: "22222222-2222-4222-8222-222222222222",
         organization: "  Example   Dynamics ",
-        consent: { sms: false, marketing: true, contact: false, email: true },
+        consent: { email: true, sms: false, phone: false },
         interests: { powerNow: true, hiCoworkingEarlyAccess: false },
       }),
       apiKey: API_KEY,
@@ -255,7 +258,8 @@ describe("NASA expo lead capture", () => {
     const priya = state.people.find((person) => !emails(person).length);
     expect(text(jordan, "description")).toContain(`[${EXPO_DESCRIPTION_MARKER} |`);
     expect(text(jordan, "description")).toContain("org:prime");
-    expect(text(jordan, "description")).toContain("consent:marketing,email");
+    expect(text(jordan, "description")).toContain("consent:sms,phone");
+    expect(text(jordan, "description")).toContain("consent:email");
     expect(text(jordan, "description")).toContain("interests:power_now");
     expect(text(jordan, "description").match(/22222222-2222-4222-8222-222222222222/g)).toHaveLength(1);
     expect(jordan?.values.company).toEqual([
@@ -270,22 +274,23 @@ describe("NASA expo lead capture", () => {
     expect(state.calls.filter((call) => call.method === "POST" && call.path === "/v2/objects/people/records")).toHaveLength(1);
 
     const smsNote = state.notes[0]?.content ?? "";
-    expect(smsNote).toContain("SMS consent: opt-in true");
+    expect(smsNote).toContain("Text (SMS): yes");
+    expect(smsNote).toContain("Phone: yes");
+    expect(smsNote).toContain("Email: no");
     expect(smsNote).toContain(`Version: ${EXPO_CONSENT_CATALOG.sms.version}`);
     expect(smsNote).toContain(`At (ET): ${CAPTURED_AT_ET}`);
-    expect(smsNote).toContain(`Wording: "${EXPO_CONSENT_CATALOG.sms.wording}"`);
-    expect(smsNote).toContain("Consent to contact: opt-in true");
-    expect(smsNote).toContain("Marketing consent: no consent");
-    expect(smsNote).toContain("Email consent: no consent");
-    expect(smsNote).not.toContain(EXPO_CONSENT_CATALOG.marketing.wording);
     expect(smsNote).toContain(`Source: ${EXPO_SOURCE}`);
+    expect(smsNote).toContain(`Wording: "${EXPO_CONSENT_CATALOG.sms.wording}"`);
+    expect(smsNote).not.toContain(EXPO_CONSENT_CATALOG.email.wording);
     expect(smsNote).toContain("Captured by: NASA Expo booth");
 
     const priyaNote = state.notes[2]?.content ?? "";
     expect(priyaNote).toContain("Email: none");
+    expect(priyaNote).toContain("Text (SMS): no");
+    expect(priyaNote).toContain("Phone: no");
     expect(priyaNote).toContain("Hi Coworking Early Access: yes");
-    expect(priyaNote).not.toContain("opt-in true");
-    expect(priyaNote).not.toContain(EXPO_CONSENT_CATALOG.contact.wording);
+    expect(priyaNote).not.toContain("Wording:");
+    expect(priyaNote).not.toContain(EXPO_CONSENT_CATALOG.phone.wording);
   });
 
   it("does not duplicate a note or description tag when the same submission retries", async () => {
@@ -319,12 +324,13 @@ describe("NASA expo lead capture", () => {
     const result = await submit(state, {
       ...payload(),
       consentWording: "FORGED WORDING",
-      consent: { sms: false, marketing: false, contact: false, email: false },
+      consent: { email: false, sms: false, phone: false },
     });
     expect(result.status).toBe(200);
     expect(state.notes[0]?.content).not.toContain("FORGED WORDING");
-    expect(state.notes[0]?.content).not.toContain("opt-in true");
-    expect(state.notes[0]?.content).toContain("SMS consent: no consent");
+    expect(state.notes[0]?.content).not.toContain("Wording:");
+    expect(state.notes[0]?.content).toContain("Text (SMS): no");
+    expect(state.notes[0]?.content).toContain(`Version: ${EXPO_CONSENT_CATALOG.sms.version}`);
   });
 
   it("rejects an incomplete lead before calling Attio", async () => {
@@ -332,10 +338,20 @@ describe("NASA expo lead capture", () => {
     const missingContact = await submit(state, payload({ email: "", phone: "" }));
     const smsWithoutPhone = await submit(state, payload({
       phone: "",
-      consent: { sms: true, marketing: false, contact: false, email: false },
+      consent: { email: false, sms: true, phone: false },
+    }));
+    const phoneWithoutPhone = await submit(state, payload({
+      phone: "",
+      consent: { email: false, sms: false, phone: true },
+    }));
+    const emailWithoutEmail = await submit(state, payload({
+      email: "",
+      consent: { email: true, sms: false, phone: false },
     }));
     expect(missingContact.status).toBe(400);
     expect(smsWithoutPhone.status).toBe(400);
+    expect(phoneWithoutPhone.status).toBe(400);
+    expect(emailWithoutEmail.status).toBe(400);
     expect(state.calls).toHaveLength(0);
   });
 
@@ -401,8 +417,53 @@ describe("NASA expo lead capture", () => {
     expect(decideLeadSubmitOutcome({ online: true, networkError: false, httpStatus: 409 })).toBe("rejected");
   });
 
-  it("keeps the booth form, hosting rewrite, and consent copy in sync", () => {
-    const form = readFileSync("apps/web/src/app/expo/nasa-2026/ExpoLeadForm.tsx", "utf8");
+  it("routes a named event onto the NASA list and leaves a general intake off that list", async () => {
+    const nasaState = emptyState();
+    const nasa = await submit(nasaState, payload({
+      event: NASA_EXPO_EVENT,
+      eventId: "",
+      list: "",
+    }));
+    expect(nasa.status).toBe(200);
+    expect(nasa.body).toMatchObject({ listStatus: "added" });
+    expect(nasaState.notes[0]?.content).toContain(`Event: ${NASA_EXPO_EVENT}`);
+    expect(nasaState.notes[0]?.content).toContain("Captured by: NASA Expo booth");
+    expect(nasaState.entries).toHaveLength(1);
+
+    const generalState = emptyState();
+    const general = await submit(generalState, payload({
+      fullName: "Casey Quinn",
+      email: "casey.quinn@example.com",
+      orgType: "",
+      event: "chamber-breakfast",
+      eventId: "",
+      list: "some-other-list",
+      clientSubmissionId: "55555555-5555-4555-8555-555555555555",
+    }));
+    expect(general.status).toBe(200);
+    expect(general.body).toMatchObject({ listStatus: "skipped", noteStatus: "created" });
+    expect(generalState.entries).toHaveLength(0);
+    expect(generalState.notes[0]?.content).toContain("Source: chamber-breakfast");
+    expect(generalState.notes[0]?.content).toContain("Captured by: Accel Analysis intake");
+    expect(generalState.notes[0]?.content).toContain("List: some-other-list");
+    expect(generalState.notes[0]?.content).toContain("Org type: Not asked");
+    expect(resolveIntakeProfile({ explicit: false })).toMatchObject({
+      fieldSet: "nasa-expo",
+      source: EXPO_SOURCE,
+      attioList: EXPO_LIST,
+    });
+  });
+
+  it("keeps three unchecked consents, the intake form, and the hosting rewrite in sync", () => {
+    expect(EXPO_CONSENT_KEYS).toEqual(["email", "sms", "phone"]);
+    expect(EXPO_CONSENT_CATALOG.sms.wording).toContain("Accel Analysis");
+    expect(EXPO_CONSENT_CATALOG.sms.wording).toContain("Message frequency varies");
+    expect(EXPO_CONSENT_CATALOG.sms.wording).toContain("Msg & data rates may apply");
+    expect(EXPO_CONSENT_CATALOG.sms.wording).toContain("STOP");
+    expect(EXPO_CONSENT_CATALOG.sms.wording).toContain("HELP");
+    expect(EXPO_LIST.listId).toBe("e799de65-f5ad-4def-b9b6-abb0c680d84a");
+
+    const form = readFileSync("apps/web/src/app/intake/IntakeForm.tsx", "utf8");
     const queue = readFileSync("apps/web/src/lib/expoLeadQueue.ts", "utf8");
     const firebase = readFileSync("firebase.json", "utf8");
     const main = readFileSync("apps/functions/src/main.ts", "utf8");
@@ -410,8 +471,14 @@ describe("NASA expo lead capture", () => {
     const doc = readFileSync("docs/EXPO-NASA-2026-LEAD-CAPTURE.md", "utf8");
 
     expect(form).toContain("EXPO_CONSENT_CATALOG");
+    expect(form).toContain("INTAKE_PRIVACY_NOTICE");
     expect(form).toContain("EXPO_OFFLINE_SAVED_MESSAGE");
+    expect(form).toContain("email: false");
     expect(form).toContain("sms: false");
+    expect(form).toContain("phone: false");
+    expect(form).not.toContain("marketing");
+    expect(form).not.toContain("NASA");
+    expect(readFileSync("apps/web/src/app/expo/nasa-2026/page.tsx", "utf8")).toContain("NASA_EXPO_EVENT");
     expect(form).not.toContain("getUserMedia");
     expect(form).not.toContain("SpeechRecognition");
     expect(form).not.toContain("webkitSpeechRecognition");
@@ -428,7 +495,9 @@ describe("NASA expo lead capture", () => {
       expect(doc).toContain(item.version);
       expect(doc).toContain(item.wording);
     }
+    expect(doc).toContain(INTAKE_PRIVACY_NOTICE);
     expect(doc).toContain("ATTIO_API_KEY");
+    expect(doc).toContain("/intake");
   });
 });
 
