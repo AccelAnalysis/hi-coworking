@@ -1,5 +1,4 @@
 import {
-  EXPO_LIST,
   companyNameKey,
   mergeDescription,
   normalizePhone,
@@ -70,7 +69,9 @@ export async function ingestNasaExpoLead(
     throw new AttioRequestError(502, "Attio did not return a person id");
   }
 
-  const listStatus = await addPersonToExpoList(fetchImpl, apiKey, personRecordId);
+  const listStatus = lead.attioList
+    ? await addPersonToExpoList(fetchImpl, apiKey, personRecordId, lead.attioList)
+    : "skipped";
   const noteStatus = await writeExpoNote(fetchImpl, apiKey, personRecordId, lead);
 
   return {
@@ -322,6 +323,7 @@ async function addPersonToExpoList(
   fetchImpl: FetchLike,
   apiKey: string,
   personId: string,
+  list: NormalizedExpoLead["attioList"] & object,
 ): Promise<ExpoIngestResult["listStatus"]> {
   try {
     const listed = await attio(
@@ -333,7 +335,7 @@ async function addPersonToExpoList(
     const entries = Array.isArray(listed.data) ? listed.data : [];
     const already = entries.some((entry) => {
       const record = entry as { list_api_slug?: string; list_id?: string };
-      return record.list_api_slug === EXPO_LIST.apiSlug || record.list_id === EXPO_LIST.listId;
+      return record.list_api_slug === list.apiSlug || record.list_id === list.listId;
     });
     if (already) return "already_listed";
   } catch (error) {
@@ -341,10 +343,10 @@ async function addPersonToExpoList(
   }
 
   try {
-    await attio(fetchImpl, apiKey, "POST", `/lists/${EXPO_LIST.apiSlug}/entries`, {
+    await attio(fetchImpl, apiKey, "POST", `/lists/${list.apiSlug}/entries`, {
       data: {
         parent_record_id: personId,
-        parent_object: EXPO_LIST.parentObject,
+        parent_object: list.parentObject,
         entry_values: {},
       },
     });
@@ -391,7 +393,7 @@ async function writeExpoNote(
     data: {
       parent_object: "people",
       parent_record_id: personId,
-      title: `NASA Expo 2026-10-20 ${lead.clientSubmissionId}`.slice(0, 200),
+      title: `Accel Analysis ${lead.source} ${lead.clientSubmissionId}`.slice(0, 200),
       format: "plaintext",
       content: lead.note,
     },

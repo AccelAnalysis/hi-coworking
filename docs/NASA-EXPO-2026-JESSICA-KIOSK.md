@@ -1,9 +1,16 @@
-# Jessica booth kiosk — NASA Expo, October 20
+# Jessica booth kiosk
 
-TV page for the Accel Analysis booth. Jessica qualifies a visitor by voice, then points them at the iPad form. The TV does not collect name, email, or phone, and the voice path does not write to Attio.
+TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points them at the intake form. The TV does not collect name, email, or phone, and the voice path does not write to Attio. The screen is not event-branded. An event query on the URL is not shown.
 
-- Kiosk: `/expo/nasa-2026/kiosk`
-- iPad form: `/expo/nasa-2026` (separate page; this work does not change it)
+- Kiosk: `/kiosk/jessica`
+- Always-on presentation: `/kiosk/jessica?mode=ambient` (alias `?display=solo`)
+- Review frames: `/kiosk/jessica/frames` (idle, happy, speaking)
+- Previous TV address: `/expo/nasa-2026/kiosk` redirects here and keeps the query
+- Intake form: `/intake` (NASA Expo iPads can stay on `/expo/nasa-2026`, which adds the event and redirects)
+
+Presentation mode is the TV loop. Jessica is already idle and animating. There is no tap-to-wake screen, no wordmark, and no iPad card. The background is Midnight with a soft Ice and Cyan glow and a little grain. Hold anywhere, or hold the space bar, to talk. Press **B** to return to the booth controls. The booth page also has a **Presentation** button, which sets `mode=ambient` and asks the browser to go fullscreen.
+
+Jessica is a flat magenta circle with two white eyes. There is no drawn mouth, brow, shine, or drop shadow. Expression comes from the eye shape and position, and from the circle squashing and stretching like a balloon. The picture is drawn on a `requestAnimationFrame` loop locked to the display refresh and eased with an exponential lerp, so a 60 Hz panel gets a new frame every refresh. The voice level drives that squash while she speaks, and the same status picks the eye pose for listening, idle, and emotion. Poses follow the kiosk status and the line she is speaking: idle, wake, listen, thinking, speaking, happy, curious, concerned, engaged, celebrate, unavailable, and push-to-talk press.
 - Voice: xAI Speech-to-Speech, `grok-voice-latest`
 - Default listen mode: push-to-talk
 
@@ -53,7 +60,7 @@ Use the Mac's speakers and built-in microphone. System Settings → Sound → Ou
 
 Reliable path for show day:
 
-1. Open Chrome or Edge to `https://hi-coworking.com/expo/nasa-2026/kiosk` (or the `web.app` host).
+1. Open Chrome or Edge to `https://hi-coworking.com/kiosk/jessica` (or the `web.app` host). `/expo/nasa-2026/kiosk` still redirects there.
 2. Allow the microphone for that site.
 3. Drag the window onto the TV.
 4. Tap **Fullscreen on the TV**. Fullscreen stays on the display that holds the window. The Mac screen stays free.
@@ -69,7 +76,7 @@ Unattended Chrome, after the mic permission is saved in this profile. Replace th
   --kiosk \
   --window-position=1512,0 \
   --window-size=1920,1080 \
-  "https://hi-coworking.com/expo/nasa-2026/kiosk"
+  "https://hi-coworking.com/kiosk/jessica?mode=ambient"
 ```
 
 Edge is the same flags with:
@@ -104,7 +111,7 @@ Say a fake email during rehearsal. Jessica should not repeat it, and it should n
 - [ ] Two empty holds produce the apology, then the greeter line. No invented summary.
 - [ ] A volunteered email or phone is not repeated and not shown on the TV.
 - [ ] Attio has no new record from the voice session.
-- [ ] The iPad still opens `/expo/nasa-2026`.
+- [ ] The iPad still opens `/expo/nasa-2026` or `/intake?event=nasa-expo-2026-10-20`.
 
 ## Dress rehearsal — October 19
 

@@ -1,14 +1,27 @@
 /**
- * NASA Business Vendor Expo lead contract.
+ * Accel Analysis lead intake contract.
  *
- * The booth form imports this module so the words on screen are the same words
- * stored in Attio. Consent is form-only: unchecked boxes are not opt-ins.
+ * The public form is not event-branded. Event, event id, and list come from
+ * the request (URL query on the client) and are stored with the lead. The
+ * booth form imports this module so the words on screen are the same words
+ * stored in Attio. Consent boxes start unchecked. Unchecked is a recorded no.
  */
 
 export const EXPO_SOURCE = "EXPO-NASA-2026-10-20";
 export const EXPO_CAPTURED_BY = "NASA Expo booth";
 export const EXPO_TIME_ZONE = "America/New_York";
 export const EXPO_DESCRIPTION_MARKER = `WS:${EXPO_SOURCE}`;
+export const NASA_EXPO_EVENT = "nasa-expo-2026-10-20";
+export const ACCEL_INTAKE_SOURCE = "ACCEL-INTAKE";
+export const ACCEL_INTAKE_CAPTURED_BY = "Accel Analysis intake";
+export const ACCEL_DISPLAY_NAME = "Accel Analysis";
+export const ACCEL_PHONE_DISPLAY = "(757) 236-0651";
+export const ACCEL_EMAIL = "JHolman@AccelAnalysis.com";
+export const ACCEL_TAGLINE = "Put AI to work without overwhelming your team.";
+export const ACCEL_ONE_LINER = "We redesign work so people and AI can work together productively.";
+
+export const INTAKE_PRIVACY_NOTICE =
+  "Accel Analysis keeps what you type here so we can follow up on what you asked. The three boxes start unchecked. If you check one, we store yes, the exact wording version, the time in Eastern Time, and the source of this form. If you leave it unchecked, we store no. We do not sell this information. Questions: JHolman@AccelAnalysis.com or (757) 236-0651.";
 
 export const EXPO_LIST = {
   apiSlug: "nasa_expo_2026_10_20_leads",
@@ -25,37 +38,32 @@ export const EXPO_ORG_TYPES = [
 
 export type ExpoOrgType = (typeof EXPO_ORG_TYPES)[number]["id"];
 
-export const EXPO_CONSENT_KEYS = ["sms", "marketing", "contact", "email"] as const;
+export const EXPO_CONSENT_KEYS = ["email", "sms", "phone"] as const;
 export type ExpoConsentKey = (typeof EXPO_CONSENT_KEYS)[number];
 
 /**
- * Version ids are the citation keys. The wording string is the exact text
- * shown on the booth form and copied into the Attio note when that box is checked.
+ * Version ids cite the exact sentence on the form. Wording is copied into the
+ * Attio note only when that box is checked. A new version is required because
+ * the set is email, text, and phone — the prior four-box expo wording is retired.
  */
 export const EXPO_CONSENT_CATALOG = {
-  sms: {
-    version: "expo-consent-v1-sms",
-    label: "SMS consent",
-    wording:
-      "I agree to receive text messages from Accel Analysis at the mobile number I provided about my NASA Business Vendor Expo conversation and related follow-up. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.",
-  },
-  marketing: {
-    version: "expo-consent-v1-marketing",
-    label: "Marketing consent",
-    wording:
-      "I agree that Accel Analysis may send me marketing about Accel Analysis and Hi Coworking, including events, offers, and product news, using the contact channels I separately opt into.",
-  },
-  contact: {
-    version: "expo-consent-v1-contact",
-    label: "Consent to contact",
-    wording:
-      "I agree that Accel Analysis may contact me about the need I described at the NASA Business Vendor Expo, using the email address or phone number I provided.",
-  },
   email: {
-    version: "expo-consent-v1-email",
-    label: "Email consent",
+    version: "intake-consent-v1-email",
+    label: "Email",
     wording:
-      "I agree to receive email from Accel Analysis at the email address I provided about my NASA Business Vendor Expo conversation and the information I requested.",
+      "I agree to receive email from Accel Analysis at the email address I provided about my inquiry and the information I requested. I can unsubscribe at any time.",
+  },
+  sms: {
+    version: "intake-consent-v1-sms",
+    label: "Text (SMS)",
+    wording:
+      "I agree to receive text messages from Accel Analysis at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.",
+  },
+  phone: {
+    version: "intake-consent-v1-phone",
+    label: "Phone",
+    wording:
+      "I agree that Accel Analysis may call me at the phone number I provided about my inquiry and related follow-up. I can ask them to stop calling at any time.",
   },
 } as const satisfies Record<
   ExpoConsentKey,
@@ -78,15 +86,33 @@ export type ExpoLeadPayload = {
   consent: Record<ExpoConsentKey, boolean>;
   submittedAt: string;
   clientSubmissionId: string;
+  /** Present when the form sent URL context. Absent on older booth payloads. */
+  event?: string;
+  eventId?: string;
+  list?: string;
   expo_hp?: string;
 };
 
 export type StoredConsent = {
   key: ExpoConsentKey;
   optIn: boolean;
-  version: string | null;
+  version: string;
   wording: string | null;
-  capturedAtEt: string | null;
+  capturedAtEt: string;
+  source: string;
+};
+
+export type IntakeFieldSet = "nasa-expo" | "general";
+
+export type IntakeProfile = {
+  fieldSet: IntakeFieldSet;
+  source: string;
+  capturedBy: string;
+  event: string | null;
+  eventId: string | null;
+  requestedList: string | null;
+  attioList: typeof EXPO_LIST | null;
+  explicit: boolean;
 };
 
 export type NormalizedExpoLead = {
@@ -98,7 +124,7 @@ export type NormalizedExpoLead = {
   phoneE164: string | null;
   phoneDigits: string | null;
   phoneCountryCode: string | null;
-  orgType: ExpoOrgType;
+  orgType: ExpoOrgType | null;
   orgTypeLabel: string;
   need: string;
   timing: string | null;
@@ -111,6 +137,11 @@ export type NormalizedExpoLead = {
   capturedAtEt: string;
   capturedBy: string;
   source: string;
+  event: string | null;
+  eventId: string | null;
+  requestedList: string | null;
+  fieldSet: IntakeFieldSet;
+  attioList: typeof EXPO_LIST | null;
   clientSubmissionId: string;
   descriptionTag: string;
   note: string;
@@ -210,6 +241,79 @@ export function orgTypeLabel(orgType: ExpoOrgType): string {
   return EXPO_ORG_TYPES.find((item) => item.id === orgType)?.label ?? orgType;
 }
 
+const NASA_EVENT_KEYS = new Set([
+  "nasa-expo-2026-10-20",
+  "expo-nasa-2026-10-20",
+  NASA_EXPO_EVENT,
+]);
+
+export function normalizeEventKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+export function isNasaExpoEvent(event: string, eventId: string, list: string): boolean {
+  const keys = [normalizeEventKey(event), normalizeEventKey(eventId)];
+  if (keys.some((key) => key.length > 0 && NASA_EVENT_KEYS.has(key))) return true;
+  const listKey = list.trim().toLowerCase();
+  return listKey === EXPO_LIST.apiSlug || listKey === EXPO_LIST.listId;
+}
+
+export function intakeContextFromBody(body: Record<string, unknown>): {
+  event: string;
+  eventId: string;
+  list: string;
+  explicit: boolean;
+} {
+  const explicit = ["event", "eventId", "event_id", "list"].some((key) =>
+    Object.prototype.hasOwnProperty.call(body, key),
+  );
+  return {
+    event: cleanLine(body.event).slice(0, 80),
+    eventId: cleanLine(body.eventId ?? body.event_id).slice(0, 80),
+    list: cleanLine(body.list).slice(0, 80),
+    explicit,
+  };
+}
+
+/**
+ * Legacy booth posts omit event keys and stay on the NASA expo list.
+ * The shared form always sends the keys, including empty ones, so a bare
+ * /intake visit is a general Accel Analysis lead and does not join that list.
+ */
+export function resolveIntakeProfile(input: {
+  event?: string;
+  eventId?: string;
+  list?: string;
+  explicit: boolean;
+}): IntakeProfile {
+  const event = sanitizeToken(input.event ?? "");
+  const eventId = sanitizeToken(input.eventId ?? "");
+  const list = sanitizeToken(input.list ?? "");
+  const nasa = !input.explicit || isNasaExpoEvent(event, eventId, list);
+  if (nasa) {
+    return {
+      fieldSet: "nasa-expo",
+      source: EXPO_SOURCE,
+      capturedBy: EXPO_CAPTURED_BY,
+      event: event || eventId || NASA_EXPO_EVENT,
+      eventId: eventId || null,
+      requestedList: list || EXPO_LIST.apiSlug,
+      attioList: EXPO_LIST,
+      explicit: input.explicit,
+    };
+  }
+  return {
+    fieldSet: "general",
+    source: event || eventId || ACCEL_INTAKE_SOURCE,
+    capturedBy: ACCEL_INTAKE_CAPTURED_BY,
+    event: event || eventId || null,
+    eventId: eventId || null,
+    requestedList: list || null,
+    attioList: null,
+    explicit: true,
+  };
+}
+
 export function validateExpoLeadPayload(
   input: unknown,
   now = new Date(),
@@ -227,6 +331,7 @@ export function validateExpoLeadPayload(
   const need = cleanMultiline(body.need);
   const timing = cleanLine(body.timing);
   const clientSubmissionId = cleanLine(body.clientSubmissionId).toLowerCase();
+  const profile = resolveIntakeProfile(intakeContextFromBody(body));
 
   if (!fullName || fullName.length > 120) {
     return { ok: false, error: "Enter the visitor's full name." };
@@ -237,7 +342,11 @@ export function validateExpoLeadPayload(
   if (!roleTitle || roleTitle.length > 120) {
     return { ok: false, error: "Enter their role or title." };
   }
-  if (!isOrgType(body.orgType)) {
+  if (profile.fieldSet === "nasa-expo") {
+    if (!isOrgType(body.orgType)) {
+      return { ok: false, error: "Choose an organization type." };
+    }
+  } else if (cleanLine(body.orgType) && !isOrgType(body.orgType)) {
     return { ok: false, error: "Choose an organization type." };
   }
   if (!need || need.length > 500) {
@@ -266,7 +375,10 @@ export function validateExpoLeadPayload(
   const interests = readInterests(body.interests);
   const consentFlags = readConsentFlags(body.consent);
   if (consentFlags.sms && !phone) {
-    return { ok: false, error: "SMS consent needs a phone number." };
+    return { ok: false, error: "Text consent needs a phone number." };
+  }
+  if (consentFlags.phone && !phone) {
+    return { ok: false, error: "Phone consent needs a phone number." };
   }
   if (consentFlags.email && !email) {
     return { ok: false, error: "Email consent needs an email address." };
@@ -274,8 +386,10 @@ export function validateExpoLeadPayload(
 
   const capturedAt = resolveCapturedAt(body.submittedAt, now);
   const capturedAtEt = formatIsoEastern(capturedAt);
-  const consent = EXPO_CONSENT_KEYS.map((key) => toStoredConsent(key, consentFlags[key], capturedAtEt));
-  const orgType = body.orgType;
+  const consent = EXPO_CONSENT_KEYS.map((key) =>
+    toStoredConsent(key, consentFlags[key], capturedAtEt, profile.source),
+  );
+  const orgType = isOrgType(body.orgType) ? body.orgType : null;
 
   const leadWithoutCopy: Omit<NormalizedExpoLead, "descriptionTag" | "note"> = {
     fullName,
@@ -287,15 +401,20 @@ export function validateExpoLeadPayload(
     phoneDigits: phone?.digits ?? null,
     phoneCountryCode: phone?.countryCode ?? null,
     orgType,
-    orgTypeLabel: orgTypeLabel(orgType),
+    orgTypeLabel: orgType ? orgTypeLabel(orgType) : "Not asked",
     need,
     timing: timing || null,
     interests,
     consent,
     submittedAt: capturedAt.toISOString(),
     capturedAtEt,
-    capturedBy: EXPO_CAPTURED_BY,
-    source: EXPO_SOURCE,
+    capturedBy: profile.capturedBy,
+    source: profile.source,
+    event: profile.event,
+    eventId: profile.eventId,
+    requestedList: profile.requestedList,
+    fieldSet: profile.fieldSet,
+    attioList: profile.attioList,
     clientSubmissionId,
   };
 
@@ -317,14 +436,16 @@ export function buildDescriptionTag(
     lead.interests.hiCoworkingEarlyAccess ? "hi_coworking_early_access" : null,
   ].filter((item): item is string => Boolean(item));
   const optedIn = lead.consent.filter((item) => item.optIn).map((item) => item.key);
+  const marker = lead.fieldSet === "nasa-expo" ? EXPO_DESCRIPTION_MARKER : `WS:${ACCEL_INTAKE_SOURCE}`;
   const parts = [
-    EXPO_DESCRIPTION_MARKER,
-    `org:${lead.orgType}`,
+    marker,
+    `event:${sanitizeTagPart(lead.event ?? "none").slice(0, 80)}`,
+    lead.orgType ? `org:${lead.orgType}` : "org:not_asked",
     `need:${sanitizeTagPart(lead.need).slice(0, 80)}`,
     lead.timing ? `timing:${sanitizeTagPart(lead.timing).slice(0, 40)}` : null,
     interests.length > 0 ? `interests:${interests.join(",")}` : "interests:none",
     optedIn.length > 0 ? `consent:${optedIn.join(",")}` : "consent:none",
-    `by:${EXPO_CAPTURED_BY}`,
+    `by:${lead.capturedBy}`,
     `at:${lead.capturedAtEt}`,
     `sub:${lead.clientSubmissionId}`,
   ].filter((part): part is string => Boolean(part));
@@ -343,8 +464,10 @@ export function buildExpoLeadNote(
   lead: Omit<NormalizedExpoLead, "descriptionTag" | "note">,
 ): string {
   const lines = [
-    "NASA Business Vendor Expo lead",
-    `Source: ${EXPO_SOURCE}`,
+    "Accel Analysis lead",
+    `Source: ${lead.source}`,
+    `Event: ${lead.event ?? "none"}`,
+    `List: ${lead.requestedList ?? "none"}`,
     `Submission: ${lead.clientSubmissionId}`,
     `Captured by: ${lead.capturedBy}`,
     `Captured at (ET): ${lead.capturedAtEt}`,
@@ -355,7 +478,7 @@ export function buildExpoLeadNote(
     `Role: ${lead.roleTitle}`,
     `Email: ${lead.email ?? "none"}`,
     `Phone: ${lead.phoneOriginal ?? "none"}`,
-    `Org type: ${lead.orgTypeLabel} (${lead.orgType})`,
+    `Org type: ${lead.orgType ? `${lead.orgTypeLabel} (${lead.orgType})` : lead.orgTypeLabel}`,
     `Timing: ${lead.timing ?? "not given"}`,
     "",
     "Need",
@@ -373,28 +496,32 @@ export function buildExpoLeadNote(
 
 function formatConsentBlock(consent: StoredConsent): string {
   const label = EXPO_CONSENT_CATALOG[consent.key].label;
-  if (!consent.optIn || !consent.version || !consent.wording || !consent.capturedAtEt) {
-    return `${label}: no consent`;
-  }
-  return [
-    `${label}: opt-in true`,
+  const lines = [
+    `${label}: ${consent.optIn ? "yes" : "no"}`,
     `Version: ${consent.version}`,
     `At (ET): ${consent.capturedAtEt}`,
-    `Wording: "${consent.wording}"`,
-  ].join("\n");
+    `Source: ${consent.source}`,
+  ];
+  if (consent.optIn && consent.wording) {
+    lines.push(`Wording: "${consent.wording}"`);
+  }
+  return lines.join("\n");
 }
 
-function toStoredConsent(key: ExpoConsentKey, optIn: boolean, capturedAtEt: string): StoredConsent {
-  if (!optIn) {
-    return { key, optIn: false, version: null, wording: null, capturedAtEt: null };
-  }
+function toStoredConsent(
+  key: ExpoConsentKey,
+  optIn: boolean,
+  capturedAtEt: string,
+  source: string,
+): StoredConsent {
   const catalog = EXPO_CONSENT_CATALOG[key];
   return {
     key,
-    optIn: true,
+    optIn,
     version: catalog.version,
-    wording: catalog.wording,
+    wording: optIn ? catalog.wording : null,
     capturedAtEt,
+    source,
   };
 }
 
@@ -419,11 +546,14 @@ function readInterests(value: unknown): NormalizedExpoLead["interests"] {
 function readConsentFlags(value: unknown): Record<ExpoConsentKey, boolean> {
   const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
-    sms: record.sms === true,
-    marketing: record.marketing === true,
-    contact: record.contact === true,
     email: record.email === true,
+    sms: record.sms === true,
+    phone: record.phone === true,
   };
+}
+
+function sanitizeToken(value: string): string {
+  return value.replace(/[^\w.:@+-]/g, "").slice(0, 80);
 }
 
 function isOrgType(value: unknown): value is ExpoOrgType {

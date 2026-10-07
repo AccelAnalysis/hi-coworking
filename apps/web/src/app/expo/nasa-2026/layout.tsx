@@ -1,23 +1,18 @@
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "NASA Expo lead capture · Accel Analysis",
-  description: "Booth lead capture for Accel Analysis at the NASA Business Vendor Expo on October 20, 2026.",
+  title: "Lead intake · Accel Analysis",
+  description: "Accel Analysis lead intake.",
   robots: { index: false, follow: false },
-  appleWebApp: {
-    capable: true,
-    title: "Expo Leads",
-    statusBarStyle: "black-translucent",
-  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0c1b2a",
+  themeColor: "#F2F6FF",
 };
 
-export default function NasaExpoLayout({ children }: { children: React.ReactNode }) {
+export default function ExpoAliasLayout({ children }: { children: React.ReactNode }) {
   return children;
 }

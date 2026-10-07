@@ -1,10 +1,14 @@
-# NASA Expo 2026 lead capture
+# Accel Analysis lead intake
 
-Booth form for Accel Analysis at the NASA Business Vendor Expo on October 20, 2026. Visitors enter a lead on an iPad. The page writes an Attio person, links a company, adds the person to the expo list, and stores consent in a person note plus a description tag. It does not record audio or any kiosk voice path.
+Shared lead form for Accel Analysis. The page is Accel-branded. It does not show an event name. Visitors enter a lead on a phone, iPad, or laptop. The page writes an Attio person, links a company, adds the person to a known list when the URL names one, and stores consent in a person note plus a description tag. It does not record audio or any kiosk voice path.
 
-Public page: `/expo/nasa-2026`
+Public page: `/intake`
+
+NASA Expo alias: `/expo/nasa-2026` redirects to `/intake?event=nasa-expo-2026-10-20`. Existing QR codes keep working. The event slug is not rendered.
 
 Ingest: `POST /api/expo/nasa-lead` (Firebase Hosting rewrite to the `expo_submitNasaLead` Cloud Function)
+
+Event context is read from `event`, `event_id`, and `list` on the form post (filled from the page query string). A post that omits those keys still uses the NASA Expo list, so older queued leads keep their destination. A post that sends the keys empty is a general Accel Analysis lead and is not added to that list. Unknown list slugs are stored on the note and are not sent to Attio.
 
 Attio list: **NASA Expo 2026-10-20 Leads**
 
@@ -38,39 +42,39 @@ The list entry sends no custom attributes. If the list only has system attribute
 
 Each accepted lead appends one description line:
 
-`[WS:EXPO-NASA-2026-10-20 | org:… | need:… | consent:… | by:NASA Expo booth | at:<ISO Eastern> | sub:<submission id>]`
+`[WS:EXPO-NASA-2026-10-20 | event:nasa-expo-2026-10-20 | org:… | need:… | consent:… | by:NASA Expo booth | at:<ISO Eastern> | sub:<submission id>]`
 
-The person note is the full record: need, organization type, capture time, and consent. `captured_by` is always `NASA Expo booth`. `source` is always `EXPO-NASA-2026-10-20`. `captured_at` is an ISO timestamp in `America/New_York`, taken when the visitor is saved on the iPad (including offline) as long as that time is within the last 14 days.
+When the URL names the NASA Expo (`event=nasa-expo-2026-10-20`, the same id, or the list slug below), `captured_by` is `NASA Expo booth` and `source` is `EXPO-NASA-2026-10-20`. The form then asks for organization type and the two “only if they ask” interests. Other events store the event slug as the source and `captured_by` `Accel Analysis intake`. `captured_at` is an ISO timestamp in `America/New_York`, taken when the person is saved (including offline) as long as that time is within the last 14 days.
 
-Unchecked consent is stored as `no consent` for that channel. A checked box stores `opt-in true`, the version id, the Eastern timestamp, and the exact wording below.
+Each consent box stores yes or no, the wording version, the Eastern timestamp, and the source. The exact wording is copied into the note only when the box is checked. All three boxes start unchecked.
+
+## Privacy notice
+
+Draft, pending Jonathan’s approval. The form shows this text:
+
+Accel Analysis keeps what you type here so we can follow up on what you asked. The three boxes start unchecked. If you check one, we store yes, the exact wording version, the time in Eastern Time, and the source of this form. If you leave it unchecked, we store no. We do not sell this information. Questions: JHolman@AccelAnalysis.com or (757) 236-0651.
 
 ## Consent wording — cite these versions
 
-Source of truth: `EXPO_CONSENT_CATALOG` in `apps/functions/src/expo/nasaLeadModel.ts`. The booth form renders that catalog, and the ingest copies it onto the Attio note. All four boxes start unchecked.
+Source of truth: `EXPO_CONSENT_CATALOG` in `apps/functions/src/expo/nasaLeadModel.ts`. The form renders that catalog. There are three boxes: email, text (SMS), and phone.
 
-### `expo-consent-v1-sms`
+### `intake-consent-v1-email`
 
-SMS consent
+Email
 
-I agree to receive text messages from Accel Analysis at the mobile number I provided about my NASA Business Vendor Expo conversation and related follow-up. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.
+I agree to receive email from Accel Analysis at the email address I provided about my inquiry and the information I requested. I can unsubscribe at any time.
 
-### `expo-consent-v1-marketing`
+### `intake-consent-v1-sms`
 
-Marketing consent
+Text (SMS)
 
-I agree that Accel Analysis may send me marketing about Accel Analysis and Hi Coworking, including events, offers, and product news, using the contact channels I separately opt into.
+I agree to receive text messages from Accel Analysis at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.
 
-### `expo-consent-v1-contact`
+### `intake-consent-v1-phone`
 
-Consent to contact
+Phone
 
-I agree that Accel Analysis may contact me about the need I described at the NASA Business Vendor Expo, using the email address or phone number I provided.
-
-### `expo-consent-v1-email`
-
-Email consent
-
-I agree to receive email from Accel Analysis at the email address I provided about my NASA Business Vendor Expo conversation and the information I requested.
+I agree that Accel Analysis may call me at the phone number I provided about my inquiry and related follow-up. I can ask them to stop calling at any time.
 
 ## Deploy
 
@@ -86,7 +90,7 @@ firebase deploy --project hi-coworking-plat --only hosting
 
 Deploy the function before hosting so `/api/expo/nasa-lead` has somewhere to go. This does not redeploy booking or events functions. The page is outside the coming-soon gate and does not change those flows.
 
-Open `https://hi-coworking.com/expo/nasa-2026` on the booth iPad. Guided Access can stay on that URL. If Wi-Fi drops, the iPad shows **Saved — will sync** and keeps the lead in IndexedDB until it can post.
+Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Saved — will sync** and keeps the lead in IndexedDB until it can post.
 
 ## Test without touching Attio
 
@@ -102,7 +106,7 @@ That run creates three fake leads against a mock Attio: an emailed visitor, the 
 npm run dev
 ```
 
-Open `http://localhost:3000/expo/nasa-2026`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill a lead and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Saved — will sync**. The lead stays in IndexedDB. Use **Sync now** after the function is reachable, or turn the iPad offline and submit another visitor to see the same message without a network. Validation errors, such as a missing name, stay on screen instead of being queued.
+Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill a lead and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Saved — will sync**. The lead stays in IndexedDB. Use **Sync now** after the function is reachable, or turn the device offline and submit another visitor to see the same message without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
 
 ## Test three fake leads against Attio
 
@@ -120,7 +124,7 @@ Send them through the deployed ingest (the script does not take the API key; the
 node scripts/expo-nasa-fake-leads.mjs --send --url https://hi-coworking.com/api/expo/nasa-lead
 ```
 
-The three leads are Jordan Hale (`expo-fake-jordan@example.com`, Example Dynamics), Priya Shah (phone only, Northstar Sub Co), and Alex Kim (`expo-fake-alex@example.com`, Other Workshop). Jordan opts into SMS and contact. Priya opts into contact only. Alex leaves every consent box unchecked and asks about Hi Coworking early access.
+The three leads are Jordan Hale (`expo-fake-jordan@example.com`, Example Dynamics), Priya Shah (phone only, Northstar Sub Co), and Alex Kim (`expo-fake-alex@example.com`, Other Workshop). Jordan opts into text and phone. Priya opts into phone only. Alex leaves every consent box unchecked and asks about Hi Coworking early access. Each payload includes `event=nasa-expo-2026-10-20` so it joins the expo list.
 
 Direct function URL, if Hosting is not deployed yet:
 
