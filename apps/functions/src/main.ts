@@ -99,6 +99,7 @@ export const setUserRole = legacy.setUserRole;
 export const leads_submitLead = legacy.leads_submitLead;
 export const leads_onNewLead = legacy.leads_onNewLead;
 export const leads_submitContact = legacy.leads_submitContact;
+export { expo_submitNasaLead } from "./expo/submitNasaLead";
 export const stripe_createCheckoutSession = legacy.stripe_createCheckoutSession;
 export const stripe_webhook = legacy.stripe_webhook;
 export const qb_createCheckout = legacy.qb_createCheckout;
