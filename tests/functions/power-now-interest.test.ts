@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
-import { createPowerNowRateLimiter } from "../../apps/functions/src/expo/powerNowIngest";
+import {
+  POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID,
+  createPowerNowRateLimiter,
+} from "../../apps/functions/src/expo/powerNowIngest";
 import {
   PITCH_COMPETITION_LIST,
   POWER_NOW_CONSENT_VERSION,
@@ -25,12 +28,13 @@ type MockState = {
   companies: StoredRecord[];
   notes: Array<{ parentObject: string; parent: string; title: string; content: string }>;
   entries: Array<{ parent: string; slug: string; listId: string; parentObject: string; entryValues: unknown }>;
-  tasks: Array<{ content: string; linked: unknown; assignees?: unknown }>;
+  tasks: Array<{ id: string; content: string; linked: unknown; assignees?: unknown }>;
   calls: string[];
+  failAssignee?: boolean;
+  sequence: number;
 };
 
 function createAttio(state: MockState): typeof fetch {
-  let sequence = 0;
   return async (input, init) => {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
@@ -45,7 +49,7 @@ function createAttio(state: MockState): typeof fetch {
       return json(200, { data: matched.map(toApi) });
     }
     if (method === "POST" && url.pathname === "/v2/objects/companies/records") {
-      const company = { id: `company-${++sequence}`, values: body?.data?.values ?? {} };
+      const company = { id: `company-${++state.sequence}`, values: body?.data?.values ?? {} };
       state.companies.push(company);
       return json(200, { data: toApi(company) });
     }
@@ -58,7 +62,7 @@ function createAttio(state: MockState): typeof fetch {
       const email = String(body?.data?.values?.email_addresses?.[0]?.email_address ?? "").toLowerCase();
       let person = state.people.find((item) => emails(item).includes(email));
       if (!person) {
-        person = { id: `person-${++sequence}`, values: {} };
+        person = { id: `person-${++state.sequence}`, values: {} };
         state.people.push(person);
       }
       person.values = body?.data?.values ?? {};
@@ -95,7 +99,7 @@ function createAttio(state: MockState): typeof fetch {
         title: body?.data?.title,
         content: body?.data?.content,
       });
-      return json(200, { data: { id: { note_id: `note-${++sequence}` } } });
+      return json(200, { data: { id: { note_id: `note-${++state.sequence}` } } });
     }
     if (method === "GET" && url.pathname === "/v2/tasks") {
       const linked = url.searchParams.get("linked_record_id");
@@ -104,19 +108,29 @@ function createAttio(state: MockState): typeof fetch {
       });
     }
     if (method === "POST" && url.pathname === "/v2/tasks") {
+      const id = `task-${++state.sequence}`;
       state.tasks.push({
+        id,
         content: body?.data?.content,
         linked: body?.data?.linked_records,
         assignees: body?.data?.assignees,
       });
-      return json(200, { data: { id: { task_id: `task-${++sequence}` } } });
+      return json(200, { data: { id: { task_id: id } } });
+    }
+    const taskUpdate = url.pathname.match(/^\/v2\/tasks\/([^/]+)$/);
+    if (taskUpdate && method === "PATCH") {
+      if (state.failAssignee) return json(500, { message: "assignee rejected" });
+      const task = state.tasks.find((item) => item.id === taskUpdate[1]);
+      if (!task) return json(404, { message: "missing task" });
+      task.assignees = body?.data?.assignees;
+      return json(200, { data: { id: { task_id: task.id } } });
     }
     return json(500, { message: `Unhandled ${method} ${url.pathname}` });
   };
 }
 
 function emptyState(): MockState {
-  return { people: [], companies: [], notes: [], entries: [], tasks: [], calls: [] };
+  return { people: [], companies: [], notes: [], entries: [], tasks: [], calls: [], sequence: 0 };
 }
 
 function pitchBody(overrides: Record<string, unknown> = {}) {
@@ -323,8 +337,13 @@ describe("Power NOW Attio payload mapping", () => {
     expect(companyNote?.title).toBe(personNote?.title);
     expect(companyNote?.content).toBe(personNote?.content);
     expect(personNote?.content).toContain("What would you pitch?: A workshop kit for first customers.");
+    expect(POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID).toBe("2029a271-1072-4dd9-849e-6a32fdb71df5");
     expect(state.tasks).toHaveLength(1);
-    expect(state.tasks[0]?.assignees).toBeUndefined();
+    expect(state.tasks[0]?.assignees).toEqual([jonathanAssignee()]);
+    expect(state.tasks[0]?.linked).toEqual([
+      { target_object: "people", target_record_id: person?.id },
+      { target_object: "companies", target_record_id: state.companies[0]?.id },
+    ]);
     expect(state.tasks[0]?.content).toContain("Power NOW pitch interest for Jessica.");
     expect(state.tasks[0]?.content).toContain("Name: Ada Lovelace");
     expect(state.tasks[0]?.content).toContain("Company: Analytical Engines");
@@ -342,6 +361,10 @@ describe("Power NOW Attio payload mapping", () => {
     expect(state.notes[0]?.content).toContain("unnamed-business");
     expect(state.notes[0]?.content).toContain("pitch-list-not-added");
     expect(state.tasks[0]?.content).toContain("Flags: unnamed-business, pitch-list-not-added");
+    expect(state.tasks[0]?.assignees).toEqual([jonathanAssignee()]);
+    expect(state.tasks[0]?.linked).toEqual([
+      { target_object: "people", target_record_id: state.people[0]?.id },
+    ]);
   });
 
   it("maps watch and contribute without adding them to Pitch Competition", async () => {
@@ -365,6 +388,19 @@ describe("Power NOW Attio payload mapping", () => {
     expect(contributeNote?.content).toContain("sms: yes");
     expect(contributeNote?.content).toContain("Approximate value: 80");
     expect(contributeNote?.content).toContain("Describe your offer: A studio tour for two");
+
+    const watchTask = state.tasks.find((task) => task.content.startsWith("Power NOW watch"));
+    const contributeTask = state.tasks.find((task) => task.content.startsWith("Power NOW contribute"));
+    expect(watchTask?.assignees).toEqual([jonathanAssignee()]);
+    expect(watchTask?.linked).toEqual([
+      { target_object: "people", target_record_id: watchPerson?.id },
+      { target_object: "companies", target_record_id: state.companies.find((company) => text(company, "name") === "Navy Yard Lab")?.id },
+    ]);
+    expect(contributeTask?.assignees).toEqual([jonathanAssignee()]);
+    expect(contributeTask?.linked).toEqual([
+      { target_object: "people", target_record_id: contributePerson?.id },
+      { target_object: "companies", target_record_id: state.companies.find((company) => text(company, "name") === "Harbor Goods")?.id },
+    ]);
   });
 
   it("keeps an earlier path tag when the same person joins a second path", async () => {
@@ -380,6 +416,48 @@ describe("Power NOW Attio payload mapping", () => {
     const description = text(state.people[0]!, "description");
     expect(description).toContain("path:pitch");
     expect(description).toContain("path:watch");
+  });
+
+  it("still saves the submission when assigning the task fails", async () => {
+    const state = emptyState();
+    state.failAssignee = true;
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
+      errors.push(String(message));
+    });
+    try {
+      const result = await submit(state, pitchBody());
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ ok: true, taskStatus: "created", noteStatus: "created" });
+      expect(state.tasks).toHaveLength(1);
+      expect(state.tasks[0]?.assignees).toBeUndefined();
+      expect(state.tasks[0]?.linked).toEqual([
+        { target_object: "people", target_record_id: state.people[0]?.id },
+        { target_object: "companies", target_record_id: state.companies[0]?.id },
+      ]);
+      expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
+      expect(errors.some((message) => message.includes("left unassigned") && message.includes("assignee rejected"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("uses POWER_NOW_TASK_ASSIGNEE_ID when it is set", async () => {
+    const override = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const previous = process.env.POWER_NOW_TASK_ASSIGNEE_ID;
+    process.env.POWER_NOW_TASK_ASSIGNEE_ID = override;
+    try {
+      const state = emptyState();
+      const result = await submit(state, watchBody());
+      expect(result.status).toBe(200);
+      expect(state.tasks[0]?.content).toContain("Power NOW watch interest for Jessica.");
+      expect(state.tasks[0]?.assignees).toEqual([
+        { referenced_actor_type: "workspace-member", referenced_actor_id: override },
+      ]);
+    } finally {
+      if (previous === undefined) delete process.env.POWER_NOW_TASK_ASSIGNEE_ID;
+      else process.env.POWER_NOW_TASK_ASSIGNEE_ID = previous;
+    }
   });
 
   it("does not write a second note or task for the same submission", async () => {
@@ -447,6 +525,13 @@ describe("Power NOW page boundaries", () => {
     expect(POWER_NOW_SEND_ERROR).toContain("hello@accelanalysis.com");
   });
 });
+
+function jonathanAssignee() {
+  return {
+    referenced_actor_type: "workspace-member",
+    referenced_actor_id: POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID,
+  };
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
