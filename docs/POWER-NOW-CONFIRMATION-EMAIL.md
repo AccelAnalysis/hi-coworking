@@ -2,7 +2,7 @@
 
 The Power NOW form can send its own confirmation after a submission is saved in Attio. It does not use Attio sequences. Pitch, watch, and contribute each get Step 1 only, in Jessica's wording.
 
-The sender is `hello@accelanalysis.com`. The default provider is Resend. Microsoft Graph remains available when `hello@` is a shared mailbox.
+The sender is `hello@accelanalysis.com`. The default provider is Resend. The Graph adapter remains in the code for a later switch, and its secrets are not bound on the function.
 
 Nothing in this document sets a secret or deploys the function.
 
@@ -60,15 +60,15 @@ The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields ar
 
 ## Secrets
 
-Bound on `expo_submitNasaLead`. Create each one in Secret Manager before deploying that function. The flag can stay off, but Firebase still requires the secrets to exist because the function declares them. Do not put the values in git, logs, or this doc.
+Bound on `expo_submitNasaLead` for the Resend path. Create each one in Secret Manager before deploying that function. The flag can stay off, but Firebase still requires these two secrets to exist because the function declares them. Do not put the values in git, logs, or this doc.
 
-| Secret | Used by |
-| --- | --- |
-| `RESEND_API_KEY` | Resend `Authorization: Bearer` |
-| `M365_TENANT_ID` | Graph client-credentials token |
-| `M365_CLIENT_ID` | Graph client-credentials token |
-| `M365_CLIENT_SECRET` | Graph client-credentials token |
-| `RECAPTCHA_ENTERPRISE_API_KEY` | reCAPTCHA Enterprise assessments |
+| Secret | Required for this deploy | Used by |
+| --- | --- | --- |
+| `RESEND_API_KEY` | yes | Resend `Authorization: Bearer` |
+| `RECAPTCHA_ENTERPRISE_API_KEY` | yes | reCAPTCHA Enterprise assessments |
+| `M365_TENANT_ID` | no | Graph client-credentials token, only after a later switch |
+| `M365_CLIENT_ID` | no | Graph client-credentials token, only after a later switch |
+| `M365_CLIENT_SECRET` | no | Graph client-credentials token, only after a later switch |
 
 `ATTIO_API_KEY` is unchanged and still required.
 
@@ -76,11 +76,12 @@ Create a secret without printing it in CI:
 
 ```bash
 firebase functions:secrets:set RESEND_API_KEY --project hi-coworking-plat
+firebase functions:secrets:set RECAPTCHA_ENTERPRISE_API_KEY --project hi-coworking-plat
 ```
 
-Repeat for `M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET`, and `RECAPTCHA_ENTERPRISE_API_KEY`.
+Do not create the M365 secrets for the Resend deploy. They are optional and only for a later Graph switch.
 
-The manual workflow **Hi Coworking Firebase expo lead function** checks that these names exist and have an enabled version. It does not print values. That workflow runs only from `main`, and only after this revision is merged. Do not run it from this branch.
+The manual workflow **Hi Coworking Firebase expo lead function** checks that `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` exist and have an enabled version. It does not check the M365 secrets and it does not print values. That workflow runs only from `main`, and only after this revision is merged. Do not run it from this branch.
 
 ## Resend setup (Jonathan)
 
@@ -99,15 +100,19 @@ The function calls `POST https://api.resend.com/emails` with `Idempotency-Key` s
 
 ## Microsoft Graph
 
+The Graph adapter stays in the code. It is not on the deploy path. `expo_submitNasaLead` does not bind `M365_TENANT_ID`, `M365_CLIENT_ID`, or `M365_CLIENT_SECRET`.
+
 Set `POWER_NOW_EMAIL_PROVIDER=graph` only if `hello@accelanalysis.com` is a shared mailbox. Graph cannot reliably send from an alias. An alias on Jonathan's mailbox will not work as the From address.
 
-The function uses the client-credentials flow (`M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET`) and `POST /users/{sender}/sendMail` with `saveToSentItems: true`. The sender in that path is the mailbox inside `POWER_NOW_SENDER`, defaulting to `hello@accelanalysis.com`. The app registration needs application permission to send as that mailbox, with admin consent.
+Before Graph can send, add those three secrets back to the function binding in `POWER_NOW_CONFIRMATION_SECRETS`, create them in Secret Manager, and deploy `expo_submitNasaLead` again. The adapter then uses the client-credentials flow and `POST /users/{sender}/sendMail` with `saveToSentItems: true`. The sender in that path is the mailbox inside `POWER_NOW_SENDER`, defaulting to `hello@accelanalysis.com`. The app registration needs application permission to send as that mailbox, with admin consent.
 
-Grant the key least privilege and store it only in Secret Manager.
+If `POWER_NOW_EMAIL_PROVIDER=graph` and any of those three values is missing, the function skips the send the same way it does when `RESEND_API_KEY` is missing. It logs the person record id and `ProviderUnconfigured`, prefixes the follow-up task with `[CONFIRMATION EMAIL FAILED]`, and still saves the submission.
+
+Grant any Graph key least privilege and store it only in Secret Manager.
 
 ## Abuse controls
 
-Checked only when the flag is on. A block skips the email and still returns success for the saved submission. These blocks do not prefix the task. A provider or network failure does.
+Checked only when the flag is on. A block skips the email and still returns success for the saved submission. These blocks do not prefix the task. A provider or network failure does, including a missing Resend key or a Graph selection whose M365 values are not configured.
 
 - Honeypot fields `expo_hp` and `pn_hp` already return a fake success before any Attio write, so they send no mail.
 - Submit faster than `POWER_NOW_MIN_SUBMIT_MS`, or omit `pnStartedAt`, and the email is skipped.
@@ -131,4 +136,4 @@ Run that locally. Do not paste a real address into a log or a pull request. Then
 
 ## Deploy
 
-Do not deploy this from the pull request. After merge, create the five secrets above, set the public reCAPTCHA site key on the web build if mail should send, and leave `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` unset until a deliberate test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS`. The manual function workflow deploys only `expo_submitNasaLead`.
+Do not deploy this from the pull request. After merge, create `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY`, set the public reCAPTCHA site key on the web build if mail should send, and leave `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` unset until a deliberate test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS`. The manual function workflow deploys only `expo_submitNasaLead`.

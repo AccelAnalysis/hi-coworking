@@ -457,6 +457,60 @@ describe("Power NOW confirmation delivery", () => {
     expect(blocked.result.body).toMatchObject({ ok: true });
   });
 
+  it("flags the task when Graph is selected without M365 secrets, and still saves the submission", async () => {
+    const state = emptyState();
+    const mail = mailRecorder();
+    const { result } = await submit(state, pitchBody(), {
+      env: enabledEnv({ POWER_NOW_EMAIL_PROVIDER: "graph" }),
+      mail,
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, accepted: true, path: "pitch" });
+    expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
+    expect(state.people).toHaveLength(1);
+    expect(mail.calls).toHaveLength(0);
+    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(true);
+    const failure = state.notes.find((note) => note.title === "Power NOW confirmation email failed");
+    expect(failure?.content).toContain("Error class: ProviderUnconfigured");
+    expect(failure?.content).not.toContain("ada@example.com");
+  });
+
+  it("flags the task the same way when the Resend key is missing", async () => {
+    const state = emptyState();
+    const mail = mailRecorder();
+    const env = enabledEnv();
+    delete env.RESEND_API_KEY;
+    const { result } = await submit(state, pitchBody(), { env, mail });
+    expect(result.status).toBe(200);
+    expect(state.people).toHaveLength(1);
+    expect(mail.calls).toHaveLength(0);
+    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(true);
+    expect(state.notes.find((note) => note.title === "Power NOW confirmation email failed")?.content).toContain(
+      "Error class: ProviderUnconfigured",
+    );
+  });
+
+  it("sends through Graph when the mailbox secrets are present in the environment", async () => {
+    const state = emptyState();
+    const mail = mailRecorder();
+    const { result } = await submit(state, pitchBody(), {
+      env: enabledEnv({
+        POWER_NOW_EMAIL_PROVIDER: "graph",
+        M365_TENANT_ID: "tenant-1",
+        M365_CLIENT_ID: "client-1",
+        M365_CLIENT_SECRET: "secret-1",
+      }),
+      mail,
+    });
+    expect(result.status).toBe(200);
+    expect(mail.calls.map((call) => call.url)).toEqual([
+      "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token",
+      "https://graph.microsoft.com/v1.0/users/hello%40accelanalysis.com/sendMail",
+    ]);
+    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(false);
+    expect(JSON.parse(mail.calls[1]!.body).saveToSentItems).toBe(true);
+  });
+
   it("skips the email when captcha is not configured and still saves the submission", async () => {
     const state = emptyState();
     const mail = mailRecorder();
@@ -656,12 +710,21 @@ describe("Power NOW confirmation config surface", () => {
     expect(rules).toContain("powerNowEmailIpWindow");
     expect(rules).toContain("powerNowEmailDaily");
     const workflow = readFileSync(".github/workflows/firebase-live-expo-lead-function.yml", "utf8");
-    for (const name of ["RESEND_API_KEY", "M365_TENANT_ID", "M365_CLIENT_ID", "M365_CLIENT_SECRET", "RECAPTCHA_ENTERPRISE_API_KEY"]) {
-      expect(workflow).toContain(name);
-    }
+    const requiredSecrets = workflow.slice(workflow.indexOf("secrets=("), workflow.indexOf("for secret"));
+    expect(requiredSecrets).toContain("RESEND_API_KEY");
+    expect(requiredSecrets).toContain("RECAPTCHA_ENTERPRISE_API_KEY");
+    expect(requiredSecrets).not.toContain("M365_");
+    const bound = readFileSync("apps/functions/src/expo/powerNowConfirmationSecrets.ts", "utf8");
+    expect(bound).toContain("RESEND_API_KEY");
+    expect(bound).toContain("RECAPTCHA_ENTERPRISE_API_KEY");
+    expect(bound).not.toContain('defineSecret("M365_TENANT_ID")');
+    expect(bound).not.toContain('defineSecret("M365_CLIENT_ID")');
+    expect(bound).not.toContain('defineSecret("M365_CLIENT_SECRET")');
     const docs = readFileSync("docs/POWER-NOW-CONFIRMATION-EMAIL.md", "utf8");
     expect(docs).toContain("shared mailbox");
     expect(docs).toContain("100 emails a day");
     expect(docs).toContain("DKIM");
+    expect(docs).toContain("add those three secrets back to the function binding");
+    expect(docs).toContain("optional and only for a later Graph switch");
   });
 });

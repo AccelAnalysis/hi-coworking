@@ -217,7 +217,7 @@ export type PowerNowConfirmationOptions = {
   readSecret?: (name: string) => string | undefined;
 };
 
-type SendFailureClass = "ResendRejected" | "GraphRejected" | "GraphAuthFailed" | "SendFailed";
+type SendFailureClass = "ResendRejected" | "GraphRejected" | "GraphAuthFailed" | "SendFailed" | "ProviderUnconfigured";
 
 export function confirmationEmailEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.POWER_NOW_CONFIRMATION_EMAIL_ENABLED === "true";
@@ -667,13 +667,11 @@ export async function runPowerNowConfirmation(input: {
     if (suppressed) return skipped(input.personRecordId, "Suppressed");
 
     const provider = confirmationProvider(env);
-    if (provider === "invalid") return skipped(input.personRecordId, "ProviderUnconfigured");
-    if (provider === "graph") {
-      const ready = readSecret("M365_TENANT_ID") && readSecret("M365_CLIENT_ID") && readSecret("M365_CLIENT_SECRET");
-      if (!ready) return skipped(input.personRecordId, "ProviderUnconfigured");
-    } else if (!readSecret("RESEND_API_KEY")) {
-      return skipped(input.personRecordId, "ProviderUnconfigured");
-    }
+    const graphReady = Boolean(
+      readSecret("M365_TENANT_ID") && readSecret("M365_CLIENT_ID") && readSecret("M365_CLIENT_SECRET"),
+    );
+    const providerReady = provider === "graph" ? graphReady : provider === "resend" && Boolean(readSecret("RESEND_API_KEY"));
+    if (!providerReady) return providerUnconfigured(input);
 
     const addressKey = `${emailHash}_${input.lead.path}`;
     const ipKey = powerNowEmailHash(input.ip.trim() || "unknown");
@@ -769,6 +767,19 @@ export class ConfirmationEmailError extends Error {
     this.name = "ConfirmationEmailError";
     this.errorClass = errorClass;
   }
+}
+
+async function providerUnconfigured(input: {
+  personRecordId: string;
+  onSendFailure: (errorClass: "ProviderUnconfigured") => Promise<void>;
+}): Promise<{ outcome: "skipped"; errorClass: "ProviderUnconfigured" }> {
+  logConfirmation(input.personRecordId, "ProviderUnconfigured");
+  try {
+    await input.onSendFailure("ProviderUnconfigured");
+  } catch {
+    logConfirmation(input.personRecordId, "ProviderUnconfigured");
+  }
+  return { outcome: "skipped", errorClass: "ProviderUnconfigured" };
 }
 
 function skipped(personRecordId: string, errorClass: string): { outcome: "skipped"; errorClass: string } {
