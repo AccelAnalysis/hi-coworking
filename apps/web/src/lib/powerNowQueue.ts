@@ -33,6 +33,8 @@ export type PowerNowSubmission = {
   submittedAt: string;
   clientSubmissionId: string;
   expo_hp: string;
+  pnStartedAt?: string;
+  recaptchaToken?: string;
 };
 
 export type QueuedPowerNow = {
