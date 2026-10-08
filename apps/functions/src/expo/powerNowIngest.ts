@@ -3,9 +3,9 @@
  * No new Attio lists or attributes. Pitch companies join the existing
  * Pitch Competition list. Consent is also stored in Firestore.
  *
- * TODO(power-now): Assign the Attio task to Jessica when she has a
- * workspace-member id. On 2026-10-07 the workspace only listed Jonathan
- * Holman, so the task is created unassigned rather than alerting the wrong person.
+ * Each submission's follow-up task is assigned to Jonathan Holman.
+ * Override the workspace member with POWER_NOW_TASK_ASSIGNEE_ID.
+ * If that assign call fails, the task stays unassigned and the submission still succeeds.
  */
 
 import * as admin from "firebase-admin";
@@ -31,6 +31,14 @@ import {
 const ATTIO_BASE = "https://api.attio.com/v2";
 const POWER_NOW_RATE_LIMIT = 8;
 const POWER_NOW_RATE_WINDOW_MS = 10 * 60 * 1000;
+
+/** Jonathan Holman (jholman@accelanalysis.com). */
+export const POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID = "2029a271-1072-4dd9-849e-6a32fdb71df5";
+
+export function powerNowTaskAssigneeId(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.POWER_NOW_TASK_ASSIGNEE_ID?.trim();
+  return configured || POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID;
+}
 
 export class PowerNowAttioError extends Error {
   readonly status: number;
@@ -433,8 +441,9 @@ async function ensureTask(
     { target_object: "people", target_record_id: personRecordId },
     ...(companyRecordId ? [{ target_object: "companies", target_record_id: companyRecordId }] : []),
   ];
+  let taskId: string | null = null;
   try {
-    await attio(fetchImpl, apiKey, "POST", "/tasks", {
+    const created = await attio(fetchImpl, apiKey, "POST", "/tasks", {
       data: {
         content,
         format: "plaintext",
@@ -442,11 +451,43 @@ async function ensureTask(
         linked_records: linked,
       },
     });
-    return "created";
+    taskId = taskIdFrom(created.data);
   } catch (error) {
     if (error instanceof PowerNowAttioError && error.status < 500) return "skipped";
     throw error;
   }
+
+  if (!taskId) {
+    console.error("Power NOW task was created without an id, so it was left unassigned.");
+    return "created";
+  }
+
+  try {
+    await attio(fetchImpl, apiKey, "PATCH", `/tasks/${taskId}`, {
+      data: {
+        assignees: [
+          {
+            referenced_actor_type: "workspace-member",
+            referenced_actor_id: powerNowTaskAssigneeId(),
+          },
+        ],
+      },
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    console.error(`Power NOW task ${taskId} was left unassigned: ${detail}`);
+  }
+  return "created";
+}
+
+function taskIdFrom(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const id = (data as { id?: { task_id?: unknown } | string }).id;
+  if (typeof id === "string" && id.trim()) return id.trim();
+  if (id && typeof id === "object" && typeof id.task_id === "string" && id.task_id.trim()) {
+    return id.task_id.trim();
+  }
+  return null;
 }
 
 async function taskExists(
