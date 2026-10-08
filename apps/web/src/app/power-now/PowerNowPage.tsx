@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   BUSINESS_STAGES,
   HEARD_ABOUT_OPTIONS,
@@ -25,6 +25,7 @@ import {
   powerNowQueueInMemory,
   type PowerNowSubmission,
 } from "@/lib/powerNowQueue";
+import { powerNowRecaptchaToken, preloadPowerNowRecaptcha } from "@/lib/powerNowRecaptcha";
 
 const QUESTIONS = (
   <p>
@@ -158,6 +159,11 @@ export function PowerNowPage() {
   const [saving, setSaving] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [memoryWarning, setMemoryWarning] = useState(false);
+  const startedAt = useRef(new Date().toISOString());
+
+  useEffect(() => {
+    preloadPowerNowRecaptcha();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -209,6 +215,12 @@ export function PowerNowPage() {
       return;
     }
     setFieldErrors({});
+    const recaptchaToken = await powerNowRecaptchaToken();
+    const outbound: PowerNowSubmission = {
+      ...payload,
+      pnStartedAt: startedAt.current,
+      recaptchaToken,
+    };
     setSaving(true);
     const receiptBase: Receipt = {
       id: payload.clientSubmissionId,
@@ -224,20 +236,20 @@ export function PowerNowPage() {
     };
     try {
       if (!navigator.onLine) {
-        await enqueuePowerNow(payload);
+        await enqueuePowerNow(outbound);
         setMemoryWarning(powerNowQueueInMemory());
         setReceipt({ ...receiptBase, state: "queued" });
         clearPath(path);
         return;
       }
-      const outcome = await postPowerNow(payload);
+      const outcome = await postPowerNow(outbound);
       if (outcome.decision === "saved") {
         setReceipt(receiptBase);
         clearPath(path);
         return;
       }
       if (outcome.decision === "queue") {
-        await enqueuePowerNow(payload, outcome.error);
+        await enqueuePowerNow(outbound, outcome.error);
         setMemoryWarning(powerNowQueueInMemory());
         setReceipt({ ...receiptBase, state: "queued" });
         clearPath(path);

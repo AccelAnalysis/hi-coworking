@@ -16,6 +16,15 @@ import {
   splitPersonName,
 } from "./nasaLeadModel";
 import {
+  confirmationEmailEnabled,
+  confirmationFailureNote,
+  createFirestoreConfirmationStore,
+  prefixConfirmationFailure,
+  runPowerNowConfirmation,
+  type PowerNowConfirmationOptions,
+} from "./powerNowConfirmation";
+import { readPowerNowSecret } from "./powerNowConfirmationSecrets";
+import {
   PITCH_COMPETITION_LIST,
   POWER_NOW_RATE_LIMIT_ERROR,
   POWER_NOW_SEND_ERROR,
@@ -135,6 +144,7 @@ export async function handlePowerNowHttp(request: {
   ip?: string | null;
   rateLimiter?: PowerNowRateLimiter;
   consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
+  confirmation?: PowerNowConfirmationOptions;
 }): Promise<{ status: number; body: Record<string, unknown>; extraHeaders?: Record<string, string> }> {
   const limiter = request.rateLimiter ?? sharedRateLimiter;
   const ip = request.ip?.trim() || "unknown";
@@ -157,10 +167,20 @@ export async function handlePowerNowHttp(request: {
   }
 
   try {
+    const raw = request.body && typeof request.body === "object"
+      ? request.body as Record<string, unknown>
+      : null;
     const result = await ingestPowerNow(validated.lead, {
       apiKey,
       fetchImpl: request.fetchImpl,
       consentLog: request.consentLog ?? writePowerNowConsentLog,
+      confirmation: {
+        ...request.confirmation,
+        now: request.confirmation?.now ?? request.now,
+        ip: request.confirmation?.ip ?? request.ip ?? undefined,
+        startedAt: request.confirmation?.startedAt ?? (typeof raw?.pnStartedAt === "string" ? raw.pnStartedAt : null),
+        captchaToken: request.confirmation?.captchaToken ?? (typeof raw?.recaptchaToken === "string" ? raw.recaptchaToken : null),
+      },
     });
     return {
       status: 200,
@@ -186,13 +206,16 @@ export async function ingestPowerNow(
     apiKey: string;
     fetchImpl?: FetchLike;
     consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
+    confirmation?: PowerNowConfirmationOptions;
   },
 ): Promise<PowerNowIngestResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiKey = options.apiKey;
+  const confirmationEnv = options.confirmation?.env ?? process.env;
+  const sendConfirmation = confirmationEmailEnabled(confirmationEnv);
   const company = await findOrCreateCompany(fetchImpl, apiKey, lead);
   const existing = await findPersonByEmail(fetchImpl, apiKey, lead.email);
-  const values = personValues(lead, company.id, existing);
+  const values = personValues(lead, company.id, existing, sendConfirmation);
   const person = await assertPersonByEmail(fetchImpl, apiKey, values);
   const personRecordId = recordId(person);
   if (!personRecordId) throw new PowerNowAttioError(502, "Attio did not return a person id");
@@ -213,9 +236,14 @@ export async function ingestPowerNow(
     : true;
 
   let taskStatus: PowerNowIngestResult["taskStatus"] = "already_recorded";
+  let taskId: string | null = null;
+  let taskContent: string | null = null;
   let noteStatus: PowerNowIngestResult["noteStatus"] = personNoted ? "already_recorded" : "created";
   if (!personNoted || !companyNoted) {
-    taskStatus = await ensureTask(fetchImpl, apiKey, lead, personRecordId, company.id, flags);
+    const task = await ensureTask(fetchImpl, apiKey, lead, personRecordId, company.id, flags);
+    taskStatus = task.status;
+    taskId = task.taskId;
+    taskContent = task.content;
     const note = buildPowerNowNote(lead, { flags, taskStatus });
     const title = powerNowNoteTitle(lead.path, lead.capturedAtEt);
     if (!personNoted) await createNote(fetchImpl, apiKey, "people", personRecordId, title, note);
@@ -244,6 +272,52 @@ export async function ingestPowerNow(
     listStatus,
     descriptionTag: lead.descriptionTag,
   });
+
+  if (sendConfirmation) {
+    try {
+      await runPowerNowConfirmation({
+        lead,
+        personRecordId,
+        env: confirmationEnv,
+        now: options.confirmation?.now ?? new Date(),
+        ip: options.confirmation?.ip ?? "unknown",
+        startedAt: options.confirmation?.startedAt ?? null,
+        captchaToken: options.confirmation?.captchaToken ?? null,
+        mailFetch: options.confirmation?.mailFetch,
+        store: options.confirmation?.store ?? createFirestoreConfirmationStore(),
+        resolveMx: options.confirmation?.resolveMx,
+        verifyCaptcha: options.confirmation?.verifyCaptcha,
+        readSecret: options.confirmation?.readSecret ?? ((name) => readPowerNowSecret(name, confirmationEnv)),
+        onSuccess: async (note) => {
+          await createNote(fetchImpl, apiKey, "people", personRecordId, "Power NOW confirmation email", note);
+        },
+        onSendFailure: async (errorClass) => {
+          if (taskId && taskContent) {
+            try {
+              await attio(fetchImpl, apiKey, "PATCH", `/tasks/${taskId}`, {
+                data: {
+                  content: prefixConfirmationFailure(taskContent),
+                  format: "plaintext",
+                },
+              });
+            } catch {
+              console.error("Power NOW confirmation email", { personRecordId, errorClass });
+            }
+          }
+          await createNote(
+            fetchImpl,
+            apiKey,
+            "people",
+            personRecordId,
+            "Power NOW confirmation email failed",
+            confirmationFailureNote(errorClass),
+          );
+        },
+      });
+    } catch {
+      console.error("Power NOW confirmation email", { personRecordId, errorClass: "SendFailed" });
+    }
+  }
 
   return {
     ok: true,
@@ -302,11 +376,22 @@ function personValues(
   lead: NormalizedPowerNow,
   companyId: string | null,
   existing: AttioRecord | null,
+  promoteSubmittedEmail = false,
 ): Record<string, unknown> {
   const name = splitPersonName(lead.fullName);
+  const emails: Array<{ email_address: string }> = [{ email_address: lead.email }];
+  if (promoteSubmittedEmail && existing) {
+    const seen = new Set([lead.email.toLowerCase()]);
+    for (const other of readEmails(existing)) {
+      const key = other.toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      emails.push({ email_address: other });
+    }
+  }
   const values: Record<string, unknown> = {
     name: [name],
-    email_addresses: [{ email_address: lead.email }],
+    email_addresses: emails,
     description: [{
       value: mergeDescription(readText(existing, "description"), lead.descriptionTag, lead.clientSubmissionId),
     }],
@@ -424,9 +509,9 @@ async function ensureTask(
   personRecordId: string,
   companyRecordId: string | null,
   flags: string[],
-): Promise<PowerNowIngestResult["taskStatus"]> {
+): Promise<{ status: PowerNowIngestResult["taskStatus"]; taskId: string | null; content: string | null }> {
   if (await taskExists(fetchImpl, apiKey, personRecordId, lead.clientSubmissionId)) {
-    return "already_recorded";
+    return { status: "already_recorded", taskId: null, content: null };
   }
   const content = buildPowerNowTaskContent({
     path: lead.path,
@@ -453,13 +538,15 @@ async function ensureTask(
     });
     taskId = taskIdFrom(created.data);
   } catch (error) {
-    if (error instanceof PowerNowAttioError && error.status < 500) return "skipped";
+    if (error instanceof PowerNowAttioError && error.status < 500) {
+      return { status: "skipped", taskId: null, content: null };
+    }
     throw error;
   }
 
   if (!taskId) {
     console.error("Power NOW task was created without an id, so it was left unassigned.");
-    return "created";
+    return { status: "created", taskId: null, content };
   }
 
   try {
@@ -477,7 +564,7 @@ async function ensureTask(
     const detail = error instanceof Error ? error.message : "unknown error";
     console.error(`Power NOW task ${taskId} was left unassigned: ${detail}`);
   }
-  return "created";
+  return { status: "created", taskId, content };
 }
 
 function taskIdFrom(data: unknown): string | null {
