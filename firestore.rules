@@ -720,5 +720,22 @@ service cloud.firestore {
     match /powerNowConsentLog/{submissionId} {
       allow read, write: if false;
     }
+
+    // Power NOW confirmation mail: suppression and send counters. Admin SDK only.
+    match /powerNowEmailSuppression/{emailHash} {
+      allow read, write: if false;
+    }
+
+    match /powerNowEmailAddressWindow/{windowId} {
+      allow read, write: if false;
+    }
+
+    match /powerNowEmailIpWindow/{windowId} {
+      allow read, write: if false;
+    }
+
+    match /powerNowEmailDaily/{dayId} {
+      allow read, write: if false;
+    }
   }
 }
