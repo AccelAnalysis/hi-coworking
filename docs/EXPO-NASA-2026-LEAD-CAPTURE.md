@@ -155,3 +155,5 @@ Direct function URL, if Hosting is not deployed yet:
 ```bash
 node scripts/expo-nasa-fake-leads.mjs --send --url https://us-central1-hi-coworking-plat.cloudfunctions.net/expo_submitNasaLead
 ```
+
+Power NOW confirmation mail, when that flag is later turned on, is a separate path on the same function. Setup, secrets, and the Resend and Graph options are in [POWER-NOW-CONFIRMATION-EMAIL.md](POWER-NOW-CONFIRMATION-EMAIL.md). The flag stays off until it is set to `true`.

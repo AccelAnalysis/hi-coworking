@@ -105,6 +105,39 @@ jobs:
             exit 1
           fi
 
+      - name: Confirm Power NOW confirmation secrets exist in Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Names only. Values are never printed. The function binds these secrets,
+          # so deploy fails if any of them is missing, even while the email flag is off.
+          secrets=(
+            RESEND_API_KEY
+            M365_TENANT_ID
+            M365_CLIENT_ID
+            M365_CLIENT_SECRET
+            RECAPTCHA_ENTERPRISE_API_KEY
+          )
+          for secret in "${secrets[@]}"; do
+            err="${RUNNER_TEMP}/secret-check.txt"
+            if ! gcloud secrets describe "${secret}" --project=hi-coworking-plat --format='value(name)' >/dev/null 2>"${err}"; then
+              if grep -Eq 'NOT_FOUND|not found' "${err}"; then
+                echo "${secret} is missing from Secret Manager in project hi-coworking-plat." >&2
+                echo "Create it before deploying this function. Do not paste the value into the workflow log." >&2
+              else
+                echo "Could not confirm ${secret} in Secret Manager for hi-coworking-plat. Refusing to deploy." >&2
+              fi
+              echo "The secret value was not printed." >&2
+              exit 1
+            fi
+            enabled="$(gcloud secrets versions list "${secret}" --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1)"
+            if [[ -z "${enabled}" ]]; then
+              echo "${secret} has no enabled version in Secret Manager for hi-coworking-plat." >&2
+              echo "The secret value was not printed." >&2
+              exit 1
+            fi
+          done
+
       - name: Deploy expo_submitNasaLead only
         run: npx firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 
