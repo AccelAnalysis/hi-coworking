@@ -110,12 +110,11 @@ jobs:
         run: |
           set -euo pipefail
           # Names only. Values are never printed. The function binds these secrets,
-          # so deploy fails if any of them is missing, even while the email flag is off.
+          # so deploy fails if either is missing, even while the email flag is off.
+          # M365_TENANT_ID, M365_CLIENT_ID, and M365_CLIENT_SECRET are optional.
+          # They are only for a later Graph switch, and are not bound on this function.
           secrets=(
             RESEND_API_KEY
-            M365_TENANT_ID
-            M365_CLIENT_ID
-            M365_CLIENT_SECRET
             RECAPTCHA_ENTERPRISE_API_KEY
           )
           for secret in "${secrets[@]}"; do
