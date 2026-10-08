@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { FormsHostGuard } from "@/components/FormsHostGuard";
 import { AuthProvider } from "@/lib/authContext";
+import { formsHostGuardScript } from "@/lib/formsHostGuard";
 import { HOME_DESCRIPTION, HOME_TITLE, PUBLIC_SITE_ORIGIN } from "@/lib/publicSite";
 
 const geistSans = Geist({
@@ -30,6 +33,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-dvh`}
       >
+        <Script id="forms-host-guard" strategy="beforeInteractive">
+          {formsHostGuardScript()}
+        </Script>
+        <FormsHostGuard />
         <AuthProvider>
           {children}
         </AuthProvider>

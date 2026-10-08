@@ -16,6 +16,7 @@ import {
   type PowerNowFieldErrors,
   type PowerNowPath,
 } from "@/lib/powerNowLead";
+import { resolvePowerNowPath } from "@/lib/powerNowLocation";
 import {
   POWER_NOW_QUEUED_MESSAGE,
   enqueuePowerNow,
@@ -160,12 +161,13 @@ export function PowerNowPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const path = canonicalizePowerNowPath(params.get("path"));
-    if (params.has("path") && !path) {
+    const fromQuery = canonicalizePowerNowPath(params.get("path"));
+    if (params.has("path") && !fromQuery) {
       params.delete("path");
       const query = params.toString();
       window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
     }
+    const path = fromQuery ?? resolvePowerNowPath(window.location.pathname, "");
     if (path) {
       setActive(path);
       window.setTimeout(() => scrollToPath(path), 0);
