@@ -1,0 +1,132 @@
+name: Hi Coworking Firebase expo lead function
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy expo_submitNasaLead to deploy only that function'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-expo-lead-function
+  cancel-in-progress: false
+
+jobs:
+  deploy-expo-lead-function:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+      DEPLOY_CONFIRMATION: ${{ inputs.confirm }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Require the typed confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Refusing to deploy from ${GITHUB_REF}. Run this workflow from main." >&2
+            exit 1
+          fi
+          if [[ "${DEPLOY_CONFIRMATION}" != "deploy expo_submitNasaLead" ]]; then
+            echo "Confirmation did not match. Type exactly: deploy expo_submitNasaLead" >&2
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            echo "Add a Firebase/Google Cloud service-account JSON with permission to deploy Gen 2 Functions, then re-run this workflow." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build functions
+        run: npm run build:shared && npm run build:functions
+
+      - name: Guard the Firebase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const rc = JSON.parse(fs.readFileSync('.firebaserc', 'utf8'));
+          const project = rc.projects && rc.projects.default;
+          if (project !== 'hi-coworking-plat') {
+            throw new Error(`Refusing to deploy: .firebaserc default project is ${project || '(missing)'}, expected hi-coworking-plat.`);
+          }
+          NODE
+
+      - name: Confirm ATTIO_API_KEY exists in Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
+          err="${RUNNER_TEMP}/attio-secret-check.txt"
+          if ! gcloud secrets describe ATTIO_API_KEY --project=hi-coworking-plat --format='value(name)' >/dev/null 2>"${err}"; then
+            if grep -Eq 'NOT_FOUND|not found' "${err}"; then
+              echo "ATTIO_API_KEY is missing from Secret Manager in project hi-coworking-plat." >&2
+              echo "Set it with: firebase functions:secrets:set ATTIO_API_KEY --project hi-coworking-plat" >&2
+            else
+              echo "Could not confirm ATTIO_API_KEY in Secret Manager for hi-coworking-plat. Refusing to deploy." >&2
+            fi
+            echo "The secret value was not printed." >&2
+            exit 1
+          fi
+          enabled="$(gcloud secrets versions list ATTIO_API_KEY --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1)"
+          if [[ -z "${enabled}" ]]; then
+            echo "ATTIO_API_KEY has no enabled version in Secret Manager for hi-coworking-plat." >&2
+            echo "The secret value was not printed." >&2
+            exit 1
+          fi
+
+      - name: Deploy expo_submitNasaLead only
+        run: npx firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
+
+      - name: Smoke-test the function without writing to Attio
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/expo_submitNasaLead"
+          body="${RUNNER_TEMP}/expo-lead-options.txt"
+          status="$(curl --silent --show-error --location \
+            --request OPTIONS \
+            --output "${body}" \
+            --write-out '%{http_code}' \
+            --header 'Origin: https://hi-coworking.com' \
+            --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: content-type' \
+            "${endpoint}")"
+          if [[ "${status}" != "204" && "${status}" != "200" ]]; then
+            echo "expo_submitNasaLead OPTIONS smoke test failed (HTTP ${status}). This request does not write to Attio." >&2
+            exit 1
+          fi
+          if grep -q '<html' "${body}"; then
+            echo "expo_submitNasaLead OPTIONS returned HTML instead of the function. This request does not write to Attio." >&2
+            exit 1
+          fi

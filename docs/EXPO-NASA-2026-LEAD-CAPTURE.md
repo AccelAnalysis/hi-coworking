@@ -90,6 +90,30 @@ firebase deploy --project hi-coworking-plat --only hosting
 
 Deploy the function before hosting so `/api/expo/nasa-lead` has somewhere to go. This does not redeploy booking or events functions. The page is outside the coming-soon gate and does not change those flows.
 
+### Manual GitHub Actions deploy
+
+Workflow display name: **Hi Coworking Firebase expo lead function** (`.github/workflows/firebase-live-expo-lead-function.yml`).
+
+It is `workflow_dispatch` only. GitHub shows that button after this file is on `main`. Running it from another branch is refused. Nothing in this repo starts it on push.
+
+In Actions, open **Hi Coworking Firebase expo lead function**, choose **Run workflow** on `main`, and type this confirmation exactly:
+
+```text
+deploy expo_submitNasaLead
+```
+
+The job uses the same service account as the other live function deploys (`FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT`, or `FIREBASE_SERVICE_ACCOUNT`), Node 20, `npm ci`, and `npm run build:shared && npm run build:functions`. It refuses to continue unless `.firebaserc` defaults to `hi-coworking-plat`.
+
+Before deploy it checks that Secret Manager in `hi-coworking-plat` has an enabled `ATTIO_API_KEY` version. A missing secret fails the job. The workflow never prints the secret value and never reads the secret payload.
+
+The only deploy command is:
+
+```bash
+npx firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
+```
+
+That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
+
 Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Saved — will sync** and keeps the lead in IndexedDB until it can post.
 
 ## Test without touching Attio
