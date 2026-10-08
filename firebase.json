@@ -58,6 +58,9 @@
           "region": "us-central1"
         }
       },
+      { "source": "/power-now/pitch", "destination": "/power-now.html" },
+      { "source": "/power-now/watch", "destination": "/power-now.html" },
+      { "source": "/power-now/contribute", "destination": "/power-now.html" },
       {
         "source": "**",
         "destination": "/index.html"
