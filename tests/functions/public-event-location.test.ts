@@ -26,6 +26,7 @@ describe("online event location", () => {
     const projected = publicEvent(event({ format: "virtual", location: CARROLLTON }));
     expect(projected.format).toBe("virtual");
     expect(projected.location).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(projected, "location")).toBe(false);
     expect(projected.title).toBe("Power NOW Pitch Competition");
     expect(JSON.stringify(projected)).not.toContain("Carrollton");
   });
