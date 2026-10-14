@@ -153,6 +153,8 @@ describe("public RFx Exchange quarantine", () => {
     const sitemap = read("apps/web/src/app/sitemap.ts");
     const robots = read("apps/web/src/app/robots.ts");
     expect(sitemap).toContain("PUBLIC_HI_PAGES");
+    expect(sitemap).toContain('export const dynamic = "force-static"');
+    expect(robots).toContain('export const dynamic = "force-static"');
     expect(sitemap).not.toMatch(/\/rfx|\/platform|\/exchange|AccelPO/);
     expect(robots).toContain("PUBLIC_RFX_QUARANTINE_PREFIXES");
     expect(robots).toContain("PUBLIC_SITE_ORIGIN");

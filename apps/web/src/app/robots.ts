@@ -6,6 +6,8 @@ import {
 } from "@/lib/rfxQuarantine";
 import { PUBLIC_SITE_ORIGIN } from "@/lib/publicSite";
 
+export const dynamic = "force-static";
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
