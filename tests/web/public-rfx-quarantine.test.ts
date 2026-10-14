@@ -2,6 +2,12 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  HOME_DESCRIPTION,
+  HOME_TITLE,
+  PUBLIC_HI_PAGES,
+  PUBLIC_SITE_ORIGIN,
+} from "../../apps/web/src/lib/publicSite";
+import {
   ADMIN_HI_HOME,
   ADMIN_RFX_QUARANTINE_PREFIXES,
   MEMBER_HI_HOME,
@@ -84,6 +90,36 @@ describe("public RFx Exchange quarantine", () => {
     for (const page of routedPages) {
       const source = readFileSync(page, "utf8");
       expect(source, page).not.toMatch(/RFx Marketplace|Explore the RFx|Register for the RFx/);
+      if (page.includes(`${resolve(root, "apps/web/src/app/admin")}/`) || page.includes(`${resolve(root, "apps/web/src/app/expo")}/`)) {
+        continue;
+      }
+      expect(source, page).not.toMatch(/\bRFx\b/);
+      expect(source, page).not.toMatch(/href=["']\/(rfx|platform|exchange|directory|referrals)(\/|["'?])/);
+    }
+
+    const removedRoutes = [
+      "apps/web/src/app/rfx/page.tsx",
+      "apps/web/src/app/rfx/new/page.tsx",
+      "apps/web/src/app/rfx/detail/page.tsx",
+      "apps/web/src/app/rfx/evaluate/page.tsx",
+      "apps/web/src/app/platform/page.tsx",
+      "apps/web/src/app/exchange/page.tsx",
+      "apps/web/src/app/directory/page.tsx",
+      "apps/web/src/app/directory/profile/page.tsx",
+      "apps/web/src/app/referrals/page.tsx",
+      "apps/web/src/app/org/page.tsx",
+      "apps/web/src/app/org/dashboard/page.tsx",
+      "apps/web/src/app/org/settings/page.tsx",
+      "apps/web/src/app/dashboard/page.tsx",
+      "apps/web/src/app/profile/page.tsx",
+      "apps/web/src/app/admin/rfx/page.tsx",
+      "apps/web/src/app/admin/territories/page.tsx",
+      "apps/web/src/app/admin/verification/page.tsx",
+      "apps/web/src/app/admin/orgs/page.tsx",
+      "apps/web/src/app/admin/analytics/page.tsx",
+    ];
+    for (const route of removedRoutes) {
+      expect(existsSync(resolve(root, route)), route).toBe(false);
     }
 
     for (const preserved of [
@@ -96,5 +132,40 @@ describe("public RFx Exchange quarantine", () => {
     ]) {
       expect(existsSync(resolve(root, "apps/web/src/quarantine/rfx-exchange", preserved))).toBe(true);
     }
+  });
+
+  it("lists only Hi Coworking pages and keeps product routes out of the sitemap", () => {
+    expect(HOME_TITLE).toBe("Hi Coworking");
+    expect(HOME_DESCRIPTION).not.toMatch(/RFx|Exchange|AccelPO|\bAccel\b/i);
+    expect(PUBLIC_HI_PAGES).toContain("/");
+    expect(PUBLIC_HI_PAGES).toContain("/events");
+    expect(PUBLIC_HI_PAGES).toContain("/bookstore");
+
+    const quarantined = [
+      ...PUBLIC_RFX_QUARANTINE_PREFIXES,
+      ...MEMBER_RFX_QUARANTINE_PREFIXES,
+      ...ADMIN_RFX_QUARANTINE_PREFIXES,
+    ];
+    for (const path of PUBLIC_HI_PAGES) {
+      expect(quarantined.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)), path).toBe(false);
+    }
+
+    const sitemap = read("apps/web/src/app/sitemap.ts");
+    const robots = read("apps/web/src/app/robots.ts");
+    expect(sitemap).toContain("PUBLIC_HI_PAGES");
+    expect(sitemap).not.toMatch(/\/rfx|\/platform|\/exchange|AccelPO/);
+    expect(robots).toContain("PUBLIC_RFX_QUARANTINE_PREFIXES");
+    expect(robots).toContain("PUBLIC_SITE_ORIGIN");
+    expect(robots).toContain("/sitemap.xml");
+    expect(PUBLIC_SITE_ORIGIN).toBe("https://hi-coworking.com");
+
+    const home = read("apps/web/src/app/page.tsx");
+    expect(home).toContain("openGraph");
+    expect(home).toContain("twitter");
+    expect(home).toContain("HOME_TITLE");
+    expect(home).toContain("HOME_DESCRIPTION");
+    expect(home).not.toMatch(/RFx|Exchange|AccelPO|\bAccel\b/);
+    expect(read("apps/web/src/app/layout.tsx")).toContain("metadataBase");
+    expect(read("apps/web/src/app/HomePage.tsx")).not.toMatch(/RFx|\/rfx|Exchange|AccelPO|\bAccel\b/i);
   });
 });
