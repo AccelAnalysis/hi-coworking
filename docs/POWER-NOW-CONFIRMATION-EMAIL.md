@@ -40,14 +40,17 @@ On success it writes a Person note with the subject, the send time in Eastern ti
 
 ## Environment variables
 
-Exact names. Function params are declared in `apps/functions/src/expo/powerNowConfirmation.ts`. The two values that this repo sets for project `hi-coworking-plat` are in `apps/functions/.env.hi-coworking-plat`:
+Exact names. Function params are declared in `apps/functions/src/expo/powerNowConfirmation.ts`. The two values that this repo sets are the same in both dotenv files:
+
+- `apps/functions/.env.hi-coworking-plat` for project `hi-coworking-plat`
+- `apps/functions/.env.demo-hi-coworking` for the functions emulator (`demo-hi-coworking`)
 
 ```
 POWER_NOW_CONFIRMATION_EMAIL_ENABLED=
 POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
 ```
 
-`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is blank. That is off. `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is Jonathan's address and no one else.
+`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is blank. That is off. The blank line is present so the emulator and a non-interactive deploy do not ask for a value. `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is Jonathan's address and no one else.
 
 | Name | Where | Value in this repo | Purpose |
 | --- | --- | --- | --- |

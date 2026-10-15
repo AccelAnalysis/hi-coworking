@@ -772,14 +772,19 @@ describe("Power NOW confirmation config surface", () => {
       POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: "JHolman@AccelAnalysis.com",
     })).toEqual(["jholman@accelanalysis.com"]);
 
-    const envFile = readFileSync("apps/functions/.env.hi-coworking-plat", "utf8");
-    expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
-    expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
-    expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
-    expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
-    expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
-    expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
-    expect(envFile).not.toMatch(/^NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
+    for (const envPath of [
+      "apps/functions/.env.hi-coworking-plat",
+      "apps/functions/.env.demo-hi-coworking",
+    ]) {
+      const envFile = readFileSync(envPath, "utf8");
+      expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
+      expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
+      expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
+      expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
+      expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
+      expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
+      expect(envFile).not.toMatch(/^NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
+    }
 
     const source = readFileSync("apps/functions/src/expo/powerNowConfirmation.ts", "utf8");
     expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_EMAIL_ENABLED"');
