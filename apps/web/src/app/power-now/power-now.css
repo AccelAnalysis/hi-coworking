@@ -620,6 +620,32 @@
   margin: 0 0 16px;
 }
 
+.pn-field > label.pn-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  font-weight: 600;
+}
+
+.pn-check input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--blue);
+}
+
+.pn-anchors {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.pn-anchors li {
+  margin: 0 0 4px;
+  color: var(--midnight);
+}
+
 .pn-scale {
   display: flex;
   flex-wrap: wrap;

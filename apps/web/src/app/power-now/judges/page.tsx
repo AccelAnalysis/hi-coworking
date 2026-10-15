@@ -6,17 +6,19 @@ import { httpsCallable } from "firebase/functions";
 import { db, functions } from "@/lib/firebase";
 import { AdminLinks, AdminRequired, PowerNowFrame, SignOutButton, callableMessage, useAdminGate } from "../ui";
 
-type Judge = { uid: string; email: string; active: boolean };
+type ListedPerson = { uid: string; email: string; active: boolean };
 type Night = { id: string; label: string; locked: boolean };
 type Founder = { personId: string; name: string; email: string; company: string };
 type SelectedPitcher = { id: string; name: string; email: string; company: string };
 
 export default function JudgesPage() {
   const { user, loading, isAdmin } = useAdminGate();
-  const [judges, setJudges] = useState<Judge[]>([]);
+  const [judges, setJudges] = useState<ListedPerson[]>([]);
+  const [hosts, setHosts] = useState<ListedPerson[]>([]);
   const [nights, setNights] = useState<Night[]>([]);
   const [founders, setFounders] = useState<Founder[]>([]);
   const [judgeEmail, setJudgeEmail] = useState("");
+  const [hostEmail, setHostEmail] = useState("");
   const [nightId, setNightId] = useState("");
   const [nightLabel, setNightLabel] = useState("");
   const [selectedNight, setSelectedNight] = useState("");
@@ -36,6 +38,12 @@ export default function JudgesPage() {
         return { uid: item.id, email: data.email || "", active: data.active === true };
       }));
     });
+    const unsubHosts = onSnapshot(collection(db, "powerNowHosts"), (snap) => {
+      setHosts(snap.docs.map((item) => {
+        const data = item.data() as { email?: string; active?: boolean };
+        return { uid: item.id, email: data.email || "", active: data.active === true };
+      }));
+    });
     const unsubNights = onSnapshot(collection(db, "powerNowNights"), (snap) => {
       const next = snap.docs.map((item) => {
         const data = item.data() as { label?: string; locked?: boolean };
@@ -46,6 +54,7 @@ export default function JudgesPage() {
     });
     return () => {
       unsubJudges();
+      unsubHosts();
       unsubNights();
     };
   }, [isAdmin]);
@@ -91,8 +100,8 @@ export default function JudgesPage() {
 
   return (
     <PowerNowFrame
-      title="Judges and pitchers"
-      lede="Add the judges who score a night, and mark the founders who are selected to pitch. Each person signs in with their own email link."
+      title="Hosts, judges, and pitchers"
+      lede="Add the hosts who watch live scores, the judges who score a night, and the founders selected to pitch. Each person signs in with their own email link."
     >
       <AdminLinks />
       {!isAdmin ? <AdminRequired loading={loading} signedIn={Boolean(user)} /> : (
@@ -127,6 +136,44 @@ export default function JudgesPage() {
                         }}
                       >
                         Remove judge
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </form>
+
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            const add = httpsCallable(functions, "powerNow_addHost");
+            void run(() => add({ email: hostEmail }), "Host added.");
+          }}>
+            <h2>Hosts</h2>
+            <p className="pn-help">Hosts see the scores from each judge and the totals. They do not see private comments.</p>
+            <div className="pn-field">
+              <label htmlFor="host-email">Host email</label>
+              <input id="host-email" type="email" required value={hostEmail} onChange={(event) => setHostEmail(event.target.value)} />
+            </div>
+            <div className="pn-actions">
+              <button className="pn-btn pn-btn-primary" type="submit" disabled={busy}>Add host</button>
+            </div>
+            {hosts.length === 0 ? <p className="pn-note">No hosts yet.</p> : (
+              <ul className="pn-readonly">
+                {hosts.map((host) => (
+                  <li key={host.uid}>
+                    <p>{host.email || host.uid} {host.active ? "" : "(removed)"}</p>
+                    {host.active ? (
+                      <button
+                        className="pn-btn pn-btn-outline"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          const remove = httpsCallable(functions, "powerNow_removeHost");
+                          void run(() => remove({ uid: host.uid }), "Host removed.");
+                        }}
+                      >
+                        Remove host
                       </button>
                     ) : null}
                   </li>

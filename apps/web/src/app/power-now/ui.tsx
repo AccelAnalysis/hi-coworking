@@ -54,7 +54,7 @@ export function AdminLinks() {
   return (
     <ul className="pn-nav">
       <li><Link href="/power-now/fit">Fit conversation</Link></li>
-      <li><Link href="/power-now/judges">Judges and pitchers</Link></li>
+      <li><Link href="/power-now/judges">Hosts, judges, and pitchers</Link></li>
       <li><Link href="/power-now/results">Live results</Link></li>
     </ul>
   );
@@ -102,7 +102,7 @@ export function EmailLinkSignIn({
   path,
   intro,
 }: {
-  path: "/power-now/score" | "/power-now/rubric";
+  path: "/power-now/score" | "/power-now/rubric" | "/power-now/results";
   intro: string;
 }) {
   const { user, loading } = useAuth();

@@ -4,6 +4,8 @@ const ATTIO_BASE = "https://api.attio.com/v2";
 
 export const POWER_NOW_SCORE_PATH = "/power-now/score";
 export const POWER_NOW_RUBRIC_PATH = "/power-now/rubric";
+export const POWER_NOW_RESULTS_PATH = "/power-now/results";
+export const POWER_NOW_COMMENT_MAX = 2000;
 export const POWER_NOW_SLUG = /^[A-Za-z0-9-]{1,64}$/;
 
 /**
@@ -20,13 +22,96 @@ export const POWER_NOW_FIT_PLACEHOLDER = {
   ],
 } as const;
 
-export const POWER_NOW_CRITERIA_PLACEHOLDER = {
-  placeholder: true,
-  notice: "Placeholder rubric. Jonathan approves the real scoring criteria later.",
+/**
+ * Working Part B rubric from 15 October 2026.
+ * Judges read powerNowCriteria/current at runtime. Swap that Firestore
+ * document when a later rubric arrives. This constant only seeds a missing
+ * or still-placeholder document, so an edit in Firestore is left in place.
+ */
+export const POWER_NOW_CRITERIA_PART_B = {
+  version: "part-b-2026-10-15",
+  placeholder: false,
+  notice: "Working rubric, 15 October 2026. Replace this document when a later rubric is approved.",
+  scale: { min: 1, max: 5 },
   items: [
-    { id: "placeholder-clarity", label: "Placeholder criterion: clarity of the problem", max: 5 },
-    { id: "placeholder-customer", label: "Placeholder criterion: customer and market", max: 5 },
-    { id: "placeholder-ask", label: "Placeholder criterion: the ask and the next step", max: 5 },
+    {
+      id: "j1-opportunity",
+      code: "J1",
+      label: "Opportunity and growth potential",
+      prompt: "How significant the problem or opportunity is, and how far the business could grow.",
+      weight: 20,
+      max: 5,
+      anchors: [
+        { score: 1, text: "Problem unclear; little sense of where it goes." },
+        { score: 3, text: "Real problem; plausible path to grow." },
+        { score: 5, text: "Clear, significant opportunity with a credible growth path." },
+      ],
+    },
+    {
+      id: "j2-customer-market",
+      code: "J2",
+      label: "Customer and market understanding",
+      prompt: "How well the founder knows who the customer is and what they need.",
+      weight: 20,
+      max: 5,
+      anchors: [
+        { score: 1, text: "Customer not named." },
+        { score: 3, text: "Customer named; some evidence of need." },
+        { score: 5, text: "Specific customer, backed by conversations or data." },
+      ],
+    },
+    {
+      id: "j3-business-model",
+      code: "J3",
+      label: "Business model",
+      prompt: "How the business makes, or intends to make, money.",
+      weight: 15,
+      max: 5,
+      anchors: [
+        { score: 1, text: "No idea how it earns." },
+        { score: 3, text: "Reasonable plan, untested." },
+        { score: 5, text: "Clear model with early proof." },
+      ],
+    },
+    {
+      id: "j4-differentiation",
+      code: "J4",
+      label: "Differentiation",
+      prompt: "What makes this business different from how customers solve the problem today.",
+      weight: 15,
+      max: 5,
+      anchors: [
+        { score: 1, text: "Same as alternatives." },
+        { score: 3, text: "Some difference, partly explained." },
+        { score: 5, text: "Clear, meaningful difference customers would notice." },
+      ],
+    },
+    {
+      id: "j5-execution",
+      code: "J5",
+      label: "Evidence of execution",
+      prompt: "What the founder has done so far.",
+      weight: 20,
+      max: 5,
+      anchors: [
+        { score: 1, text: "Idea only." },
+        { score: 3, text: "Some steps taken (prototype or conversations)." },
+        { score: 5, text: "Strong progress (pilot, sales, or launch)." },
+      ],
+    },
+    {
+      id: "j6-pitch-quality",
+      code: "J6",
+      label: "Pitch quality",
+      prompt: "How clearly the founder answers what they're building, why it matters, what they've done, and what they'll do now.",
+      weight: 10,
+      max: 5,
+      anchors: [
+        { score: 1, text: "Hard to follow." },
+        { score: 3, text: "Clear on most points." },
+        { score: 5, text: "Clear, concise, answers all four within time." },
+      ],
+    },
   ],
 } as const;
 
@@ -38,7 +123,7 @@ export class PowerNowInputError extends Error {
 }
 
 export type FitQuestion = { id: string; prompt: string };
-export type Criterion = { id: string; label: string; max: number };
+export type SignInAudience = "judge" | "pitcher" | "host";
 export type PitchFounder = { personId: string; name: string; email: string; company: string };
 
 export type DocRecord = { id: string; data: Record<string, unknown> };
@@ -74,7 +159,7 @@ export function assertSlug(value: unknown, label: string): string {
   return next;
 }
 
-export function assertContinueUrl(origin: unknown, path: unknown): { continueUrl: string; audience: "judge" | "pitcher" } {
+export function assertContinueUrl(origin: unknown, path: unknown): { continueUrl: string; audience: SignInAudience } {
   const rawOrigin = String(origin ?? "").trim();
   const rawPath = String(path ?? "").trim();
   let url: URL;
@@ -97,21 +182,27 @@ export function assertContinueUrl(origin: unknown, path: unknown): { continueUrl
   if (!allowed || (url.protocol !== "https:" && !(url.protocol === "http:" && (host === "localhost" || host === "127.0.0.1")))) {
     throw new PowerNowInputError("Choose the Power NOW page you are signing in from.");
   }
-  if (rawPath !== POWER_NOW_SCORE_PATH && rawPath !== POWER_NOW_RUBRIC_PATH) {
+  if (rawPath !== POWER_NOW_SCORE_PATH && rawPath !== POWER_NOW_RUBRIC_PATH && rawPath !== POWER_NOW_RESULTS_PATH) {
     throw new PowerNowInputError("Choose the Power NOW page you are signing in from.");
   }
+  const audience: SignInAudience = rawPath === POWER_NOW_SCORE_PATH
+    ? "judge"
+    : rawPath === POWER_NOW_RUBRIC_PATH
+      ? "pitcher"
+      : "host";
   return {
     continueUrl: `${url.origin}${rawPath}`,
-    audience: rawPath === POWER_NOW_SCORE_PATH ? "judge" : "pitcher",
+    audience,
   };
 }
 
 export function signInAllowed(
-  audience: "judge" | "pitcher",
+  audience: SignInAudience,
   judges: DocRecord[],
   pitchers: DocRecord[],
+  hosts: DocRecord[] = [],
 ): boolean {
-  const rows = audience === "judge" ? judges : pitchers;
+  const rows = audience === "judge" ? judges : audience === "pitcher" ? pitchers : hosts;
   return rows.some((row) => row.data.active === true);
 }
 
@@ -361,9 +452,55 @@ export async function seedPowerNowPlaceholders(store: DocStore): Promise<{ quest
   const criteriaPath = "powerNowCriteria/current";
   const questions = await store.get(questionsPath);
   const criteria = await store.get(criteriaPath);
-  if (!questions) await store.set(questionsPath, { ...POWER_NOW_FIT_PLACEHOLDER, updatedAt: new Date().toISOString() });
-  if (!criteria) await store.set(criteriaPath, { ...POWER_NOW_CRITERIA_PLACEHOLDER, updatedAt: new Date().toISOString() });
-  return { questions: !questions, criteria: !criteria };
+  const writeQuestions = !questions;
+  const writeCriteria = !criteria || criteria.placeholder === true;
+  const updatedAt = new Date().toISOString();
+  if (writeQuestions) await store.set(questionsPath, { ...POWER_NOW_FIT_PLACEHOLDER, updatedAt });
+  if (writeCriteria) await store.set(criteriaPath, { ...POWER_NOW_CRITERIA_PART_B, updatedAt });
+  return { questions: writeQuestions, criteria: writeCriteria };
+}
+
+type ListedRole = {
+  collectionName: "powerNowJudges" | "powerNowHosts";
+  claim: "powerNowJudge" | "powerNowHost";
+  noun: string;
+};
+
+const JUDGE_ROLE: ListedRole = { collectionName: "powerNowJudges", claim: "powerNowJudge", noun: "judge" };
+const HOST_ROLE: ListedRole = { collectionName: "powerNowHosts", claim: "powerNowHost", noun: "host" };
+
+async function addListedPerson(
+  store: DocStore,
+  auth: AuthStore,
+  emailInput: unknown,
+  addedBy: string,
+  role: ListedRole,
+) {
+  const email = normalizeEmail(emailInput);
+  if (!email.includes("@") || email.length > 200) {
+    throw new PowerNowInputError(`Enter the ${role.noun}'s email address.`);
+  }
+  const user = await ensureUser(auth, email);
+  await auth.setClaims(user.uid, { ...user.claims, [role.claim]: true });
+  await store.set(`${role.collectionName}/${user.uid}`, {
+    email,
+    active: true,
+    addedBy,
+    updatedAt: new Date().toISOString(),
+  });
+  return { uid: user.uid, email };
+}
+
+async function removeListedPerson(store: DocStore, auth: AuthStore, uidInput: unknown, role: ListedRole) {
+  const uid = String(uidInput ?? "").trim();
+  if (!uid) throw new PowerNowInputError(`Choose a ${role.noun} to remove.`);
+  const existing = await store.get(`${role.collectionName}/${uid}`);
+  if (!existing) throw new PowerNowInputError(`That ${role.noun} is not on the list.`);
+  const email = normalizeEmail(existing.email);
+  const user = email ? await auth.getByEmail(email) : null;
+  if (user) await auth.setClaims(user.uid, { ...user.claims, [role.claim]: false });
+  await store.set(`${role.collectionName}/${uid}`, { ...existing, active: false, updatedAt: new Date().toISOString() });
+  return { uid };
 }
 
 async function ensureUser(auth: AuthStore, email: string): Promise<{ uid: string; claims: Record<string, unknown> }> {
@@ -373,30 +510,20 @@ async function ensureUser(auth: AuthStore, email: string): Promise<{ uid: string
   return { uid: created.uid, claims: {} };
 }
 
-export async function addPowerNowJudge(store: DocStore, auth: AuthStore, emailInput: unknown, addedBy: string) {
-  const email = normalizeEmail(emailInput);
-  if (!email.includes("@") || email.length > 200) throw new PowerNowInputError("Enter the judge's email address.");
-  const user = await ensureUser(auth, email);
-  await auth.setClaims(user.uid, { ...user.claims, powerNowJudge: true });
-  await store.set(`powerNowJudges/${user.uid}`, {
-    email,
-    active: true,
-    addedBy,
-    updatedAt: new Date().toISOString(),
-  });
-  return { uid: user.uid, email };
+export function addPowerNowJudge(store: DocStore, auth: AuthStore, emailInput: unknown, addedBy: string) {
+  return addListedPerson(store, auth, emailInput, addedBy, JUDGE_ROLE);
 }
 
-export async function removePowerNowJudge(store: DocStore, auth: AuthStore, uidInput: unknown) {
-  const uid = String(uidInput ?? "").trim();
-  if (!uid) throw new PowerNowInputError("Choose a judge to remove.");
-  const existing = await store.get(`powerNowJudges/${uid}`);
-  if (!existing) throw new PowerNowInputError("That judge is not on the list.");
-  const email = normalizeEmail(existing.email);
-  const user = email ? await auth.getByEmail(email) : null;
-  if (user) await auth.setClaims(user.uid, { ...user.claims, powerNowJudge: false });
-  await store.set(`powerNowJudges/${uid}`, { ...existing, active: false, updatedAt: new Date().toISOString() });
-  return { uid };
+export function removePowerNowJudge(store: DocStore, auth: AuthStore, uidInput: unknown) {
+  return removeListedPerson(store, auth, uidInput, JUDGE_ROLE);
+}
+
+export function addPowerNowHost(store: DocStore, auth: AuthStore, emailInput: unknown, addedBy: string) {
+  return addListedPerson(store, auth, emailInput, addedBy, HOST_ROLE);
+}
+
+export function removePowerNowHost(store: DocStore, auth: AuthStore, uidInput: unknown) {
+  return removeListedPerson(store, auth, uidInput, HOST_ROLE);
 }
 
 export async function savePowerNowNight(store: DocStore, nightIdInput: unknown, labelInput: unknown) {
@@ -483,15 +610,16 @@ export async function setSelectedPitcher(
 export async function prepareSignInLink(
   store: DocStore,
   input: { email?: unknown; origin?: unknown; path?: unknown },
-): Promise<{ continueUrl: string; email: string; audience: "judge" | "pitcher" } | null> {
+): Promise<{ continueUrl: string; email: string; audience: SignInAudience } | null> {
   const email = normalizeEmail(input.email);
   if (!email.includes("@") || email.length > 200) throw new PowerNowInputError("Enter the email address on the list.");
   const target = assertContinueUrl(input.origin, input.path);
-  const [judges, pitchers] = await Promise.all([
+  const [judges, pitchers, hosts] = await Promise.all([
     store.queryByEmail("powerNowJudges", email),
     store.queryByEmail("powerNowPitchers", email),
+    store.queryByEmail("powerNowHosts", email),
   ]);
-  if (!signInAllowed(target.audience, judges, pitchers)) return null;
+  if (!signInAllowed(target.audience, judges, pitchers, hosts)) return null;
   return { continueUrl: target.continueUrl, email, audience: target.audience };
 }
 

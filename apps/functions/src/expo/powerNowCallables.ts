@@ -4,10 +4,12 @@ import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import {
   PowerNowInputError,
+  addPowerNowHost,
   addPowerNowJudge,
   listPitchInterestFounders,
   lockPowerNowNight,
   prepareSignInLink,
+  removePowerNowHost,
   removePowerNowJudge,
   requestFirebaseEmailSignIn,
   saveFitConversation,
@@ -161,6 +163,26 @@ export const powerNow_removeJudge = onCall(async (request) => {
   const data = (request.data ?? {}) as { uid?: unknown };
   try {
     return await removePowerNowJudge(docStore(), authStore(), data.uid);
+  } catch (error) {
+    asError(error);
+  }
+});
+
+export const powerNow_addHost = onCall(async (request) => {
+  const uid = requireAdmin(request);
+  const data = (request.data ?? {}) as { email?: unknown };
+  try {
+    return await addPowerNowHost(docStore(), authStore(), data.email, uid);
+  } catch (error) {
+    asError(error);
+  }
+});
+
+export const powerNow_removeHost = onCall(async (request) => {
+  requireAdmin(request);
+  const data = (request.data ?? {}) as { uid?: unknown };
+  try {
+    return await removePowerNowHost(docStore(), authStore(), data.uid);
   } catch (error) {
     asError(error);
   }

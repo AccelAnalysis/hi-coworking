@@ -36,6 +36,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/powerNowPitchers/$(request.auth.uid)).data.active == true;
     }
 
+    function powerNowHostActive() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/powerNowHosts/$(request.auth.uid))
+        && get(/databases/$(database)/documents/powerNowHosts/$(request.auth.uid)).data.active == true;
+    }
+
+    function powerNowCommentOk(value) {
+      return value is string && value.size() <= 2000;
+    }
+
     function powerNowNightOpen(nightId) {
       return isPowerNowSlug(nightId)
         && exists(/databases/$(database)/documents/powerNowNights/$(nightId))
@@ -47,7 +57,7 @@ service cloud.firestore {
         && point.criterionId.matches('^[A-Za-z0-9-]{1,80}$')
         && point.value is int
         && point.value >= 1
-        && point.value <= 10;
+        && point.value <= 5;
     }
 
     function powerNowPointsOk(points) {
@@ -69,7 +79,12 @@ service cloud.firestore {
         && isPowerNowSlug(data.pitcherId)
         && data.judgeUid is string
         && data.updatedAt is timestamp
-        && powerNowPointsOk(data.points);
+        && data.recused is bool
+        && powerNowCommentOk(data.founderComment)
+        && (
+          (data.recused == true && data.points is list && data.points.size() == 0)
+          || (data.recused == false && powerNowPointsOk(data.points))
+        );
     }
 
     function isStaff() {
@@ -780,11 +795,16 @@ service cloud.firestore {
     }
 
     match /powerNowCriteria/{docId} {
-      allow read: if isAdmin() || powerNowJudgeActive() || powerNowPitcherActive();
+      allow read: if isAdmin() || powerNowJudgeActive() || powerNowPitcherActive() || powerNowHostActive();
       allow create, update, delete: if isAdmin();
     }
 
     match /powerNowJudges/{uid} {
+      allow read: if isAdmin() || powerNowHostActive() || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowHosts/{uid} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
       allow create, update, delete: if isAdmin();
     }
@@ -795,17 +815,18 @@ service cloud.firestore {
     }
 
     match /powerNowNights/{nightId} {
-      allow read: if isAdmin() || powerNowJudgeActive();
+      allow read: if isAdmin() || powerNowJudgeActive() || powerNowHostActive();
       allow create, update, delete: if isAdmin();
 
       match /pitchers/{pitcherId} {
-        allow read: if isAdmin() || powerNowJudgeActive();
+        allow read: if isAdmin() || powerNowJudgeActive() || powerNowHostActive();
         allow create, update, delete: if isAdmin();
       }
     }
 
     match /powerNowScores/{scoreId} {
       allow read: if isAdmin()
+        || powerNowHostActive()
         || (powerNowJudgeActive() && resource.data.judgeUid == request.auth.uid);
 
       allow create: if powerNowJudgeActive()
@@ -822,6 +843,35 @@ service cloud.firestore {
         && request.resource.data.nightId == resource.data.nightId
         && request.resource.data.pitcherId == resource.data.pitcherId
         && powerNowScoreShape(request.resource.data)
+        && powerNowNightOpen(resource.data.nightId);
+
+      allow delete: if false;
+    }
+
+    // Private notes stay with Jonathan. Hosts, pitchers, and other judges cannot read them.
+    match /powerNowPrivateComments/{scoreId} {
+      allow read: if isAdmin()
+        || (powerNowJudgeActive() && resource == null)
+        || (powerNowJudgeActive() && resource.data.judgeUid == request.auth.uid);
+
+      allow create: if powerNowJudgeActive()
+        && request.resource.data.judgeUid == request.auth.uid
+        && scoreId == request.resource.data.nightId + "_" + request.resource.data.pitcherId + "_" + request.auth.uid
+        && isPowerNowSlug(request.resource.data.nightId)
+        && isPowerNowSlug(request.resource.data.pitcherId)
+        && powerNowCommentOk(request.resource.data.comment)
+        && request.resource.data.updatedAt is timestamp
+        && powerNowNightOpen(request.resource.data.nightId)
+        && exists(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId))
+        && get(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId)).data.selected == true;
+
+      allow update: if powerNowJudgeActive()
+        && resource.data.judgeUid == request.auth.uid
+        && request.resource.data.judgeUid == resource.data.judgeUid
+        && request.resource.data.nightId == resource.data.nightId
+        && request.resource.data.pitcherId == resource.data.pitcherId
+        && powerNowCommentOk(request.resource.data.comment)
+        && request.resource.data.updatedAt is timestamp
         && powerNowNightOpen(resource.data.nightId);
 
       allow delete: if false;

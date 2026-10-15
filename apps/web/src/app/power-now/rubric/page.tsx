@@ -3,15 +3,15 @@
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { readPowerNowCriteria, type PowerNowCriterion } from "@/lib/powerNowScore";
 import { useAuth } from "@/lib/authContext";
 import { EmailLinkSignIn, PlaceholderBanner, PowerNowFrame, SignOutButton } from "../ui";
-
-type Criterion = { id: string; label: string; max: number };
+import { CriteriaReadout } from "../criteriaView";
 
 export default function RubricPage() {
   const { user, loading } = useAuth();
   const [isPitcher, setIsPitcher] = useState<boolean | null>(null);
-  const [criteria, setCriteria] = useState<Criterion[]>([]);
+  const [criteria, setCriteria] = useState<PowerNowCriterion[]>([]);
   const [placeholder, setPlaceholder] = useState(false);
   const [notice, setNotice] = useState("");
   const [missing, setMissing] = useState(false);
@@ -35,11 +35,11 @@ export default function RubricPage() {
         setCriteria([]);
         return;
       }
-      const data = snap.data() as { placeholder?: boolean; notice?: string; items?: Criterion[] };
+      const published = readPowerNowCriteria(snap.data());
       setMissing(false);
-      setCriteria(Array.isArray(data.items) ? data.items : []);
-      setPlaceholder(data.placeholder === true);
-      setNotice(typeof data.notice === "string" ? data.notice : "");
+      setCriteria(published.items);
+      setPlaceholder(published.placeholder);
+      setNotice(published.notice);
     }, () => setMissing(true));
     return () => unsub();
   }, [isPitcher]);
@@ -61,14 +61,7 @@ export default function RubricPage() {
           <p className="pn-note">This view is read only.</p>
           {placeholder ? <PlaceholderBanner notice={notice} /> : null}
           {missing || criteria.length === 0 ? <p className="pn-note">The rubric has not been published yet.</p> : (
-            <ol className="pn-readonly">
-              {criteria.map((criterion) => (
-                <li key={criterion.id}>
-                  <h2>{criterion.label}</h2>
-                  <p className="pn-help">Scored from 1 to {criterion.max}.</p>
-                </li>
-              ))}
-            </ol>
+            <CriteriaReadout items={criteria} />
           )}
         </>
       ) : null}

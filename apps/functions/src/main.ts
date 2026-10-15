@@ -106,6 +106,8 @@ export {
   powerNow_seedPlaceholders,
   powerNow_addJudge,
   powerNow_removeJudge,
+  powerNow_addHost,
+  powerNow_removeHost,
   powerNow_saveNight,
   powerNow_lockNight,
   powerNow_setSelectedPitcher,

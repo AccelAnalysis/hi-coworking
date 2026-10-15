@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  POWER_NOW_CRITERIA_PLACEHOLDER,
+  POWER_NOW_CRITERIA_PART_B,
   POWER_NOW_FIT_PLACEHOLDER,
   PowerNowInputError,
+  addPowerNowHost,
   addPowerNowJudge,
   assertContinueUrl,
   buildFitConversationNote,
@@ -81,20 +82,32 @@ describe("Power NOW forms", () => {
     expect(powerNowScoreDocId("2026-11-12", "founder-1", "judge-1")).toBe("2026-11-12_founder-1_judge-1");
   });
 
-  it("keeps placeholder questions and criteria on the server", () => {
+  it("keeps fit questions as placeholders and seeds the working rubric", () => {
     expect(POWER_NOW_FIT_PLACEHOLDER.placeholder).toBe(true);
     expect(POWER_NOW_FIT_PLACEHOLDER.items[0]?.prompt).toMatch(/^Placeholder question:/);
-    expect(POWER_NOW_CRITERIA_PLACEHOLDER.placeholder).toBe(true);
-    expect(POWER_NOW_CRITERIA_PLACEHOLDER.items[0]?.label).toMatch(/^Placeholder criterion:/);
+    expect(POWER_NOW_CRITERIA_PART_B.placeholder).toBe(false);
+    expect(POWER_NOW_CRITERIA_PART_B.version).toBe("part-b-2026-10-15");
+    expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.weight)).toEqual([20, 20, 15, 15, 20, 10]);
+    expect(POWER_NOW_CRITERIA_PART_B.items.every((item) => item.max === 5 && item.anchors.length === 3)).toBe(true);
+    expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.code)).toEqual(["J1", "J2", "J3", "J4", "J5", "J6"]);
   });
 
-  it("writes placeholder documents only when they are missing", async () => {
+  it("seeds the working rubric once and replaces a placeholder rubric", async () => {
     const store = memoryStore();
     await seedPowerNowPlaceholders(store);
-    const first = store.docs.get("powerNowFitQuestions/current");
+    const first = store.docs.get("powerNowCriteria/current");
+    expect(first).toMatchObject({ placeholder: false, version: "part-b-2026-10-15" });
     await seedPowerNowPlaceholders(store);
-    expect(store.docs.get("powerNowFitQuestions/current")).toEqual(first);
-    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ placeholder: true });
+    expect(store.docs.get("powerNowCriteria/current")).toEqual(first);
+    expect(store.docs.get("powerNowFitQuestions/current")).toMatchObject({ placeholder: true });
+
+    store.docs.set("powerNowCriteria/current", { placeholder: true, items: [], notice: "old" });
+    await seedPowerNowPlaceholders(store);
+    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "part-b-2026-10-15", placeholder: false });
+
+    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "later-rubric", items: [{ id: "custom" }] });
+    await seedPowerNowPlaceholders(store);
+    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "later-rubric" });
   });
 
   it("lists founders from the pitch competition list without returning the API key", async () => {
@@ -234,6 +247,19 @@ describe("Power NOW forms", () => {
       email: "ada@example.com",
       origin: "https://hi-coworking.com",
       path: "/power-now/score",
+    })).toBeNull();
+
+    await addPowerNowHost(store, auth, "host@example.com", "admin-1");
+    const hostLink = await prepareSignInLink(store, {
+      email: "host@example.com",
+      origin: "https://forms.accelanalysis.com",
+      path: "/power-now/results",
+    });
+    expect(hostLink?.audience).toBe("host");
+    expect(await prepareSignInLink(store, {
+      email: "judge@example.com",
+      origin: "https://forms.accelanalysis.com",
+      path: "/power-now/results",
     })).toBeNull();
 
     await removePowerNowJudge(store, auth, "uid-1");
