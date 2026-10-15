@@ -1,7 +1,8 @@
 /**
  * Public URLs that used to render RFx Exchange / platform product UI.
- * Hosting redirects and route stubs both send visitors to a Hi Coworking page.
- * The previous screen implementations stay under src/quarantine and are not routed.
+ * Firebase Hosting redirects send those visitors to a Hi Coworking page.
+ * The screens stay under src/quarantine and are not part of the Next.js app,
+ * sitemap, or static export.
  */
 
 export const PUBLIC_HI_HOME = "/";

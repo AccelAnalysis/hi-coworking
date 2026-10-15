@@ -315,7 +315,9 @@ export function publicEvent(event: EventDocV2) {
     title: event.title,
     description: publicDescription(event.description || ""),
     format: event.format,
-    location: event.format === "virtual" ? undefined : event.location,
+    // Omit the key. A callable response encodes an explicit undefined as null,
+    // which would still publish a location field for an online event.
+    ...(event.format === "virtual" ? {} : { location: event.location }),
     startTime: event.startTime,
     endTime: event.endTime,
     timezone: event.timezone || "America/New_York",
