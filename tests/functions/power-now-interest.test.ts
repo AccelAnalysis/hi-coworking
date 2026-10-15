@@ -521,7 +521,10 @@ describe("Power NOW page boundaries", () => {
     expect(`${page}\n${css}`).not.toMatch(/\$\d/);
     expect(firebase).toContain('"functionId": "expo_submitNasaLead"');
     expect(rules).toContain("powerNowConsentLog");
-    expect(appEntries.some((name) => name.startsWith("sitemap"))).toBe(false);
+    const sitemap = readFileSync("apps/web/src/app/sitemap.ts", "utf8");
+    expect(sitemap).toContain("PUBLIC_HI_PAGES");
+    expect(sitemap).not.toMatch(/power-now|Power NOW/);
+    expect(appEntries).toContain("sitemap.ts");
     expect(POWER_NOW_SEND_ERROR).toContain("hello@accelanalysis.com");
   });
 });
