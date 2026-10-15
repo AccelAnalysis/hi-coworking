@@ -100,6 +100,17 @@ export const leads_submitLead = legacy.leads_submitLead;
 export const leads_onNewLead = legacy.leads_onNewLead;
 export const leads_submitContact = legacy.leads_submitContact;
 export { expo_submitNasaLead } from "./expo/submitNasaLead";
+export {
+  powerNow_listPitchFounders,
+  powerNow_saveFitNote,
+  powerNow_seedPlaceholders,
+  powerNow_addJudge,
+  powerNow_removeJudge,
+  powerNow_saveNight,
+  powerNow_lockNight,
+  powerNow_setSelectedPitcher,
+  powerNow_sendSignInLink,
+} from "./expo/powerNowCallables";
 export const stripe_createCheckoutSession = legacy.stripe_createCheckoutSession;
 export const stripe_webhook = legacy.stripe_webhook;
 export const qb_createCheckout = legacy.qb_createCheckout;

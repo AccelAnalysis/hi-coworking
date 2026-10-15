@@ -50,6 +50,7 @@ const MODULES = [
   { href: "/admin/leads", label: "Leads", description: "New inquiries, follow-up context, and conversion", icon: UserCog },
   { href: "/admin/products", label: "Pricing & memberships", description: "Canonical plans, prices, and purchase paths", icon: Package },
   { href: "/admin/roles", label: "Roles & permissions", description: "Staff authority and protected operations", icon: UserCog },
+  { href: "/power-now/fit", label: "Power NOW", description: "Fit conversations, judges, selected pitchers, and live scores", icon: Rocket },
 ] as const;
 
 function createdAt(row: Row) {
