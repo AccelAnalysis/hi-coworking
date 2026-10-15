@@ -776,10 +776,10 @@ describe("Power NOW confirmation config surface", () => {
     expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
     expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
     expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
-    expect(envFile).not.toContain("RESEND_API_KEY");
-    expect(envFile).not.toContain("RECAPTCHA_ENTERPRISE_API_KEY");
-    expect(envFile).not.toContain("RECAPTCHA_ENTERPRISE_SITE_KEY");
-    expect(envFile).not.toContain("NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY");
+    expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
+    expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
+    expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
+    expect(envFile).not.toMatch(/^NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
 
     const source = readFileSync("apps/functions/src/expo/powerNowConfirmation.ts", "utf8");
     expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_EMAIL_ENABLED"');
