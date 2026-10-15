@@ -66,8 +66,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build functions
-        run: npm run build:shared && npm run build:functions
+      - name: Build the isolated expo lead bundle
+        run: npm run build:expo-lead-deploy
 
       - name: Guard the Firebase project
         shell: bash
@@ -106,7 +106,7 @@ jobs:
           fi
 
       - name: Deploy expo_submitNasaLead only
-        run: npx firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
+        run: npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 
       - name: Smoke-test the function without writing to Attio
         shell: bash

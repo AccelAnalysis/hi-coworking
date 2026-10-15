@@ -10,11 +10,14 @@ on:
       - "firebase/admin-member-functions/**"
       - "firebase/admin-operating-calendar-functions/**"
       - "firebase/payment-status-guard-functions/**"
+      - "firebase/expo-lead-functions/**"
       - "firebase/admin-event-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-calendar.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
+      - "firebase.expo-lead.json"
+      - ".github/workflows/firebase-live-expo-lead-function.yml"
       - "tests/functions/**"
       - "tests/rules/**"
       - "firestore.rules"
@@ -78,6 +81,9 @@ jobs:
       - name: Build isolated payment-status guard bundle
         run: npm run build:payment-status-guard-deploy
 
+      - name: Build isolated expo lead bundle
+        run: npm run build:expo-lead-deploy
+
       - name: Build isolated admin event deploy bundle
         run: npm run build:admin-event-deploy
 
@@ -102,6 +108,7 @@ jobs:
           tests/functions/public-event-location.test.ts
           tests/functions/public-event-actions.test.ts
           tests/functions/expo-nasa-lead.test.ts
+          tests/functions/expo-lead-deploy-workflow.test.ts
           tests/web/public-rfx-quarantine.test.ts
 
       - name: Run active transaction integration tests
