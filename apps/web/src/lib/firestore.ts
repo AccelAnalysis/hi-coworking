@@ -122,13 +122,12 @@ export async function publishLayout(locationId: string, floorId: string, layoutI
 }
 
 export async function getPublishedLayouts(locationId: string, floorId: string): Promise<LayoutVariant[]> {
-  const q = query(
-    collection(db, "locations", locationId, "floors", floorId, "layouts"),
-    where("status", "==", "PUBLISHED"),
-    orderBy("updatedAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as LayoutVariant);
+  // Filter in the client. A status + updatedAt query needs a composite index
+  // that is not deployed on hi-coworking-plat yet, and layouts per floor are few.
+  const layouts = await getLayouts(locationId, floorId);
+  return layouts
+    .filter((layout) => layout.status === "PUBLISHED")
+    .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 }
 
 function isWithinRuleWindow(layout: LayoutVariant, targetDate: Date): boolean {

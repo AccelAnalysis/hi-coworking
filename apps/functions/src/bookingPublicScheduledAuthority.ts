@@ -50,3 +50,7 @@ export const booking_createQuote = onCall(async (request) => {
   await validateRequestedWindow(request);
   return runCallable(bookingPublic.booking_createQuote, request);
 });
+
+export const booking_getDayOccupancy = onCall(async (request) => {
+  return runCallable(bookingPublic.booking_getDayOccupancy, request);
+});
