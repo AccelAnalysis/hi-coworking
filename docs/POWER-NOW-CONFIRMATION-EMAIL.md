@@ -8,9 +8,9 @@ Nothing in this document sets a secret or deploys the function.
 
 ## Flag
 
-`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` must be the string `true`. Any other value, including unset, sends nothing. The Attio person, company, list, note, task, and consent log stay as they are without this feature. The HTTP response does not include the submitted email address.
+`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` must be the string `true`. Any other value, including empty or unset, sends nothing. The Attio person, company, list, note, task, and consent log stay as they are without this feature. The HTTP response does not include the submitted email address.
 
-`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is an optional allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Attio and does not receive mail.
+`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is the allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Attio and does not receive mail. The deployed value is `jholman@accelanalysis.com` only. An empty value means no allow-list, so do not clear it for the flag-on test.
 
 ## What gets sent
 
@@ -40,21 +40,32 @@ On success it writes a Person note with the subject, the send time in Eastern ti
 
 ## Environment variables
 
-| Name | Default | Purpose |
-| --- | --- | --- |
-| `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` | unset (off) | `true` turns sending on |
-| `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` | unset | Allow-list. Unset means no allow-list |
-| `POWER_NOW_EMAIL_PROVIDER` | `resend` | `resend` or `graph` |
-| `POWER_NOW_SENDER` | `Accel Analysis <hello@accelanalysis.com>` | From header. A bare address is wrapped with the Accel Analysis display name |
-| `POWER_NOW_REPLY_TO` | `hello@accelanalysis.com` | Reply-To and the unsubscribe mailto |
-| `POWER_NOW_CONFIRMATION_DAILY_CAP` | `100` | Global sends per UTC day. Resend's free plan allows 100 emails a day |
-| `POWER_NOW_CONFIRMATION_IP_DAILY_CAP` | `20` | Sends per IP address per rolling 24 hours |
-| `POWER_NOW_EMAIL_ASSET_BASE_URL` | `https://hi-coworking.com` | Origin for the lockup image |
-| `POWER_NOW_MIN_SUBMIT_MS` | `3000` | Minimum time from page open to submit. Missing or faster skips the email |
-| `POWER_NOW_RECAPTCHA_MIN_SCORE` | `0.5` | Minimum reCAPTCHA Enterprise score |
-| `RECAPTCHA_ENTERPRISE_SITE_KEY` | unset | Server site key. Missing site key or API key skips the email and still saves the submission |
-| `RECAPTCHA_ENTERPRISE_PROJECT` | `hi-coworking-plat` | reCAPTCHA Enterprise project |
-| `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` | unset | Public site key baked into the web build. The page loads the Enterprise script only when this is set |
+Exact names. Function params are declared in `apps/functions/src/expo/powerNowConfirmation.ts`. The two values that this repo sets for project `hi-coworking-plat` are in `apps/functions/.env.hi-coworking-plat`:
+
+```
+POWER_NOW_CONFIRMATION_EMAIL_ENABLED=
+POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
+```
+
+`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is blank. That is off. `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is Jonathan's address and no one else.
+
+| Name | Where | Value in this repo | Purpose |
+| --- | --- | --- | --- |
+| `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` | `apps/functions/.env.hi-coworking-plat` | empty (off) | `true` turns sending on |
+| `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` | `apps/functions/.env.hi-coworking-plat` | `jholman@accelanalysis.com` | Allow-list. The flag-on test sends only here |
+| `POWER_NOW_EMAIL_PROVIDER` | function env, optional | unset, code default `resend` | `resend` or `graph` |
+| `POWER_NOW_SENDER` | function env, optional | unset, code default `Accel Analysis <hello@accelanalysis.com>` | From header. A bare address is wrapped with the Accel Analysis display name |
+| `POWER_NOW_REPLY_TO` | function env, optional | unset, code default `hello@accelanalysis.com` | Reply-To and the unsubscribe mailto |
+| `POWER_NOW_CONFIRMATION_DAILY_CAP` | function env, optional | unset, code default `100` | Global sends per UTC day. Resend's free plan allows 100 emails a day |
+| `POWER_NOW_CONFIRMATION_IP_DAILY_CAP` | function env, optional | unset, code default `20` | Sends per IP address per rolling 24 hours |
+| `POWER_NOW_EMAIL_ASSET_BASE_URL` | function env, optional | unset, code default `https://hi-coworking.com` | Origin for the lockup image |
+| `POWER_NOW_MIN_SUBMIT_MS` | function env, optional | unset, code default `3000` | Minimum time from page open to submit. Missing or faster skips the email |
+| `POWER_NOW_RECAPTCHA_MIN_SCORE` | function env, optional | unset, code default `0.5` | Minimum reCAPTCHA Enterprise score |
+| `RECAPTCHA_ENTERPRISE_SITE_KEY` | function env | unset. Owner supplies the site key | Server site key. Missing site key or API key skips the email and still saves the submission |
+| `RECAPTCHA_ENTERPRISE_PROJECT` | function env, optional | unset, code default `hi-coworking-plat` | reCAPTCHA Enterprise project |
+| `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` | web build env | unset. Owner supplies the same site key | Public site key baked into the web build. The page loads the Enterprise script only when this is set |
+| `RESEND_API_KEY` | Secret Manager | not set. Owner supplies it | Resend `Authorization: Bearer` |
+| `RECAPTCHA_ENTERPRISE_API_KEY` | Secret Manager | not set. Owner supplies it | reCAPTCHA Enterprise assessments |
 
 The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields are not stored on the Attio note.
 
@@ -83,20 +94,70 @@ Do not create the M365 secrets for the Resend deploy. They are optional and only
 
 The manual workflow **Hi Coworking Firebase expo lead function** checks that `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` exist and have an enabled version. It does not check the M365 secrets and it does not print values. That workflow runs only from `main`, and only after this revision is merged. Do not run it from this branch.
 
-## Resend setup (Jonathan)
+## Jonathan checklist
+
+Do these in order. This pull request does not set secrets, does not turn the flag on, and does not deploy.
 
 Resend is the default (`POWER_NOW_EMAIL_PROVIDER` unset or `resend`).
 
+### 1. Resend DNS
+
 1. Create a Resend account.
 2. Add the domain `accelanalysis.com`.
-3. In GoDaddy DNS for that domain, add the DKIM TXT record Resend shows, plus the MX and SPF records on the send subdomain Resend shows. Wait until Resend marks the domain verified.
-4. Create a sending-only API key. Do not use a full-access key.
-5. Store that key as the secret `RESEND_API_KEY`.
-6. Leave the From and Reply-To defaults unless a mailbox change is deliberate.
+3. In GoDaddy DNS for `accelanalysis.com`, add the records Resend shows:
+   - the DKIM TXT record
+   - the MX record on the send subdomain
+   - the SPF TXT record on the send subdomain
+4. Wait until Resend marks `accelanalysis.com` verified.
+5. Leave the From and Reply-To defaults unless a mailbox change is deliberate. From is `Accel Analysis <hello@accelanalysis.com>`. Reply-To is `hello@accelanalysis.com`.
 
 The free plan allows 100 emails a day. `POWER_NOW_CONFIRMATION_DAILY_CAP` defaults to 100 so this function stays inside that plan. Resend's own counter may use a different day boundary than this function's UTC day. Raising the cap above 100 requires a Resend plan that allows it.
 
 The function calls `POST https://api.resend.com/emails` with `Idempotency-Key` set to `pn-confirm:{sha256 of the email}:{path}:{UTC date}`. The raw email is not in the key.
+
+### 2. Keys
+
+Create these yourself. Do not put the values in git, a pull request, or a log.
+
+1. In Resend, create a sending-only API key. Do not use a full-access key.
+2. Store it as Secret Manager secret `RESEND_API_KEY` on project `hi-coworking-plat`.
+3. Store the reCAPTCHA Enterprise API key as Secret Manager secret `RECAPTCHA_ENTERPRISE_API_KEY` on the same project. The site keys are not secrets. See the next section.
+
+```bash
+firebase functions:secrets:set RESEND_API_KEY --project hi-coworking-plat
+firebase functions:secrets:set RECAPTCHA_ENTERPRISE_API_KEY --project hi-coworking-plat
+```
+
+`ATTIO_API_KEY` is already required and is unchanged. Do not create `M365_TENANT_ID`, `M365_CLIENT_ID`, or `M365_CLIENT_SECRET` for this Resend deploy.
+
+### 3. reCAPTCHA Enterprise
+
+1. In Google Cloud project `hi-coworking-plat`, create a score-based reCAPTCHA Enterprise site key for the Power NOW hostnames (`hi-coworking.com` and any preview host you will submit from).
+2. The assessment action is `power_now_submit`. The minimum score stays `POWER_NOW_RECAPTCHA_MIN_SCORE=0.5` unless a real submission scores lower.
+3. Put that site key in both places. They are the same value, and this repo leaves both unset:
+   - `RECAPTCHA_ENTERPRISE_SITE_KEY` on `expo_submitNasaLead` (function environment, not Secret Manager)
+   - `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` on the web build that serves the Power NOW form
+4. Create an API key allowed to call `recaptchaenterprise.googleapis.com` and store it as `RECAPTCHA_ENTERPRISE_API_KEY` (step 2).
+5. Leave `RECAPTCHA_ENTERPRISE_PROJECT` unset so it stays `hi-coworking-plat`, unless the key lives in another project.
+
+A missing site key, a missing API key, a missing token, or a score under `0.5` skips the email and still saves the submission. The page loads the Enterprise script only when `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` is set at build time.
+
+### 4. Flag-on test to jholman@ only
+
+`apps/functions/.env.hi-coworking-plat` already wires the allow-list and leaves the flag off:
+
+```
+POWER_NOW_CONFIRMATION_EMAIL_ENABLED=
+POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
+```
+
+After DNS is verified, both secrets exist, both site-key env vars are set, and you have deployed `expo_submitNasaLead` plus a web build that includes the public site key:
+
+1. Keep `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` set to exactly `jholman@accelanalysis.com`. Do not add another address. This is the same mailbox as `JHolman@AccelAnalysis.com`.
+2. Set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` to the string `true` and redeploy `expo_submitNasaLead`.
+3. Open the Power NOW form, wait at least 3 seconds, and submit one path as `jholman@accelanalysis.com`.
+4. Confirm that inbox receives the Step 1 message for that path. Submit again as any other address and confirm Attio still saves it and no confirmation mail is sent.
+5. Set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` back to empty and redeploy. Leave `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` in place until a later decision to write to other people. Clearing the allow-list sends to every address that passes the other checks.
 
 ## Microsoft Graph
 
@@ -136,4 +197,4 @@ Run that locally. Do not paste a real address into a log or a pull request. Then
 
 ## Deploy
 
-Do not deploy this from the pull request. After merge, create `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY`, set the public reCAPTCHA site key on the web build if mail should send, and leave `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` unset until a deliberate test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS`. The manual function workflow deploys only `expo_submitNasaLead`.
+Do not deploy this from the pull request. Do not set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in this repo. After merge, follow the Jonathan checklist above: Resend DNS, then `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY`, then the reCAPTCHA site keys, then a flag-on test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` only. The manual function workflow deploys only `expo_submitNasaLead`.
