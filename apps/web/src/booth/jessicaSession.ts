@@ -10,7 +10,7 @@ export const CLIENT_SECRET_URL = "https://api.x.ai/v1/realtime/client_secrets";
 export const CLIENT_SECRET_TTL_SECONDS = 300;
 export const DEFAULT_BOOTH_TOKEN_URL =
   "https://us-central1-hi-coworking-plat.cloudfunctions.net/booth_mintVoiceClientSecret";
-export const IPAD_FORM_PATH = "/expo/nasa-2026";
+export const IPAD_FORM_PATH = "/intake";
 
 export const HANDOFF_LINE =
   "Please enter your details on the iPad so our team can follow up the way you prefer.";
@@ -24,7 +24,7 @@ export const STT_STOP_LINE =
 export const STT_FAILURE_LIMIT = 2;
 export const JESSICA_VOICE = "eve";
 
-export const JESSICA_INSTRUCTIONS = `You are Jessica, the Accel Analysis booth assistant at the NASA Expo. Speak in one or two short sentences. The room is noisy.
+export const JESSICA_INSTRUCTIONS = `You are Jessica, the Accel Analysis assistant. Speak in one or two short sentences. Be direct, thoughtful, practical, and human. The room is noisy.
 
 You already greeted the visitor and asked about their biggest problem this quarter. Continue in order, one question at a time: who else is involved, then their timeline. After those answers, restate their need in their words without adding anything they did not say, then say exactly: "${HANDOFF_LINE}" Stop after that sentence.
 
@@ -73,7 +73,7 @@ export function buildSessionUpdate(mode: ListenMode) {
           transcription: {
             model: "grok-transcribe",
             language_hint: "en",
-            keyterms: ["Accel Analysis", "NASA", "Jessica", "iPad"],
+            keyterms: ["Accel Analysis", "Jessica", "iPad", "Hi Coworking"],
           },
         },
         output: {

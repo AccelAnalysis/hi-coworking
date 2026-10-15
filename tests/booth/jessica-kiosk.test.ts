@@ -26,7 +26,8 @@ import {
   parseClientSecret,
   scrubAssistantCaption,
 } from "../../apps/web/src/booth/jessicaSession";
-import { jessicaEmotion } from "../../apps/web/src/booth/jessicaEmotion";
+import { JESSICA_ANIMATION, JESSICA_POSES, jessicaPose, poseSprings } from "../../apps/web/src/booth/jessicaEmotion";
+import { ambientAvatarStatus, jessicaDisplayFromSearch } from "../../apps/web/src/booth/jessicaDisplay";
 import { base64Pcm16ToFloat32, floatToPcm16, pcm16ToBase64, resampleLinear, rms } from "../../apps/web/src/booth/pcm";
 import {
   BOOTH_ALLOWED_ORIGINS,
@@ -142,7 +143,8 @@ describe("Jessica booth script", () => {
 
   it("uses push-to-talk by default and the documented realtime socket", () => {
     expect(REALTIME_WS_URL).toBe("wss://api.x.ai/v1/realtime?model=grok-voice-latest");
-    expect(IPAD_FORM_PATH).toBe("/expo/nasa-2026");
+    expect(IPAD_FORM_PATH).toBe("/intake");
+    expect(JESSICA_INSTRUCTIONS).not.toContain("NASA");
     expect(buildSessionUpdate("ptt").session.turn_detection).toBeNull();
     expect(buildSessionUpdate("vad").session.turn_detection).toEqual({ type: "server_vad" });
     expect("tools" in buildSessionUpdate("ptt").session).toBe(false);
@@ -157,6 +159,7 @@ describe("Jessica booth script", () => {
     const files = [
       ...walk("apps/web/src/booth"),
       ...walk("apps/web/src/app/expo"),
+      ...walk("apps/web/src/app/kiosk"),
       "apps/web/public/booth/pcm-capture-worklet.js",
     ];
     const source = files.map((file) => readFileSync(file, "utf8")).join("\n");
@@ -263,20 +266,93 @@ describe("ephemeral voice token", () => {
   });
 });
 
-describe("Jessica pebble emotion", () => {
-  it("follows the booth line instead of one repeating face", () => {
-    expect(jessicaEmotion("speaking", GREETING_LINE)).toBe("happy");
-    expect(jessicaEmotion("speaking", "Who else is involved in solving that?")).toBe("curious");
-    expect(jessicaEmotion("speaking", "What timeline are you working toward?")).toBe("curious");
-    expect(jessicaEmotion("speaking", "So the need is a clearer way to review proposals this quarter.")).toBe("engaged");
-    expect(jessicaEmotion("speaking", HANDOFF_LINE)).toBe("happy");
-    expect(jessicaEmotion("speaking", STT_RETRY_LINE)).toBe("concerned");
-    expect(jessicaEmotion("speaking", STT_STOP_LINE)).toBe("concerned");
-    expect(jessicaEmotion("listening", "")).toBe("curious");
-    expect(jessicaEmotion("thinking", "")).toBe("curious");
-    expect(jessicaEmotion("ready", "")).toBe("calm");
-    expect(jessicaEmotion("error", "Voice service is unavailable. A greeter and the iPad can still help.")).toBe("concerned");
-    expect(jessicaEmotion("handoff", "")).toBe("happy");
+describe("Jessica blob animation", () => {
+  it("maps booth status and the spoken line onto a wide pose library", () => {
+    expect(JESSICA_POSES).toEqual([
+      "idle",
+      "wake",
+      "listen",
+      "thinking",
+      "speaking",
+      "happy",
+      "curious",
+      "concerned",
+      "engaged",
+      "celebrate",
+      "unavailable",
+      "press",
+    ]);
+    expect(JESSICA_ANIMATION).toMatchObject({
+      driver: "requestAnimationFrame",
+      targetFps: 60,
+      body: "flat-blob",
+    });
+    expect(jessicaPose("speaking", GREETING_LINE)).toBe("happy");
+    expect(jessicaPose("speaking", "Who else is involved in solving that?")).toBe("curious");
+    expect(jessicaPose("speaking", "What timeline are you working toward?")).toBe("curious");
+    expect(jessicaPose("speaking", "So the need is a clearer way to review proposals this quarter.")).toBe("engaged");
+    expect(jessicaPose("speaking", HANDOFF_LINE)).toBe("celebrate");
+    expect(jessicaPose("speaking", STT_RETRY_LINE)).toBe("concerned");
+    expect(jessicaPose("speaking", STT_STOP_LINE)).toBe("unavailable");
+    expect(jessicaPose("listening", "")).toBe("listen");
+    expect(jessicaPose("listening", "", true)).toBe("press");
+    expect(jessicaPose("thinking", "")).toBe("thinking");
+    expect(jessicaPose("connecting", "")).toBe("thinking");
+    expect(jessicaPose("needs-start", "")).toBe("wake");
+    expect(jessicaPose("ready", "")).toBe("idle");
+    expect(jessicaPose("speaking", "")).toBe("speaking");
+    expect(jessicaPose("error", "Voice service is unavailable. A greeter and the iPad can still help.")).toBe("unavailable");
+    expect(jessicaPose("handoff", "")).toBe("celebrate");
+  });
+
+  it("squashes the circle from the voice level and keeps pleasure in the eyes", () => {
+    const quiet = poseSprings("speaking", 0);
+    const loud = poseSprings("speaking", 1);
+    expect(loud.squash).toBeGreaterThan(quiet.squash + 0.5);
+    expect(loud.voice).toBe(1);
+    expect(poseSprings("engaged", 0.82).squash).toBeGreaterThan(poseSprings("idle", 0).squash + 0.5);
+    expect(poseSprings("happy", 0).cheer).toBeGreaterThan(poseSprings("idle", 0).cheer);
+    expect(poseSprings("listen", 0).squash).toBeLessThan(0);
+    expect(poseSprings("press", 0).squash).toBeGreaterThan(0.5);
+  });
+
+  it("paints a flat circle and white eyes from a display-refresh loop", () => {
+    const avatar = readFileSync("apps/web/src/booth/JessicaAvatar.tsx", "utf8");
+    const kiosk = readFileSync("apps/web/src/booth/JessicaKiosk.tsx", "utf8");
+    expect(avatar).toContain("requestAnimationFrame");
+    expect(avatar).toContain("ellipse");
+    expect(avatar).toContain("#e21886");
+    expect(avatar).toContain("#ffffff");
+    expect(avatar).not.toContain("bezierCurveTo");
+    expect(avatar).not.toContain("quadraticCurveTo");
+    expect(avatar).not.toContain("createRadialGradient");
+    expect(avatar).not.toContain("shadowBlur");
+    expect(avatar.toLowerCase()).not.toContain("cleft");
+    expect(avatar.toLowerCase()).not.toContain("eyebrow");
+    expect(avatar.toLowerCase()).not.toContain("pupil");
+    expect(kiosk).not.toContain("NASA");
+    expect(kiosk).toContain("#0163FD");
+    expect(kiosk).toContain("#00072E");
+    expect(kiosk).toContain('set("mode", "ambient")');
+    expect(kiosk).toContain("requestFullscreen");
+    expect(kiosk).toContain('data-display="ambient"');
+  });
+
+  it("opens an always-on solo display from the URL and keeps the wake screen off", () => {
+    expect(jessicaDisplayFromSearch("")).toBe("booth");
+    expect(jessicaDisplayFromSearch("?mode=booth")).toBe("booth");
+    expect(jessicaDisplayFromSearch("?mode=ambient")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?mode=AMBIENT")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?display=solo")).toBe("ambient");
+    expect(jessicaDisplayFromSearch("?display=solo&event=nasa-expo-2026-10-20")).toBe("ambient");
+    expect(ambientAvatarStatus("needs-start")).toBe("ready");
+    expect(ambientAvatarStatus("connecting")).toBe("ready");
+    expect(ambientAvatarStatus("error")).toBe("ready");
+    expect(ambientAvatarStatus("listening")).toBe("listening");
+    expect(ambientAvatarStatus("speaking")).toBe("speaking");
+    expect(jessicaPose(ambientAvatarStatus("needs-start"), "")).toBe("idle");
+    expect(readFileSync("apps/web/src/app/kiosk/jessica/page.tsx", "utf8")).toContain("JessicaKiosk");
+    expect(readFileSync("apps/web/src/app/expo/nasa-2026/kiosk/page.tsx", "utf8")).toContain("/kiosk/jessica");
   });
 });
 
