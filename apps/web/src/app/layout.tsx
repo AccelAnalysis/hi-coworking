@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/authContext";
+import { HOME_DESCRIPTION, HOME_TITLE, PUBLIC_SITE_ORIGIN } from "@/lib/publicSite";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,8 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hi Coworking",
-  description: "Big ideas. Intimate space. A micro-coworking space designed for focus, flexibility, and real local use.",
+  metadataBase: new URL(PUBLIC_SITE_ORIGIN),
+  title: HOME_TITLE,
+  description: HOME_DESCRIPTION,
 };
 
 export default function RootLayout({

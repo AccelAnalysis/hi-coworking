@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./LaunchCountdown.module.css";
 
-export const PUBLIC_LAUNCH_AT = new Date("2026-10-15T08:00:00-04:00").getTime();
+// November 1 is in Eastern Standard Time (UTC-05:00), after DST ends.
+export const PUBLIC_LAUNCH_AT = new Date("2026-11-01T08:00:00-05:00").getTime();
 
 type CountdownValue = {
   days: string;
