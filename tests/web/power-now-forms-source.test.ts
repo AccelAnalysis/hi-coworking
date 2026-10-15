@@ -5,7 +5,7 @@ import {
   POWER_NOW_CRITERIA_PART_B,
   POWER_NOW_FIT_PLACEHOLDER,
 } from "../../apps/functions/src/expo/powerNowForms";
-import { readPowerNowCriteria, weightedScore } from "../../apps/web/src/lib/powerNowScore";
+import { rankPitchers, readPowerNowCriteria, weightedScore } from "../../apps/web/src/lib/powerNowScore";
 
 const root = resolve(process.cwd());
 
@@ -50,6 +50,10 @@ describe("Power NOW form client", () => {
     expect(rubric).not.toContain("powerNowPrivateComments");
     expect(score).toContain("powerNowScoreDocId");
     expect(score).toContain("recused");
+    expect(score).toContain("Submit score");
+    expect(results).toContain("rankPitchers");
+    expect(results).toContain("Average weighted score");
+    expect(results).toContain("Lock scoring");
     expect(score).not.toContain('collection(db, "powerNowScores")');
     expect(results).toContain("onSnapshot");
     expect(results).toContain('collection(db, "powerNowScores")');
@@ -66,5 +70,47 @@ describe("Power NOW form client", () => {
     expect(published.items).toHaveLength(6);
     const points = published.items.map((item, index) => ({ criterionId: item.id, value: index + 1 > 5 ? 5 : index + 1 }));
     expect(weightedScore(points, published.items)).toBeCloseTo(3.15, 5);
+  });
+
+  it("ranks by weighted average, then J5, J2, J1, judge preference, and Jonathan", () => {
+    const criteria = [
+      { id: "j1-opportunity", weight: 20 },
+      { id: "j2-customer-market", weight: 20 },
+      { id: "j5-execution", weight: 20 },
+    ];
+    const card = (j5: number, j2: number, j1: number) => [
+      { criterionId: "j5-execution", value: j5 },
+      { criterionId: "j2-customer-market", value: j2 },
+      { criterionId: "j1-opportunity", value: j1 },
+    ];
+    const tied = rankPitchers(
+      [
+        { key: "a", jonathanRank: 2 },
+        { key: "b", jonathanRank: 1 },
+      ],
+      [
+        { pitcherKey: "a", judgeUid: "judge-1", recused: false, points: card(4, 4, 4) },
+        { pitcherKey: "b", judgeUid: "judge-1", recused: false, points: card(4, 4, 4) },
+        { pitcherKey: "a", judgeUid: "judge-2", recused: true, points: [] },
+      ],
+      criteria,
+    );
+    expect(tied.map((row) => row.key)).toEqual(["b", "a"]);
+    expect(tied[0]?.place).toBe(1);
+    expect(tied.every((row) => row.weightedAverage === 2.4)).toBe(true);
+
+    const byExecution = rankPitchers(
+      [
+        { key: "a", jonathanRank: null },
+        { key: "b", jonathanRank: null },
+      ],
+      [
+        { pitcherKey: "a", judgeUid: "judge-1", recused: false, points: card(5, 3, 1) },
+        { pitcherKey: "b", judgeUid: "judge-1", recused: false, points: card(3, 5, 1) },
+      ],
+      criteria,
+    );
+    expect(byExecution[0]?.weightedAverage).toBeCloseTo(byExecution[1]?.weightedAverage ?? 0, 5);
+    expect(byExecution.map((row) => row.key)).toEqual(["a", "b"]);
   });
 });

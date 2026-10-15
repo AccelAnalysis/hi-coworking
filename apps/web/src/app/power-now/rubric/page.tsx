@@ -15,6 +15,7 @@ export default function RubricPage() {
   const [placeholder, setPlaceholder] = useState(false);
   const [notice, setNotice] = useState("");
   const [missing, setMissing] = useState(false);
+  const [released, setReleased] = useState<Array<{ judge: string; strength: string; nextStep: string }>>([]);
 
   useEffect(() => {
     if (!user) {
@@ -28,8 +29,11 @@ export default function RubricPage() {
   }, [user]);
 
   useEffect(() => {
-    if (!isPitcher) return;
-    const unsub = onSnapshot(doc(db, "powerNowCriteria", "current"), (snap) => {
+    if (!isPitcher || !user) {
+      setReleased([]);
+      return;
+    }
+    const unsubCriteria = onSnapshot(doc(db, "powerNowCriteria", "current"), (snap) => {
       if (!snap.exists()) {
         setMissing(true);
         setCriteria([]);
@@ -41,8 +45,23 @@ export default function RubricPage() {
       setPlaceholder(published.placeholder);
       setNotice(published.notice);
     }, () => setMissing(true));
-    return () => unsub();
-  }, [isPitcher]);
+    const unsubNotes = onSnapshot(doc(db, "powerNowReleasedNotes", user.uid), (snap) => {
+      const comments = snap.data()?.comments;
+      setReleased(Array.isArray(comments) ? comments.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as { judge?: unknown; strength?: unknown; nextStep?: unknown };
+        return [{
+          judge: typeof row.judge === "string" ? row.judge : "Judge",
+          strength: typeof row.strength === "string" ? row.strength : "",
+          nextStep: typeof row.nextStep === "string" ? row.nextStep : "",
+        }];
+      }) : []);
+    }, () => setReleased([]));
+    return () => {
+      unsubCriteria();
+      unsubNotes();
+    };
+  }, [isPitcher, user]);
 
   return (
     <PowerNowFrame
@@ -62,6 +81,20 @@ export default function RubricPage() {
           {placeholder ? <PlaceholderBanner notice={notice} /> : null}
           {missing || criteria.length === 0 ? <p className="pn-note">The rubric has not been published yet.</p> : (
             <CriteriaReadout items={criteria} />
+          )}
+          <h2>Comments for you</h2>
+          {released.length === 0 ? (
+            <p className="pn-note">Jonathan has not released founder comments.</p>
+          ) : (
+            <ul className="pn-readonly">
+              {released.map((comment, index) => (
+                <li key={`${comment.judge}-${index}`}>
+                  <p><strong>{comment.judge}</strong></p>
+                  {comment.strength ? <p>Strength: {comment.strength}</p> : null}
+                  {comment.nextStep ? <p>Next step: {comment.nextStep}</p> : null}
+                </li>
+              ))}
+            </ul>
           )}
         </>
       ) : null}

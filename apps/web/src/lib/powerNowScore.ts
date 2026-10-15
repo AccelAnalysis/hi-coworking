@@ -65,6 +65,83 @@ export function readPowerNowCriteria(data: unknown): PowerNowCriteriaDoc {
   };
 }
 
+export const DEFAULT_TIE_BREAK = ["j5-execution", "j2-customer-market", "j1-opportunity", "judge-preference", "jonathan"];
+
+export type RankedPitcher = {
+  key: string;
+  weightedAverage: number;
+  criterionAverages: Record<string, number>;
+  preferenceCount: number;
+  jonathanRank: number | null;
+  place: number;
+};
+
+/** Average of non-recused weighted scores, then J5, J2, J1, judge preference, and Jonathan. */
+export function rankPitchers(
+  pitchers: { key: string; jonathanRank: number | null }[],
+  scores: { pitcherKey: string; judgeUid: string; recused: boolean; points: PowerNowPoint[] }[],
+  criteria: Pick<PowerNowCriterion, "id" | "weight">[],
+  tieBreak: string[] = DEFAULT_TIE_BREAK,
+): RankedPitcher[] {
+  const rows = pitchers.map((pitcher) => {
+    const mine = scores.filter((score) => score.pitcherKey === pitcher.key && !score.recused);
+    const weightedValues = mine.map((score) => weightedScore(score.points, criteria));
+    const criterionAverages: Record<string, number> = {};
+    for (const criterion of criteria) {
+      const values = mine.flatMap((score) => score.points.filter((point) => point.criterionId === criterion.id).map((point) => Number(point.value)));
+      criterionAverages[criterion.id] = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+    }
+    return {
+      key: pitcher.key,
+      weightedAverage: weightedValues.length ? weightedValues.reduce((sum, value) => sum + value, 0) / weightedValues.length : 0,
+      criterionAverages,
+      preferenceCount: 0,
+      jonathanRank: pitcher.jonathanRank,
+      place: 0,
+    };
+  });
+  const byJudge = new Map<string, { pitcherKey: string; weighted: number }[]>();
+  for (const score of scores) {
+    if (score.recused) continue;
+    const weighted = weightedScore(score.points, criteria);
+    byJudge.set(score.judgeUid, [...(byJudge.get(score.judgeUid) ?? []), { pitcherKey: score.pitcherKey, weighted }]);
+  }
+  for (const ballots of byJudge.values()) {
+    const best = Math.max(...ballots.map((ballot) => ballot.weighted));
+    const leaders = ballots.filter((ballot) => ballot.weighted === best);
+    if (leaders.length === 1) {
+      const row = rows.find((item) => item.key === leaders[0].pitcherKey);
+      if (row) row.preferenceCount += 1;
+    }
+  }
+  rows.sort((a, b) => compareRank(a, b, tieBreak) || a.key.localeCompare(b.key));
+  rows.forEach((row, index) => {
+    const previous = rows[index - 1];
+    row.place = previous && compareRank(previous, row, tieBreak) === 0 ? previous.place : index + 1;
+  });
+  return rows;
+}
+
+function compareRank(a: RankedPitcher, b: RankedPitcher, tieBreak: string[]): number {
+  if (b.weightedAverage !== a.weightedAverage) return b.weightedAverage - a.weightedAverage;
+  for (const step of tieBreak) {
+    if (step === "judge-preference") {
+      if (b.preferenceCount !== a.preferenceCount) return b.preferenceCount - a.preferenceCount;
+      continue;
+    }
+    if (step === "jonathan") {
+      const left = a.jonathanRank ?? Number.POSITIVE_INFINITY;
+      const right = b.jonathanRank ?? Number.POSITIVE_INFINITY;
+      if (left !== right) return left - right;
+      continue;
+    }
+    const left = a.criterionAverages[step] ?? 0;
+    const right = b.criterionAverages[step] ?? 0;
+    if (right !== left) return right - left;
+  }
+  return 0;
+}
+
 /** Weighted score on the 1–5 scale. Weights are percents that should add to 100. */
 export function weightedScore(
   points: PowerNowPoint[],

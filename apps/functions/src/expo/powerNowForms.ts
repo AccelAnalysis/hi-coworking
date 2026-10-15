@@ -23,15 +23,15 @@ export const POWER_NOW_FIT_PLACEHOLDER = {
 } as const;
 
 /**
- * Working Part B rubric from 15 October 2026.
- * Judges read powerNowCriteria/current at runtime. Swap that Firestore
- * document when a later rubric arrives. This constant only seeds a missing
- * or still-placeholder document, so an edit in Firestore is left in place.
+ * Working draft rubric. Criterion sentences are the 15 October copy.
+ * The v2 markdown files were not on disk, so this seed does not invent new wording.
+ * It replaces a missing, placeholder, or part-b document, then leaves edits in place.
  */
 export const POWER_NOW_CRITERIA_PART_B = {
-  version: "part-b-2026-10-15",
+  version: "v2-draft-2026-10-15",
+  draft: true,
   placeholder: false,
-  notice: "Working rubric, 15 October 2026. Replace this document when a later rubric is approved.",
+  notice: "Working draft. Jonathan can edit this document. Criterion sentences remain the 15 October rubric until a later file replaces them.",
   scale: { min: 1, max: 5 },
   items: [
     {
@@ -115,6 +115,16 @@ export const POWER_NOW_CRITERIA_PART_B = {
   ],
 } as const;
 
+/** Night operations config. Jonathan can edit the Firestore document without a code change. */
+export const POWER_NOW_SETTINGS = {
+  draft: true,
+  scoringLockTime: "19:50",
+  timeZone: "America/Chicago",
+  tieBreak: ["j5-execution", "j2-customer-market", "j1-opportunity", "judge-preference", "jonathan"],
+} as const;
+
+const REPLACED_CRITERIA_VERSIONS = new Set(["part-b-2026-10-15"]);
+
 export class PowerNowInputError extends Error {
   constructor(message: string) {
     super(message);
@@ -145,6 +155,48 @@ type FetchLike = typeof fetch;
 
 export function powerNowScoreDocId(nightId: string, pitcherId: string, judgeUid: string): string {
   return `${nightId}_${pitcherId}_${judgeUid}`;
+}
+
+function zonedParts(date: Date, timeZone: string) {
+  const bag: Record<string, string> = {};
+  for (const part of new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(date)) {
+    bag[part.type] = part.value;
+  }
+  return {
+    year: Number(bag.year),
+    month: Number(bag.month),
+    day: Number(bag.day),
+    hour: Number(bag.hour === "24" ? "0" : bag.hour),
+    minute: Number(bag.minute),
+  };
+}
+
+/** Local clock time on a calendar date, as a UTC instant. */
+export function scoringLockInstant(date: string, time: string, timeZone: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+    throw new PowerNowInputError("The scoring lock needs a date and a time.");
+  }
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) {
+    throw new PowerNowInputError("The scoring lock needs a date and a time.");
+  }
+  let utc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const desired = utc;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = zonedParts(new Date(utc), timeZone);
+    const shown = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, 0);
+    utc += desired - shown;
+  }
+  return new Date(utc).toISOString();
 }
 
 export function normalizeEmail(value: unknown): string {
@@ -447,17 +499,21 @@ export async function createPersonNote(
   }
 }
 
-export async function seedPowerNowPlaceholders(store: DocStore): Promise<{ questions: boolean; criteria: boolean }> {
+export async function seedPowerNowPlaceholders(store: DocStore): Promise<{ questions: boolean; criteria: boolean; settings: boolean }> {
   const questionsPath = "powerNowFitQuestions/current";
   const criteriaPath = "powerNowCriteria/current";
+  const settingsPath = "powerNowSettings/current";
   const questions = await store.get(questionsPath);
   const criteria = await store.get(criteriaPath);
+  const settings = await store.get(settingsPath);
   const writeQuestions = !questions;
-  const writeCriteria = !criteria || criteria.placeholder === true;
+  const writeCriteria = !criteria || criteria.placeholder === true || REPLACED_CRITERIA_VERSIONS.has(String(criteria.version ?? ""));
+  const writeSettings = !settings;
   const updatedAt = new Date().toISOString();
   if (writeQuestions) await store.set(questionsPath, { ...POWER_NOW_FIT_PLACEHOLDER, updatedAt });
   if (writeCriteria) await store.set(criteriaPath, { ...POWER_NOW_CRITERIA_PART_B, updatedAt });
-  return { questions: writeQuestions, criteria: writeCriteria };
+  if (writeSettings) await store.set(settingsPath, { ...POWER_NOW_SETTINGS, updatedAt });
+  return { questions: writeQuestions, criteria: writeCriteria, settings: writeSettings };
 }
 
 type ListedRole = {
@@ -531,13 +587,20 @@ export async function savePowerNowNight(store: DocStore, nightIdInput: unknown, 
   const label = String(labelInput ?? "").trim();
   if (!label || label.length > 120) throw new PowerNowInputError("Name the pitch night in 120 characters or fewer.");
   const existing = await store.get(`powerNowNights/${nightId}`);
+  const settings = await store.get("powerNowSettings/current");
+  const lockTime = typeof settings?.scoringLockTime === "string" ? settings.scoringLockTime : POWER_NOW_SETTINGS.scoringLockTime;
+  const timeZone = typeof settings?.timeZone === "string" ? settings.timeZone : POWER_NOW_SETTINGS.timeZone;
+  const lockAt = existing?.lockAt
+    ?? (/^\d{4}-\d{2}-\d{2}$/.test(nightId) ? new Date(scoringLockInstant(nightId, lockTime, timeZone)) : null);
   await store.set(`powerNowNights/${nightId}`, {
     label,
     locked: existing?.locked === true,
+    founderCommentsReleased: existing?.founderCommentsReleased === true,
+    lockAt,
     createdAt: typeof existing?.createdAt === "string" ? existing.createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  return { nightId };
+  return { nightId, lockAt: lockAt instanceof Date ? lockAt.toISOString() : null };
 }
 
 export async function lockPowerNowNight(store: DocStore, nightIdInput: unknown, locked: boolean) {

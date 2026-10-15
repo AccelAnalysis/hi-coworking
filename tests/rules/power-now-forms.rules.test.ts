@@ -76,6 +76,8 @@ describe("Power NOW form rules", () => {
     await assertFails(getDoc(doc(db, "powerNowScores/2026-11-12_founder-1_judge-2")));
     await assertFails(getDocs(collection(db, "powerNowJudges")));
     await assertFails(getDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-2")));
+    await assertFails(getDoc(doc(db, "powerNowSettings/current")));
+    await assertFails(getDoc(doc(db, "powerNowReleasedNotes/pitcher-1")));
     await assertFails(setDoc(doc(db, "powerNowJudges/intruder"), { email: "intruder@example.test", active: true }));
     await assertFails(setDoc(doc(db, "powerNowHosts/intruder"), { email: "intruder@example.test", active: true }));
   });
@@ -94,6 +96,8 @@ describe("Power NOW form rules", () => {
     const db = testEnv.authenticatedContext("judge-1", { role: "member" }).firestore();
     const own = doc(db, "powerNowScores/2026-11-12_founder-1_judge-1");
     await assertSucceeds(getDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-1")));
+    await assertFails(setDoc(own, { ...score("judge-1"), founderStrength: "", founderNextStep: "" }));
+    await assertFails(setDoc(own, { ...score("judge-1"), points: [{ criterionId: "j1-opportunity", value: 6 }] }));
     await assertSucceeds(setDoc(own, score("judge-1")));
     await assertSucceeds(getDoc(own));
     await assertFails(getDoc(doc(db, "powerNowScores/2026-11-12_founder-1_judge-2")));
@@ -103,8 +107,7 @@ describe("Power NOW form rules", () => {
       nightId: "2026-11-12",
       pitcherId: "founder-1",
     }));
-    await assertSucceeds(updateDoc(own, { points: [{ criterionId: "j1-opportunity", value: 4 }], updatedAt: Timestamp.now() }));
-    await assertFails(updateDoc(own, { points: [{ criterionId: "j1-opportunity", value: 6 }], updatedAt: Timestamp.now() }));
+    await assertFails(updateDoc(own, { points: [{ criterionId: "j1-opportunity", value: 4 }], updatedAt: Timestamp.now() }));
     await assertSucceeds(setDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-1"), {
       nightId: "2026-11-12",
       pitcherId: "founder-1",
@@ -113,8 +116,13 @@ describe("Power NOW form rules", () => {
       updatedAt: Timestamp.now(),
     }));
     await assertFails(getDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-2")));
-    const recused = doc(db, "powerNowScores/2026-11-12_founder-1_judge-1");
-    await assertSucceeds(updateDoc(recused, { recused: true, points: [], updatedAt: Timestamp.now() }));
+    await assertFails(updateDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-1"), {
+      comment: "Changed after submit",
+      updatedAt: Timestamp.now(),
+    }));
+    const admin = testEnv.authenticatedContext("admin-1", { role: "admin" }).firestore();
+    await assertSucceeds(updateDoc(doc(admin, "powerNowScores/2026-11-12_founder-1_judge-1"), { submitted: false }));
+    await assertSucceeds(updateDoc(own, { submitted: true, recused: true, points: [], updatedAt: Timestamp.now() }));
   });
 
   test("a host can read every score and cannot read private comments or manage roles", async () => {
@@ -126,6 +134,18 @@ describe("Power NOW form rules", () => {
     await assertFails(getDoc(doc(db, "powerNowFitQuestions/current")));
     await assertFails(setDoc(doc(db, "powerNowScores/2026-11-12_founder-1_host-1"), score("host-1")));
     await assertFails(setDoc(doc(db, "powerNowJudges/new-judge"), { email: "new-judge@example.test", active: true }));
+    await assertSucceeds(getDoc(doc(db, "powerNowSettings/current")));
+    await assertSucceeds(updateDoc(doc(db, "powerNowNights/2026-11-12"), { locked: true }));
+    await assertFails(updateDoc(doc(db, "powerNowNights/2026-11-12"), { founderCommentsReleased: true }));
+  });
+
+  test("a configured lock time closes scoring", async () => {
+    const admin = testEnv.authenticatedContext("admin-1", { role: "admin" }).firestore();
+    await assertSucceeds(updateDoc(doc(admin, "powerNowNights/2026-11-12"), {
+      lockAt: Timestamp.fromDate(new Date("2020-01-01T00:00:00Z")),
+    }));
+    const judge = testEnv.authenticatedContext("judge-1", { role: "member" }).firestore();
+    await assertFails(setDoc(doc(judge, "powerNowScores/2026-11-12_founder-1_judge-1"), score("judge-1")));
   });
 
   test("a locked night rejects score edits", async () => {
@@ -151,6 +171,13 @@ describe("Power NOW form rules", () => {
     await assertSucceeds(setDoc(doc(admin, "powerNowHosts/new-host"), { email: "host2@example.test", active: true }));
     await assertSucceeds(getDocs(collection(admin, "powerNowScores")));
     await assertSucceeds(getDoc(doc(admin, "powerNowPrivateComments/2026-11-12_founder-1_judge-2")));
+    await assertSucceeds(setDoc(doc(admin, "powerNowReleasedNotes/pitcher-1"), {
+      nightId: "2026-11-12",
+      comments: [{ judge: "Judge", strength: "Clear problem.", nextStep: "Call five customers." }],
+    }));
+    await assertSucceeds(getDoc(doc(pitcher, "powerNowReleasedNotes/pitcher-1")));
+    await assertFails(getDoc(doc(judge, "powerNowReleasedNotes/pitcher-1")));
+    await assertFails(setDoc(doc(pitcher, "powerNowReleasedNotes/pitcher-1"), { nightId: "2026-11-12", comments: [] }));
   });
 });
 
@@ -160,7 +187,9 @@ function score(judgeUid: string) {
     pitcherId: "founder-1",
     judgeUid,
     recused: false,
-    founderComment: "",
+    submitted: true,
+    founderStrength: "Clear problem.",
+    founderNextStep: "Talk to five more customers.",
     points: [{ criterionId: "j1-opportunity", value: 3 }],
     updatedAt: Timestamp.now(),
   };

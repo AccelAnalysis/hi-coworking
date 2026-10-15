@@ -10,6 +10,7 @@ import {
   listPitchInterestFounders,
   powerNowScoreDocId,
   prepareSignInLink,
+  scoringLockInstant,
   removePowerNowJudge,
   requestFirebaseEmailSignIn,
   saveFitConversation,
@@ -86,7 +87,8 @@ describe("Power NOW forms", () => {
     expect(POWER_NOW_FIT_PLACEHOLDER.placeholder).toBe(true);
     expect(POWER_NOW_FIT_PLACEHOLDER.items[0]?.prompt).toMatch(/^Placeholder question:/);
     expect(POWER_NOW_CRITERIA_PART_B.placeholder).toBe(false);
-    expect(POWER_NOW_CRITERIA_PART_B.version).toBe("part-b-2026-10-15");
+    expect(POWER_NOW_CRITERIA_PART_B.version).toBe("v2-draft-2026-10-15");
+    expect(POWER_NOW_CRITERIA_PART_B.draft).toBe(true);
     expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.weight)).toEqual([20, 20, 15, 15, 20, 10]);
     expect(POWER_NOW_CRITERIA_PART_B.items.every((item) => item.max === 5 && item.anchors.length === 3)).toBe(true);
     expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.code)).toEqual(["J1", "J2", "J3", "J4", "J5", "J6"]);
@@ -96,14 +98,15 @@ describe("Power NOW forms", () => {
     const store = memoryStore();
     await seedPowerNowPlaceholders(store);
     const first = store.docs.get("powerNowCriteria/current");
-    expect(first).toMatchObject({ placeholder: false, version: "part-b-2026-10-15" });
+    expect(first).toMatchObject({ placeholder: false, version: "v2-draft-2026-10-15", draft: true });
+    expect(store.docs.get("powerNowSettings/current")).toMatchObject({ scoringLockTime: "19:50", timeZone: "America/Chicago" });
     await seedPowerNowPlaceholders(store);
     expect(store.docs.get("powerNowCriteria/current")).toEqual(first);
     expect(store.docs.get("powerNowFitQuestions/current")).toMatchObject({ placeholder: true });
 
-    store.docs.set("powerNowCriteria/current", { placeholder: true, items: [], notice: "old" });
+    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "part-b-2026-10-15", items: [] });
     await seedPowerNowPlaceholders(store);
-    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "part-b-2026-10-15", placeholder: false });
+    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "v2-draft-2026-10-15", placeholder: false });
 
     store.docs.set("powerNowCriteria/current", { placeholder: false, version: "later-rubric", items: [{ id: "custom" }] });
     await seedPowerNowPlaceholders(store);
@@ -269,6 +272,11 @@ describe("Power NOW forms", () => {
       origin: "https://hi-coworking-plat.web.app",
       path: "/power-now/score",
     })).toBeNull();
+  });
+
+  it("sets the scoring lock to 7:50 PM in Chicago", () => {
+    expect(scoringLockInstant("2026-11-12", "19:50", "America/Chicago")).toBe("2026-11-13T01:50:00.000Z");
+    expect(scoringLockInstant("2026-10-15", "19:50", "America/Chicago")).toBe("2026-10-16T00:50:00.000Z");
   });
 
   it("refuses a sign-in link from an unknown host and hides the API key", async () => {
