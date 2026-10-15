@@ -4,14 +4,17 @@ import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest
 import {
   CONFIRMATION_FAILURE_PREFIX,
   CONFIRMATION_TEMPLATE_VERSION,
+  POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
   POWER_NOW_DEFAULT_DAILY_CAP,
   POWER_NOW_DEFAULT_FROM,
   POWER_NOW_DEFAULT_REPLY_TO,
   buildPowerNowConfirmationMessage,
   confirmationDailyCap,
   confirmationDedupeKey,
+  confirmationEmailEnabled,
   confirmationFrom,
   confirmationProvider,
+  confirmationTestRecipients,
   createMemoryConfirmationStore,
   decideReservation,
   listUnsubscribeValue,
@@ -580,6 +583,24 @@ describe("Power NOW confirmation delivery", () => {
     expect(skipped.result.body && JSON.stringify(skipped.result.body)).not.toContain("ada@example.com");
   });
 
+  it("sends a flag-on test only to jholman@accelanalysis.com", async () => {
+    const mail = mailRecorder();
+    const store = createMemoryConfirmationStore();
+    const env = enabledEnv({
+      POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
+    });
+    const other = await submit(emptyState(), pitchBody(), { mail, store, env });
+    const jonathan = await submit(emptyState(), pitchBody({
+      email: "JHolman@AccelAnalysis.com",
+      fullName: "Jonathan Holman",
+      clientSubmissionId: "55555555-5555-4555-8555-555555555555",
+    }), { mail, store, env });
+    expect(other.result.status).toBe(200);
+    expect(jonathan.result.status).toBe(200);
+    expect(mail.calls).toHaveLength(1);
+    expect(JSON.parse(mail.calls[0]!.body).to).toEqual(["jholman@accelanalysis.com"]);
+  });
+
   it("does not send when the honeypot is filled", async () => {
     const state = emptyState();
     const mail = mailRecorder();
@@ -726,5 +747,44 @@ describe("Power NOW confirmation config surface", () => {
     expect(docs).toContain("DKIM");
     expect(docs).toContain("add those three secrets back to the function binding");
     expect(docs).toContain("optional and only for a later Graph switch");
+    expect(docs).toContain("## Jonathan checklist");
+    expect(docs).toContain("### 1. Resend DNS");
+    expect(docs).toContain("### 2. Keys");
+    expect(docs).toContain("### 3. reCAPTCHA Enterprise");
+    expect(docs).toContain("### 4. Flag-on test to jholman@ only");
+    expect(docs).toContain("POWER_NOW_CONFIRMATION_EMAIL_ENABLED=");
+    expect(docs).toContain(`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=${POWER_NOW_CONFIRMATION_TEST_RECIPIENT}`);
+    expect(docs).toContain("RECAPTCHA_ENTERPRISE_SITE_KEY");
+    expect(docs).toContain("NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY");
+    expect(docs).toContain("power_now_submit");
+  });
+
+  it("keeps the flag off and wires the flag-on test to jholman@ only", () => {
+    expect(POWER_NOW_CONFIRMATION_TEST_RECIPIENT).toBe("jholman@accelanalysis.com");
+    expect(confirmationEmailEnabled({})).toBe(false);
+    expect(confirmationEmailEnabled({ POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "true" })).toBe(true);
+    expect(confirmationEmailEnabled({ POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "" })).toBe(false);
+    expect(confirmationTestRecipients({})).toBeNull();
+    expect(confirmationTestRecipients({
+      POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
+    })).toEqual(["jholman@accelanalysis.com"]);
+    expect(confirmationTestRecipients({
+      POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: "JHolman@AccelAnalysis.com",
+    })).toEqual(["jholman@accelanalysis.com"]);
+
+    const envFile = readFileSync("apps/functions/.env.hi-coworking-plat", "utf8");
+    expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
+    expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
+    expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
+    expect(envFile).not.toContain("RESEND_API_KEY");
+    expect(envFile).not.toContain("RECAPTCHA_ENTERPRISE_API_KEY");
+    expect(envFile).not.toContain("RECAPTCHA_ENTERPRISE_SITE_KEY");
+    expect(envFile).not.toContain("NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY");
+
+    const source = readFileSync("apps/functions/src/expo/powerNowConfirmation.ts", "utf8");
+    expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_EMAIL_ENABLED"');
+    expect(source).toContain('default: ""');
+    expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_TEST_RECIPIENTS"');
+    expect(source).toContain("default: POWER_NOW_CONFIRMATION_TEST_RECIPIENT");
   });
 });

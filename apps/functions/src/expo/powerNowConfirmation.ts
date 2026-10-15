@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { promises as dns } from "node:dns";
 import * as admin from "firebase-admin";
+import { defineString } from "firebase-functions/params";
 import { formatIsoEastern, splitPersonName } from "./nasaLeadModel";
 import { readPowerNowSecret } from "./powerNowConfirmationSecrets";
 import type { NormalizedPowerNow, PowerNowPath } from "./powerNowModel";
@@ -20,6 +21,8 @@ export const POWER_NOW_MIN_SUBMIT_MS_DEFAULT = 3000;
 export const POWER_NOW_RECAPTCHA_MIN_SCORE_DEFAULT = 0.5;
 export const POWER_NOW_RECAPTCHA_ACTION = "power_now_submit";
 export const POWER_NOW_RECAPTCHA_PROJECT = "hi-coworking-plat";
+/** Jonathan Holman. The deployed allow-list sends a flag-on test only here. */
+export const POWER_NOW_CONFIRMATION_TEST_RECIPIENT = "jholman@accelanalysis.com";
 export const CONFIRMATION_ADDRESS_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const CONFIRMATION_FAILURE_PREFIX = "[CONFIRMATION EMAIL FAILED]";
 
@@ -219,8 +222,41 @@ export type PowerNowConfirmationOptions = {
 
 type SendFailureClass = "ResendRejected" | "GraphRejected" | "GraphAuthFailed" | "SendFailed" | "ProviderUnconfigured";
 
+/**
+ * Empty unless set to the string true. apps/functions/.env.hi-coworking-plat
+ * leaves this blank so a deploy does not start sending.
+ */
+export const powerNowConfirmationEmailEnabledParam = defineString("POWER_NOW_CONFIRMATION_EMAIL_ENABLED", {
+  default: "",
+  description: "Set to true to send Power NOW confirmation email. Any other value, including empty, sends nothing.",
+});
+
+/**
+ * Deployed allow-list. Mail goes only to these addresses while it is set.
+ * The flag-on test is jholman@accelanalysis.com and nobody else.
+ */
+export const powerNowConfirmationTestRecipientsParam = defineString("POWER_NOW_CONFIRMATION_TEST_RECIPIENTS", {
+  default: POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
+  description: "Comma- or space-separated allow-list for Power NOW confirmation email. The flag-on test is jholman@accelanalysis.com only.",
+});
+
 export function confirmationEmailEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.POWER_NOW_CONFIRMATION_EMAIL_ENABLED === "true";
+  return configuredValue(
+    env,
+    "POWER_NOW_CONFIRMATION_EMAIL_ENABLED",
+    () => powerNowConfirmationEmailEnabledParam.value(),
+  ) === "true";
+}
+
+export function confirmationTestRecipients(env: NodeJS.ProcessEnv = process.env): string[] | null {
+  const raw = configuredValue(
+    env,
+    "POWER_NOW_CONFIRMATION_TEST_RECIPIENTS",
+    () => powerNowConfirmationTestRecipientsParam.value(),
+  );
+  if (raw == null || raw.trim() === "") return null;
+  const list = raw.split(/[\s,]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
+  return list.length > 0 ? list : null;
 }
 
 export function confirmationProvider(env: NodeJS.ProcessEnv): "resend" | "graph" | "invalid" {
@@ -634,7 +670,7 @@ export async function runPowerNowConfirmation(input: {
   const fetchImpl = input.mailFetch ?? fetch;
   const readSecret = input.readSecret ?? ((name: string) => readPowerNowSecret(name, env));
   try {
-    const allowList = testRecipients(env);
+    const allowList = confirmationTestRecipients(env);
     if (allowList && !allowList.includes(input.lead.email.trim().toLowerCase())) {
       return skipped(input.personRecordId, "TestRecipientSkipped");
     }
@@ -806,11 +842,18 @@ function recaptchaMinScore(env: NodeJS.ProcessEnv): number {
   return value;
 }
 
-function testRecipients(env: NodeJS.ProcessEnv): string[] | null {
-  const raw = env.POWER_NOW_CONFIRMATION_TEST_RECIPIENTS;
-  if (raw == null || raw.trim() === "") return null;
-  const list = raw.split(/[\s,]+/).map((item) => item.trim().toLowerCase()).filter(Boolean);
-  return list.length > 0 ? list : null;
+function configuredValue(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  readParam: () => string,
+): string | undefined {
+  if (Object.prototype.hasOwnProperty.call(env, name)) return env[name];
+  if (env !== process.env) return undefined;
+  try {
+    return readParam();
+  } catch {
+    return undefined;
+  }
 }
 
 function submittedSlowEnough(startedAt: string | null, now: Date, minMs: number): boolean {
