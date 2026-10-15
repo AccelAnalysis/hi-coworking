@@ -32,12 +32,15 @@ export const expo_submitNasaLead = onRequest(
   async (req, res) => {
     const origin = req.get("origin");
     const contentLengthHeader = req.get("content-length");
+    const forwarded = req.get("x-forwarded-for");
+    const ip = forwarded?.split(",")[0]?.trim() || req.ip || "unknown";
     const result = await handleExpoLeadHttp({
       method: req.method,
       origin,
       contentLength: contentLengthHeader ? Number(contentLengthHeader) : null,
       body: req.body,
       apiKey: readAttioApiKey(),
+      ip,
     });
 
     for (const [key, value] of Object.entries(result.headers)) {
@@ -52,6 +55,7 @@ export const expo_submitNasaLead = onRequest(
         listStatus: result.body.listStatus,
         noteStatus: result.body.noteStatus,
         companyStatus: result.body.companyStatus,
+        path: typeof result.body.path === "string" ? result.body.path : undefined,
       });
     }
 
