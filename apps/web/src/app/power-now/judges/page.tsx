@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { collection, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "@/lib/firebase";
-import { AdminLinks, AdminRequired, PowerNowFrame, callableMessage, useAdminGate } from "../ui";
+import { AdminLinks, AdminRequired, PowerNowFrame, SignOutButton, callableMessage, useAdminGate } from "../ui";
 
 type Judge = { uid: string; email: string; active: boolean };
 type Night = { id: string; label: string; locked: boolean };
@@ -97,6 +97,7 @@ export default function JudgesPage() {
       <AdminLinks />
       {!isAdmin ? <AdminRequired loading={loading} signedIn={Boolean(user)} /> : (
         <div className="pn-split">
+          <SignOutButton />
           <form onSubmit={(event) => {
             event.preventDefault();
             const add = httpsCallable(functions, "powerNow_addJudge");

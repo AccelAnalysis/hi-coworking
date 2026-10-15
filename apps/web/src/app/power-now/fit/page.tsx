@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "@/lib/firebase";
-import { AdminLinks, AdminRequired, PlaceholderBanner, PowerNowFrame, callableMessage, useAdminGate } from "../ui";
+import { AdminLinks, AdminRequired, PlaceholderBanner, PowerNowFrame, SignOutButton, callableMessage, useAdminGate } from "../ui";
 
 type Founder = { personId: string; name: string; email: string; company: string };
 type Question = { id: string; prompt: string };
@@ -90,6 +90,7 @@ export default function FitConversationPage() {
       <AdminLinks />
       {!isAdmin ? <AdminRequired loading={loading} signedIn={Boolean(user)} /> : (
         <form onSubmit={save}>
+          <SignOutButton />
           {placeholder ? <PlaceholderBanner notice={notice} /> : null}
           <div className="pn-field">
             <label htmlFor="founder">Founder</label>

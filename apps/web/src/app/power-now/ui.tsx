@@ -71,8 +71,9 @@ export function PlaceholderBanner({ notice }: { notice?: string }) {
 
 export function callableMessage(error: unknown, fallback: string): string {
   if (error && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
-    const message = (error as { message: string }).message.replace(/^Firebase:\s*/i, "").trim();
-    if (message) return message;
+    const raw = (error as { message: string }).message.replace(/^Firebase:\s*/i, "").trim();
+    const message = raw.replace(/^functions\/[a-z-]+:\s*/i, "");
+    if (message && !/^internal$/i.test(message)) return message;
   }
   return fallback;
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { AdminLinks, AdminRequired, PowerNowFrame, useAdminGate } from "../ui";
+import { AdminLinks, AdminRequired, PowerNowFrame, SignOutButton, useAdminGate } from "../ui";
 
 type Point = { criterionId: string; value: number };
 type Score = { id: string; nightId: string; pitcherId: string; judgeUid: string; points: Point[] };
@@ -107,6 +107,7 @@ export default function ResultsPage() {
       <AdminLinks />
       {!isAdmin ? <AdminRequired loading={loading} signedIn={Boolean(user)} /> : (
         <div aria-live="polite">
+          <SignOutButton />
           {error ? <p className="pn-alert" role="alert">{error}</p> : null}
           {rows.length === 0 ? <p className="pn-note">No scores yet.</p> : (
             <div className="pn-table-wrap">
