@@ -1,4 +1,5 @@
-const HC_LAUNCH_AT = new Date("2026-10-01T00:00:00-04:00").getTime();
+// November 1 is in Eastern Standard Time (UTC-05:00), after DST ends.
+const HC_LAUNCH_AT = new Date("2026-11-01T08:00:00-05:00").getTime();
 
 function getCountdownValues() {
   const remaining = Math.max(0, HC_LAUNCH_AT - Date.now());
