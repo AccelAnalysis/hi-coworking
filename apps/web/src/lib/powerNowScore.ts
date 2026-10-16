@@ -3,7 +3,7 @@ export function powerNowScoreDocId(nightId: string, pitcherId: string, judgeUid:
   return `${nightId}_${pitcherId}_${judgeUid}`;
 }
 
-export type PowerNowPoint = { criterionId: string; value: number };
+export type PowerNowPoint = { criterionId: string; value: number; evidence?: string };
 
 export type PowerNowAnchor = { score: number; text: string };
 
@@ -13,14 +13,22 @@ export type PowerNowCriterion = {
   label: string;
   prompt: string;
   weight: number;
+  proposed: boolean;
   max: number;
   anchors: PowerNowAnchor[];
 };
 
 export type PowerNowCriteriaDoc = {
   placeholder: boolean;
+  draft: boolean;
+  proposed: boolean;
   notice: string;
   version: string;
+  scaleInstruction: string;
+  conflictOptions: string[];
+  recuseIndex: number;
+  leastSureOptions: string[];
+  pitcherQuestions: string[];
   items: PowerNowCriterion[];
 };
 
@@ -53,14 +61,32 @@ export function readPowerNowCriteria(data: unknown): PowerNowCriteriaDoc {
       label,
       prompt: String(row.prompt ?? "").trim(),
       weight: Number.isFinite(weight) ? weight : 0,
+      proposed: row.proposed === true || record.proposed === true,
       max: Number.isInteger(max) && max >= 1 ? Math.min(max, 5) : 5,
       anchors,
     });
   }
+  const conflictOptions = Array.isArray(record.conflictOptions)
+    ? record.conflictOptions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const leastSureOptions = Array.isArray(record.leastSureOptions)
+    ? record.leastSureOptions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const pitcherQuestions = Array.isArray(record.pitcherQuestions)
+    ? record.pitcherQuestions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  const recuseIndex = Number(record.recuseIndex);
   return {
     placeholder: record.placeholder === true,
+    draft: record.draft === true,
+    proposed: record.proposed === true,
     notice: typeof record.notice === "string" ? record.notice : "",
     version: typeof record.version === "string" ? record.version : "",
+    scaleInstruction: typeof record.scaleInstruction === "string" ? record.scaleInstruction : "",
+    conflictOptions,
+    recuseIndex: Number.isInteger(recuseIndex) && recuseIndex >= 0 && recuseIndex < conflictOptions.length ? recuseIndex : 1,
+    leastSureOptions,
+    pitcherQuestions,
     items: parsed,
   };
 }

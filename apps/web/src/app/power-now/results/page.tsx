@@ -23,8 +23,18 @@ type Score = {
   recused: boolean;
   founderStrength: string;
   founderNextStep: string;
+  questionsAsked: string;
+  leastSure: string;
 };
-type Pitcher = { id: string; nightId: string; name: string; company: string; uid: string; jonathanRank: number | null };
+type Pitcher = {
+  id: string;
+  nightId: string;
+  name: string;
+  company: string;
+  uid: string;
+  jonathanRank: number | null;
+  jonathanReason: string;
+};
 type Night = { id: string; label: string; locked: boolean; released: boolean; lockAt: Date | null };
 type PrivateNote = { id: string; comment: string; judgeUid: string };
 
@@ -97,6 +107,8 @@ export default function ResultsPage() {
           recused?: boolean;
           founderStrength?: string;
           founderNextStep?: string;
+          questionsAsked?: string;
+          leastSure?: string;
         };
         return {
           id: item.id,
@@ -107,6 +119,8 @@ export default function ResultsPage() {
           recused: data.recused === true,
           founderStrength: typeof data.founderStrength === "string" ? data.founderStrength : "",
           founderNextStep: typeof data.founderNextStep === "string" ? data.founderNextStep : "",
+          questionsAsked: typeof data.questionsAsked === "string" ? data.questionsAsked : "",
+          leastSure: typeof data.leastSure === "string" ? data.leastSure : "",
         };
       }));
       setError("");
@@ -173,7 +187,7 @@ export default function ResultsPage() {
       for (const night of snap.docs) {
         const stop = onSnapshot(collection(db, "powerNowNights", night.id, "pitchers"), (pitcherSnap) => {
           const rows = pitcherSnap.docs.map((item) => {
-            const data = item.data() as { name?: string; company?: string; uid?: string; jonathanRank?: unknown };
+            const data = item.data() as { name?: string; company?: string; uid?: string; jonathanRank?: unknown; jonathanReason?: unknown };
             return {
               id: item.id,
               nightId: night.id,
@@ -181,6 +195,7 @@ export default function ResultsPage() {
               company: data.company || "",
               uid: typeof data.uid === "string" ? data.uid : "",
               jonathanRank: typeof data.jonathanRank === "number" ? data.jonathanRank : null,
+              jonathanReason: typeof data.jonathanReason === "string" ? data.jonathanReason : "",
             };
           });
           setPitchers((current) => [
@@ -369,26 +384,46 @@ export default function ResultsPage() {
                             <tr key={row.key}>
                               <td>{row.place}</td>
                               <th scope="row">{pitcher ? `${pitcher.name}${pitcher.company ? `, ${pitcher.company}` : ""}` : row.key}</th>
-                              <td>{row.weightedAverage.toFixed(1)}</td>
+                              <td>{row.weightedAverage.toFixed(2)}</td>
                               {steps.map((step) => (
                                 <td key={step}>
                                   {step === "judge-preference" ? row.preferenceCount : step === "jonathan" ? (
                                     isAdmin && pitcher ? (
-                                      <input
-                                        aria-label={`Jonathan rank for ${pitcher.name}`}
-                                        type="number"
-                                        min={1}
-                                        key={`${row.key}-${row.jonathanRank ?? "none"}`}
-                                        defaultValue={row.jonathanRank ?? ""}
-                                        onBlur={(event) => {
-                                          const raw = event.target.value.trim();
-                                          void updateDoc(doc(db, "powerNowNights", pitcher.nightId, "pitchers", pitcher.id), {
-                                            jonathanRank: raw ? Number(raw) : deleteField(),
-                                          });
-                                        }}
-                                      />
-                                    ) : (row.jonathanRank ?? "—")
-                                  ) : (row.criterionAverages[step] ?? 0).toFixed(1)}
+                                      <div className="pn-stack">
+                                        <input
+                                          aria-label={`Jonathan rank for ${pitcher.name}`}
+                                          type="number"
+                                          min={1}
+                                          key={`${row.key}-rank-${row.jonathanRank ?? "none"}`}
+                                          defaultValue={row.jonathanRank ?? ""}
+                                          onBlur={(event) => {
+                                            const raw = event.target.value.trim();
+                                            void updateDoc(doc(db, "powerNowNights", pitcher.nightId, "pitchers", pitcher.id), {
+                                              jonathanRank: raw ? Number(raw) : deleteField(),
+                                            });
+                                          }}
+                                        />
+                                        <input
+                                          aria-label={`Tie-break reason for ${pitcher.name}`}
+                                          type="text"
+                                          maxLength={500}
+                                          key={`${row.key}-reason-${pitcher.jonathanReason}`}
+                                          defaultValue={pitcher.jonathanReason}
+                                          onBlur={(event) => {
+                                            const raw = event.target.value.trim();
+                                            void updateDoc(doc(db, "powerNowNights", pitcher.nightId, "pitchers", pitcher.id), {
+                                              jonathanReason: raw || deleteField(),
+                                            });
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <>
+                                        {row.jonathanRank ?? "—"}
+                                        {pitcher?.jonathanReason ? <span className="pn-help">{pitcher.jonathanReason}</span> : null}
+                                      </>
+                                    )
+                                  ) : (row.criterionAverages[step] ?? 0).toFixed(2)}
                                 </td>
                               ))}
                             </tr>
@@ -423,16 +458,25 @@ export default function ResultsPage() {
                   <tbody>
                     {group.scores.map((score) => (
                       <tr key={score.id}>
-                        <th scope="row">{judges[score.judgeUid] || score.judgeUid}</th>
+                        <th scope="row">
+                          {judges[score.judgeUid] || score.judgeUid}
+                          {score.leastSure ? <span className="pn-help">Least sure: {score.leastSure}</span> : null}
+                          {score.questionsAsked ? <span className="pn-help">{score.questionsAsked}</span> : null}
+                        </th>
                         {score.recused ? (
                           <td colSpan={criteria.length + 1}>Recused</td>
                         ) : (
                           <>
                             {criteria.map((criterion) => {
                               const point = score.points.find((item) => item.criterionId === criterion.id);
-                              return <td key={criterion.id}>{point ? point.value : "—"}</td>;
+                              return (
+                                <td key={criterion.id}>
+                                  {point ? point.value : "—"}
+                                  {point?.evidence ? <span className="pn-help">{point.evidence}</span> : null}
+                                </td>
+                              );
                             })}
-                            <td>{weightedScore(score.points, criteria).toFixed(1)}</td>
+                            <td>{weightedScore(score.points, criteria).toFixed(2)}</td>
                           </>
                         )}
                       </tr>
@@ -440,12 +484,12 @@ export default function ResultsPage() {
                     <tr>
                       <th scope="row">Total</th>
                       {group.criterionTotals.map((criterion) => <td key={criterion.id}>{criterion.total}</td>)}
-                      <td>{group.weightedTotal.toFixed(1)}</td>
+                      <td>{group.weightedTotal.toFixed(2)}</td>
                     </tr>
                     <tr>
                       <th scope="row">Average weighted score</th>
-                      {group.criterionTotals.map((criterion) => <td key={criterion.id}>{criterion.average.toFixed(1)}</td>)}
-                      <td>{group.weightedAverage.toFixed(1)}</td>
+                      {group.criterionTotals.map((criterion) => <td key={criterion.id}>{criterion.average.toFixed(2)}</td>)}
+                      <td>{group.weightedAverage.toFixed(2)}</td>
                     </tr>
                   </tbody>
                 </table>

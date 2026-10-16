@@ -98,7 +98,16 @@ describe("Power NOW form rules", () => {
     await assertSucceeds(getDoc(doc(db, "powerNowPrivateComments/2026-11-12_founder-1_judge-1")));
     await assertFails(setDoc(own, { ...score("judge-1"), founderStrength: "", founderNextStep: "" }));
     await assertFails(setDoc(own, { ...score("judge-1"), points: [{ criterionId: "j1-opportunity", value: 6 }] }));
-    await assertSucceeds(setDoc(own, score("judge-1")));
+    await assertFails(setDoc(own, {
+      ...score("judge-1"),
+      points: [{ criterionId: "j1-opportunity", value: 3, evidence: "x".repeat(301) }],
+    }));
+    await assertSucceeds(setDoc(own, {
+      ...score("judge-1"),
+      points: [{ criterionId: "j1-opportunity", value: 3, evidence: "Named a shop on Main Street." }],
+      questionsAsked: "Who pays?",
+      leastSure: "J2",
+    }));
     await assertSucceeds(getDoc(own));
     await assertFails(getDoc(doc(db, "powerNowScores/2026-11-12_founder-1_judge-2")));
     await assertFails(getDocs(collection(db, "powerNowScores")));

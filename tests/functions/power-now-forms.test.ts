@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   POWER_NOW_CRITERIA_PART_B,
-  POWER_NOW_FIT_PLACEHOLDER,
+  POWER_NOW_FIT_QUESTIONS,
+  readFitQuestions,
   PowerNowInputError,
   addPowerNowHost,
   addPowerNowJudge,
@@ -21,6 +22,7 @@ import {
   type AuthStore,
   type DocRecord,
   type DocStore,
+  type FitField,
 } from "../../apps/functions/src/expo/powerNowForms";
 
 const PERSON = "11111111-1111-4111-8111-111111111111";
@@ -83,34 +85,52 @@ describe("Power NOW forms", () => {
     expect(powerNowScoreDocId("2026-11-12", "founder-1", "judge-1")).toBe("2026-11-12_founder-1_judge-1");
   });
 
-  it("keeps fit questions as placeholders and seeds the working rubric", () => {
-    expect(POWER_NOW_FIT_PLACEHOLDER.placeholder).toBe(true);
-    expect(POWER_NOW_FIT_PLACEHOLDER.items[0]?.prompt).toMatch(/^Placeholder question:/);
+  it("seeds the approved fit questions and a proposed rubric", () => {
+    expect(POWER_NOW_FIT_QUESTIONS.placeholder).toBe(false);
+    expect(POWER_NOW_FIT_QUESTIONS.version).toBe("fit-v2-2026-10-16");
+    expect(POWER_NOW_FIT_QUESTIONS.items.find((item) => item.id === "fit_q01")?.prompt).toBe(
+      "In one or two plain sentences, what does your business do?",
+    );
+    expect(POWER_NOW_FIT_QUESTIONS.items.find((item) => item.id === "rec_interviewer")?.options).toEqual([]);
     expect(POWER_NOW_CRITERIA_PART_B.placeholder).toBe(false);
-    expect(POWER_NOW_CRITERIA_PART_B.version).toBe("v2-draft-2026-10-15");
+    expect(POWER_NOW_CRITERIA_PART_B.version).toBe("v2-approved-2026-10-16");
     expect(POWER_NOW_CRITERIA_PART_B.draft).toBe(true);
+    expect(POWER_NOW_CRITERIA_PART_B.proposed).toBe(true);
     expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.weight)).toEqual([20, 20, 15, 15, 20, 10]);
-    expect(POWER_NOW_CRITERIA_PART_B.items.every((item) => item.max === 5 && item.anchors.length === 3)).toBe(true);
+    expect(POWER_NOW_CRITERIA_PART_B.items.every((item) => item.proposed === true && item.max === 5 && item.anchors.length === 5)).toBe(true);
     expect(POWER_NOW_CRITERIA_PART_B.items.map((item) => item.code)).toEqual(["J1", "J2", "J3", "J4", "J5", "J6"]);
+    expect(POWER_NOW_CRITERIA_PART_B.items[2]).toMatchObject({ id: "j3-differentiation", label: "Differentiation" });
+    expect(POWER_NOW_CRITERIA_PART_B.items[3]).toMatchObject({ id: "j4-business-model", label: "Business model" });
+    expect(POWER_NOW_CRITERIA_PART_B.items[5]?.label).toBe("Pitch and Q&A");
+    expect(POWER_NOW_CRITERIA_PART_B.items.reduce((sum, item) => sum + item.weight, 0)).toBe(100);
   });
 
-  it("seeds the working rubric once and replaces a placeholder rubric", async () => {
+  it("seeds the approved rubric once and replaces older drafts", async () => {
     const store = memoryStore();
     await seedPowerNowPlaceholders(store);
     const first = store.docs.get("powerNowCriteria/current");
-    expect(first).toMatchObject({ placeholder: false, version: "v2-draft-2026-10-15", draft: true });
+    const questions = store.docs.get("powerNowFitQuestions/current");
+    expect(first).toMatchObject({ placeholder: false, version: "v2-approved-2026-10-16", draft: true, proposed: true });
+    expect(questions).toMatchObject({ placeholder: false, version: "fit-v2-2026-10-16" });
     expect(store.docs.get("powerNowSettings/current")).toMatchObject({ scoringLockTime: "19:50", timeZone: "America/Chicago" });
+    expect(store.docs.get("powerNowNights/2026-10-23")).toMatchObject({ label: "Fri Oct 23" });
     await seedPowerNowPlaceholders(store);
     expect(store.docs.get("powerNowCriteria/current")).toEqual(first);
-    expect(store.docs.get("powerNowFitQuestions/current")).toMatchObject({ placeholder: true });
+    expect(store.docs.get("powerNowFitQuestions/current")).toEqual(questions);
 
-    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "part-b-2026-10-15", items: [] });
+    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "v2-draft-2026-10-15", items: [] });
+    store.docs.set("powerNowFitQuestions/current", { placeholder: true, items: [] });
+    store.docs.set("powerNowNights/2026-11-20", { label: "Custom night", locked: true });
     await seedPowerNowPlaceholders(store);
-    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "v2-draft-2026-10-15", placeholder: false });
+    expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "v2-approved-2026-10-16", placeholder: false });
+    expect(store.docs.get("powerNowFitQuestions/current")).toMatchObject({ version: "fit-v2-2026-10-16", placeholder: false });
+    expect(store.docs.get("powerNowNights/2026-11-20")).toMatchObject({ label: "Custom night", locked: true });
 
-    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "later-rubric", items: [{ id: "custom" }] });
+    store.docs.set("powerNowCriteria/current", { placeholder: false, version: "later-rubric", draft: true, items: [{ id: "custom" }] });
+    store.docs.set("powerNowFitQuestions/current", { placeholder: false, version: "fit-v2-2026-10-16", items: [{ id: "custom", prompt: "Edited" }] });
     await seedPowerNowPlaceholders(store);
     expect(store.docs.get("powerNowCriteria/current")).toMatchObject({ version: "later-rubric" });
+    expect(store.docs.get("powerNowFitQuestions/current")).toMatchObject({ items: [{ id: "custom", prompt: "Edited" }] });
   });
 
   it("lists founders from the pitch competition list without returning the API key", async () => {
@@ -169,7 +189,8 @@ describe("Power NOW forms", () => {
       note = String(init?.body);
       return json({ data: { id: { note_id: "note-1" } } });
     };
-    const answers = Object.fromEntries(POWER_NOW_FIT_PLACEHOLDER.items.map((item) => [item.id, `Answer for ${item.id}`]));
+    const published = readFitQuestions(store.docs.get("powerNowFitQuestions/current") ?? null);
+    const answers = sampleFitAnswers(published.items);
     await saveFitConversation({
       fetchImpl,
       apiKey: "test-key",
@@ -183,14 +204,33 @@ describe("Power NOW forms", () => {
     const body = JSON.parse(note) as { data: { parent_object: string; parent_record_id: string; content: string } };
     expect(body.data.parent_object).toBe("people");
     expect(body.data.parent_record_id).toBe(PERSON);
-    expect(body.data.content).toContain("Placeholder question: what problem is this business solving?");
-    expect(body.data.content).toContain("Answer for placeholder-problem");
-    expect(body.data.content).toContain("placeholder");
+    expect(body.data.content).toContain("What problem are you solving, and who has it? Name a specific customer if you can.");
+    expect(body.data.content).toContain("Answer for fit_q02");
+    expect(body.data.content).toContain("Question list: published (fit-v2-2026-10-16)");
+    expect(body.data.content).not.toContain("describe");
     expect(note).not.toContain("test-key");
   });
 
+  it("requires a connection note and an other-stage note only when those answers apply", () => {
+    const fields = readFitQuestions(POWER_NOW_FIT_QUESTIONS as unknown as Record<string, unknown>).items;
+    const answers = sampleFitAnswers(fields);
+    expect(validateFitAnswers(fields, answers).fit_q12a).toBe("No");
+    expect(validateFitAnswers(fields, answers).fit_q12b).toBeUndefined();
+    expect(() => validateFitAnswers(fields, { ...answers, fit_q12a: "Yes" })).toThrow(PowerNowInputError);
+    expect(validateFitAnswers(fields, { ...answers, fit_q12a: "Yes", fit_q12b: "A sponsor introduction." }).fit_q12b).toBe("A sponsor introduction.");
+    expect(() => validateFitAnswers(fields, { ...answers, fit_q04a: "Other" })).toThrow(PowerNowInputError);
+    expect(() => validateFitAnswers(fields, { ...answers, fit_q10a: { "Computer with camera": "Yes" } })).toThrow(PowerNowInputError);
+    expect(() => validateFitAnswers(fields, {})).toThrow(PowerNowInputError);
+  });
+
   it("rejects a partial fit conversation", () => {
-    expect(() => validateFitAnswers([{ id: "placeholder-problem", prompt: "Question" }], {})).toThrow(PowerNowInputError);
+    expect(() => validateFitAnswers([{
+      id: "placeholder-problem",
+      prompt: "Question",
+      section: "questions",
+      type: "long",
+      required: true,
+    }], {})).toThrow(PowerNowInputError);
     const note = buildFitConversationNote({
       founderName: "Ada",
       company: "Northwind",
@@ -296,6 +336,25 @@ describe("Power NOW forms", () => {
     }
   });
 });
+
+function sampleFitAnswers(fields: FitField[]): Record<string, unknown> {
+  const answers: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field.showIf && answers[field.showIf.id] !== field.showIf.equals) continue;
+    if (!field.required) continue;
+    if (field.type === "multi") answers[field.id] = [field.options?.[0]?.value ?? "Other"];
+    else if (field.type === "grid") {
+      const grid: Record<string, string> = {};
+      for (const row of field.rows ?? []) grid[row.value] = field.columns?.[0]?.value ?? "Yes";
+      answers[field.id] = grid;
+    } else if (field.type === "single" || field.type === "scale") {
+      answers[field.id] = field.options?.[0]?.value ?? "Ada Interviewer";
+    } else if (field.type === "datetime") answers[field.id] = "2026-10-16T15:00";
+    else if (field.type === "url") answers[field.id] = "https://app.attio.com/example";
+    else answers[field.id] = `Answer for ${field.id}`;
+  }
+  return answers;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

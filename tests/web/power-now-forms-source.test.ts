@@ -3,9 +3,25 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   POWER_NOW_CRITERIA_PART_B,
-  POWER_NOW_FIT_PLACEHOLDER,
+  POWER_NOW_FIT_QUESTIONS,
 } from "../../apps/functions/src/expo/powerNowForms";
+import { readPowerNowFit } from "../../apps/web/src/lib/powerNowFit";
 import { rankPitchers, readPowerNowCriteria, weightedScore } from "../../apps/web/src/lib/powerNowScore";
+
+function longCopy(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") {
+    if (value.trim().length >= 20) out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => longCopy(item, out));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    Object.values(value).forEach((item) => longCopy(item, out));
+  }
+  return out;
+}
 
 const root = resolve(process.cwd());
 
@@ -17,6 +33,8 @@ const clientFiles = [
   "apps/web/src/app/power-now/ui.tsx",
   "apps/web/src/app/power-now/criteriaView.tsx",
   "apps/web/src/app/power-now/fit/page.tsx",
+  "apps/web/src/app/power-now/fitFields.tsx",
+  "apps/web/src/lib/powerNowFit.ts",
   "apps/web/src/app/power-now/judges/page.tsx",
   "apps/web/src/app/power-now/results/page.tsx",
   "apps/web/src/app/power-now/score/page.tsx",
@@ -27,14 +45,8 @@ const clientFiles = [
 describe("Power NOW form client", () => {
   it("does not bundle criteria or fit-question copy", () => {
     const secretPhrases = [
-      ...POWER_NOW_FIT_PLACEHOLDER.items.map((item) => item.prompt),
-      ...POWER_NOW_CRITERIA_PART_B.items.flatMap((item) => [
-        item.label,
-        item.prompt,
-        ...item.anchors.map((anchor) => anchor.text),
-      ]),
-      POWER_NOW_FIT_PLACEHOLDER.notice,
-      POWER_NOW_CRITERIA_PART_B.notice,
+      ...longCopy(POWER_NOW_FIT_QUESTIONS),
+      ...longCopy(POWER_NOW_CRITERIA_PART_B),
     ];
     const bundle = clientFiles.map((path) => read(path)).join("\n");
     for (const phrase of secretPhrases) {
@@ -68,8 +80,19 @@ describe("Power NOW form client", () => {
   it("weights a full scorecard and ignores nothing the rubric published", () => {
     const published = readPowerNowCriteria(POWER_NOW_CRITERIA_PART_B);
     expect(published.items).toHaveLength(6);
+    expect(published.proposed).toBe(true);
+    expect(published.items.every((item) => item.anchors.length === 5 && item.proposed)).toBe(true);
     const points = published.items.map((item, index) => ({ criterionId: item.id, value: index + 1 > 5 ? 5 : index + 1 }));
     expect(weightedScore(points, published.items)).toBeCloseTo(3.15, 5);
+    const worked = [4, 3, 3, 4, 5, 3].map((value, index) => ({
+      criterionId: published.items[index]?.id ?? "",
+      value,
+    }));
+    expect(weightedScore(worked, published.items)).toBeCloseTo(3.75, 5);
+    const fit = readPowerNowFit(POWER_NOW_FIT_QUESTIONS);
+    expect(fit.items.map((item) => item.id)).toEqual(POWER_NOW_FIT_QUESTIONS.items.map((item) => item.id));
+    expect(fit.items.find((item) => item.id === "fit_q10a")?.type).toBe("grid");
+    expect(fit.openingScript.length).toBeGreaterThan(20);
   });
 
   it("ranks by weighted average, then J5, J2, J1, judge preference, and Jonathan", () => {

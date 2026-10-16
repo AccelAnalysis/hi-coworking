@@ -67,11 +67,14 @@ service cloud.firestore {
     }
 
     function powerNowPointOk(point) {
-      return point.criterionId is string
+      return point.keys().hasAll(["criterionId", "value"])
+        && point.keys().hasOnly(["criterionId", "value", "evidence"])
+        && point.criterionId is string
         && point.criterionId.matches('^[A-Za-z0-9-]{1,80}$')
         && point.value is int
         && point.value >= 1
-        && point.value <= 5;
+        && point.value <= 5
+        && (!("evidence" in point) || (point.evidence is string && point.evidence.size() <= 300));
     }
 
     function powerNowPointsOk(points) {
@@ -96,6 +99,8 @@ service cloud.firestore {
         && data.recused is bool
         && data.submitted == true
         && powerNowFounderCopyOk(data)
+        && (!("questionsAsked" in data) || powerNowCommentOk(data.questionsAsked))
+        && (!("leastSure" in data) || (data.leastSure is string && data.leastSure.size() > 0 && data.leastSure.size() <= 16))
         && (
           (data.recused == true && data.points is list && data.points.size() == 0)
           || (data.recused == false && powerNowPointsOk(data.points))

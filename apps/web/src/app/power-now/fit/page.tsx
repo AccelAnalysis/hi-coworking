@@ -4,19 +4,32 @@ import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { db, functions } from "@/lib/firebase";
+import { readPowerNowFit, type FitField, type FitForm, type FitValue } from "@/lib/powerNowFit";
 import { AdminLinks, AdminRequired, PlaceholderBanner, PowerNowFrame, SignOutButton, callableMessage, useAdminGate } from "../ui";
+import { FitFields } from "../fitFields";
 
 type Founder = { personId: string; name: string; email: string; company: string };
-type Question = { id: string; prompt: string };
+
+const EMPTY_FORM: FitForm = {
+  placeholder: false,
+  draft: false,
+  version: "",
+  notice: "",
+  openingScript: "",
+  confidentialityNote: "",
+  closingScript: "",
+  closingNote: "",
+  closingFollowUp: "",
+  sections: [],
+  items: [],
+};
 
 export default function FitConversationPage() {
   const { user, loading, isAdmin } = useAdminGate();
   const [founders, setFounders] = useState<Founder[]>([]);
   const [personId, setPersonId] = useState("");
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [placeholder, setPlaceholder] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [form, setForm] = useState<FitForm>(EMPTY_FORM);
+  const [answers, setAnswers] = useState<Record<string, FitValue>>({});
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,14 +39,19 @@ export default function FitConversationPage() {
     const seed = httpsCallable(functions, "powerNow_seedPlaceholders");
     void seed({}).catch(() => undefined);
     const unsub = onSnapshot(doc(db, "powerNowFitQuestions", "current"), (snap) => {
-      const data = snap.data() as { placeholder?: boolean; notice?: string; items?: Question[] } | undefined;
-      const items = Array.isArray(data?.items) ? data.items.filter((item) => item?.id && item?.prompt) : [];
-      setQuestions(items);
-      setPlaceholder(data?.placeholder === true);
-      setNotice(typeof data?.notice === "string" ? data.notice : "");
+      setForm(readPowerNowFit(snap.data()));
     });
     return () => unsub();
   }, [isAdmin]);
+
+  function applyFounder(nextId: string, list: Founder[]) {
+    const founder = list.find((item) => item.personId === nextId);
+    setPersonId(nextId);
+    setAnswers({
+      rec_founder: founder?.name ?? "",
+      rec_business: founder?.company ?? "",
+    });
+  }
 
   async function loadFounders() {
     setBusy(true);
@@ -41,8 +59,9 @@ export default function FitConversationPage() {
     try {
       const list = httpsCallable<Record<string, never>, { founders: Founder[] }>(functions, "powerNow_listPitchFounders");
       const result = await list({});
-      setFounders(result.data.founders ?? []);
-      if (!personId && result.data.founders?.[0]) setPersonId(result.data.founders[0].personId);
+      const next = result.data.founders ?? [];
+      setFounders(next);
+      if (!personId && next[0]) applyFounder(next[0].personId, next);
     } catch (caught) {
       setError(callableMessage(caught, "The pitch list could not be read."));
     } finally {
@@ -55,6 +74,10 @@ export default function FitConversationPage() {
     // Load once when admin access is ready.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
+
+  function changeAnswer(id: string, value: FitValue) {
+    setAnswers((current) => ({ ...current, [id]: value }));
+  }
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -82,6 +105,13 @@ export default function FitConversationPage() {
     }
   }
 
+  const sections = form.sections.length > 0
+    ? form.sections
+    : [{ id: "", title: "" }];
+  const itemsFor = (sectionId: string): FitField[] => (
+    sectionId ? form.items.filter((item) => item.section === sectionId) : form.items
+  );
+
   return (
     <PowerNowFrame
       title="Fit conversation"
@@ -91,10 +121,16 @@ export default function FitConversationPage() {
       {!isAdmin ? <AdminRequired loading={loading} signedIn={Boolean(user)} /> : (
         <form onSubmit={save}>
           <SignOutButton />
-          {placeholder ? <PlaceholderBanner notice={notice} /> : null}
+          {form.placeholder ? <PlaceholderBanner notice={form.notice} /> : null}
+          {!form.placeholder && form.notice ? <p className="pn-note">{form.notice}</p> : null}
           <div className="pn-field">
             <label htmlFor="founder">Founder</label>
-            <select id="founder" value={personId} onChange={(event) => setPersonId(event.target.value)} required>
+            <select
+              id="founder"
+              value={personId}
+              onChange={(event) => applyFounder(event.target.value, founders)}
+              required
+            >
               <option value="">Choose a founder</option>
               {founders.map((founder) => (
                 <option key={founder.personId} value={founder.personId}>
@@ -108,26 +144,43 @@ export default function FitConversationPage() {
               Refresh the pitch list
             </button>
           </div>
-          {questions.length === 0 ? <p className="pn-note">The question list is not published yet.</p> : questions.map((question) => (
-            <div className="pn-field" key={question.id}>
-              <label htmlFor={`q-${question.id}`}>{question.prompt}</label>
-              <textarea
-                id={`q-${question.id}`}
-                required
-                value={answers[question.id] ?? ""}
-                onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))}
+          {form.items.length === 0 ? <p className="pn-note">The question list is not published yet.</p> : sections.map((section) => (
+            <section key={section.id || "questions"}>
+              {section.title ? <h2>{section.title}</h2> : null}
+              {section.id === "questions" ? (
+                <CallScript quote={form.openingScript} note={form.confidentialityNote} />
+              ) : null}
+              <FitFields
+                items={itemsFor(section.id)}
+                answers={answers}
+                disabled={busy}
+                onChange={changeAnswer}
               />
-            </div>
+              {section.id === "questions" ? (
+                <CallScript quote={form.closingScript} note={form.closingNote} follow={form.closingFollowUp} />
+              ) : null}
+            </section>
           ))}
           {error ? <p className="pn-alert" role="alert">{error}</p> : null}
           {status ? <p className="pn-status" role="status">{status}</p> : null}
           <div className="pn-actions">
-            <button className="pn-btn pn-btn-primary" type="submit" disabled={busy || questions.length === 0}>
+            <button className="pn-btn pn-btn-primary" type="submit" disabled={busy || form.items.length === 0}>
               Save the note
             </button>
           </div>
         </form>
       )}
     </PowerNowFrame>
+  );
+}
+
+function CallScript({ quote, note, follow }: { quote: string; note: string; follow?: string }) {
+  if (!quote && !note && !follow) return null;
+  return (
+    <div className="pn-script">
+      {quote ? <blockquote>{quote}</blockquote> : null}
+      {note ? <p>{note}</p> : null}
+      {follow ? <blockquote>{follow}</blockquote> : null}
+    </div>
   );
 }

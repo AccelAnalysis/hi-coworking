@@ -1,4 +1,8 @@
+import { POWER_NOW_CRITERIA, POWER_NOW_FIT_QUESTIONS, POWER_NOW_NIGHTS } from "./powerNowApproved";
 import { PITCH_COMPETITION_LIST } from "./powerNowModel";
+
+export { POWER_NOW_CRITERIA, POWER_NOW_FIT_QUESTIONS, POWER_NOW_NIGHTS };
+export const POWER_NOW_CRITERIA_PART_B = POWER_NOW_CRITERIA;
 
 const ATTIO_BASE = "https://api.attio.com/v2";
 
@@ -8,113 +12,6 @@ export const POWER_NOW_RESULTS_PATH = "/power-now/results";
 export const POWER_NOW_COMMENT_MAX = 2000;
 export const POWER_NOW_SLUG = /^[A-Za-z0-9-]{1,64}$/;
 
-/**
- * Placeholder copy lives on the server. The client fetches the published
- * Firestore documents at runtime and does not embed these sentences.
- */
-export const POWER_NOW_FIT_PLACEHOLDER = {
-  placeholder: true,
-  notice: "Placeholder questions. Jonathan approves the real fit questions later.",
-  items: [
-    { id: "placeholder-problem", prompt: "Placeholder question: what problem is this business solving?" },
-    { id: "placeholder-customer", prompt: "Placeholder question: who is the customer?" },
-    { id: "placeholder-why-power-now", prompt: "Placeholder question: why is this a fit for a Power NOW night?" },
-  ],
-} as const;
-
-/**
- * Working draft rubric. Criterion sentences are the 15 October copy.
- * The v2 markdown files were not on disk, so this seed does not invent new wording.
- * It replaces a missing, placeholder, or part-b document, then leaves edits in place.
- */
-export const POWER_NOW_CRITERIA_PART_B = {
-  version: "v2-draft-2026-10-15",
-  draft: true,
-  placeholder: false,
-  notice: "Working draft. Jonathan can edit this document. Criterion sentences remain the 15 October rubric until a later file replaces them.",
-  scale: { min: 1, max: 5 },
-  items: [
-    {
-      id: "j1-opportunity",
-      code: "J1",
-      label: "Opportunity and growth potential",
-      prompt: "How significant the problem or opportunity is, and how far the business could grow.",
-      weight: 20,
-      max: 5,
-      anchors: [
-        { score: 1, text: "Problem unclear; little sense of where it goes." },
-        { score: 3, text: "Real problem; plausible path to grow." },
-        { score: 5, text: "Clear, significant opportunity with a credible growth path." },
-      ],
-    },
-    {
-      id: "j2-customer-market",
-      code: "J2",
-      label: "Customer and market understanding",
-      prompt: "How well the founder knows who the customer is and what they need.",
-      weight: 20,
-      max: 5,
-      anchors: [
-        { score: 1, text: "Customer not named." },
-        { score: 3, text: "Customer named; some evidence of need." },
-        { score: 5, text: "Specific customer, backed by conversations or data." },
-      ],
-    },
-    {
-      id: "j3-business-model",
-      code: "J3",
-      label: "Business model",
-      prompt: "How the business makes, or intends to make, money.",
-      weight: 15,
-      max: 5,
-      anchors: [
-        { score: 1, text: "No idea how it earns." },
-        { score: 3, text: "Reasonable plan, untested." },
-        { score: 5, text: "Clear model with early proof." },
-      ],
-    },
-    {
-      id: "j4-differentiation",
-      code: "J4",
-      label: "Differentiation",
-      prompt: "What makes this business different from how customers solve the problem today.",
-      weight: 15,
-      max: 5,
-      anchors: [
-        { score: 1, text: "Same as alternatives." },
-        { score: 3, text: "Some difference, partly explained." },
-        { score: 5, text: "Clear, meaningful difference customers would notice." },
-      ],
-    },
-    {
-      id: "j5-execution",
-      code: "J5",
-      label: "Evidence of execution",
-      prompt: "What the founder has done so far.",
-      weight: 20,
-      max: 5,
-      anchors: [
-        { score: 1, text: "Idea only." },
-        { score: 3, text: "Some steps taken (prototype or conversations)." },
-        { score: 5, text: "Strong progress (pilot, sales, or launch)." },
-      ],
-    },
-    {
-      id: "j6-pitch-quality",
-      code: "J6",
-      label: "Pitch quality",
-      prompt: "How clearly the founder answers what they're building, why it matters, what they've done, and what they'll do now.",
-      weight: 10,
-      max: 5,
-      anchors: [
-        { score: 1, text: "Hard to follow." },
-        { score: 3, text: "Clear on most points." },
-        { score: 5, text: "Clear, concise, answers all four within time." },
-      ],
-    },
-  ],
-} as const;
-
 /** Night operations config. Jonathan can edit the Firestore document without a code change. */
 export const POWER_NOW_SETTINGS = {
   draft: true,
@@ -123,7 +20,7 @@ export const POWER_NOW_SETTINGS = {
   tieBreak: ["j5-execution", "j2-customer-market", "j1-opportunity", "judge-preference", "jonathan"],
 } as const;
 
-const REPLACED_CRITERIA_VERSIONS = new Set(["part-b-2026-10-15"]);
+const REPLACED_CRITERIA_VERSIONS = new Set(["part-b-2026-10-15", "v2-draft-2026-10-15"]);
 
 export class PowerNowInputError extends Error {
   constructor(message: string) {
@@ -132,7 +29,39 @@ export class PowerNowInputError extends Error {
   }
 }
 
-export type FitQuestion = { id: string; prompt: string };
+export type FitOption = { value: string; label: string };
+export type FitShowIf = { id: string; equals: string };
+export type FitFieldType = "short" | "long" | "single" | "multi" | "scale" | "grid" | "datetime" | "url";
+export type FitField = {
+  id: string;
+  prompt: string;
+  section: string;
+  type: FitFieldType;
+  required: boolean;
+  maxLength?: number;
+  help?: string;
+  note?: string;
+  group?: string;
+  options?: FitOption[];
+  rows?: FitOption[];
+  columns?: FitOption[];
+  showIf?: FitShowIf;
+};
+export type FitAnswer = string | string[] | Record<string, string>;
+export type FitDocument = {
+  placeholder: boolean;
+  draft: boolean;
+  version: string;
+  notice: string;
+  openingScript: string;
+  confidentialityNote: string;
+  closingScript: string;
+  closingNote: string;
+  closingFollowUp: string;
+  sections: { id: string; title: string }[];
+  items: FitField[];
+};
+export type FitQuestion = FitField;
 export type SignInAudience = "judge" | "pitcher" | "host";
 export type PitchFounder = { personId: string; name: string; email: string; company: string };
 
@@ -258,12 +187,32 @@ export function signInAllowed(
   return rows.some((row) => row.data.active === true);
 }
 
+function fitShown(field: Pick<FitField, "showIf">, answers: Record<string, unknown>): boolean {
+  if (!field.showIf) return true;
+  return String(answers[field.showIf.id] ?? "") === field.showIf.equals;
+}
+
+function formatFitAnswer(field: Partial<FitField>, answer: FitAnswer | undefined): string {
+  if (answer == null) return "";
+  if (Array.isArray(answer)) return answer.join(", ");
+  if (typeof answer === "object") {
+    const rows = field.rows ?? [];
+    return rows
+      .map((row) => ({ label: row.label, value: answer[row.value] ?? "" }))
+      .filter((row) => row.value)
+      .map((row) => `${row.label}: ${row.value}`)
+      .join("\n");
+  }
+  return answer;
+}
+
 export function buildFitConversationNote(input: {
   founderName: string;
   company: string;
   placeholder: boolean;
-  questions: FitQuestion[];
-  answers: Record<string, string>;
+  version?: string;
+  questions: Array<Pick<FitField, "id" | "prompt"> & Partial<FitField>>;
+  answers: Record<string, FitAnswer>;
   savedAt: string;
 }): string {
   const lines = [
@@ -272,35 +221,101 @@ export function buildFitConversationNote(input: {
     `Company: ${input.company || "Not named"}`,
     input.placeholder
       ? "Question list: placeholder. Jonathan approves the real fit questions later."
-      : "Question list: published",
+      : `Question list: published${input.version ? ` (${input.version})` : ""}`,
     `Saved at: ${input.savedAt}`,
     "",
   ];
+  let lastGroup = "";
   input.questions.forEach((question, index) => {
+    if (!fitShown(question, input.answers)) return;
+    if (question.group && question.group !== lastGroup) {
+      lines.push(question.group);
+      lastGroup = question.group;
+    }
     lines.push(`${index + 1}. ${question.prompt}`);
-    lines.push(input.answers[question.id] ?? "");
+    lines.push(formatFitAnswer(question, input.answers[question.id]));
     lines.push("");
   });
   return lines.join("\n").trim();
 }
 
+function optionValues(options: FitOption[] | undefined): Set<string> {
+  return new Set((options ?? []).map((option) => option.value));
+}
+
+function parseFitAnswer(field: FitField, value: unknown): FitAnswer | undefined {
+  if (field.type === "multi") {
+    if (value == null || value === "") return undefined;
+    if (!Array.isArray(value)) throw new PowerNowInputError("Choose one of the published options.");
+    const allowed = optionValues(field.options);
+    const picked = [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))];
+    if (picked.some((item) => !allowed.has(item))) throw new PowerNowInputError("Choose one of the published options.");
+    return picked.length ? picked : undefined;
+  }
+  if (field.type === "grid") {
+    if (value == null || value === "") return undefined;
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw new PowerNowInputError("Answer every fit question before saving.");
+    }
+    const rows = optionValues(field.rows);
+    const columns = optionValues(field.columns);
+    const clean: Record<string, string> = {};
+    for (const [key, cell] of Object.entries(value as Record<string, unknown>)) {
+      if (!rows.has(key)) throw new PowerNowInputError("Answer only the published fit questions.");
+      const chosen = String(cell ?? "").trim();
+      if (!chosen) continue;
+      if (!columns.has(chosen)) throw new PowerNowInputError("Choose one of the published options.");
+      clean[key] = chosen;
+    }
+    if (field.required && (field.rows ?? []).some((row) => !clean[row.value])) {
+      throw new PowerNowInputError("Answer every fit question before saving.");
+    }
+    return Object.keys(clean).length ? clean : undefined;
+  }
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+  const limit = field.maxLength ?? (field.type === "long" ? 4000 : field.type === "url" ? 500 : 300);
+  if (text.length > limit || text.length > 4000) throw new PowerNowInputError("One answer is too long.");
+  if (field.type === "url") {
+    let url: URL;
+    try {
+      url = new URL(text);
+    } catch {
+      throw new PowerNowInputError("Enter a full web address.");
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      throw new PowerNowInputError("Enter a full web address.");
+    }
+  }
+  if (field.type === "datetime" && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text)) {
+    throw new PowerNowInputError("Enter the call date and time.");
+  }
+  if ((field.type === "single" || field.type === "scale") && (field.options?.length ?? 0) > 0) {
+    if (!optionValues(field.options).has(text)) throw new PowerNowInputError("Choose one of the published options.");
+  }
+  return text;
+}
+
 export function validateFitAnswers(
-  questions: FitQuestion[],
+  questions: FitField[],
   answers: Record<string, unknown>,
-): Record<string, string> {
+): Record<string, FitAnswer> {
   if (!Array.isArray(questions) || questions.length === 0) {
     throw new PowerNowInputError("Publish the fit questions before saving a conversation.");
   }
-  const clean: Record<string, string> = {};
   const allowed = new Set(questions.map((question) => question.id));
   for (const key of Object.keys(answers)) {
     if (!allowed.has(key)) throw new PowerNowInputError("Answer only the published fit questions.");
   }
+  const clean: Record<string, FitAnswer> = {};
   for (const question of questions) {
-    const answer = String(answers[question.id] ?? "").trim();
-    if (!answer) throw new PowerNowInputError("Answer every fit question before saving.");
-    if (answer.length > 4000) throw new PowerNowInputError("Each answer must be 4000 characters or fewer.");
-    clean[question.id] = answer;
+    if (!fitShown(question, answers)) continue;
+    const parsed = parseFitAnswer(question, answers[question.id]);
+    if (parsed === undefined) {
+      if (question.required) throw new PowerNowInputError("Answer every fit question before saving.");
+      continue;
+    }
+    clean[question.id] = parsed;
   }
   return clean;
 }
@@ -506,13 +521,17 @@ export async function seedPowerNowPlaceholders(store: DocStore): Promise<{ quest
   const questions = await store.get(questionsPath);
   const criteria = await store.get(criteriaPath);
   const settings = await store.get(settingsPath);
-  const writeQuestions = !questions;
+  const writeQuestions = !questions || questions.placeholder === true;
   const writeCriteria = !criteria || criteria.placeholder === true || REPLACED_CRITERIA_VERSIONS.has(String(criteria.version ?? ""));
   const writeSettings = !settings;
   const updatedAt = new Date().toISOString();
-  if (writeQuestions) await store.set(questionsPath, { ...POWER_NOW_FIT_PLACEHOLDER, updatedAt });
-  if (writeCriteria) await store.set(criteriaPath, { ...POWER_NOW_CRITERIA_PART_B, updatedAt });
+  if (writeQuestions) await store.set(questionsPath, { ...POWER_NOW_FIT_QUESTIONS, updatedAt });
+  if (writeCriteria) await store.set(criteriaPath, { ...POWER_NOW_CRITERIA, updatedAt });
   if (writeSettings) await store.set(settingsPath, { ...POWER_NOW_SETTINGS, updatedAt });
+  for (const night of POWER_NOW_NIGHTS) {
+    if (await store.get(`powerNowNights/${night.id}`)) continue;
+    await savePowerNowNight(store, night.id, night.label);
+  }
   return { questions: writeQuestions, criteria: writeCriteria, settings: writeSettings };
 }
 
@@ -711,20 +730,82 @@ export async function requestFirebaseEmailSignIn(
   }
 }
 
-export function readFitQuestions(data: Record<string, unknown> | null): { placeholder: boolean; notice: string; items: FitQuestion[] } {
+const FIT_TYPES = new Set<FitFieldType>(["short", "long", "single", "multi", "scale", "grid", "datetime", "url"]);
+
+function readText(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function readOptions(value: unknown): FitOption[] {
+  if (!Array.isArray(value)) return [];
+  const options: FitOption[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as { value?: unknown; label?: unknown };
+    const optionValue = String(row.value ?? "").trim();
+    const label = String(row.label ?? "").trim();
+    if (!optionValue || !label) continue;
+    options.push({ value: optionValue, label });
+  }
+  return options;
+}
+
+function readShowIf(value: unknown): FitShowIf | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as { id?: unknown; equals?: unknown };
+  const id = String(row.id ?? "").trim();
+  const equals = String(row.equals ?? "");
+  if (!id || equals === "") return undefined;
+  return { id, equals };
+}
+
+export function readFitQuestions(data: Record<string, unknown> | null): FitDocument {
   const items = Array.isArray(data?.items) ? data.items : [];
-  const questions: FitQuestion[] = [];
+  const questions: FitField[] = [];
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
-    const row = item as { id?: unknown; prompt?: unknown };
+    const row = item as Record<string, unknown>;
     const id = String(row.id ?? "").trim();
     const prompt = String(row.prompt ?? "").trim();
     if (!id || !prompt) continue;
-    questions.push({ id, prompt });
+    const rawType = String(row.type ?? "");
+    const type: FitFieldType = FIT_TYPES.has(rawType as FitFieldType) ? rawType as FitFieldType : "long";
+    const maxLength = Number(row.maxLength);
+    const showIf = readShowIf(row.showIf);
+    questions.push({
+      id,
+      prompt,
+      section: String(row.section ?? "").trim(),
+      type,
+      required: typeof row.required === "boolean" ? row.required : true,
+      ...(Number.isInteger(maxLength) && maxLength > 0 ? { maxLength } : {}),
+      ...(readText(row.help) ? { help: readText(row.help) } : {}),
+      ...(readText(row.note) ? { note: readText(row.note) } : {}),
+      ...(readText(row.group) ? { group: readText(row.group) } : {}),
+      ...(Array.isArray(row.options) ? { options: readOptions(row.options) } : {}),
+      ...(Array.isArray(row.rows) ? { rows: readOptions(row.rows) } : {}),
+      ...(Array.isArray(row.columns) ? { columns: readOptions(row.columns) } : {}),
+      ...(showIf ? { showIf } : {}),
+    });
   }
+  const sections = Array.isArray(data?.sections) ? data.sections.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as { id?: unknown; title?: unknown };
+    const id = String(row.id ?? "").trim();
+    const title = String(row.title ?? "").trim();
+    return id && title ? [{ id, title }] : [];
+  }) : [];
   return {
     placeholder: data?.placeholder === true,
-    notice: typeof data?.notice === "string" ? data.notice : "",
+    draft: data?.draft === true,
+    version: readText(data?.version),
+    notice: readText(data?.notice),
+    openingScript: readText(data?.openingScript),
+    confidentialityNote: readText(data?.confidentialityNote),
+    closingScript: readText(data?.closingScript),
+    closingNote: readText(data?.closingNote),
+    closingFollowUp: readText(data?.closingFollowUp),
+    sections,
     items: questions,
   };
 }
@@ -747,6 +828,7 @@ export async function saveFitConversation(input: {
     founderName: input.founderName,
     company: input.company,
     placeholder: config.placeholder,
+    version: config.version,
     questions: config.items,
     answers,
     savedAt,

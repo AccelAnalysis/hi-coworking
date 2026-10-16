@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { readPowerNowCriteria, type PowerNowCriterion } from "@/lib/powerNowScore";
+import { readPowerNowCriteria, type PowerNowCriteriaDoc, type PowerNowCriterion } from "@/lib/powerNowScore";
 import { useAuth } from "@/lib/authContext";
 import { EmailLinkSignIn, PlaceholderBanner, PowerNowFrame, SignOutButton } from "../ui";
 import { CriteriaReadout } from "../criteriaView";
@@ -12,8 +12,11 @@ export default function RubricPage() {
   const { user, loading } = useAuth();
   const [isPitcher, setIsPitcher] = useState<boolean | null>(null);
   const [criteria, setCriteria] = useState<PowerNowCriterion[]>([]);
-  const [placeholder, setPlaceholder] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [rubric, setRubric] = useState<Pick<PowerNowCriteriaDoc, "placeholder" | "notice" | "pitcherQuestions">>({
+    placeholder: false,
+    notice: "",
+    pitcherQuestions: [],
+  });
   const [missing, setMissing] = useState(false);
   const [released, setReleased] = useState<Array<{ judge: string; strength: string; nextStep: string }>>([]);
 
@@ -42,8 +45,7 @@ export default function RubricPage() {
       const published = readPowerNowCriteria(snap.data());
       setMissing(false);
       setCriteria(published.items);
-      setPlaceholder(published.placeholder);
-      setNotice(published.notice);
+      setRubric(published);
     }, () => setMissing(true));
     const unsubNotes = onSnapshot(doc(db, "powerNowReleasedNotes", user.uid), (snap) => {
       const comments = snap.data()?.comments;
@@ -78,9 +80,10 @@ export default function RubricPage() {
         <>
           <SignOutButton />
           <p className="pn-note">This view is read only.</p>
-          {placeholder ? <PlaceholderBanner notice={notice} /> : null}
+          {rubric.placeholder ? <PlaceholderBanner notice={rubric.notice} /> : null}
+          {!rubric.placeholder && rubric.notice ? <p className="pn-note">{rubric.notice}</p> : null}
           {missing || criteria.length === 0 ? <p className="pn-note">The rubric has not been published yet.</p> : (
-            <CriteriaReadout items={criteria} />
+            <CriteriaReadout items={criteria} showAnchors={false} pitcherQuestions={rubric.pitcherQuestions} />
           )}
           <h2>Comments for you</h2>
           {released.length === 0 ? (

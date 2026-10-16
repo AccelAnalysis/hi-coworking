@@ -6,6 +6,8 @@ import { db } from "@/lib/firebase";
 import {
   powerNowScoreDocId,
   readPowerNowCriteria,
+  weightedScore,
+  type PowerNowCriteriaDoc,
   type PowerNowCriterion,
 } from "@/lib/powerNowScore";
 import { useAuth } from "@/lib/authContext";
@@ -15,19 +17,25 @@ type Pitcher = { id: string; name: string; company: string };
 type Night = { id: string; label: string; locked: boolean; lockAt: Date | null };
 type Draft = {
   values: Record<string, number>;
-  recused: boolean;
+  evidence: Record<string, string>;
+  conflictIndex: number | null;
   founderStrength: string;
   founderNextStep: string;
   privateComment: string;
+  questionsAsked: string;
+  leastSure: string;
   submitted: boolean;
 };
 
 const EMPTY_DRAFT: Draft = {
   values: {},
-  recused: false,
+  evidence: {},
+  conflictIndex: null,
   founderStrength: "",
   founderNextStep: "",
   privateComment: "",
+  questionsAsked: "",
+  leastSure: "",
   submitted: false,
 };
 const COMMENT_MAX = 2000;
@@ -39,8 +47,14 @@ export default function ScorePage() {
   const [nightId, setNightId] = useState("");
   const [pitchers, setPitchers] = useState<Pitcher[]>([]);
   const [criteria, setCriteria] = useState<PowerNowCriterion[]>([]);
-  const [placeholder, setPlaceholder] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [rubric, setRubric] = useState<Pick<PowerNowCriteriaDoc, "placeholder" | "notice" | "scaleInstruction" | "conflictOptions" | "recuseIndex" | "leastSureOptions">>({
+    placeholder: false,
+    notice: "",
+    scaleInstruction: "",
+    conflictOptions: [],
+    recuseIndex: 1,
+    leastSureOptions: [],
+  });
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -73,8 +87,7 @@ export default function ScorePage() {
     const unsubCriteria = onSnapshot(doc(db, "powerNowCriteria", "current"), (snap) => {
       const published = readPowerNowCriteria(snap.data());
       setCriteria(published.items);
-      setPlaceholder(published.placeholder);
-      setNotice(published.notice);
+      setRubric(published);
     });
     return () => {
       unsubNights();
@@ -101,20 +114,29 @@ export default function ScorePage() {
             getDoc(doc(db, "powerNowPrivateComments", scoreId)),
           ]);
         const data = scoreSnap.data() as {
-          points?: Array<{ criterionId: string; value: number }>;
+          points?: Array<{ criterionId: string; value: number; evidence?: string }>;
           recused?: boolean;
           founderStrength?: string;
           founderNextStep?: string;
+          questionsAsked?: string;
+          leastSure?: string;
           submitted?: boolean;
         } | undefined;
         const values: Record<string, number> = {};
-        for (const point of data?.points ?? []) values[point.criterionId] = point.value;
+        const evidence: Record<string, string> = {};
+        for (const point of data?.points ?? []) {
+          values[point.criterionId] = point.value;
+          if (typeof point.evidence === "string") evidence[point.criterionId] = point.evidence;
+        }
         loaded[pitcher.id] = {
           values,
-          recused: data?.recused === true,
+          evidence,
+          conflictIndex: data ? (data.recused === true ? -1 : 0) : null,
           founderStrength: typeof data?.founderStrength === "string" ? data.founderStrength : "",
           founderNextStep: typeof data?.founderNextStep === "string" ? data.founderNextStep : "",
           privateComment: typeof privateSnap.data()?.comment === "string" ? privateSnap.data()?.comment as string : "",
+          questionsAsked: typeof data?.questionsAsked === "string" ? data.questionsAsked : "",
+          leastSure: typeof data?.leastSure === "string" ? data.leastSure : "",
           submitted: data?.submitted === true,
         };
         } catch {
@@ -143,21 +165,33 @@ export default function ScorePage() {
       const strength = draft.founderStrength.trim();
       const nextStep = draft.founderNextStep.trim();
       const privateNote = draft.privateComment.trim();
-      if (strength.length > COMMENT_MAX || nextStep.length > COMMENT_MAX || privateNote.length > COMMENT_MAX) {
+      const questionsAsked = draft.questionsAsked.trim();
+      const leastSure = draft.leastSure.trim();
+      if ([strength, nextStep, privateNote, questionsAsked].some((item) => item.length > COMMENT_MAX)) {
         setError("Each comment must be 2000 characters or fewer.");
         return;
       }
-      const points = draft.recused
+      const selectedConflict = draft.conflictIndex === -1 ? rubric.recuseIndex : draft.conflictIndex;
+      if (rubric.conflictOptions.length > 0 && selectedConflict === null) {
+        setError("Answer the conflict check before submitting.");
+        return;
+      }
+      const recused = rubric.conflictOptions.length > 0 && selectedConflict === rubric.recuseIndex;
+      const points = recused
         ? []
-        : criteria.map((criterion) => ({
-          criterionId: criterion.id,
-          value: draft.values[criterion.id] ?? 0,
-        }));
-      if (!draft.recused && points.some((point) => point.value < 1)) {
+        : criteria.map((criterion) => {
+          const evidence = (draft.evidence[criterion.id] ?? "").trim();
+          return {
+            criterionId: criterion.id,
+            value: draft.values[criterion.id] ?? 0,
+            ...(evidence ? { evidence: evidence.slice(0, 300) } : {}),
+          };
+        });
+      if (!recused && points.some((point) => point.value < 1)) {
         setError("Score every criterion, or recuse yourself from this pitcher.");
         return;
       }
-      if (!draft.recused && (!strength || !nextStep)) {
+      if (!recused && (!strength || !nextStep)) {
         setError("Add a strength and a next step for the founder before submitting.");
         return;
       }
@@ -167,11 +201,13 @@ export default function ScorePage() {
         nightId,
         pitcherId,
         judgeUid: user.uid,
-        recused: draft.recused,
+        recused,
         submitted: true,
         points,
         founderStrength: strength,
         founderNextStep: nextStep,
+        ...(questionsAsked ? { questionsAsked } : {}),
+        ...(leastSure ? { leastSure } : {}),
         updatedAt: serverTimestamp(),
       });
       batch.set(doc(db, "powerNowPrivateComments", scoreId), {
@@ -182,7 +218,7 @@ export default function ScorePage() {
         updatedAt: serverTimestamp(),
       });
       await batch.commit();
-      setStatus(draft.recused
+      setStatus(recused
         ? "Recusal submitted. It is locked."
         : "Score submitted. It is locked.");
     } catch (caught) {
@@ -208,7 +244,9 @@ export default function ScorePage() {
       {user && isJudge ? (
         <>
           <SignOutButton />
-          {placeholder ? <PlaceholderBanner notice={notice} /> : null}
+          {rubric.placeholder ? <PlaceholderBanner notice={rubric.notice} /> : null}
+          {!rubric.placeholder && rubric.notice ? <p className="pn-note">{rubric.notice}</p> : null}
+          {rubric.scaleInstruction ? <p>{rubric.scaleInstruction}</p> : null}
           {criteria.length === 0 ? <p className="pn-note">The rubric has not been published yet.</p> : (
             <>
               <div className="pn-field">
@@ -226,76 +264,96 @@ export default function ScorePage() {
               {pitchers.length === 0 ? <p className="pn-note">No selected pitchers for this night.</p> : pitchers.map((pitcher) => {
                 const draft = drafts[pitcher.id] ?? EMPTY_DRAFT;
                 const locked = Boolean(night?.locked || draft.submitted || (night?.lockAt && night.lockAt.getTime() <= Date.now()));
+                const selectedConflict = draft.conflictIndex === -1 ? rubric.recuseIndex : draft.conflictIndex;
+                const recused = rubric.conflictOptions.length > 0 && selectedConflict === rubric.recuseIndex;
+                const ready = criteria.length > 0 && criteria.every((criterion) => (draft.values[criterion.id] ?? 0) >= 1);
+                const weighted = ready ? weightedScore(
+                  criteria.map((criterion) => ({ criterionId: criterion.id, value: draft.values[criterion.id] ?? 0 })),
+                  criteria,
+                ).toFixed(2) : "";
                 return (
                   <form key={pitcher.id} onSubmit={(event) => { event.preventDefault(); void save(pitcher.id); }}>
                     <h2>{pitcher.name}{pitcher.company ? `, ${pitcher.company}` : ""}</h2>
                     {draft.submitted ? <p className="pn-note">Submitted. This score is locked.</p> : null}
-                    <div className="pn-field">
-                      <label className="pn-check" htmlFor={`${pitcher.id}-recuse`}>
-                        <input
-                          id={`${pitcher.id}-recuse`}
-                          type="checkbox"
-                          checked={draft.recused}
-                          disabled={locked}
-                          onChange={(event) => updateDraft(pitcher.id, { recused: event.target.checked })}
-                        />
-                        <span>I am recusing myself from this pitcher</span>
-                      </label>
-                      <span className="pn-help">A recusal saves no scores and is left out of the totals.</span>
-                    </div>
+                    {rubric.conflictOptions.length === 0 ? <p className="pn-note">The conflict check is not published yet.</p> : (
+                      <fieldset className="pn-field">
+                        <legend>Conflict check</legend>
+                        {rubric.conflictOptions.map((option, index) => (
+                          <label className="pn-check" key={option}>
+                            <input
+                              type="radio"
+                              name={`${pitcher.id}-conflict`}
+                              checked={selectedConflict === index}
+                              disabled={locked}
+                              onChange={() => updateDraft(pitcher.id, { conflictIndex: index })}
+                            />
+                            <span>{option}</span>
+                          </label>
+                        ))}
+                        <span className="pn-help">A recusal saves no scores and is left out of the totals.</span>
+                      </fieldset>
+                    )}
                     {criteria.map((criterion) => (
-                      <fieldset className="pn-field" key={criterion.id}>
+                      <fieldset className="pn-field" key={criterion.id} disabled={recused || locked}>
                         <legend>{criterion.code ? `${criterion.code}. ${criterion.label}` : criterion.label}</legend>
                         {criterion.prompt ? <p>{criterion.prompt}</p> : null}
-                        {criterion.weight > 0 ? <span className="pn-help">Weight {criterion.weight}%.</span> : null}
-                        {criterion.anchors.length > 0 ? (
-                          <ul className="pn-anchors">
-                            {criterion.anchors.map((anchor) => (
-                              <li key={anchor.score}>{anchor.score}: {anchor.text}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span className="pn-help">Score from 1 to {criterion.max}.</span>
-                        )}
-                        <div className="pn-scale" role="radiogroup" aria-label={`${criterion.label} score`}>
-                          {Array.from({ length: criterion.max }, (_, index) => index + 1).map((value) => (
-                            <label className="pn-scale-option" key={value}>
-                              <input
-                                type="radio"
-                                name={`${pitcher.id}-${criterion.id}`}
-                                value={value}
-                                checked={!draft.recused && draft.values[criterion.id] === value}
-                                disabled={draft.recused || locked}
-                                onChange={() => updateDraft(pitcher.id, {
-                                  values: { ...draft.values, [criterion.id]: value },
-                                })}
-                              />
-                              <span>{value}</span>
-                            </label>
-                          ))}
+                        {criterion.weight > 0 ? (
+                          <span className="pn-help">{criterion.proposed ? "Proposed weight" : "Weight"} {criterion.weight}%.</span>
+                        ) : null}
+                        <div className="pn-scale pn-scale-anchors" role="radiogroup" aria-label={`${criterion.label} score`}>
+                          {Array.from({ length: criterion.max }, (_, index) => index + 1).map((value) => {
+                            const anchor = criterion.anchors.find((item) => item.score === value);
+                            return (
+                              <label className="pn-scale-option pn-anchor-option" key={value}>
+                                <input
+                                  type="radio"
+                                  name={`${pitcher.id}-${criterion.id}`}
+                                  value={value}
+                                  checked={!recused && draft.values[criterion.id] === value}
+                                  disabled={recused || locked}
+                                  onChange={() => updateDraft(pitcher.id, {
+                                    values: { ...draft.values, [criterion.id]: value },
+                                  })}
+                                />
+                                <span>{anchor ? `${value}. ${anchor.text}` : value}</span>
+                              </label>
+                            );
+                          })}
                         </div>
+                        <label htmlFor={`${pitcher.id}-${criterion.id}-evidence`}>Evidence I noted</label>
+                        <input
+                          id={`${pitcher.id}-${criterion.id}-evidence`}
+                          type="text"
+                          maxLength={300}
+                          disabled={recused || locked}
+                          value={draft.evidence[criterion.id] ?? ""}
+                          onChange={(event) => updateDraft(pitcher.id, {
+                            evidence: { ...draft.evidence, [criterion.id]: event.target.value },
+                          })}
+                        />
                       </fieldset>
                     ))}
+                    {!recused && weighted ? <p>Weighted score: {weighted}</p> : null}
                     <div className="pn-field">
-                      <label htmlFor={`${pitcher.id}-strength`}>Strength for the founder</label>
+                      <label htmlFor={`${pitcher.id}-strength`}>Biggest strength (for the founder)</label>
                       <span className="pn-help">Required, unless you recuse yourself. Jonathan reviews this before a founder can see it.</span>
                       <textarea
                         id={`${pitcher.id}-strength`}
                         value={draft.founderStrength}
                         maxLength={COMMENT_MAX}
-                        required={!draft.recused}
+                        required={!recused}
                         disabled={locked}
                         onChange={(event) => updateDraft(pitcher.id, { founderStrength: event.target.value })}
                       />
                     </div>
                     <div className="pn-field">
-                      <label htmlFor={`${pitcher.id}-next`}>Next step for the founder</label>
+                      <label htmlFor={`${pitcher.id}-next`}>One next step to suggest (for the founder)</label>
                       <span className="pn-help">Required, unless you recuse yourself. Jonathan reviews this before a founder can see it.</span>
                       <textarea
                         id={`${pitcher.id}-next`}
                         value={draft.founderNextStep}
                         maxLength={COMMENT_MAX}
-                        required={!draft.recused}
+                        required={!recused}
                         disabled={locked}
                         onChange={(event) => updateDraft(pitcher.id, { founderNextStep: event.target.value })}
                       />
@@ -311,9 +369,35 @@ export default function ScorePage() {
                         onChange={(event) => updateDraft(pitcher.id, { privateComment: event.target.value })}
                       />
                     </div>
+                    <div className="pn-field">
+                      <label htmlFor={`${pitcher.id}-questions`}>Questions I asked</label>
+                      <textarea
+                        id={`${pitcher.id}-questions`}
+                        value={draft.questionsAsked}
+                        maxLength={COMMENT_MAX}
+                        disabled={locked}
+                        onChange={(event) => updateDraft(pitcher.id, { questionsAsked: event.target.value })}
+                      />
+                    </div>
+                    {rubric.leastSureOptions.length > 0 ? (
+                      <div className="pn-field">
+                        <label htmlFor={`${pitcher.id}-unsure`}>{"Score I'm least sure about"}</label>
+                        <select
+                          id={`${pitcher.id}-unsure`}
+                          value={draft.leastSure}
+                          disabled={locked}
+                          onChange={(event) => updateDraft(pitcher.id, { leastSure: event.target.value })}
+                        >
+                          <option value="">Optional</option>
+                          {rubric.leastSureOptions.map((option) => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
                     <div className="pn-actions">
                       <button className="pn-btn pn-btn-primary" type="submit" disabled={busy || locked}>
-                        {draft.recused ? "Submit recusal" : "Submit score"}
+                        {recused ? "Submit recusal" : "Submit score"}
                       </button>
                     </div>
                   </form>
