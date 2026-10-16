@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -17,6 +17,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetSending, setResetSending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [nextPath, setNextPath] = useState("/my-hi");
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next") || "";
+    if (/^\/power-now\/[a-z0-9/-]*$/.test(next)) setNextPath(next);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +31,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push("/my-hi");
+      router.push(nextPath);
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };

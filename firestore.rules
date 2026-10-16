@@ -20,6 +20,93 @@ service cloud.firestore {
       return hasRole("admin") || hasRole("master");
     }
 
+    function isPowerNowSlug(value) {
+      return value is string && value.matches('^[A-Za-z0-9-]{1,64}$');
+    }
+
+    function powerNowJudgeActive() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/powerNowJudges/$(request.auth.uid))
+        && get(/databases/$(database)/documents/powerNowJudges/$(request.auth.uid)).data.active == true;
+    }
+
+    function powerNowPitcherActive() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/powerNowPitchers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/powerNowPitchers/$(request.auth.uid)).data.active == true;
+    }
+
+    function powerNowHostActive() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/powerNowHosts/$(request.auth.uid))
+        && get(/databases/$(database)/documents/powerNowHosts/$(request.auth.uid)).data.active == true;
+    }
+
+    function powerNowCommentOk(value) {
+      return value is string && value.size() <= 2000;
+    }
+
+    function powerNowNightOpen(nightId) {
+      return isPowerNowSlug(nightId)
+        && exists(/databases/$(database)/documents/powerNowNights/$(nightId))
+        && get(/databases/$(database)/documents/powerNowNights/$(nightId)).data.locked != true
+        && (
+          !("lockAt" in get(/databases/$(database)/documents/powerNowNights/$(nightId)).data)
+          || get(/databases/$(database)/documents/powerNowNights/$(nightId)).data.lockAt == null
+          || request.time < get(/databases/$(database)/documents/powerNowNights/$(nightId)).data.lockAt
+        );
+    }
+
+    function powerNowFounderCopyOk(data) {
+      return powerNowCommentOk(data.founderStrength)
+        && powerNowCommentOk(data.founderNextStep)
+        && (
+          data.recused == true
+          || (data.founderStrength.size() > 0 && data.founderNextStep.size() > 0)
+        );
+    }
+
+    function powerNowPointOk(point) {
+      return point.keys().hasAll(["criterionId", "value"])
+        && point.keys().hasOnly(["criterionId", "value", "evidence"])
+        && point.criterionId is string
+        && point.criterionId.matches('^[A-Za-z0-9-]{1,80}$')
+        && point.value is int
+        && point.value >= 1
+        && point.value <= 5
+        && (!("evidence" in point) || (point.evidence is string && point.evidence.size() <= 300));
+    }
+
+    function powerNowPointsOk(points) {
+      return points is list
+        && points.size() >= 1
+        && points.size() <= 8
+        && powerNowPointOk(points[0])
+        && (points.size() < 2 || powerNowPointOk(points[1]))
+        && (points.size() < 3 || powerNowPointOk(points[2]))
+        && (points.size() < 4 || powerNowPointOk(points[3]))
+        && (points.size() < 5 || powerNowPointOk(points[4]))
+        && (points.size() < 6 || powerNowPointOk(points[5]))
+        && (points.size() < 7 || powerNowPointOk(points[6]))
+        && (points.size() < 8 || powerNowPointOk(points[7]));
+    }
+
+    function powerNowScoreShape(data) {
+      return isPowerNowSlug(data.nightId)
+        && isPowerNowSlug(data.pitcherId)
+        && data.judgeUid is string
+        && data.updatedAt is timestamp
+        && data.recused is bool
+        && data.submitted == true
+        && powerNowFounderCopyOk(data)
+        && (!("questionsAsked" in data) || powerNowCommentOk(data.questionsAsked))
+        && (!("leastSure" in data) || (data.leastSure is string && data.leastSure.size() > 0 && data.leastSure.size() <= 16))
+        && (
+          (data.recused == true && data.points is list && data.points.size() == 0)
+          || (data.recused == false && powerNowPointsOk(data.points))
+        );
+    }
+
     function isStaff() {
       return hasRole("staff") || isAdmin();
     }
@@ -719,6 +806,132 @@ service cloud.firestore {
     // Power NOW consent log of record. Admin SDK only. Clients cannot read or write it.
     match /powerNowConsentLog/{submissionId} {
       allow read, write: if false;
+    }
+
+    // --- Power NOW fit questions, rubric, judges, and scores ---
+    // Criteria text is stored here and is not shipped in the public client bundle.
+    match /powerNowFitQuestions/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /powerNowSettings/{docId} {
+      allow read: if isAdmin() || powerNowHostActive();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowCriteria/{docId} {
+      allow read: if isAdmin() || powerNowJudgeActive() || powerNowPitcherActive() || powerNowHostActive();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowJudges/{uid} {
+      allow read: if isAdmin() || powerNowHostActive() || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowHosts/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowPitchers/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /powerNowNights/{nightId} {
+      allow read: if isAdmin() || powerNowJudgeActive() || powerNowHostActive();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          powerNowHostActive()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["locked", "lockAt", "updatedAt"])
+        );
+
+      match /pitchers/{pitcherId} {
+        allow read: if isAdmin() || powerNowJudgeActive() || powerNowHostActive();
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    match /powerNowScores/{scoreId} {
+      allow read: if isAdmin()
+        || powerNowHostActive()
+        || (powerNowJudgeActive() && resource == null)
+        || (powerNowJudgeActive() && resource.data.judgeUid == request.auth.uid);
+
+      allow create: if powerNowJudgeActive()
+        && powerNowScoreShape(request.resource.data)
+        && request.resource.data.judgeUid == request.auth.uid
+        && scoreId == request.resource.data.nightId + "_" + request.resource.data.pitcherId + "_" + request.auth.uid
+        && powerNowNightOpen(request.resource.data.nightId)
+        && exists(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId))
+        && get(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId)).data.selected == true;
+
+      allow update: if (
+          isAdmin()
+          && resource.data.submitted == true
+          && request.resource.data.submitted == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["submitted"])
+        ) || (
+          powerNowJudgeActive()
+          && resource.data.submitted == false
+          && resource.data.judgeUid == request.auth.uid
+          && request.resource.data.judgeUid == resource.data.judgeUid
+          && request.resource.data.nightId == resource.data.nightId
+          && request.resource.data.pitcherId == resource.data.pitcherId
+          && powerNowScoreShape(request.resource.data)
+          && powerNowNightOpen(resource.data.nightId)
+        );
+
+      allow delete: if false;
+    }
+
+    // Founder-facing copy is released only when Jonathan writes the pitcher's note.
+    match /powerNowReleasedNotes/{uid} {
+      allow read: if isAdmin()
+        || powerNowHostActive()
+        || (powerNowPitcherActive() && request.auth.uid == uid);
+      allow create, update: if isAdmin()
+        && request.resource.data.nightId is string
+        && request.resource.data.comments is list
+        && request.resource.data.comments.size() <= 20
+        && !("points" in request.resource.data)
+        && !("scores" in request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Private notes stay with Jonathan. Hosts, pitchers, and other judges cannot read them.
+    match /powerNowPrivateComments/{scoreId} {
+      allow read: if isAdmin()
+        || (powerNowJudgeActive() && resource == null)
+        || (powerNowJudgeActive() && resource.data.judgeUid == request.auth.uid);
+
+      allow create: if powerNowJudgeActive()
+        && request.resource.data.judgeUid == request.auth.uid
+        && scoreId == request.resource.data.nightId + "_" + request.resource.data.pitcherId + "_" + request.auth.uid
+        && isPowerNowSlug(request.resource.data.nightId)
+        && isPowerNowSlug(request.resource.data.pitcherId)
+        && powerNowCommentOk(request.resource.data.comment)
+        && request.resource.data.updatedAt is timestamp
+        && powerNowNightOpen(request.resource.data.nightId)
+        && exists(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId))
+        && get(/databases/$(database)/documents/powerNowNights/$(request.resource.data.nightId)/pitchers/$(request.resource.data.pitcherId)).data.selected == true;
+
+      allow update: if powerNowJudgeActive()
+        && resource.data.judgeUid == request.auth.uid
+        && request.resource.data.judgeUid == resource.data.judgeUid
+        && request.resource.data.nightId == resource.data.nightId
+        && request.resource.data.pitcherId == resource.data.pitcherId
+        && powerNowCommentOk(request.resource.data.comment)
+        && request.resource.data.updatedAt is timestamp
+        && powerNowNightOpen(resource.data.nightId)
+        && (
+          !exists(/databases/$(database)/documents/powerNowScores/$(scoreId))
+          || get(/databases/$(database)/documents/powerNowScores/$(scoreId)).data.submitted != true
+        );
+
+      allow delete: if false;
     }
   }
 }
