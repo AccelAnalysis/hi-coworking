@@ -42,11 +42,13 @@ export function powerNowTaskAssigneeId(env: NodeJS.ProcessEnv = process.env): st
 
 export class PowerNowAttioError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "PowerNowAttioError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -453,7 +455,10 @@ async function ensureTask(
     });
     taskId = taskIdFrom(created.data);
   } catch (error) {
-    if (error instanceof PowerNowAttioError && error.status < 500) return "skipped";
+    if (error instanceof PowerNowAttioError && error.status < 500) {
+      warnFollowUpTaskSkipped(error);
+      return "skipped";
+    }
     throw error;
   }
 
@@ -478,6 +483,16 @@ async function ensureTask(
     console.error(`Power NOW task ${taskId} was left unassigned: ${detail}`);
   }
   return "created";
+}
+
+function warnFollowUpTaskSkipped(error: PowerNowAttioError): void {
+  const code = error.code ?? "none";
+  const scopeHint = error.status === 403
+    ? " A 403 usually means the Attio key is missing the task:read-write scope."
+    : "";
+  console.warn(
+    `Power NOW follow-up task was not created. Attio error code: ${code}. HTTP ${error.status}. The submission was saved.${scopeHint}`,
+  );
 }
 
 function taskIdFrom(data: unknown): string | null {
@@ -584,16 +599,21 @@ async function attio(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
-  let json: { data?: unknown; message?: string } | null = null;
+  let json: { data?: unknown; message?: string; code?: unknown } | null = null;
   if (text) {
     try {
-      json = JSON.parse(text) as { data?: unknown; message?: string };
+      json = JSON.parse(text) as { data?: unknown; message?: string; code?: unknown };
     } catch {
       json = { message: text.slice(0, 300) };
     }
   }
   if (!response.ok) {
-    throw new PowerNowAttioError(response.status, json?.message || response.statusText || "Attio request failed");
+    const code = typeof json?.code === "string" && json.code.trim() ? json.code.trim() : null;
+    throw new PowerNowAttioError(
+      response.status,
+      json?.message || response.statusText || "Attio request failed",
+      code,
+    );
   }
   return json ?? {};
 }
