@@ -6,7 +6,7 @@ import {
   validateExpoLeadPayload,
   type NormalizedExpoLead,
 } from "./nasaLeadModel";
-import { POWER_NOW_FORM } from "./powerNowModel";
+import { canonicalizePowerNowPath, POWER_NOW_FORM } from "./powerNowModel";
 import type { PowerNowConfirmationOptions } from "./powerNowConfirmation";
 import { handlePowerNowHttp, type PowerNowConsentLog, type PowerNowRateLimiter } from "./powerNowIngest";
 
@@ -103,6 +103,9 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:5003",
 ]);
 
+/** Public Power NOW host. Pitch, watch, and contribute only — not the booth intake form. */
+const POWER_NOW_FORMS_ORIGIN = "https://forms.accelanalysis.com";
+
 export async function handleExpoLeadHttp(request: {
   method: string;
   origin?: string | null;
@@ -116,8 +119,8 @@ export async function handleExpoLeadHttp(request: {
   consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
   confirmation?: PowerNowConfirmationOptions;
 }): Promise<ExpoHttpResult> {
-  const headers = corsHeaders(request.origin);
-  if (request.origin && !isAllowedOrigin(request.origin)) {
+  const headers = corsHeaders(request.origin, request.method, request.body);
+  if (request.origin && !isAllowedOrigin(request.origin, request.method, request.body)) {
     return {
       status: 403,
       headers,
@@ -574,20 +577,31 @@ function phoneRecordMatches(record: AttioRecord, digits: string | null): boolean
   });
 }
 
-function corsHeaders(origin: string | null | undefined): Record<string, string> {
+function corsHeaders(origin: string | null | undefined, method: string, body: unknown): Record<string, string> {
   const headers: Record<string, string> = {
     Vary: "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "3600",
   };
-  if (origin && isAllowedOrigin(origin)) {
+  if (origin && isAllowedOrigin(origin, method, body)) {
     headers["Access-Control-Allow-Origin"] = origin;
   }
   return headers;
 }
 
-function isAllowedOrigin(origin: string): boolean {
+function isAllowedOrigin(origin: string, method: string, body: unknown): boolean {
   if (ALLOWED_ORIGINS.has(origin)) return true;
-  return /^https:\/\/(?:[a-z0-9-]+--)?hi-coworking-plat\.(?:web\.app|firebaseapp\.com)$/.test(origin);
+  if (/^https:\/\/(?:[a-z0-9-]+--)?hi-coworking-plat\.(?:web\.app|firebaseapp\.com)$/.test(origin)) {
+    return true;
+  }
+  if (origin !== POWER_NOW_FORMS_ORIGIN) return false;
+  if (method === "OPTIONS") return true;
+  return isPowerNowFormsSubmission(body);
+}
+
+function isPowerNowFormsSubmission(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const record = body as Record<string, unknown>;
+  return record.form === POWER_NOW_FORM && canonicalizePowerNowPath(record.path) !== null;
 }
