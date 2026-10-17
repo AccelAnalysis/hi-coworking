@@ -9,7 +9,7 @@ import { promises as dns } from "node:dns";
 import * as admin from "firebase-admin";
 import { defineString } from "firebase-functions/params";
 import { formatIsoEastern, splitPersonName } from "./nasaLeadModel";
-import { readPowerNowSecret } from "./powerNowConfirmationSecrets";
+import { loadOptionalPowerNowSecrets, readPowerNowSecret } from "./powerNowConfirmationSecrets";
 import type { NormalizedPowerNow, PowerNowPath } from "./powerNowModel";
 
 export const POWER_NOW_DEFAULT_FROM = "Accel Analysis <hello@accelanalysis.com>";
@@ -21,6 +21,13 @@ export const POWER_NOW_MIN_SUBMIT_MS_DEFAULT = 3000;
 export const POWER_NOW_RECAPTCHA_MIN_SCORE_DEFAULT = 0.5;
 export const POWER_NOW_RECAPTCHA_ACTION = "power_now_submit";
 export const POWER_NOW_RECAPTCHA_PROJECT = "hi-coworking-plat";
+/** Public site key. Not a secret. The console key must allow both hosts below. */
+export const POWER_NOW_RECAPTCHA_SITE_KEY = "6LcAvvMtAAAAAOAmm8Z-yA83L0B_EmU7kIaq6rDX";
+export const POWER_NOW_RECAPTCHA_HOSTS = [
+  "forms.accelanalysis.com",
+  "hi-coworking.com",
+  "www.hi-coworking.com",
+] as const;
 /** Jonathan Holman. The deployed allow-list sends a flag-on test only here. */
 export const POWER_NOW_CONFIRMATION_TEST_RECIPIENT = "jholman@accelanalysis.com";
 export const CONFIRMATION_ADDRESS_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -238,6 +245,15 @@ export const powerNowConfirmationEmailEnabledParam = defineString("POWER_NOW_CON
 export const powerNowConfirmationTestRecipientsParam = defineString("POWER_NOW_CONFIRMATION_TEST_RECIPIENTS", {
   default: POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
   description: "Comma- or space-separated allow-list for Power NOW confirmation email. The flag-on test is jholman@accelanalysis.com only.",
+});
+
+/**
+ * Public site key for the forms host and hi-coworking.com. Not a secret.
+ * The matching API key stays in Secret Manager and is optional at deploy.
+ */
+export const powerNowRecaptchaSiteKeyParam = defineString("RECAPTCHA_ENTERPRISE_SITE_KEY", {
+  default: POWER_NOW_RECAPTCHA_SITE_KEY,
+  description: "Public reCAPTCHA Enterprise site key. The key must allow forms.accelanalysis.com and hi-coworking.com.",
 });
 
 export function confirmationEmailEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -494,13 +510,20 @@ export async function verifyRecaptchaEnterprise(input: {
   fetchImpl: typeof fetch;
   readSecret?: (name: string) => string | undefined;
 }): Promise<CaptchaVerdict> {
-  const siteKey = input.env.RECAPTCHA_ENTERPRISE_SITE_KEY?.trim()
-    || input.env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY?.trim()
-    || "";
+  const siteKey = recaptchaSiteKey(input.env);
   const apiKey = input.readSecret?.("RECAPTCHA_ENTERPRISE_API_KEY")
     ?? input.env.RECAPTCHA_ENTERPRISE_API_KEY?.trim()
     ?? "";
-  if (!siteKey || !apiKey) return { ok: false, errorClass: "CaptchaUnconfigured" };
+  if (!siteKey || !apiKey) {
+    const missing = [
+      siteKey ? null : "RECAPTCHA_ENTERPRISE_SITE_KEY",
+      apiKey ? null : "RECAPTCHA_ENTERPRISE_API_KEY",
+    ].filter(Boolean).join(", ");
+    console.warn(
+      `Power NOW reCAPTCHA Enterprise is unset (${missing}). The confirmation email is skipped. reCAPTCHA is not treated as passed. Origin, honeypot, and rate-limit checks still run.`,
+    );
+    return { ok: false, errorClass: "CaptchaUnconfigured" };
+  }
   if (!input.token.trim()) return { ok: false, errorClass: "CaptchaMissing" };
   const project = input.env.RECAPTCHA_ENTERPRISE_PROJECT?.trim() || POWER_NOW_RECAPTCHA_PROJECT;
   const minScore = recaptchaMinScore(input.env);
@@ -525,14 +548,36 @@ export async function verifyRecaptchaEnterprise(input: {
   }
   if (!response.ok) return { ok: false, errorClass: "CaptchaRejected" };
   const body = await response.json().catch(() => null) as {
-    tokenProperties?: { valid?: boolean; action?: string };
+    tokenProperties?: { valid?: boolean; action?: string; hostname?: string };
     riskAnalysis?: { score?: number };
   } | null;
+  const hostname = body?.tokenProperties?.hostname?.trim().toLowerCase() ?? "";
   const valid = body?.tokenProperties?.valid === true
     && body.tokenProperties.action === POWER_NOW_RECAPTCHA_ACTION
+    && recaptchaHostAllowed(hostname)
     && typeof body.riskAnalysis?.score === "number"
     && body.riskAnalysis.score >= minScore;
   return valid ? { ok: true } : { ok: false, errorClass: "CaptchaRejected" };
+}
+
+function recaptchaSiteKey(env: NodeJS.ProcessEnv): string {
+  if (Object.prototype.hasOwnProperty.call(env, "RECAPTCHA_ENTERPRISE_SITE_KEY")) {
+    return env.RECAPTCHA_ENTERPRISE_SITE_KEY?.trim() || "";
+  }
+  if (Object.prototype.hasOwnProperty.call(env, "NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY")) {
+    return env.NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY?.trim() || "";
+  }
+  if (env !== process.env) return "";
+  const fromParam = configuredValue(
+    env,
+    "RECAPTCHA_ENTERPRISE_SITE_KEY",
+    () => powerNowRecaptchaSiteKeyParam.value(),
+  );
+  return fromParam?.trim() || POWER_NOW_RECAPTCHA_SITE_KEY;
+}
+
+function recaptchaHostAllowed(hostname: string): boolean {
+  return (POWER_NOW_RECAPTCHA_HOSTS as readonly string[]).includes(hostname);
 }
 
 export async function sendWithResend(
@@ -668,6 +713,7 @@ export async function runPowerNowConfirmation(input: {
 }): Promise<{ outcome: "sent" | "skipped"; errorClass?: string; messageId?: string }> {
   const env = input.env;
   const fetchImpl = input.mailFetch ?? fetch;
+  await loadOptionalPowerNowSecrets(env);
   const readSecret = input.readSecret ?? ((name: string) => readPowerNowSecret(name, env));
   try {
     const allowList = confirmationTestRecipients(env);
@@ -707,7 +753,14 @@ export async function runPowerNowConfirmation(input: {
       readSecret("M365_TENANT_ID") && readSecret("M365_CLIENT_ID") && readSecret("M365_CLIENT_SECRET"),
     );
     const providerReady = provider === "graph" ? graphReady : provider === "resend" && Boolean(readSecret("RESEND_API_KEY"));
-    if (!providerReady) return providerUnconfigured(input);
+    if (!providerReady) {
+      if (provider === "resend" && !readSecret("RESEND_API_KEY")) {
+        console.warn(
+          "Power NOW secret RESEND_API_KEY is unset. The confirmation email is skipped. The Attio submission is unchanged.",
+        );
+      }
+      return providerUnconfigured(input);
+    }
 
     const addressKey = `${emailHash}_${input.lead.path}`;
     const ipKey = powerNowEmailHash(input.ip.trim() || "unknown");

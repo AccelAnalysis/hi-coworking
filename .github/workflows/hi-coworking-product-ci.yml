@@ -108,6 +108,7 @@ jobs:
           tests/functions/public-event-location.test.ts
           tests/functions/public-event-actions.test.ts
           tests/functions/expo-nasa-lead.test.ts
+          tests/functions/power-now-confirmation.test.ts
           tests/functions/expo-lead-deploy-workflow.test.ts
           tests/web/public-rfx-quarantine.test.ts
 

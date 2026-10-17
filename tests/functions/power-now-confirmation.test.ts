@@ -8,6 +8,8 @@ import {
   POWER_NOW_DEFAULT_DAILY_CAP,
   POWER_NOW_DEFAULT_FROM,
   POWER_NOW_DEFAULT_REPLY_TO,
+  POWER_NOW_RECAPTCHA_HOSTS,
+  POWER_NOW_RECAPTCHA_SITE_KEY,
   buildPowerNowConfirmationMessage,
   confirmationDailyCap,
   confirmationDedupeKey,
@@ -25,6 +27,11 @@ import {
   type MemoryConfirmationStore,
 } from "../../apps/functions/src/expo/powerNowConfirmation";
 import { PITCH_COMPETITION_LIST } from "../../apps/functions/src/expo/powerNowModel";
+import {
+  loadOptionalPowerNowSecrets,
+  readPowerNowSecret,
+  resetOptionalPowerNowSecretCache,
+} from "../../apps/functions/src/expo/powerNowConfirmationSecrets";
 
 const NOW = new Date("2026-10-07T21:35:00.000Z");
 const API_KEY = "test-key";
@@ -679,6 +686,32 @@ describe("Power NOW mail adapters", () => {
       }),
     });
     expect(rejected).toEqual({ ok: false, errorClass: "CaptchaRejected" });
+    for (const hostname of POWER_NOW_RECAPTCHA_HOSTS) {
+      const accepted = await verifyRecaptchaEnterprise({
+        token: "token",
+        env: {
+          RECAPTCHA_ENTERPRISE_SITE_KEY: "site",
+          RECAPTCHA_ENTERPRISE_API_KEY: "api",
+        },
+        fetchImpl: async () => json(200, {
+          tokenProperties: { valid: true, action: "power_now_submit", hostname },
+          riskAnalysis: { score: 0.9 },
+        }),
+      });
+      expect(accepted, hostname).toEqual({ ok: true });
+    }
+    const foreignHost = await verifyRecaptchaEnterprise({
+      token: "token",
+      env: {
+        RECAPTCHA_ENTERPRISE_SITE_KEY: "site",
+        RECAPTCHA_ENTERPRISE_API_KEY: "api",
+      },
+      fetchImpl: async () => json(200, {
+        tokenProperties: { valid: true, action: "power_now_submit", hostname: "evil.example" },
+        riskAnalysis: { score: 0.9 },
+      }),
+    });
+    expect(foreignHost).toEqual({ ok: false, errorClass: "CaptchaRejected" });
     const missing = await verifyRecaptchaEnterprise({
       token: "token",
       env: {},
@@ -731,13 +764,16 @@ describe("Power NOW confirmation config surface", () => {
     expect(rules).toContain("powerNowEmailIpWindow");
     expect(rules).toContain("powerNowEmailDaily");
     const workflow = readFileSync(".github/workflows/firebase-live-expo-lead-function.yml", "utf8");
-    const requiredSecrets = workflow.slice(workflow.indexOf("secrets=("), workflow.indexOf("for secret"));
-    expect(requiredSecrets).toContain("RESEND_API_KEY");
-    expect(requiredSecrets).toContain("RECAPTCHA_ENTERPRISE_API_KEY");
-    expect(requiredSecrets).not.toContain("M365_");
+    const optionalSecrets = workflow.slice(workflow.indexOf("secrets=("), workflow.indexOf("for secret"));
+    expect(optionalSecrets).toContain("RESEND_API_KEY");
+    expect(optionalSecrets).toContain("RECAPTCHA_ENTERPRISE_API_KEY");
+    expect(optionalSecrets).not.toContain("exit 1");
+    expect(optionalSecrets).not.toContain("M365_");
+    expect(workflow).toContain("--config firebase.expo-lead.json");
     const bound = readFileSync("apps/functions/src/expo/powerNowConfirmationSecrets.ts", "utf8");
     expect(bound).toContain("RESEND_API_KEY");
     expect(bound).toContain("RECAPTCHA_ENTERPRISE_API_KEY");
+    expect(bound).not.toMatch(/defineSecret\(\s*["']/);
     expect(bound).not.toContain('defineSecret("M365_TENANT_ID")');
     expect(bound).not.toContain('defineSecret("M365_CLIENT_ID")');
     expect(bound).not.toContain('defineSecret("M365_CLIENT_SECRET")');
@@ -782,14 +818,80 @@ describe("Power NOW confirmation config surface", () => {
       expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
       expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
       expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
-      expect(envFile).not.toMatch(/^RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
+      expect(envFile).toMatch(new RegExp(`^RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}$`, "m"));
       expect(envFile).not.toMatch(/^NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY=/m);
     }
+
+    const expoLeadEnv = readFileSync("firebase/expo-lead-functions/.env.hi-coworking-plat", "utf8");
+    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
+    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
+    expect(expoLeadEnv).toMatch(new RegExp(`^RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}$`, "m"));
+    expect(expoLeadEnv).not.toMatch(/^RESEND_API_KEY=/m);
+    expect(expoLeadEnv).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
+
+    const webEnv = readFileSync("apps/web/.env.production", "utf8");
+    const nextConfig = readFileSync("apps/web/next.config.ts", "utf8");
+    expect(webEnv).toContain(`NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}`);
+    expect(nextConfig).toContain(POWER_NOW_RECAPTCHA_SITE_KEY);
+    expect(webEnv).not.toMatch(/^RESEND_API_KEY=/m);
+    expect(webEnv).not.toMatch(/^RECAPTCHA_ENTERPRISE_API_KEY=/m);
+    expect(POWER_NOW_RECAPTCHA_HOSTS).toEqual([
+      "forms.accelanalysis.com",
+      "hi-coworking.com",
+      "www.hi-coworking.com",
+    ]);
 
     const source = readFileSync("apps/functions/src/expo/powerNowConfirmation.ts", "utf8");
     expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_EMAIL_ENABLED"');
     expect(source).toContain('default: ""');
     expect(source).toContain('defineString("POWER_NOW_CONFIRMATION_TEST_RECIPIENTS"');
     expect(source).toContain("default: POWER_NOW_CONFIRMATION_TEST_RECIPIENT");
+    expect(source).toContain('defineString("RECAPTCHA_ENTERPRISE_SITE_KEY"');
+    expect(source).toContain("default: POWER_NOW_RECAPTCHA_SITE_KEY");
+  });
+
+  it("reads an optional secret when it exists and warns with the Secret Manager code when it does not", async () => {
+    const previousService = process.env.K_SERVICE;
+    const previousResend = process.env.RESEND_API_KEY;
+    const previousCaptcha = process.env.RECAPTCHA_ENTERPRISE_API_KEY;
+    process.env.K_SERVICE = "expo_submitNasaLead";
+    delete process.env.RESEND_API_KEY;
+    delete process.env.RECAPTCHA_ENTERPRISE_API_KEY;
+    resetOptionalPowerNowSecretCache();
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((message) => {
+      warnings.push(String(message));
+    });
+    try {
+      await loadOptionalPowerNowSecrets(process.env, async (input) => {
+        const url = String(input);
+        if (url.includes("metadata.google.internal")) {
+          return json(200, { access_token: "ya29.test-token" });
+        }
+        if (url.includes("/secrets/RESEND_API_KEY/")) {
+          return json(200, { payload: { data: Buffer.from("re_test_secret").toString("base64") } });
+        }
+        if (url.includes("/secrets/RECAPTCHA_ENTERPRISE_API_KEY/")) {
+          return json(404, { error: { status: "NOT_FOUND" } });
+        }
+        return json(500, { error: { status: "INTERNAL" } });
+      });
+      expect(readPowerNowSecret("RESEND_API_KEY")).toBe("re_test_secret");
+      expect(readPowerNowSecret("RECAPTCHA_ENTERPRISE_API_KEY")).toBeUndefined();
+      expect(warnings.some((message) =>
+        message.includes("RECAPTCHA_ENTERPRISE_API_KEY") && message.includes("NOT_FOUND"),
+      )).toBe(true);
+      expect(warnings.join("\n")).not.toContain("re_test_secret");
+      expect(warnings.join("\n")).not.toContain("ya29.test-token");
+    } finally {
+      spy.mockRestore();
+      resetOptionalPowerNowSecretCache();
+      if (previousService === undefined) delete process.env.K_SERVICE;
+      else process.env.K_SERVICE = previousService;
+      if (previousResend === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previousResend;
+      if (previousCaptcha === undefined) delete process.env.RECAPTCHA_ENTERPRISE_API_KEY;
+      else process.env.RECAPTCHA_ENTERPRISE_API_KEY = previousCaptcha;
+    }
   });
 });

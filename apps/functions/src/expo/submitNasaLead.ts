@@ -2,7 +2,6 @@ import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
 import { handleExpoLeadHttp } from "./nasaLeadIngest";
-import { POWER_NOW_CONFIRMATION_SECRETS } from "./powerNowConfirmationSecrets";
 
 /**
  * Public booth ingest. The browser posts the form here; Attio is called only
@@ -24,7 +23,7 @@ function readAttioApiKey(): string | undefined {
 
 export const expo_submitNasaLead = onRequest(
   {
-    secrets: [attioApiKey, ...POWER_NOW_CONFIRMATION_SECRETS],
+    secrets: [attioApiKey],
     cors: false,
     timeoutSeconds: 60,
     memory: "256MiB",

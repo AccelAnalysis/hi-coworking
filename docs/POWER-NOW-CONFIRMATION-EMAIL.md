@@ -64,22 +64,22 @@ POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
 | `POWER_NOW_EMAIL_ASSET_BASE_URL` | function env, optional | unset, code default `https://hi-coworking.com` | Origin for the lockup image |
 | `POWER_NOW_MIN_SUBMIT_MS` | function env, optional | unset, code default `3000` | Minimum time from page open to submit. Missing or faster skips the email |
 | `POWER_NOW_RECAPTCHA_MIN_SCORE` | function env, optional | unset, code default `0.5` | Minimum reCAPTCHA Enterprise score |
-| `RECAPTCHA_ENTERPRISE_SITE_KEY` | function env | unset. Owner supplies the site key | Server site key. Missing site key or API key skips the email and still saves the submission |
+| `RECAPTCHA_ENTERPRISE_SITE_KEY` | `firebase/expo-lead-functions/.env.hi-coworking-plat` and the function param default | `6LcAvvMtAAAAAOAmm8Z-yA83L0B_EmU7kIaq6rDX` | Public site key. Not a secret. The console key must allow `forms.accelanalysis.com` and `hi-coworking.com` |
 | `RECAPTCHA_ENTERPRISE_PROJECT` | function env, optional | unset, code default `hi-coworking-plat` | reCAPTCHA Enterprise project |
-| `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` | web build env | unset. Owner supplies the same site key | Public site key baked into the web build. The page loads the Enterprise script only when this is set |
-| `RESEND_API_KEY` | Secret Manager | not set. Owner supplies it | Resend `Authorization: Bearer` |
-| `RECAPTCHA_ENTERPRISE_API_KEY` | Secret Manager | not set. Owner supplies it | reCAPTCHA Enterprise assessments |
+| `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` | `apps/web/.env.production` and `apps/web/next.config.ts` | same public site key | Baked into the forms web build. The page loads the Enterprise script only when this is set |
+| `RESEND_API_KEY` | Secret Manager, optional at deploy | not in git. Owner supplies it | Resend `Authorization: Bearer`. Missing key skips the email and logs a warning |
+| `RECAPTCHA_ENTERPRISE_API_KEY` | Secret Manager, optional at deploy | not in git. Owner supplies it | reCAPTCHA Enterprise assessments. Missing key skips the email and does not treat reCAPTCHA as passed |
 
 The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields are not stored on the Attio note.
 
 ## Secrets
 
-Bound on `expo_submitNasaLead` for the Resend path. Create each one in Secret Manager before deploying that function. The flag can stay off, but Firebase still requires these two secrets to exist because the function declares them. Do not put the values in git, logs, or this doc.
+`RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` are not `defineSecret` bindings. The isolated deploy (`firebase.expo-lead.json`, entry `firebase/expo-lead-functions`) still requires only `ATTIO_API_KEY`. A missing Resend or reCAPTCHA secret does not block deploy. At runtime the function reads each one from the environment, then from Secret Manager as `217107644706-compute@developer.gserviceaccount.com`. That service account needs Secret Accessor on the secret. If the secret is missing or unreadable, the function logs a warning with the Secret Manager status and skips the confirmation email. It does not treat reCAPTCHA as passed. Origin checks, the honeypot, and rate limits still run. Do not put secret values in git, logs, or this doc.
 
 | Secret | Required for this deploy | Used by |
 | --- | --- | --- |
-| `RESEND_API_KEY` | yes | Resend `Authorization: Bearer` |
-| `RECAPTCHA_ENTERPRISE_API_KEY` | yes | reCAPTCHA Enterprise assessments |
+| `RESEND_API_KEY` | no | Resend `Authorization: Bearer` |
+| `RECAPTCHA_ENTERPRISE_API_KEY` | no | reCAPTCHA Enterprise assessments |
 | `M365_TENANT_ID` | no | Graph client-credentials token, only after a later switch |
 | `M365_CLIENT_ID` | no | Graph client-credentials token, only after a later switch |
 | `M365_CLIENT_SECRET` | no | Graph client-credentials token, only after a later switch |
@@ -93,9 +93,11 @@ firebase functions:secrets:set RESEND_API_KEY --project hi-coworking-plat
 firebase functions:secrets:set RECAPTCHA_ENTERPRISE_API_KEY --project hi-coworking-plat
 ```
 
+Grant Secret Accessor on each secret to `217107644706-compute@developer.gserviceaccount.com`.
+
 Do not create the M365 secrets for the Resend deploy. They are optional and only for a later Graph switch.
 
-The manual workflow **Hi Coworking Firebase expo lead function** checks that `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` exist and have an enabled version. It does not check the M365 secrets and it does not print values. That workflow runs only from `main`, and only after this revision is merged. Do not run it from this branch.
+The manual workflow **Hi Coworking Firebase expo lead function** deploys with `--config firebase.expo-lead.json` and `--only functions:expo_submitNasaLead`. It warns if `RESEND_API_KEY` or `RECAPTCHA_ENTERPRISE_API_KEY` is missing and continues. It does not check the M365 secrets and it does not print values. That workflow runs only from `main`, and only after this revision is merged. Do not run it from this branch.
 
 ## Jonathan checklist
 
@@ -135,15 +137,15 @@ firebase functions:secrets:set RECAPTCHA_ENTERPRISE_API_KEY --project hi-coworki
 
 ### 3. reCAPTCHA Enterprise
 
-1. In Google Cloud project `hi-coworking-plat`, create a score-based reCAPTCHA Enterprise site key for the Power NOW hostnames (`hi-coworking.com` and any preview host you will submit from).
-2. The assessment action is `power_now_submit`. The minimum score stays `POWER_NOW_RECAPTCHA_MIN_SCORE=0.5` unless a real submission scores lower.
-3. Put that site key in both places. They are the same value, and this repo leaves both unset:
-   - `RECAPTCHA_ENTERPRISE_SITE_KEY` on `expo_submitNasaLead` (function environment, not Secret Manager)
-   - `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` on the web build that serves the Power NOW form
-4. Create an API key allowed to call `recaptchaenterprise.googleapis.com` and store it as `RECAPTCHA_ENTERPRISE_API_KEY` (step 2).
-5. Leave `RECAPTCHA_ENTERPRISE_PROJECT` unset so it stays `hi-coworking-plat`, unless the key lives in another project.
+The score-based site key is already in this repo: `6LcAvvMtAAAAAOAmm8Z-yA83L0B_EmU7kIaq6rDX`. It is public. It is set as `RECAPTCHA_ENTERPRISE_SITE_KEY` for `expo_submitNasaLead` and as `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` for the forms web build.
 
-A missing site key, a missing API key, a missing token, or a score under `0.5` skips the email and still saves the submission. The page loads the Enterprise script only when `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` is set at build time.
+Before merging, confirm in the reCAPTCHA Enterprise console for project `hi-coworking-plat` that this key's domain list includes both `forms.accelanalysis.com` and `hi-coworking.com`. Add `www.hi-coworking.com` as well if that host will submit. The function accepts an assessment only when the hostname is one of those three. A token from any other host skips the email.
+
+1. The assessment action is `power_now_submit`. The minimum score stays `POWER_NOW_RECAPTCHA_MIN_SCORE=0.5` unless a real submission scores lower.
+2. Confirm `RECAPTCHA_ENTERPRISE_API_KEY` exists in Secret Manager and that `217107644706-compute@developer.gserviceaccount.com` has Secret Accessor on it. The site key is not a secret.
+3. Leave `RECAPTCHA_ENTERPRISE_PROJECT` unset so it stays `hi-coworking-plat`, unless the key lives in another project.
+
+A missing API key, a missing token, a hostname outside the list above, or a score under `0.5` skips the email and still saves the submission. reCAPTCHA is not treated as passed. The page loads the Enterprise script because `NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY` is set for the forms build.
 
 ### 4. Flag-on test to jholman@ only
 
@@ -168,7 +170,7 @@ The Graph adapter stays in the code. It is not on the deploy path. `expo_submitN
 
 Set `POWER_NOW_EMAIL_PROVIDER=graph` only if `hello@accelanalysis.com` is a shared mailbox. Graph cannot reliably send from an alias. An alias on Jonathan's mailbox will not work as the From address.
 
-Before Graph can send, add those three secrets back to the function binding in `POWER_NOW_CONFIRMATION_SECRETS`, create them in Secret Manager, and deploy `expo_submitNasaLead` again. The adapter then uses the client-credentials flow and `POST /users/{sender}/sendMail` with `saveToSentItems: true`. The sender in that path is the mailbox inside `POWER_NOW_SENDER`, defaulting to `hello@accelanalysis.com`. The app registration needs application permission to send as that mailbox, with admin consent.
+Before Graph can send, add those three secrets back to the function binding by listing them next to `POWER_NOW_OPTIONAL_SECRETS`, create them in Secret Manager, and deploy `expo_submitNasaLead` again. The adapter then uses the client-credentials flow and `POST /users/{sender}/sendMail` with `saveToSentItems: true`. The sender in that path is the mailbox inside `POWER_NOW_SENDER`, defaulting to `hello@accelanalysis.com`. The app registration needs application permission to send as that mailbox, with admin consent.
 
 If `POWER_NOW_EMAIL_PROVIDER=graph` and any of those three values is missing, the function skips the send the same way it does when `RESEND_API_KEY` is missing. It logs the person record id and `ProviderUnconfigured`, prefixes the follow-up task with `[CONFIRMATION EMAIL FAILED]`, and still saves the submission.
 
@@ -200,4 +202,4 @@ Run that locally. Do not paste a real address into a log or a pull request. Then
 
 ## Deploy
 
-Do not deploy this from the pull request. Do not set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in this repo. After merge, follow the Jonathan checklist above: Resend DNS, then `RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY`, then the reCAPTCHA site keys, then a flag-on test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` only. The manual function workflow deploys only `expo_submitNasaLead`.
+Do not deploy this from the pull request. Do not set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in this repo. Before merging, confirm the reCAPTCHA key lists `forms.accelanalysis.com` and `hi-coworking.com`. `RESEND_API_KEY` can be created after merge; until it exists the function deploys and skips confirmation email. After merge, follow the Jonathan checklist above, then a flag-on test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` only. The manual function workflow deploys only `expo_submitNasaLead` with `--config firebase.expo-lead.json`.
