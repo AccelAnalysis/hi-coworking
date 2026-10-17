@@ -7,6 +7,7 @@ import {
   type NormalizedExpoLead,
 } from "./nasaLeadModel";
 import { canonicalizePowerNowPath, POWER_NOW_FORM } from "./powerNowModel";
+import type { PowerNowConfirmationOptions } from "./powerNowConfirmation";
 import { handlePowerNowHttp, type PowerNowConsentLog, type PowerNowRateLimiter } from "./powerNowIngest";
 
 const ATTIO_BASE = "https://api.attio.com/v2";
@@ -116,6 +117,7 @@ export async function handleExpoLeadHttp(request: {
   ip?: string | null;
   rateLimiter?: PowerNowRateLimiter;
   consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
+  confirmation?: PowerNowConfirmationOptions;
 }): Promise<ExpoHttpResult> {
   const headers = corsHeaders(request.origin, request.method, request.body);
   if (request.origin && !isAllowedOrigin(request.origin, request.method, request.body)) {
@@ -154,6 +156,7 @@ export async function handleExpoLeadHttp(request: {
       ip: request.ip,
       rateLimiter: request.rateLimiter,
       consentLog: request.consentLog,
+      confirmation: request.confirmation,
     });
     return {
       status: powerNow.status,

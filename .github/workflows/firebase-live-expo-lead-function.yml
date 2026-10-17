@@ -105,6 +105,29 @@ jobs:
             exit 1
           fi
 
+      - name: Note optional Power NOW secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Names only. Values are never printed. These are not defineSecret
+          # bindings, so a missing secret does not block this deploy.
+          # M365_TENANT_ID, M365_CLIENT_ID, and M365_CLIENT_SECRET are not checked.
+          secrets=(
+            RESEND_API_KEY
+            RECAPTCHA_ENTERPRISE_API_KEY
+          )
+          for secret in "${secrets[@]}"; do
+            err="${RUNNER_TEMP}/secret-check.txt"
+            if ! gcloud secrets describe "${secret}" --project=hi-coworking-plat --format='value(name)' >/dev/null 2>"${err}"; then
+              echo "Warning: ${secret} is not confirmed in Secret Manager. expo_submitNasaLead will still deploy. Confirmation email or reCAPTCHA is skipped until the secret exists. The secret value was not printed." >&2
+              continue
+            fi
+            enabled="$(gcloud secrets versions list "${secret}" --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1 || true)"
+            if [[ -z "${enabled}" ]]; then
+              echo "Warning: ${secret} has no enabled version. The function skips the feature that needs it. The secret value was not printed." >&2
+            fi
+          done
+
       - name: Deploy expo_submitNasaLead only
         run: npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 
