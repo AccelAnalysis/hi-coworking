@@ -149,18 +149,6 @@ function toApi(record: StoredRecord) {
   return { id: { record_id: record.id }, values: record.values };
 }
 
-function parseEnvFile(path: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq < 0) continue;
-    env[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
-  }
-  return env;
-}
-
 function enabledEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
     POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "true",
@@ -602,35 +590,6 @@ describe("Power NOW confirmation delivery", () => {
     expect(skipped.result.body && JSON.stringify(skipped.result.body)).not.toContain("ada@example.com");
   });
 
-  it("uses the deployed expo-lead test config and emails only jholman@", async () => {
-    const env = parseEnvFile("firebase/expo-lead-functions/.env.hi-coworking-plat");
-    env.RESEND_API_KEY = "test-resend-key";
-    env.RECAPTCHA_ENTERPRISE_API_KEY = "captcha-key";
-    expect(env.POWER_NOW_CONFIRMATION_EMAIL_ENABLED).toBe("true");
-    expect(confirmationEmailEnabled(env)).toBe(true);
-    expect(confirmationTestRecipients(env)).toEqual(["jholman@accelanalysis.com"]);
-
-    const mail = mailRecorder();
-    const store = createMemoryConfirmationStore();
-    const other = await submit(emptyState(), pitchBody(), { mail, store, env });
-    const jonathan = await submit(emptyState(), pitchBody({
-      email: "JHolman@AccelAnalysis.com",
-      fullName: "Jonathan Holman",
-      clientSubmissionId: "55555555-5555-4555-8555-555555555555",
-    }), { mail, store, env });
-    const secondOther = await submit(emptyState(), watchBody({
-      email: "grace@example.com",
-      clientSubmissionId: WATCH_ID,
-    }), { mail, store, env });
-    expect(other.result.status).toBe(200);
-    expect(jonathan.result.status).toBe(200);
-    expect(secondOther.result.status).toBe(200);
-    expect(mail.calls).toHaveLength(1);
-    expect(JSON.parse(mail.calls[0]!.body).to).toEqual(["jholman@accelanalysis.com"]);
-    expect(JSON.stringify(other.result.body)).not.toContain("ada@example.com");
-    expect(JSON.stringify(secondOther.result.body)).not.toContain("grace@example.com");
-  });
-
   it("sends a flag-on test only to jholman@accelanalysis.com", async () => {
     const mail = mailRecorder();
     const store = createMemoryConfirmationStore();
@@ -864,7 +823,7 @@ describe("Power NOW confirmation config surface", () => {
     }
 
     const expoLeadEnv = readFileSync("firebase/expo-lead-functions/.env.hi-coworking-plat", "utf8");
-    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true$/m);
+    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
     expect(expoLeadEnv).toMatch(new RegExp(`^RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}$`, "m"));
     expect(expoLeadEnv).not.toMatch(/^RESEND_API_KEY=/m);

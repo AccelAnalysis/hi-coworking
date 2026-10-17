@@ -10,20 +10,7 @@ Nothing in this document sets a secret or deploys the function.
 
 `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` must be the string `true`. Any other value, including empty or unset, sends nothing. The Attio person, company, list, note, task, and consent log stay as they are without this feature. The HTTP response does not include the submitted email address.
 
-`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is the allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Attio and does not receive mail. The deployed value is `jholman@accelanalysis.com` only. An empty value means no allow-list, so do not clear it while the flag is true: that would email every address that passes the other checks.
-
-## Temporary flag-on test
-
-`firebase/expo-lead-functions/.env.hi-coworking-plat` is the env the isolated `expo_submitNasaLead` deploy reads. It currently sets:
-
-```
-POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true
-POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
-```
-
-That is the inbox test, not the steady setting. With those two values, confirmation mail goes only to `jholman@accelanalysis.com` (the same mailbox as `JHolman@AccelAnalysis.com`). Any other submitter is still saved in Attio and gets no email. The emulator files under `apps/functions/` stay blank, so local emulators do not send.
-
-Revert this flag, or follow this change with a flag-off pull request, after the inbox test. Do not leave `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in place.
+`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is the allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Attio and does not receive mail. The deployed value is `jholman@accelanalysis.com` only. An empty value means no allow-list, so do not clear it for the flag-on test.
 
 ## What gets sent
 
@@ -215,4 +202,4 @@ Run that locally. Do not paste a real address into a log or a pull request. Then
 
 ## Deploy
 
-Do not deploy this from a pull request branch. The isolated expo-lead env currently sets `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` for the jholman inbox test, with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com`. That test step must be reverted, or followed by a flag-off change, after the inbox check. Before merging, confirm the reCAPTCHA key lists `forms.accelanalysis.com` and `hi-coworking.com`. `RESEND_API_KEY` can be created after merge; until it exists the function deploys and skips confirmation email. The manual function workflow deploys only `expo_submitNasaLead` with `--config firebase.expo-lead.json`.
+Do not deploy this from the pull request. Do not set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in this repo. Before merging, confirm the reCAPTCHA key lists `forms.accelanalysis.com` and `hi-coworking.com`. `RESEND_API_KEY` can be created after merge; until it exists the function deploys and skips confirmation email. After merge, follow the Jonathan checklist above, then a flag-on test with `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` only. The manual function workflow deploys only `expo_submitNasaLead` with `--config firebase.expo-lead.json`.
