@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "source": "firebase/expo-lead-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "npm run build:expo-lead-deploy"
+    ]
+  }
+}

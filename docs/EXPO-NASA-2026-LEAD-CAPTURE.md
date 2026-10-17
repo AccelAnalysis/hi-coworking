@@ -78,17 +78,36 @@ I agree that Accel Analysis may call me at the phone number I provided about my 
 
 ## Deploy
 
+`expo_submitNasaLead` binds `ATTIO_API_KEY` only. Deploy it from the isolated entry in `firebase/expo-lead-functions` (`firebase.expo-lead.json`). That entry imports this function and nothing else, so Firebase resolves `ATTIO_API_KEY` during the deploy.
+
+`firebase deploy --only functions:expo_submitNasaLead` against `firebase.json` still loads `apps/functions` (`main.ts`). `main.ts` imports `index.ts`, which imports `eventMarketing.ts`. That file calls `defineSecret("TWILIO_ACCOUNT_SID")` (and the other campaign secrets) at load time. Firebase CLI 15.23.0 puts every registered `defineSecret()` on the codebase build and resolves those params before it applies `--only`. A missing Twilio secret then fails the deploy in non-interactive mode, even though this function never reads it. Twilio stays on `events_processCampaignJobs`. This deploy does not remove that function or any other.
+
 From the repo root, after `ATTIO_API_KEY` is set:
 
 ```bash
-npm run build:functions
-firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead
+npm run deploy:expo-lead
+```
 
+That command is:
+
+```bash
+firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead
+```
+
+Keep `--only functions:expo_submitNasaLead`. The isolated config uses the default codebase so it updates the function that is already deployed. Without that filter, Firebase would treat every other default-codebase function as removed.
+
+Hosting is separate. Deploy the function before hosting so `/api/expo/nasa-lead` has somewhere to go:
+
+```bash
 npm run build
 firebase deploy --project hi-coworking-plat --only hosting
 ```
 
-Deploy the function before hosting so `/api/expo/nasa-lead` has somewhere to go. This does not redeploy booking or events functions. The page is outside the coming-soon gate and does not change those flows.
+The function deploy does not redeploy booking or events functions. The page is outside the coming-soon gate and does not change those flows.
+
+### Power NOW public links
+
+The approved public URLs are `https://accelanalysis.com/power-now`, `/pitch`, `/watch`, and `/contribute`. Each path returns HTTP 301 to the same path on `https://forms.accelanalysis.com` (for example `https://forms.accelanalysis.com/power-now`). The public Power NOW host is `forms.accelanalysis.com`, reached through those `accelanalysis.com` redirects. It is not `hi-coworking.com`.
 
 ### Manual GitHub Actions deploy
 
@@ -102,14 +121,14 @@ In Actions, open **Hi Coworking Firebase expo lead function**, choose **Run work
 deploy expo_submitNasaLead
 ```
 
-The job uses the same service account as the other live function deploys (`FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT`, or `FIREBASE_SERVICE_ACCOUNT`), Node 20, `npm ci`, and `npm run build:shared && npm run build:functions`. It refuses to continue unless `.firebaserc` defaults to `hi-coworking-plat`.
+The job uses the same service account as the other live function deploys (`FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT`, or `FIREBASE_SERVICE_ACCOUNT`), Node 20, `npm ci`, and `npm run build:expo-lead-deploy`. It refuses to continue unless `.firebaserc` defaults to `hi-coworking-plat`.
 
-Before deploy it checks that Secret Manager in `hi-coworking-plat` has an enabled `ATTIO_API_KEY` version. A missing secret fails the job. The workflow never prints the secret value and never reads the secret payload.
+Before deploy it checks that Secret Manager in `hi-coworking-plat` has an enabled `ATTIO_API_KEY` version. A missing secret fails the job. The workflow never prints the secret value and never reads the secret payload. It does not require `TWILIO_ACCOUNT_SID` or any other secret.
 
 The only deploy command is:
 
 ```bash
-npx firebase deploy --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
+npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 ```
 
 That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.

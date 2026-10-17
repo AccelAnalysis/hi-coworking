@@ -19,6 +19,7 @@ firebase/booking-transaction-functions/lib/
 firebase/admin-event-functions/lib/
 firebase/booth-kiosk-functions/lib/
 firebase/booth-kiosk-functions/.secret.local
+firebase/expo-lead-functions/lib/
 
 # Production
 *.log
