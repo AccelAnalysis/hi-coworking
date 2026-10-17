@@ -404,6 +404,33 @@ describe("NASA expo lead capture", () => {
     });
     expect(blocked.status).toBe(403);
     expect(blocked.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+
+    const formsHostBooth = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://forms.accelanalysis.com",
+      body: payload(),
+      apiKey: API_KEY,
+      now: NOW,
+    });
+    expect(formsHostBooth.status).toBe(403);
+    expect(formsHostBooth.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+    expect(formsHostBooth.body).toMatchObject({
+      error: "This booth form cannot be submitted from that site.",
+    });
+
+    const hiCoworking = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://www.hi-coworking.com",
+      body: payload({
+        email: "www@example.com",
+        clientSubmissionId: "66666666-6666-4666-8666-666666666666",
+      }),
+      apiKey: API_KEY,
+      fetchImpl: createAttio(emptyState()),
+      now: NOW,
+    });
+    expect(hiCoworking.status).toBe(200);
+    expect(hiCoworking.headers["Access-Control-Allow-Origin"]).toBe("https://www.hi-coworking.com");
   });
 
   it("queues network and server failures and keeps validation errors on screen", () => {

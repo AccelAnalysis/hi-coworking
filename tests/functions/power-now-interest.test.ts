@@ -31,6 +31,7 @@ type MockState = {
   tasks: Array<{ id: string; content: string; linked: unknown; assignees?: unknown }>;
   calls: string[];
   failAssignee?: boolean;
+  failTaskCreate?: { status: number; code?: string; message?: string };
   sequence: number;
 };
 
@@ -108,6 +109,12 @@ function createAttio(state: MockState): typeof fetch {
       });
     }
     if (method === "POST" && url.pathname === "/v2/tasks") {
+      if (state.failTaskCreate) {
+        return json(state.failTaskCreate.status, {
+          code: state.failTaskCreate.code,
+          message: state.failTaskCreate.message ?? "task create failed",
+        });
+      }
       const id = `task-${++state.sequence}`;
       state.tasks.push({
         id,
@@ -222,6 +229,76 @@ async function submit(
     },
   });
 }
+
+describe("Power NOW forms host origin", () => {
+  it("accepts pitch, watch, and contribute from https://forms.accelanalysis.com", async () => {
+    const state = emptyState();
+    for (const body of [pitchBody(), watchBody(), contributeBody()]) {
+      const result = await handleExpoLeadHttp({
+        method: "POST",
+        origin: "https://forms.accelanalysis.com",
+        body,
+        apiKey: API_KEY,
+        fetchImpl: createAttio(state),
+        now: NOW,
+        ip: "203.0.113.10",
+        rateLimiter: { allow: () => true },
+        consentLog: async () => undefined,
+      });
+      expect(result.status, String(body.path)).toBe(200);
+      expect(result.headers["Access-Control-Allow-Origin"]).toBe("https://forms.accelanalysis.com");
+      expect(result.body).toMatchObject({ ok: true, path: body.path });
+    }
+  });
+
+  it("answers the forms-host preflight and still rejects other sites and the booth form", async () => {
+    const preflight = await handleExpoLeadHttp({
+      method: "OPTIONS",
+      origin: "https://forms.accelanalysis.com",
+      body: null,
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers["Access-Control-Allow-Origin"]).toBe("https://forms.accelanalysis.com");
+
+    const state = emptyState();
+    const booth = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://forms.accelanalysis.com",
+      body: { fullName: "Booth Visitor", email: "booth@example.com" },
+      apiKey: API_KEY,
+      fetchImpl: createAttio(state),
+      now: NOW,
+    });
+    expect(booth.status).toBe(403);
+    expect(booth.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+    expect(booth.body).toMatchObject({ error: "This booth form cannot be submitted from that site." });
+    expect(state.calls).toEqual([]);
+
+    const lookalike = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://forms.accelanalysis.com.evil.example",
+      body: pitchBody({ clientSubmissionId: "44444444-4444-4444-8444-444444444444" }),
+      apiKey: API_KEY,
+      now: NOW,
+    });
+    expect(lookalike.status).toBe(403);
+    expect(lookalike.headers["Access-Control-Allow-Origin"]).toBeUndefined();
+
+    const hi = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://hi-coworking.com",
+      body: pitchBody({ clientSubmissionId: "55555555-5555-4555-8555-555555555555", email: "hi@example.com" }),
+      apiKey: API_KEY,
+      fetchImpl: createAttio(state),
+      now: NOW,
+      ip: "203.0.113.11",
+      rateLimiter: { allow: () => true },
+      consentLog: async () => undefined,
+    });
+    expect(hi.status).toBe(200);
+    expect(hi.headers["Access-Control-Allow-Origin"]).toBe("https://hi-coworking.com");
+  });
+});
 
 describe("Power NOW path allow-list", () => {
   it("rejects a path outside pitch, watch, and contribute", async () => {
@@ -416,6 +493,34 @@ describe("Power NOW Attio payload mapping", () => {
     const description = text(state.people[0]!, "description");
     expect(description).toContain("path:pitch");
     expect(description).toContain("path:watch");
+  });
+
+  it("logs the Attio error code and still saves when follow-up task creation fails", async () => {
+    const state = emptyState();
+    state.failTaskCreate = {
+      status: 403,
+      code: "insufficient_permissions",
+      message: "Your API key is missing the required scopes: task:read-write",
+    };
+    const warnings: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((message) => {
+      warnings.push(String(message));
+    });
+    try {
+      const result = await submit(state, pitchBody());
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ ok: true, taskStatus: "skipped", noteStatus: "created" });
+      expect(state.tasks).toHaveLength(0);
+      expect(state.people).toHaveLength(1);
+      expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
+      expect(warnings.some((message) =>
+        message.includes("Attio error code: insufficient_permissions")
+        && message.includes("task:read-write")
+        && message.includes("submission was saved"),
+      )).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("still saves the submission when assigning the task fails", async () => {
