@@ -33,6 +33,7 @@ type MockState = {
   listAttributes?: Array<{ api_slug: string; type: string; is_writable?: boolean; is_archived?: boolean }>;
   failAssignee?: boolean;
   failTaskCreate?: { status: number; code?: string; message?: string };
+  failListCreate?: { status: number; message: string };
   sequence: number;
 };
 
@@ -81,6 +82,9 @@ function createAttio(state: MockState): typeof fetch {
       return json(200, { data });
     }
     if (method === "POST" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/entries`) {
+      if (state.failListCreate) {
+        return json(state.failListCreate.status, { message: state.failListCreate.message });
+      }
       state.entries.push({
         parent: body?.data?.parent_record_id,
         slug: PITCH_COMPETITION_LIST.apiSlug,
@@ -220,7 +224,11 @@ function contributeBody(overrides: Record<string, unknown> = {}) {
 async function submit(
   state: MockState,
   body: Record<string, unknown>,
-  extras: { limiter?: ReturnType<typeof createPowerNowRateLimiter>; logs?: unknown[] } = {},
+  extras: {
+    limiter?: ReturnType<typeof createPowerNowRateLimiter>;
+    logs?: unknown[];
+    confirmationEnv?: NodeJS.ProcessEnv;
+  } = {},
 ) {
   const logs = extras.logs ?? [];
   return handleExpoLeadHttp({
@@ -235,6 +243,7 @@ async function submit(
     consentLog: async (entry) => {
       logs.push(entry);
     },
+    confirmation: extras.confirmationEnv ? { env: extras.confirmationEnv } : undefined,
   });
 }
 
@@ -446,6 +455,89 @@ describe("Power NOW Attio payload mapping", () => {
     expect(state.tasks[0]?.content).toContain("Company: Analytical Engines");
     expect(state.tasks[0]?.content).toContain(`https://app.attio.com/accel-analysis/person/${person?.id}/overview`);
     expect(logs[0]?.listStatus).toBe("added");
+  });
+
+  it("accepts Idea / Concept selected on the pitch form and writes the Attio option titles", async () => {
+    const state = emptyState();
+    const mailCalls: string[] = [];
+    state.listAttributes = [
+      { api_slug: "city", type: "text", is_writable: true },
+      { api_slug: "state", type: "select", is_writable: true },
+      { api_slug: "business_stage", type: "select", is_writable: true },
+      { api_slug: "opportunity_type", type: "select", is_writable: true },
+    ];
+    const result = await handleExpoLeadHttp({
+      method: "POST",
+      origin: "https://forms.accelanalysis.com",
+      body: pitchBody({
+        state: "VA",
+        businessStage: "idea_concept",
+        opportunityType: "starting_a_new_business",
+        email: "pitcher@example.com",
+      }),
+      apiKey: API_KEY,
+      fetchImpl: createAttio(state),
+      now: NOW,
+      ip: "203.0.113.10",
+      rateLimiter: { allow: () => true },
+      consentLog: async () => {},
+      confirmation: {
+        env: {
+          POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "",
+          POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: "jholman@accelanalysis.com",
+        },
+        mailFetch: async (input) => {
+          mailCalls.push(String(input));
+          throw new Error("confirmation mail must not be called");
+        },
+      },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, path: "pitch", listStatus: "added" });
+    expect(mailCalls).toEqual([]);
+    expect(state.entries[0]?.entryValues).toEqual({
+      city: [{ value: "Carrollton" }],
+      state: [{ option: "Virginia" }],
+      business_stage: [{ option: "Idea / Concept" }],
+      opportunity_type: [{ option: "Starting a new business" }],
+    });
+    const note = state.notes.find((item) => item.parentObject === "people");
+    expect(note?.content).toContain("Business stage: Idea / Concept");
+    expect(note?.content).toContain("State: Virginia");
+    expect(note?.content).toContain("What best describes the opportunity you are pitching?: Starting a new business");
+    expect(text(state.people[0]!, "description")).toContain("stage:idea_concept");
+    expect(text(state.people[0]!, "description")).toContain("state:VA");
+    expect(text(state.people[0]!, "description")).toContain("opportunity:starting_a_new_business");
+  });
+
+  it("keeps a pitch when Attio rejects a state that is not one of the list options", async () => {
+    const state = emptyState();
+    state.listAttributes = [
+      { api_slug: "city", type: "text", is_writable: true },
+      { api_slug: "state", type: "select", is_writable: true },
+      { api_slug: "business_stage", type: "select", is_writable: true },
+      { api_slug: "opportunity_type", type: "select", is_writable: true },
+    ];
+    state.failListCreate = { status: 400, message: "Unknown select option: American Samoa" };
+    const result = await submit(state, pitchBody({
+      state: "AS",
+      businessStage: "idea_concept",
+      opportunityType: "starting_a_new_business",
+      email: "samoa@example.com",
+    }), {
+      confirmationEnv: { POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "" },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, listStatus: "skipped" });
+    expect(state.entries).toHaveLength(0);
+    expect(state.people).toHaveLength(1);
+    const note = state.notes.find((item) => item.parentObject === "people");
+    expect(note?.content).toContain("State: American Samoa");
+    expect(note?.content).toContain("Business stage: Idea / Concept");
+    expect(text(state.people[0]!, "description")).toContain("state:AS");
+    expect(text(state.people[0]!, "description")).toContain("stage:idea_concept");
   });
 
   it("writes city, state, stage, and opportunity onto the pitch list only when those attributes exist", async () => {
