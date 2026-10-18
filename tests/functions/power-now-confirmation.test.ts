@@ -88,6 +88,9 @@ function createAttio(state: MockState): typeof fetch {
       person.values = body?.data?.values ?? {};
       return json(200, { data: toApi(person) });
     }
+    if (method === "GET" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/attributes`) {
+      return json(200, { data: [] });
+    }
     if (method === "GET" && url.pathname.includes("/entries")) return json(200, { data: [] });
     if (method === "POST" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/entries`) {
       state.entries.push(body);
@@ -180,8 +183,10 @@ function pitchBody(overrides: Record<string, unknown> = {}) {
     phone: "",
     businessName: "Analytical Engines",
     city: "Carrollton",
+    state: "VA",
     businessStage: "Prototype or testing",
     businessStageOther: "",
+    opportunityType: "starting_a_new_business",
     businessDescription: "We help local makers test a first product.",
     pitchTopic: "A workshop kit for first customers.",
     progress: "",

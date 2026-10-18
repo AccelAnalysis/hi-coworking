@@ -2,9 +2,10 @@
  * Power NOW interest page contract.
  *
  * Three short forms share the Accel intake function. Path is allow-listed.
- * Until Jonathan approves new Attio attributes and lists, submissions are
- * stored as description tags plus one note. Consent wording lives here so
- * the page and the Attio record show the same sentence.
+ * Pitch city, state, stage, and opportunity are stored on the note and the
+ * description tag. The Pitch Competition list entry gets them only when
+ * those attributes already exist. This code does not create Attio attributes.
+ * Consent wording lives here so the page and the Attio record show the same sentence.
  */
 
 import {
@@ -12,6 +13,12 @@ import {
   normalizePhone,
   splitPersonName,
 } from "./nasaLeadModel";
+import {
+  pitchDescriptionTokens,
+  resolveBusinessStage,
+  resolveOpportunity,
+  resolveUsState,
+} from "./powerNowPitchFields";
 
 export const POWER_NOW_FORM = "power-now";
 export const POWER_NOW_SOURCE = "power-now-interest-page";
@@ -31,7 +38,6 @@ export const PITCH_COMPETITION_LIST = {
   parentObject: "companies",
 } as const;
 
-export const BUSINESS_STAGES = ["Idea", "Prototype or testing", "Early revenue", "Other"] as const;
 export const HEARD_ABOUT_OPTIONS = [
   "LinkedIn",
   "Email",
@@ -141,7 +147,15 @@ export type NormalizedPowerNow = {
   path: PowerNowPath;
   fullName: string;
   firstName: string;
+  lastName: string;
   email: string;
+  city: string | null;
+  stateCode: string | null;
+  stateName: string | null;
+  businessStage: string | null;
+  businessStageLabel: string | null;
+  opportunityType: string | null;
+  opportunityLabel: string | null;
   phoneOriginal: string | null;
   phoneE164: string | null;
   phoneDigits: string | null;
@@ -217,6 +231,14 @@ export function buildPowerNowDescriptionTag(
     lead.referrerPath ? `ref:${lead.referrerPath}` : null,
     lead.capturedAtEt,
     `sub:${lead.clientSubmissionId}`,
+    ...(lead.path === "pitch" && lead.city && lead.stateCode && lead.businessStage && lead.opportunityType
+      ? pitchDescriptionTokens({
+          city: lead.city,
+          stateCode: lead.stateCode,
+          businessStage: lead.businessStage,
+          opportunityType: lead.opportunityType,
+        })
+      : []),
   ].filter((part): part is string => Boolean(part));
   return `[${parts.join(" | ")}]`;
 }
@@ -320,14 +342,15 @@ export function validatePowerNowPayload(
     return { ok: false, error: fields.path, fields };
   }
 
-  const fullName = cleanLine(body.fullName);
   const email = cleanLine(body.email).toLowerCase();
   const phoneRaw = cleanLine(body.phone);
   const businessName = cleanLine(body.businessName);
   const company = cleanLine(body.company);
   const city = cleanLine(body.city);
-  const stage = cleanLine(body.businessStage);
+  const stateRaw = cleanLine(body.state);
+  const stageRaw = cleanLine(body.businessStage);
   const stageOther = cleanLine(body.businessStageOther);
+  const opportunityRaw = cleanLine(body.opportunityType);
   const businessDescription = cleanMultiline(body.businessDescription);
   const pitchTopic = cleanMultiline(body.pitchTopic);
   const progress = cleanMultiline(body.progress);
@@ -341,7 +364,10 @@ export function validatePowerNowPayload(
   const consentFlags = readConsentFlags(body.consent);
   const channels = POWER_NOW_CHANNELS[path] as readonly PowerNowChannel[];
 
-  if (!fullName || fullName.length > 120) fields.name = "Please add your name.";
+  const pitchName = path === "pitch" ? resolvePitchName(body) : null;
+  const legacyName = pitchName ? null : splitPersonName(cleanLine(body.fullName));
+  if (pitchName) Object.assign(fields, pitchName.errors);
+  else if (!legacyName?.full_name || legacyName.full_name.length > 120) fields.name = "Please add your name.";
   if (!email || email.length > 200 || !EMAIL_PATTERN.test(email)) fields.email = "Please add your email.";
 
   const phoneProvided = phoneRaw.length > 0;
@@ -350,11 +376,16 @@ export function validatePowerNowPayload(
     fields.phone = "Please add your phone.";
   }
 
+  const stage = path === "pitch" ? resolveBusinessStage(stageRaw) : null;
+  const state = path === "pitch" ? resolveUsState(stateRaw) : null;
+  const opportunity = path === "pitch" ? resolveOpportunity(opportunityRaw) : null;
   if (path === "pitch") {
     if (!businessName || businessName.length > 160) fields.business = "Please add your business name.";
-    if (!city || city.length > 120) fields.city = "Please add your city or county.";
-    if (!isChoice(stage, BUSINESS_STAGES)) fields.stage = "Please add your business stage.";
-    else if (stage === "Other" && (!stageOther || stageOther.length > 80)) fields.stage = "Please add your business stage.";
+    if (!city || city.length > 80) fields.city = "Please add your city.";
+    if (!state) fields.state = "Please add your state.";
+    if (!stage) fields.stage = "Please add your business stage.";
+    else if (stageOther.length > 80) fields.stage = "Please shorten your business stage.";
+    if (!opportunity) fields.opportunity = "Please add the opportunity you are pitching.";
     if (!businessDescription || businessDescription.length > 600) {
       fields.does = businessDescription.length > 600
         ? "Please shorten your answer about what your business does to 600 characters."
@@ -425,13 +456,22 @@ export function validatePowerNowPayload(
   const createCompany = path === "watch" ? company.length > 0 : path === "contribute" || !unnamedBusiness;
   const companyName = createCompany ? namedCompany : null;
   const heardValue = formatChoice(heard, heardOther);
-  const stageValue = stage === "Other" ? `Other: ${stageOther}` : stage;
+  const stageLabel = stage
+    ? stage.value === "other" && stageOther
+      ? `Other: ${stageOther}`
+      : stage.label
+    : "";
+  const firstName = pitchName?.firstName ?? legacyName?.first_name ?? "";
+  const lastName = pitchName?.lastName ?? legacyName?.last_name ?? "";
+  const fullName = pitchName?.fullName ?? legacyName?.full_name ?? "";
 
   const answers = answersForPath(path, {
     businessName,
     company,
     city,
-    stageValue,
+    stateName: state?.name ?? "",
+    stageLabel,
+    opportunityLabel: opportunity?.label ?? "",
     businessDescription,
     pitchTopic,
     progress,
@@ -442,12 +482,19 @@ export function validatePowerNowPayload(
     website,
   });
 
-  const name = splitPersonName(fullName);
   const leadWithoutTag: Omit<NormalizedPowerNow, "descriptionTag"> = {
     path,
-    fullName: name.full_name,
-    firstName: name.first_name,
+    fullName,
+    firstName,
+    lastName,
     email,
+    city: path === "pitch" ? city : null,
+    stateCode: state?.code ?? null,
+    stateName: state?.name ?? null,
+    businessStage: stage?.value ?? null,
+    businessStageLabel: stage?.label ?? null,
+    opportunityType: opportunity?.value ?? null,
+    opportunityLabel: opportunity?.label ?? null,
     phoneOriginal,
     phoneE164: phone?.e164 ?? null,
     phoneDigits: phone?.digits ?? null,
@@ -479,13 +526,47 @@ export function validatePowerNowPayload(
   };
 }
 
+function resolvePitchName(body: Record<string, unknown>): {
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  errors: PowerNowFieldErrors;
+} {
+  const errors: PowerNowFieldErrors = {};
+  const sentSplit = typeof body.firstName === "string" || typeof body.lastName === "string";
+  if (sentSplit) {
+    const firstName = cleanLine(body.firstName);
+    const lastName = cleanLine(body.lastName);
+    if (!firstName || firstName.length > 60) errors.firstName = "Please add your first name.";
+    if (!lastName || lastName.length > 60) errors.lastName = "Please add your last name.";
+    return {
+      firstName,
+      lastName,
+      fullName: [firstName, lastName].filter(Boolean).join(" "),
+      errors,
+    };
+  }
+  const parsed = splitPersonName(cleanLine(body.fullName));
+  if (!parsed.first_name || !parsed.last_name || parsed.full_name.length > 120) {
+    errors.name = "Please add your first and last name.";
+  }
+  return {
+    firstName: parsed.first_name,
+    lastName: parsed.last_name,
+    fullName: parsed.full_name,
+    errors,
+  };
+}
+
 function answersForPath(
   path: PowerNowPath,
   input: {
     businessName: string;
     company: string;
     city: string;
-    stageValue: string;
+    stateName: string;
+    stageLabel: string;
+    opportunityLabel: string;
     businessDescription: string;
     pitchTopic: string;
     progress: string;
@@ -499,8 +580,10 @@ function answersForPath(
   if (path === "pitch") {
     return [
       { label: "Business name", value: input.businessName },
-      { label: "City or county", value: input.city },
-      { label: "Business stage", value: input.stageValue },
+      { label: "City", value: input.city },
+      { label: "State", value: input.stateName },
+      { label: "Business stage", value: input.stageLabel },
+      { label: "What best describes the opportunity you are pitching?", value: input.opportunityLabel },
       { label: "What does your business do, and what problem does it solve?", value: input.businessDescription },
       { label: "What would you pitch?", value: input.pitchTopic },
       { label: "What progress have you made so far?", value: input.progress || "not given" },

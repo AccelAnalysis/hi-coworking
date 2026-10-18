@@ -1,5 +1,4 @@
 export {
-  BUSINESS_STAGES,
   HEARD_ABOUT_OPTIONS,
   OFFER_TYPES,
   PITCH_COMPETITION_LIST,
@@ -19,6 +18,14 @@ export {
   validatePowerNowPayload,
   watchUpdatePhrase,
 } from "../../../functions/src/expo/powerNowModel";
+
+export {
+  BUSINESS_STAGE_INTRO,
+  BUSINESS_STAGE_OPTIONS,
+  OPPORTUNITY_OPTIONS,
+  OPPORTUNITY_QUESTION,
+  US_STATE_OPTIONS,
+} from "../../../functions/src/expo/powerNowPitchFields";
 
 export type {
   NormalizedPowerNow,

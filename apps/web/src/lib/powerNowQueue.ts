@@ -8,12 +8,16 @@ export type PowerNowSubmission = {
   form: "power-now";
   path: "pitch" | "watch" | "contribute";
   fullName: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone: string;
   businessName: string;
   company: string;
   city: string;
+  state?: string;
   businessStage: string;
+  opportunityType?: string;
   businessStageOther: string;
   businessDescription: string;
   pitchTopic: string;

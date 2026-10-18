@@ -2,9 +2,13 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  BUSINESS_STAGES,
+  BUSINESS_STAGE_INTRO,
+  BUSINESS_STAGE_OPTIONS,
   HEARD_ABOUT_OPTIONS,
   OFFER_TYPES,
+  OPPORTUNITY_OPTIONS,
+  OPPORTUNITY_QUESTION,
+  US_STATE_OPTIONS,
   POWER_NOW_CHANNELS,
   POWER_NOW_CONSENT_CATALOG,
   POWER_NOW_FORM,
@@ -35,13 +39,15 @@ const QUESTIONS = (
 );
 
 type PitchDraft = {
-  name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   business: string;
   city: string;
+  state: string;
   stage: string;
-  stageOther: string;
+  opportunity: string;
   does: string;
   pitch: string;
   progress: string;
@@ -78,13 +84,15 @@ type ContributeDraft = {
 };
 
 const EMPTY_PITCH: PitchDraft = {
-  name: "",
+  firstName: "",
+  lastName: "",
   email: "",
   phone: "",
   business: "",
   city: "",
+  state: "",
   stage: "",
-  stageOther: "",
+  opportunity: "",
   does: "",
   pitch: "",
   progress: "",
@@ -173,7 +181,7 @@ export function PowerNowPage() {
       const query = params.toString();
       window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
     }
-    const path = fromQuery ?? resolvePowerNowPath(window.location.pathname, "");
+    const path = fromQuery ?? resolvePowerNowPath(window.location.pathname, window.location.search);
     if (path) {
       setActive(path);
       window.setTimeout(() => scrollToPath(path), 0);
@@ -409,13 +417,16 @@ export function PowerNowPage() {
               onTryAgain={() => void tryAgain()}
               onSubmit={(event) => {
                 const payload = basePayload("pitch", {
-                  fullName: pitch.name,
+                  fullName: `${pitch.firstName} ${pitch.lastName}`.trim(),
+                  firstName: pitch.firstName,
+                  lastName: pitch.lastName,
                   email: pitch.email,
                   phone: pitch.phone,
                   businessName: pitch.business,
                   city: pitch.city,
+                  state: pitch.state,
                   businessStage: pitch.stage,
-                  businessStageOther: pitch.stageOther,
+                  opportunityType: pitch.opportunity,
                   businessDescription: pitch.does,
                   pitchTopic: pitch.pitch,
                   progress: pitch.progress,
@@ -547,35 +558,40 @@ function PitchPanel(props: PanelProps<PitchDraft>) {
   return (
     <PanelShell {...props} title="Apply to pitch" submitLabel="Send my pitch interest">
       <p className="pn-req">Fields marked * are required. Please don’t include confidential information.</p>
-      <TextField id="p-name" field="name" label="Your name *" help="First and last name." autoComplete="name" value={draft.name} error={props.errors.name} onChange={(name) => setDraft({ ...draft, name })} />
-      <TextField id="p-email" field="email" label="Email *" help="We’ll use this to set up your conversation." type="email" autoComplete="email" value={draft.email} error={props.errors.email} onChange={(email) => setDraft({ ...draft, email })} />
-      <TextField id="p-phone" field="phone" label="Phone" help="Optional. Required if you check text or phone below." type="tel" autoComplete="tel" value={draft.phone} error={props.errors.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
-      <TextField id="p-business" field="business" label="Business name *" help={'If you haven’t named it yet, write “Not named yet.”'} autoComplete="organization" value={draft.business} error={props.errors.business} onChange={(business) => setDraft({ ...draft, business })} />
-      <TextField id="p-city" field="city" label="City or county *" help="Where your business is based." value={draft.city} error={props.errors.city} onChange={(city) => setDraft({ ...draft, city })} />
-      <fieldset className={props.errors.stage ? "pn-choice-field pn-field-error" : "pn-choice-field"} data-field="stage">
-        <legend id="p-stage-label">Business stage *</legend>
-        <span className="pn-help">Pick the closest fit.</span>
-        <div className="pn-choices" role="radiogroup" aria-labelledby="p-stage-label">
-          {BUSINESS_STAGES.map((stage) => (
-            <label className="pn-choice" key={stage}>
-              <input type="radio" name="pitch-stage" value={stage} checked={draft.stage === stage} onChange={() => setDraft({ ...draft, stage })} />
-              <span>
-                {stage}
-                {stage === "Other" && draft.stage === "Other" ? (
-                  <input
-                    className="pn-other"
-                    type="text"
-                    aria-label="Other business stage"
-                    value={draft.stageOther}
-                    onChange={(event) => setDraft({ ...draft, stageOther: event.target.value })}
-                  />
-                ) : null}
-              </span>
-            </label>
-          ))}
-        </div>
-        {props.errors.stage ? <span className="pn-err" role="alert">{props.errors.stage}</span> : null}
-      </fieldset>
+      <div className="pn-split">
+        <TextField id="p-first" field="firstName" name="given-name" label="First name *" autoComplete="given-name" autoCapitalize="words" value={draft.firstName} error={props.errors.firstName ?? props.errors.name} onChange={(firstName) => setDraft({ ...draft, firstName })} />
+        <TextField id="p-last" field="lastName" name="family-name" label="Last name *" autoComplete="family-name" autoCapitalize="words" value={draft.lastName} error={props.errors.lastName} onChange={(lastName) => setDraft({ ...draft, lastName })} />
+      </div>
+      <TextField id="p-email" field="email" name="email" label="Email *" help="We’ll use this to set up your conversation." type="email" autoComplete="email" value={draft.email} error={props.errors.email} onChange={(email) => setDraft({ ...draft, email })} />
+      <TextField id="p-phone" field="phone" name="tel" label="Phone" help="Optional. Required if you check text or phone below." type="tel" autoComplete="tel" value={draft.phone} error={props.errors.phone} onChange={(phone) => setDraft({ ...draft, phone })} />
+      <TextField id="p-business" field="business" name="organization" label="Business name *" help={'If you haven’t named it yet, write “Not named yet.”'} autoComplete="organization" value={draft.business} error={props.errors.business} onChange={(business) => setDraft({ ...draft, business })} />
+      <div className="pn-split">
+        <TextField id="p-city" field="city" name="address-level2" label="City *" help="Where your business is based." autoComplete="address-level2" autoCapitalize="words" value={draft.city} error={props.errors.city} onChange={(city) => setDraft({ ...draft, city })} />
+        <StateField value={draft.state} error={props.errors.state} onChange={(state) => setDraft({ ...draft, state })} />
+      </div>
+      <ChoiceCards
+        field="stage"
+        legendId="p-stage-label"
+        legend="Business stage"
+        required
+        help={BUSINESS_STAGE_INTRO}
+        name="pitch-stage"
+        options={BUSINESS_STAGE_OPTIONS}
+        value={draft.stage}
+        error={props.errors.stage}
+        onChange={(stage) => setDraft({ ...draft, stage })}
+      />
+      <ChoiceCards
+        field="opportunity"
+        legendId="p-opportunity-label"
+        legend={OPPORTUNITY_QUESTION}
+        required
+        name="pitch-opportunity"
+        options={OPPORTUNITY_OPTIONS}
+        value={draft.opportunity}
+        error={props.errors.opportunity}
+        onChange={(opportunity) => setDraft({ ...draft, opportunity })}
+      />
       <LongField id="p-does" field="does" label="What does your business do, and what problem does it solve? *" help="A few sentences in plain words." value={draft.does} error={props.errors.does} onChange={(does) => setDraft({ ...draft, does })} />
       <LongField id="p-pitch" field="pitch" label="What would you pitch? *" help="The idea, product, or next step you’d present." value={draft.pitch} error={props.errors.pitch} onChange={(value) => setDraft({ ...draft, pitch: value })} />
       <LongField id="p-progress" field="progress" label="What progress have you made so far?" help="For example, customer conversations, a prototype, a pilot, or first sales." value={draft.progress} error={props.errors.progress} onChange={(progress) => setDraft({ ...draft, progress })} />
@@ -771,6 +787,8 @@ function TextField({
   onChange,
   type = "text",
   autoComplete,
+  autoCapitalize,
+  name,
 }: {
   id: string;
   field: string;
@@ -781,24 +799,120 @@ function TextField({
   onChange: (value: string) => void;
   type?: "text" | "email" | "tel" | "url";
   autoComplete?: string;
+  autoCapitalize?: "words" | "none";
+  name?: string;
 }) {
   const helpId = `${id}-help`;
   const errorId = `${id}-error`;
+  const required = label.includes("*");
   return (
     <div className={error ? "pn-field pn-field-error" : "pn-field"} data-field={field}>
       <label htmlFor={id}>{label}</label>
       {help ? <span className="pn-help" id={helpId}>{help}</span> : null}
       <input
         id={id}
+        name={name}
         type={type}
         autoComplete={autoComplete}
+        autoCapitalize={autoCapitalize}
         value={value}
+        aria-required={required || undefined}
         aria-invalid={error ? true : undefined}
         aria-describedby={[help ? helpId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
       {error ? <span className="pn-err" id={errorId} role="alert">{error}</span> : null}
     </div>
+  );
+}
+
+function StateField({
+  value,
+  error,
+  onChange,
+}: {
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  const helpId = "p-state-help";
+  const errorId = "p-state-error";
+  return (
+    <div className={error ? "pn-field pn-field-error" : "pn-field"} data-field="state">
+      <label htmlFor="p-state">State *</label>
+      <span className="pn-help" id={helpId}>U.S. state, D.C., or territory.</span>
+      <select
+        id="p-state"
+        name="address-level1"
+        autoComplete="address-level1"
+        value={value}
+        aria-required="true"
+        aria-invalid={error ? true : undefined}
+        aria-describedby={[helpId, error ? errorId : null].filter(Boolean).join(" ")}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Choose a state</option>
+        {US_STATE_OPTIONS.map((state) => (
+          <option key={state.code} value={state.code}>{state.name}</option>
+        ))}
+      </select>
+      {error ? <span className="pn-err" id={errorId} role="alert">{error}</span> : null}
+    </div>
+  );
+}
+
+function ChoiceCards({
+  field,
+  legendId,
+  legend,
+  required = false,
+  help,
+  name,
+  options,
+  value,
+  error,
+  onChange,
+}: {
+  field: string;
+  legendId: string;
+  legend: string;
+  required?: boolean;
+  help?: string;
+  name: string;
+  options: readonly { value: string; label: string; helper?: string }[];
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  const helpId = help ? `${field}-help` : undefined;
+  const errorId = `${field}-error`;
+  return (
+    <fieldset className={error ? "pn-choice-field pn-field-error" : "pn-choice-field"} data-field={field}>
+      <legend id={legendId}>
+        {legend}
+        {required ? <span className="pn-req-mark"> *</span> : null}
+      </legend>
+      {help ? <span className="pn-help" id={helpId}>{help}</span> : null}
+      <div
+        className="pn-choices"
+        role="radiogroup"
+        aria-labelledby={legendId}
+        aria-describedby={[helpId, error ? errorId : null].filter(Boolean).join(" ") || undefined}
+        aria-required={required || undefined}
+        aria-invalid={error ? true : undefined}
+      >
+        {options.map((option) => (
+          <label className={value === option.value ? "pn-choice pn-choice-card pn-choice-on" : "pn-choice pn-choice-card"} key={option.value}>
+            <input type="radio" name={name} value={option.value} checked={value === option.value} onChange={() => onChange(option.value)} />
+            <span>
+              <span className="pn-choice-label">{option.label}</span>
+              {option.helper ? <span className="pn-choice-help">{option.helper}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+      {error ? <span className="pn-err" id={errorId} role="alert">{error}</span> : null}
+    </fieldset>
   );
 }
 
@@ -948,12 +1062,16 @@ function basePayload(path: PowerNowPath, fields: Partial<PowerNowSubmission> & P
     form: POWER_NOW_FORM,
     path,
     fullName: fields.fullName,
+    firstName: fields.firstName,
+    lastName: fields.lastName,
     email: fields.email,
     phone: fields.phone ?? "",
     businessName: fields.businessName ?? "",
     company: fields.company ?? "",
     city: fields.city ?? "",
+    state: fields.state,
     businessStage: fields.businessStage ?? "",
+    opportunityType: fields.opportunityType,
     businessStageOther: fields.businessStageOther ?? "",
     businessDescription: fields.businessDescription ?? "",
     pitchTopic: fields.pitchTopic ?? "",

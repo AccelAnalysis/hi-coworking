@@ -13,7 +13,6 @@ import {
   companyNameKey,
   mergeDescription,
   normalizePhone,
-  splitPersonName,
 } from "./nasaLeadModel";
 import {
   confirmationEmailEnabled,
@@ -36,6 +35,11 @@ import {
   type NormalizedPowerNow,
   type PowerNowConsentRecord,
 } from "./powerNowModel";
+import {
+  pitchListEntryValues,
+  readPitchListAttributes,
+  type PitchListAttribute,
+} from "./powerNowPitchFields";
 
 const ATTIO_BASE = "https://api.attio.com/v2";
 const POWER_NOW_RATE_LIMIT = 8;
@@ -223,7 +227,7 @@ export async function ingestPowerNow(
   if (!personRecordId) throw new PowerNowAttioError(502, "Attio did not return a person id");
 
   const listStatus = lead.path === "pitch" && company.id
-    ? await addCompanyToPitchList(fetchImpl, apiKey, company.id)
+    ? await addCompanyToPitchList(fetchImpl, apiKey, company.id, lead)
     : lead.path === "pitch"
       ? "skipped"
       : "not_applicable";
@@ -380,7 +384,11 @@ function personValues(
   existing: AttioRecord | null,
   promoteSubmittedEmail = false,
 ): Record<string, unknown> {
-  const name = splitPersonName(lead.fullName);
+  const name = {
+    first_name: lead.firstName,
+    last_name: lead.lastName,
+    full_name: lead.fullName,
+  };
   const emails: Array<{ email_address: string }> = [{ email_address: lead.email }];
   if (promoteSubmittedEmail && existing) {
     const seen = new Set([lead.email.toLowerCase()]);
@@ -428,15 +436,34 @@ async function addCompanyToPitchList(
   fetchImpl: FetchLike,
   apiKey: string,
   companyId: string,
+  lead: NormalizedPowerNow,
 ): Promise<"added" | "already_listed" | "skipped"> {
+  const entryValues = pitchListEntryValues(lead, await loadPitchListAttributes(fetchImpl, apiKey));
+  let existingEntryId: string | null = null;
   try {
     const listed = await attio(fetchImpl, apiKey, "GET", `/objects/companies/records/${companyId}/entries`);
     const entries = Array.isArray(listed.data) ? listed.data : [];
-    const already = entries.some((entry) => {
+    const already = entries.find((entry) => {
       const record = entry as { list_api_slug?: string; list_id?: string };
       return record.list_api_slug === PITCH_COMPETITION_LIST.apiSlug || record.list_id === PITCH_COMPETITION_LIST.listId;
     });
-    if (already) return "already_listed";
+    if (already) existingEntryId = entryIdFrom(already);
+    if (already && !existingEntryId) return "already_listed";
+    if (existingEntryId) {
+      if (Object.keys(entryValues).length > 0) {
+        try {
+          await attio(fetchImpl, apiKey, "PATCH", `/lists/${PITCH_COMPETITION_LIST.apiSlug}/entries/${existingEntryId}`, {
+            data: { entry_values: entryValues },
+          });
+        } catch (error) {
+          const status = error instanceof PowerNowAttioError ? error.status : 0;
+          console.warn(
+            `Power NOW pitch list entry ${existingEntryId} was not updated. HTTP ${status}. The submission was saved.`,
+          );
+        }
+      }
+      return "already_listed";
+    }
   } catch (error) {
     if (error instanceof PowerNowAttioError && error.status >= 500) throw error;
   }
@@ -446,7 +473,7 @@ async function addCompanyToPitchList(
       data: {
         parent_record_id: companyId,
         parent_object: PITCH_COMPETITION_LIST.parentObject,
-        entry_values: {},
+        entry_values: entryValues,
       },
     });
     return "added";
@@ -578,6 +605,36 @@ function warnFollowUpTaskSkipped(error: PowerNowAttioError): void {
   console.warn(
     `Power NOW follow-up task was not created. Attio error code: ${code}. HTTP ${error.status}. The submission was saved.${scopeHint}`,
   );
+}
+
+async function loadPitchListAttributes(
+  fetchImpl: FetchLike,
+  apiKey: string,
+): Promise<PitchListAttribute[]> {
+  try {
+    const listed = await attio(
+      fetchImpl,
+      apiKey,
+      "GET",
+      `/lists/${PITCH_COMPETITION_LIST.apiSlug}/attributes`,
+    );
+    return readPitchListAttributes(listed.data);
+  } catch (error) {
+    const status = error instanceof PowerNowAttioError ? error.status : 0;
+    console.warn(
+      `Power NOW pitch list attributes were not readable. City, state, stage, and opportunity stay on the note. HTTP ${status}.`,
+    );
+    return [];
+  }
+}
+
+function entryIdFrom(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object") return null;
+  const id = (entry as { id?: { entry_id?: unknown } | string; entry_id?: unknown }).id;
+  if (typeof id === "string" && id.trim()) return id.trim();
+  if (id && typeof id === "object" && typeof id.entry_id === "string" && id.entry_id.trim()) return id.entry_id.trim();
+  const direct = (entry as { entry_id?: unknown }).entry_id;
+  return typeof direct === "string" && direct.trim() ? direct.trim() : null;
 }
 
 function taskIdFrom(data: unknown): string | null {
