@@ -30,6 +30,7 @@ type MockState = {
   entries: Array<{ parent: string; slug: string; listId: string; parentObject: string; entryValues: unknown }>;
   tasks: Array<{ id: string; content: string; linked: unknown; assignees?: unknown }>;
   calls: string[];
+  listAttributes?: Array<{ api_slug: string; type: string; is_writable?: boolean; is_archived?: boolean }>;
   failAssignee?: boolean;
   failTaskCreate?: { status: number; code?: string; message?: string };
   sequence: number;
@@ -68,6 +69,9 @@ function createAttio(state: MockState): typeof fetch {
       }
       person.values = body?.data?.values ?? {};
       return json(200, { data: toApi(person) });
+    }
+    if (method === "GET" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/attributes`) {
+      return json(200, { data: state.listAttributes ?? [] });
     }
     const companyEntries = url.pathname.match(/^\/v2\/objects\/companies\/records\/([^/]+)\/entries$/);
     if (companyEntries && method === "GET") {
@@ -144,12 +148,16 @@ function pitchBody(overrides: Record<string, unknown> = {}) {
   return {
     form: "power-now",
     path: "pitch",
+    firstName: "Ada",
+    lastName: "Lovelace",
     fullName: "Ada Lovelace",
     email: "ada@example.com",
     phone: "",
     businessName: "Analytical Engines",
     city: "Carrollton",
-    businessStage: "Prototype or testing",
+    state: "VA",
+    businessStage: "development_testing",
+    opportunityType: "growing_an_existing_business",
     businessStageOther: "",
     businessDescription: "We help local makers test a first product.",
     pitchTopic: "A workshop kit for first customers.",
@@ -393,6 +401,13 @@ describe("Power NOW Attio payload mapping", () => {
     expect(text(person!, "description")).toContain("ref:/updates");
     expect(text(person!, "description")).toContain(CAPTURED_AT_ET);
     expect(text(person!, "description")).toContain(`sub:${PITCH_ID}`);
+    expect(text(person!, "description")).toContain("city:Carrollton");
+    expect(text(person!, "description")).toContain("state:VA");
+    expect(text(person!, "description")).toContain("stage:development_testing");
+    expect(text(person!, "description")).toContain("opportunity:growing_an_existing_business");
+    expect(person?.values.name).toEqual([
+      { first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" },
+    ]);
     expect(person?.values.company).toEqual([
       { target_object: "companies", target_record_id: state.companies[0]?.id },
     ]);
@@ -413,7 +428,12 @@ describe("Power NOW Attio payload mapping", () => {
     expect(personNote?.title).toBe(`Power NOW pitch interest ${CAPTURED_AT_ET}`);
     expect(companyNote?.title).toBe(personNote?.title);
     expect(companyNote?.content).toBe(personNote?.content);
+    expect(personNote?.content).toContain("City: Carrollton");
+    expect(personNote?.content).toContain("State: Virginia");
+    expect(personNote?.content).toContain("Business stage: Development / Testing");
+    expect(personNote?.content).toContain("What best describes the opportunity you are pitching?: Growing an existing business");
     expect(personNote?.content).toContain("What would you pitch?: A workshop kit for first customers.");
+    expect(state.calls.some((call) => call.startsWith("POST") && call.includes("/attributes"))).toBe(false);
     expect(POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID).toBe("2029a271-1072-4dd9-849e-6a32fdb71df5");
     expect(state.tasks).toHaveLength(1);
     expect(state.tasks[0]?.assignees).toEqual([jonathanAssignee()]);
@@ -426,6 +446,52 @@ describe("Power NOW Attio payload mapping", () => {
     expect(state.tasks[0]?.content).toContain("Company: Analytical Engines");
     expect(state.tasks[0]?.content).toContain(`https://app.attio.com/accel-analysis/person/${person?.id}/overview`);
     expect(logs[0]?.listStatus).toBe("added");
+  });
+
+  it("writes city, state, stage, and opportunity onto the pitch list only when those attributes exist", async () => {
+    const state = emptyState();
+    state.listAttributes = [
+      { api_slug: "entry_id", type: "text", is_writable: false },
+      { api_slug: "city", type: "text", is_writable: true },
+      { api_slug: "state", type: "select", is_writable: true },
+      { api_slug: "business_stage", type: "select", is_writable: true },
+      { api_slug: "opportunity_type", type: "text", is_writable: true },
+      { api_slug: "created_at", type: "timestamp", is_writable: false },
+    ];
+    const result = await submit(state, pitchBody());
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ listStatus: "added" });
+    expect(state.entries[0]?.entryValues).toEqual({
+      city: [{ value: "Carrollton" }],
+      state: [{ option: "Virginia" }],
+      business_stage: [{ option: "Development / Testing" }],
+      opportunity_type: [{ value: "growing_an_existing_business" }],
+    });
+    expect(state.calls.filter((call) => call.includes("/attributes"))).toEqual([
+      "GET /v2/lists/pitch_competition/attributes",
+    ]);
+  });
+
+  it("maps a legacy pitch stage and a full name from an older client", async () => {
+    const state = emptyState();
+    const result = await submit(state, pitchBody({
+      firstName: undefined,
+      lastName: undefined,
+      fullName: "Ada Lovelace",
+      businessStage: "Prototype or testing",
+      state: "Virginia",
+      opportunityType: "other",
+    }));
+    expect(result.status).toBe(200);
+    expect(state.people[0]?.values.name).toEqual([
+      { first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" },
+    ]);
+    expect(text(state.people[0]!, "description")).toContain("stage:development_testing");
+    expect(text(state.people[0]!, "description")).toContain("state:VA");
+    expect(text(state.people[0]!, "description")).toContain("opportunity:other");
+    expect(state.notes[0]?.content).toContain("Business stage: Development / Testing");
+    expect(state.notes[0]?.content).toContain("State: Virginia");
+    expect(state.notes[0]?.content).toContain("What best describes the opportunity you are pitching?: Other");
   });
 
   it("skips the company when a pitcher has not named it, and does not open a pitch-list entry", async () => {
