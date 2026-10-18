@@ -331,6 +331,10 @@
   min-width: 0;
 }
 
+.pn-choice-field {
+  display: flow-root;
+}
+
 .pn-field > label,
 .pn-choice-field > legend {
   display: block;
@@ -339,6 +343,26 @@
   color: var(--midnight);
   margin-bottom: 4px;
   padding: 0;
+}
+
+/*
+  A wrapping legend is painted on the fieldset border and clips the second
+  line, which hid the required mark on the long opportunity question.
+  Float it to full width, the same way the consent intro stays visible.
+*/
+.pn-choice-field > legend {
+  float: left;
+  width: 100%;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.pn-choice-field > legend + * {
+  clear: left;
+}
+
+.pn-req-mark {
+  white-space: nowrap;
 }
 
 .pn-help {

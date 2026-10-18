@@ -61,6 +61,14 @@ describe("Power NOW pitch field validation", () => {
 
     expect(validatePowerNowPayload(pitch({ businessStage: "Idea / Concept" }), NOW).ok).toBe(false);
     expect(validatePowerNowPayload(pitch({ opportunityType: "Growing an existing business" }), NOW).ok).toBe(false);
+    expect(validatePowerNowPayload(pitch({ opportunityType: "" }), NOW)).toMatchObject({
+      ok: false,
+      fields: { opportunity: "Please add the opportunity you are pitching." },
+    });
+    expect(validatePowerNowPayload(pitch({ opportunityType: undefined }), NOW)).toMatchObject({
+      ok: false,
+      fields: { opportunity: "Please add the opportunity you are pitching." },
+    });
     expect(validatePowerNowPayload(pitch({ state: "Ontario" }), NOW).ok).toBe(false);
     expect(validatePowerNowPayload(pitch({ city: "" }), NOW).ok).toBe(false);
     expect(validatePowerNowPayload(pitch({ firstName: "Ada", lastName: "" }), NOW)).toMatchObject({

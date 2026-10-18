@@ -572,7 +572,8 @@ function PitchPanel(props: PanelProps<PitchDraft>) {
       <ChoiceCards
         field="stage"
         legendId="p-stage-label"
-        legend="Business stage *"
+        legend="Business stage"
+        required
         help={BUSINESS_STAGE_INTRO}
         name="pitch-stage"
         options={BUSINESS_STAGE_OPTIONS}
@@ -583,7 +584,8 @@ function PitchPanel(props: PanelProps<PitchDraft>) {
       <ChoiceCards
         field="opportunity"
         legendId="p-opportunity-label"
-        legend={`${OPPORTUNITY_QUESTION} *`}
+        legend={OPPORTUNITY_QUESTION}
+        required
         name="pitch-opportunity"
         options={OPPORTUNITY_OPTIONS}
         value={draft.opportunity}
@@ -863,6 +865,7 @@ function ChoiceCards({
   field,
   legendId,
   legend,
+  required = false,
   help,
   name,
   options,
@@ -873,6 +876,7 @@ function ChoiceCards({
   field: string;
   legendId: string;
   legend: string;
+  required?: boolean;
   help?: string;
   name: string;
   options: readonly { value: string; label: string; helper?: string }[];
@@ -884,14 +888,17 @@ function ChoiceCards({
   const errorId = `${field}-error`;
   return (
     <fieldset className={error ? "pn-choice-field pn-field-error" : "pn-choice-field"} data-field={field}>
-      <legend id={legendId}>{legend}</legend>
+      <legend id={legendId}>
+        {legend}
+        {required ? <span className="pn-req-mark"> *</span> : null}
+      </legend>
       {help ? <span className="pn-help" id={helpId}>{help}</span> : null}
       <div
         className="pn-choices"
         role="radiogroup"
         aria-labelledby={legendId}
         aria-describedby={[helpId, error ? errorId : null].filter(Boolean).join(" ") || undefined}
-        aria-required="true"
+        aria-required={required || undefined}
         aria-invalid={error ? true : undefined}
       >
         {options.map((option) => (
