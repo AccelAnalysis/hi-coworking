@@ -537,6 +537,60 @@ describe("Power NOW Attio payload mapping", () => {
     ]);
   });
 
+  it("keeps an existing company when a contributor submits a different business name", async () => {
+    const state = emptyState();
+    state.companies.push(
+      { id: "company-existing", values: { name: [{ value: "Prize Labs" }] } },
+      { id: "company-named", values: { name: [{ value: "Harbor Goods" }] } },
+    );
+    state.people.push({
+      id: "person-existing",
+      values: {
+        email_addresses: [{ email_address: "katherine@example.com" }],
+        name: [{ first_name: "Katherine", last_name: "Johnson", full_name: "Katherine Johnson" }],
+        description: [{ value: "Earlier contributor note" }],
+        company: [
+          {
+            target_object: "companies",
+            target_record_id: "company-retired",
+            active_until: "2020-01-01T00:00:00.000Z",
+          },
+          { target_object: "companies", target_record_id: "company-existing" },
+        ],
+      },
+    });
+
+    const result = await submit(state, contributeBody());
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      action: "updated",
+      path: "contribute",
+      companyStatus: "existing",
+      listStatus: "not_applicable",
+    });
+    expect(state.calls).not.toContain("POST /v2/objects/companies/records");
+    expect(state.calls).not.toContain("POST /v2/objects/companies/records/query");
+    expect(state.calls.filter((call) => call.includes("/v2/lists/"))).toEqual([]);
+    expect(state.entries).toHaveLength(0);
+    expect(state.companies.map((company) => company.id)).toEqual(["company-existing", "company-named"]);
+    expect(state.people[0]?.values.company).toEqual([
+      { target_object: "companies", target_record_id: "company-existing" },
+    ]);
+    const description = text(state.people[0]!, "description");
+    expect(description).toContain("Earlier contributor note");
+    expect(description).toContain("submitted-business:Harbor Goods");
+    expect(description).toContain("path:contribute");
+    const personNote = state.notes.find((note) => note.parentObject === "people");
+    expect(personNote?.content).toContain("Business name: Harbor Goods");
+    expect(state.tasks[0]?.linked).toEqual([
+      { target_object: "people", target_record_id: "person-existing" },
+      { target_object: "companies", target_record_id: "company-existing" },
+    ]);
+    expect(state.tasks[0]?.content).toContain("Company: Harbor Goods");
+  });
+
   it("links a submitted company when the person has no active company", async () => {
     const state = emptyState();
     state.people.push({

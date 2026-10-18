@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   EXPO_CONSENT_CATALOG,
@@ -32,6 +32,7 @@ type MockState = {
   calls: Array<{ method: string; path: string; body?: unknown; authorization?: string }>;
   listStatus: number;
   listMessage: string;
+  failPersonWrite?: { status: number; code?: string; message?: string };
 };
 
 function createAttio(state: MockState): typeof fetch {
@@ -77,6 +78,19 @@ function createAttio(state: MockState): typeof fetch {
     }
 
     if (method === "PUT" && url.pathname === "/v2/objects/people/records") {
+      if (state.failPersonWrite) {
+        return json(state.failPersonWrite.status, {
+          code: state.failPersonWrite.code,
+          message: state.failPersonWrite.message ?? "person write failed",
+        });
+      }
+      const companies = body?.data?.values?.company;
+      if (Array.isArray(companies) && companies.length > 1) {
+        return json(400, {
+          code: "validation_type",
+          message: "The company attribute is not multiselect.",
+        });
+      }
       const email = String(body?.data?.values?.email_addresses?.[0]?.email_address ?? "").toLowerCase();
       let person = state.people.find((item) => emails(item).includes(email));
       if (!person) {
@@ -96,6 +110,19 @@ function createAttio(state: MockState): typeof fetch {
 
     const personPath = url.pathname.match(/^\/v2\/objects\/people\/records\/([^/]+)$/);
     if (personPath && method === "PATCH") {
+      if (state.failPersonWrite) {
+        return json(state.failPersonWrite.status, {
+          code: state.failPersonWrite.code,
+          message: state.failPersonWrite.message ?? "person write failed",
+        });
+      }
+      const companies = body?.data?.values?.company;
+      if (Array.isArray(companies) && companies.length > 1) {
+        return json(400, {
+          code: "validation_type",
+          message: "The company attribute is not multiselect.",
+        });
+      }
       const person = state.people.find((item) => item.id === personPath[1]);
       if (!person) return json(404, { message: "not found" });
       person.values = { ...person.values, ...(body?.data?.values ?? {}) };
@@ -291,6 +318,85 @@ describe("NASA expo lead capture", () => {
     expect(priyaNote).toContain("Hi Coworking Early Access: yes");
     expect(priyaNote).not.toContain("Wording:");
     expect(priyaNote).not.toContain(EXPO_CONSENT_CATALOG.phone.wording);
+  });
+
+  it("keeps an existing company when a booth visitor submits a different organization", async () => {
+    const state = emptyState();
+    state.companies.push(
+      { id: "company-existing", values: { name: [{ value: "Example Dynamics" }] } },
+      { id: "company-named", values: { name: [{ value: "Northstar Sub Co" }] } },
+    );
+    state.people.push({
+      id: "person-existing",
+      values: {
+        email_addresses: [{ email_address: "expo-fake-jordan@example.com" }],
+        name: [{ first_name: "Jordan", last_name: "Hale", full_name: "Jordan Hale" }],
+        description: [{ value: "Earlier booth note" }],
+        company: [
+          {
+            target_object: "companies",
+            target_record_id: "company-retired",
+            active_until: "2020-01-01T00:00:00.000Z",
+          },
+          { target_object: "companies", target_record_id: "company-existing" },
+        ],
+      },
+    });
+
+    const result = await submit(state, payload({ organization: "Northstar Sub Co" }));
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      action: "updated",
+      companyStatus: "existing",
+      noteStatus: "created",
+    });
+    expect(state.calls.some((call) => call.method === "POST" && call.path === "/v2/objects/companies/records")).toBe(false);
+    expect(state.calls.some((call) => call.method === "POST" && call.path === "/v2/objects/companies/records/query")).toBe(false);
+    expect(state.companies.map((company) => company.id)).toEqual(["company-existing", "company-named"]);
+    expect(state.people).toHaveLength(1);
+    expect(state.people[0]?.values.company).toEqual([
+      { target_object: "companies", target_record_id: "company-existing" },
+    ]);
+    const description = text(state.people[0], "description");
+    expect(description).toContain("Earlier booth note");
+    expect(description).toContain("submitted-org:Northstar Sub Co");
+    expect(state.notes).toHaveLength(1);
+    expect(state.notes[0]?.content).toContain("Organization: Northstar Sub Co");
+    expect(state.notes[0]?.content).toContain("Submitted organization: Northstar Sub Co");
+    expect(state.notes[0]?.parent).toBe("person-existing");
+  });
+
+  it("logs the Attio status, code, and message when a booth send fails", async () => {
+    const state = emptyState();
+    const recordId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    state.failPersonWrite = {
+      status: 400,
+      code: "validation_type",
+      message: `Invalid company for expo-fake-jordan@example.com on record ${recordId}. Call 202-555-0147.`,
+    };
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
+      errors.push(String(message));
+    });
+    try {
+      const result = await submit(state, payload());
+      expect(result.status).toBe(502);
+      expect(result.body).toEqual({ ok: false, error: "Attio could not save this lead yet." });
+      expect(JSON.stringify(result.body)).not.toContain("expo-fake-jordan@example.com");
+      const line = errors.find((message) => message.includes("Expo lead send failed"));
+      expect(line).toContain("HTTP 400");
+      expect(line).toContain("Attio error code: validation_type");
+      expect(line).toContain("Invalid company for [redacted]");
+      expect(line).toContain(recordId);
+      expect(line).not.toContain("expo-fake-jordan@example.com");
+      expect(line).not.toContain("202-555-0147");
+      expect(line).not.toContain("Example Dynamics");
+      expect(line).not.toContain("Jordan Hale");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("does not duplicate a note or description tag when the same submission retries", async () => {
