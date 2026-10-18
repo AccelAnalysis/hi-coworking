@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { validatePowerNowPayload } from "../../apps/functions/src/expo/powerNowModel";
 import {
@@ -61,6 +62,22 @@ describe("Power NOW pitch field validation", () => {
 
     expect(validatePowerNowPayload(pitch({ businessStage: "Idea / Concept" }), NOW).ok).toBe(false);
     expect(validatePowerNowPayload(pitch({ opportunityType: "Growing an existing business" }), NOW).ok).toBe(false);
+    const selected = validatePowerNowPayload(pitch({
+      state: "Virginia",
+      businessStage: "idea_concept",
+      opportunityType: "starting_a_new_business",
+    }), NOW);
+    expect(selected.ok).toBe(true);
+    if (selected.ok) {
+      expect(selected.lead).toMatchObject({
+        stateCode: "VA",
+        stateName: "Virginia",
+        businessStage: "idea_concept",
+        businessStageLabel: "Idea / Concept",
+        opportunityType: "starting_a_new_business",
+        opportunityLabel: "Starting a new business",
+      });
+    }
     expect(validatePowerNowPayload(pitch({ opportunityType: "" }), NOW)).toMatchObject({
       ok: false,
       fields: { opportunity: "Please add the opportunity you are pitching." },
@@ -144,6 +161,31 @@ describe("Power NOW pitch field validation", () => {
     for (const option of [...BUSINESS_STAGE_OPTIONS, ...OPPORTUNITY_OPTIONS]) {
       expect(option.value).toMatch(/^[a-z0-9_]+$/);
     }
+  });
+
+  it("accepts every stage and opportunity value the pitch cards submit", () => {
+    for (const stage of BUSINESS_STAGE_OPTIONS) {
+      for (const opportunity of OPPORTUNITY_OPTIONS) {
+        const result = validatePowerNowPayload(pitch({
+          state: "VA",
+          businessStage: stage.value,
+          opportunityType: opportunity.value,
+        }), NOW);
+        expect(result.ok, `${stage.label} / ${opportunity.label}`).toBe(true);
+        if (!result.ok) continue;
+        expect(result.lead.businessStageLabel, stage.label).toBe(stage.label);
+        expect(result.lead.opportunityLabel, opportunity.label).toBe(opportunity.label);
+        expect(result.lead.stateName).toBe("Virginia");
+      }
+    }
+
+    const page = readFileSync("apps/web/src/app/power-now/PowerNowPage.tsx", "utf8");
+    expect(page).toContain("businessStage: pitch.stage");
+    expect(page).toContain("opportunityType: pitch.opportunity");
+    expect(page).toContain("state: pitch.state");
+    expect(page).toContain("value={option.value}");
+    expect(page).toContain("onChange={() => onChange(option.value)}");
+    expect(page).toContain("value={state.code}");
   });
 
   it("writes pitch list values only for attributes that are present and writable", () => {
