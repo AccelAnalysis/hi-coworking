@@ -1,8 +1,14 @@
-import { POWER_NOW_SEND_ERROR } from "@/lib/powerNowLead";
-import type { PowerNowFieldErrors } from "@/lib/powerNowLead";
-import { decideLeadSubmitOutcome, EXPO_LEAD_ENDPOINT } from "@/lib/expoLeadQueue";
+import { EXPO_LEAD_ENDPOINT } from "./expoLeadQueue";
+import { POWER_NOW_SEND_ERROR } from "./powerNowLead";
+import type { PowerNowFieldErrors } from "./powerNowLead";
 
 export const POWER_NOW_QUEUED_MESSAGE = "Saved — will sync";
+
+export const POWER_NOW_UNREACHABLE_ERROR =
+  "We couldn’t reach the server. This device still looks online, so nothing is waiting to sync. Please try again, or email hello@accelanalysis.com.";
+
+/** Longer than the 60s function limit so the browser does not abort the request first. */
+export const POWER_NOW_POST_TIMEOUT_MS = 70_000;
 
 export type PowerNowSubmission = {
   form: "power-now";
@@ -127,34 +133,35 @@ export async function postPowerNow(payload: PowerNowSubmission): Promise<{
   error: string | null;
   fields?: PowerNowFieldErrors;
 }> {
-  const online = typeof navigator === "undefined" ? true : navigator.onLine;
-  if (!online) return { decision: "queue", error: "Offline" };
+  if (!browserOnline()) return { decision: "queue", error: "Offline" };
 
   try {
     const response = await fetch(EXPO_LEAD_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(payload),
-      signal: "timeout" in AbortSignal ? AbortSignal.timeout(20_000) : undefined,
+      signal: "timeout" in AbortSignal ? AbortSignal.timeout(POWER_NOW_POST_TIMEOUT_MS) : undefined,
     });
     const contentType = response.headers.get("content-type") ?? "";
     const body = contentType.includes("application/json")
       ? await response.json().catch(() => null) as { ok?: boolean; error?: string; fields?: PowerNowFieldErrors } | null
       : null;
     if (response.ok && body?.ok === true) return { decision: "saved", error: null };
-    if (response.ok) return { decision: "rejected", error: POWER_NOW_SEND_ERROR };
-    const decision = decideLeadSubmitOutcome({
-      online: true,
-      networkError: false,
-      httpStatus: response.status,
-    });
-    if (decision === "rejected" || response.status === 429) {
-      return { decision: "rejected", error: body?.error || POWER_NOW_SEND_ERROR, fields: body?.fields };
-    }
-    return { decision: "queue", error: body?.error || POWER_NOW_SEND_ERROR };
+    // Any HTTP answer, including 4xx and 5xx, means the server was reached.
+    // Field errors, rate limits, and send failures stay on the form.
+    return {
+      decision: "rejected",
+      error: body?.error || POWER_NOW_SEND_ERROR,
+      fields: body?.fields,
+    };
   } catch {
-    return { decision: "queue", error: POWER_NOW_SEND_ERROR };
+    if (!browserOnline()) return { decision: "queue", error: "Offline" };
+    return { decision: "rejected", error: POWER_NOW_UNREACHABLE_ERROR };
   }
+}
+
+function browserOnline(): boolean {
+  return typeof navigator === "undefined" ? true : navigator.onLine;
 }
 
 function readyToRetry(lead: QueuedPowerNow): boolean {

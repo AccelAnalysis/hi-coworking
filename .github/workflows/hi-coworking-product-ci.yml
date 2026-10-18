@@ -114,6 +114,7 @@ jobs:
           tests/functions/power-now-confirmation.test.ts
           tests/functions/power-now-interest.test.ts
           tests/functions/power-now-pitch-fields.test.ts
+          tests/functions/power-now-queue.test.ts
           tests/functions/expo-lead-deploy-workflow.test.ts
           tests/web/public-rfx-quarantine.test.ts
 
