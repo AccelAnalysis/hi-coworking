@@ -1,4 +1,10 @@
 import {
+  appendDescriptionToken,
+  logAttioSendFailure,
+  readActiveCompanyId,
+  singleCompanyValue,
+} from "./attioPersonCompany";
+import {
   companyNameKey,
   mergeDescription,
   normalizePhone,
@@ -14,11 +20,13 @@ const ATTIO_BASE = "https://api.attio.com/v2";
 
 export class AttioRequestError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "AttioRequestError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -55,12 +63,16 @@ export async function ingestNasaExpoLead(
 ): Promise<ExpoIngestResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiKey = options.apiKey;
-  const company = await findOrCreateCompany(fetchImpl, apiKey, lead);
   const existing = lead.email
     ? await findPersonByEmail(fetchImpl, apiKey, lead.email)
     : await findPersonByPhone(fetchImpl, apiKey, lead);
-
-  const values = personValues(lead, company.id, existing);
+  const keptCompanyId = readActiveCompanyId(existing);
+  // Assert a company only when it will be the person's one company record.
+  const company = keptCompanyId
+    ? { id: keptCompanyId, status: "existing" as const }
+    : await findOrCreateCompany(fetchImpl, apiKey, lead);
+  const submittedOrganization = keptCompanyId ? lead.organization : null;
+  const values = personValues(lead, company.id, existing, submittedOrganization);
   const person = lead.email
     ? await assertPersonByEmail(fetchImpl, apiKey, values)
     : existing
@@ -75,7 +87,10 @@ export async function ingestNasaExpoLead(
   const listStatus = lead.attioList
     ? await addPersonToExpoList(fetchImpl, apiKey, personRecordId, lead.attioList)
     : "skipped";
-  const noteStatus = await writeExpoNote(fetchImpl, apiKey, personRecordId, lead);
+  const notedLead = submittedOrganization
+    ? { ...lead, note: appendSubmittedOrganization(lead.note, submittedOrganization) }
+    : lead;
+  const noteStatus = await writeExpoNote(fetchImpl, apiKey, personRecordId, notedLead);
 
   return {
     ok: true,
@@ -201,6 +216,7 @@ export async function handleExpoLeadHttp(request: {
     if (error instanceof ExpoLeadError) {
       return { status: error.status, headers, body: { ok: false, error: error.message } };
     }
+    logAttioSendFailure("Expo lead", error);
     return {
       status: 502,
       headers,
@@ -288,13 +304,17 @@ function personValues(
   lead: NormalizedExpoLead,
   companyId: string | null,
   existing: AttioRecord | null,
+  submittedOrganization: string | null = null,
 ): Record<string, unknown> {
   const name = splitPersonName(lead.fullName);
+  const descriptionTag = submittedOrganization
+    ? appendDescriptionToken(lead.descriptionTag, "submitted-org", submittedOrganization)
+    : lead.descriptionTag;
   const values: Record<string, unknown> = {
     name: [name],
     job_title: [{ value: lead.roleTitle }],
     description: [{
-      value: mergeDescription(readText(existing, "description"), lead.descriptionTag, lead.clientSubmissionId),
+      value: mergeDescription(readText(existing, "description"), descriptionTag, lead.clientSubmissionId),
     }],
   };
 
@@ -305,10 +325,15 @@ function personValues(
   const phones = mergePhones(existing, lead);
   if (phones.length > 0) values.phone_numbers = phones;
 
-  const companies = mergeCompanies(existing, companyId);
-  if (companies.length > 0) values.company = companies;
+  if (companyId) values.company = singleCompanyValue(companyId);
 
   return values;
+}
+
+function appendSubmittedOrganization(note: string, organization: string): string {
+  const line = `Submitted organization: ${organization.trim()}`;
+  if (!organization.trim() || note.includes(line)) return note;
+  return `${note}\n${line}`;
 }
 
 async function assertPersonByEmail(
@@ -460,21 +485,6 @@ function mergePhones(existing: AttioRecord | null, lead: NormalizedExpoLead): Ar
   return phones;
 }
 
-function mergeCompanies(existing: AttioRecord | null, companyId: string | null): Array<Record<string, string>> {
-  const companies: Array<Record<string, string>> = [];
-  const seen = new Set<string>();
-  for (const value of activeValues(existing, "company")) {
-    const record = value as { target_record_id?: string };
-    if (!record.target_record_id || seen.has(record.target_record_id)) continue;
-    seen.add(record.target_record_id);
-    companies.push({ target_object: "companies", target_record_id: record.target_record_id });
-  }
-  if (companyId && !seen.has(companyId)) {
-    companies.push({ target_object: "companies", target_record_id: companyId });
-  }
-  return companies;
-}
-
 async function queryRecords(
   fetchImpl: FetchLike,
   apiKey: string,
@@ -506,16 +516,21 @@ async function attio(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
-  let json: { data?: AttioRecord; message?: string; code?: string } | null = null;
+  let json: { data?: AttioRecord; message?: string; code?: unknown } | null = null;
   if (text) {
     try {
-      json = JSON.parse(text) as { data?: AttioRecord; message?: string; code?: string };
+      json = JSON.parse(text) as { data?: AttioRecord; message?: string; code?: unknown };
     } catch {
       json = { message: text.slice(0, 300) };
     }
   }
   if (!response.ok) {
-    throw new AttioRequestError(response.status, json?.message || response.statusText || "Attio request failed");
+    const code = typeof json?.code === "string" && json.code.trim() ? json.code.trim() : null;
+    throw new AttioRequestError(
+      response.status,
+      json?.message || response.statusText || "Attio request failed",
+      code,
+    );
   }
   return (json ?? {}) as { data?: unknown };
 }

@@ -14,6 +14,12 @@
 
 import * as admin from "firebase-admin";
 import {
+  appendDescriptionToken,
+  logAttioSendFailure,
+  readActiveCompanyId,
+  singleCompanyValue,
+} from "./attioPersonCompany";
+import {
   companyNameKey,
   mergeDescription,
   normalizePhone,
@@ -206,33 +212,9 @@ export async function handlePowerNowHttp(request: {
       },
     };
   } catch (error) {
-    logPowerNowSendFailure(error);
+    logAttioSendFailure("Power NOW", error);
     return { status: 502, body: { ok: false, error: POWER_NOW_SEND_ERROR } };
   }
-}
-
-function logPowerNowSendFailure(error: unknown): void {
-  const attioError = error instanceof PowerNowAttioError ? error : null;
-  const status = attioError ? String(attioError.status) : "unknown";
-  const code = attioError?.code?.trim() || "none";
-  const raw = attioError?.message || (error instanceof Error ? error.message : "Attio request failed");
-  const message = redactPowerNowLog(raw).slice(0, 500);
-  console.error(`Power NOW send failed. HTTP ${status}. Attio error code: ${code}. ${message}`);
-}
-
-function redactPowerNowLog(message: string): string {
-  const recordIds: string[] = [];
-  const shielded = message.replace(
-    /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
-    (id) => {
-      recordIds.push(id);
-      return `@@${recordIds.length - 1}@@`;
-    },
-  );
-  const redacted = shielded
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted]")
-    .replace(/\+?\d[\d\s().-]{6,}\d/g, "[redacted]");
-  return redacted.replace(/@@(\d+)@@/g, (_, index: string) => recordIds[Number(index)] ?? "");
 }
 
 export async function ingestPowerNow(
@@ -249,7 +231,7 @@ export async function ingestPowerNow(
   const confirmationEnv = options.confirmation?.env ?? process.env;
   const sendConfirmation = confirmationEmailEnabled(confirmationEnv);
   const existing = await findPersonByEmail(fetchImpl, apiKey, lead.email);
-  const keptCompanyId = readCompanyId(existing);
+  const keptCompanyId = readActiveCompanyId(existing);
   // Assert a company only when it will be the person's one company record.
   const company = keptCompanyId
     ? { id: keptCompanyId, status: "existing" as const }
@@ -436,7 +418,7 @@ function personValues(
     }
   }
   const descriptionTag = submittedBusinessName
-    ? appendSubmittedBusiness(lead.descriptionTag, submittedBusinessName)
+    ? appendDescriptionToken(lead.descriptionTag, "submitted-business", submittedBusinessName)
     : lead.descriptionTag;
   const values: Record<string, unknown> = {
     name: [name],
@@ -449,17 +431,8 @@ function personValues(
     const phones = mergePhones(existing, lead);
     if (phones.length > 0) values.phone_numbers = phones;
   }
-  if (companyId) values.company = [{ target_object: "companies", target_record_id: companyId }];
+  if (companyId) values.company = singleCompanyValue(companyId);
   return values;
-}
-
-function appendSubmittedBusiness(tag: string, businessName: string): string {
-  const safe = businessName.replace(/[|[\]]/g, " ").replace(/\s+/g, " ").trim();
-  if (!safe) return tag;
-  const token = `submitted-business:${safe}`;
-  if (tag.includes(token)) return tag;
-  if (tag.endsWith("]")) return `${tag.slice(0, -1)} | ${token}]`;
-  return `${tag} | ${token}`;
 }
 
 async function assertPersonByEmail(
@@ -741,18 +714,6 @@ function mergePhones(existing: AttioRecord | null, lead: NormalizedPowerNow): Ar
     }
   }
   return phones;
-}
-
-function readCompanyId(record: AttioRecord | null): string | null {
-  const values = record?.values?.company;
-  if (!Array.isArray(values)) return null;
-  for (const value of values) {
-    if (!value || typeof value !== "object") continue;
-    if ((value as { active_until?: unknown }).active_until != null) continue;
-    const id = (value as { target_record_id?: unknown }).target_record_id;
-    if (typeof id === "string" && id.trim()) return id.trim();
-  }
-  return null;
 }
 
 async function queryRecords(
