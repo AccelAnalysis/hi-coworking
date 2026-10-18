@@ -2,7 +2,10 @@ name: Hi Coworking product CI
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      # Lets the stacked confirmation-email test PR run product CI before it is retargeted to main.
+      - cursor/power-now-confirm-email-e615
     paths:
       - "apps/functions/**"
       - "apps/web/**"
