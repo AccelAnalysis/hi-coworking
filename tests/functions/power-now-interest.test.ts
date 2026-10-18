@@ -33,6 +33,7 @@ type MockState = {
   listAttributes?: Array<{ api_slug: string; type: string; is_writable?: boolean; is_archived?: boolean }>;
   failAssignee?: boolean;
   failTaskCreate?: { status: number; code?: string; message?: string };
+  failPersonWrite?: { status: number; code?: string; message?: string };
   sequence: number;
 };
 
@@ -61,6 +62,19 @@ function createAttio(state: MockState): typeof fetch {
       return json(200, { data: matched.map(toApi) });
     }
     if (method === "PUT" && url.pathname === "/v2/objects/people/records") {
+      if (state.failPersonWrite) {
+        return json(state.failPersonWrite.status, {
+          code: state.failPersonWrite.code,
+          message: state.failPersonWrite.message ?? "person write failed",
+        });
+      }
+      const companies = body?.data?.values?.company;
+      if (Array.isArray(companies) && companies.length > 1) {
+        return json(400, {
+          code: "validation_type",
+          message: "The company attribute is not multiselect.",
+        });
+      }
       const email = String(body?.data?.values?.email_addresses?.[0]?.email_address ?? "").toLowerCase();
       let person = state.people.find((item) => emails(item).includes(email));
       if (!person) {
@@ -448,6 +462,108 @@ describe("Power NOW Attio payload mapping", () => {
     expect(logs[0]?.listStatus).toBe("added");
   });
 
+  it("keeps an existing company when a pitcher submits a different business name", async () => {
+    const state = emptyState();
+    state.listAttributes = [
+      { api_slug: "city", type: "text", is_writable: true },
+      { api_slug: "state", type: "select", is_writable: true },
+      { api_slug: "business_stage", type: "select", is_writable: true },
+      { api_slug: "opportunity_type", type: "select", is_writable: true },
+    ];
+    state.companies.push(
+      { id: "company-existing", values: { name: [{ value: "Ada Labs" }] } },
+      { id: "company-named", values: { name: [{ value: "Analytical Engines" }] } },
+    );
+    state.people.push({
+      id: "person-existing",
+      values: {
+        email_addresses: [{ email_address: "ada@example.com" }],
+        name: [{ first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" }],
+        description: [{ value: "Earlier note" }],
+        company: [
+          {
+            target_object: "companies",
+            target_record_id: "company-retired",
+            active_until: "2020-01-01T00:00:00.000Z",
+          },
+          { target_object: "companies", target_record_id: "company-existing" },
+        ],
+      },
+    });
+
+    const result = await submit(state, pitchBody());
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({
+      ok: true,
+      action: "updated",
+      companyStatus: "existing",
+      listStatus: "added",
+    });
+    expect(state.calls).not.toContain("POST /v2/objects/companies/records");
+    expect(state.calls).not.toContain("POST /v2/objects/companies/records/query");
+    expect(state.companies.map((company) => company.id)).toEqual(["company-existing", "company-named"]);
+    expect(state.people).toHaveLength(1);
+    expect(state.people[0]?.values.company).toEqual([
+      { target_object: "companies", target_record_id: "company-existing" },
+    ]);
+    const description = text(state.people[0]!, "description");
+    expect(description).toContain("Earlier note");
+    expect(description).toContain("submitted-business:Analytical Engines");
+    expect(description).toContain("city:Carrollton");
+    expect(description).toContain("state:VA");
+    expect(description).toContain("stage:development_testing");
+    expect(description).toContain("opportunity:growing_an_existing_business");
+    expect(state.entries).toEqual([
+      {
+        parent: "company-existing",
+        slug: "pitch_competition",
+        listId: PITCH_COMPETITION_LIST.listId,
+        parentObject: "companies",
+        entryValues: {
+          city: [{ value: "Carrollton" }],
+          state: [{ option: "Virginia" }],
+          business_stage: [{ option: "Development / Testing" }],
+          opportunity_type: [{ option: "Growing an existing business" }],
+        },
+      },
+    ]);
+    const companyNote = state.notes.find((note) => note.parentObject === "companies");
+    expect(companyNote?.parent).toBe("company-existing");
+    expect(companyNote?.content).toContain("Business name: Analytical Engines");
+    expect(state.tasks[0]?.linked).toEqual([
+      { target_object: "people", target_record_id: "person-existing" },
+      { target_object: "companies", target_record_id: "company-existing" },
+    ]);
+  });
+
+  it("links a submitted company when the person has no active company", async () => {
+    const state = emptyState();
+    state.people.push({
+      id: "person-existing",
+      values: {
+        email_addresses: [{ email_address: "ada@example.com" }],
+        company: [{
+          target_object: "companies",
+          target_record_id: "company-retired",
+          active_until: "2020-01-01T00:00:00.000Z",
+        }],
+      },
+    });
+
+    const result = await submit(state, pitchBody());
+
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ companyStatus: "created", listStatus: "added" });
+    expect(state.companies).toHaveLength(1);
+    expect(text(state.companies[0]!, "name")).toBe("Analytical Engines");
+    expect(state.people[0]?.values.company).toEqual([
+      { target_object: "companies", target_record_id: state.companies[0]?.id },
+    ]);
+    expect(text(state.people[0]!, "description")).not.toContain("submitted-business:");
+    expect(state.entries[0]?.parent).toBe(state.companies[0]?.id);
+  });
+
   it("writes city, state, stage, and opportunity onto the pitch list only when those attributes exist", async () => {
     const state = emptyState();
     state.listAttributes = [
@@ -559,6 +675,37 @@ describe("Power NOW Attio payload mapping", () => {
     const description = text(state.people[0]!, "description");
     expect(description).toContain("path:pitch");
     expect(description).toContain("path:watch");
+  });
+
+  it("logs the Attio status, code, and message when a send fails", async () => {
+    const state = emptyState();
+    const recordId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    state.failPersonWrite = {
+      status: 400,
+      code: "validation_type",
+      message: `Invalid value for ada@example.com on record ${recordId}. Call 757-555-0100.`,
+    };
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
+      errors.push(String(message));
+    });
+    try {
+      const result = await submit(state, pitchBody());
+      expect(result.status).toBe(502);
+      expect(result.body).toEqual({ ok: false, error: POWER_NOW_SEND_ERROR });
+      expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
+      const line = errors.find((message) => message.includes("Power NOW send failed"));
+      expect(line).toContain("HTTP 400");
+      expect(line).toContain("Attio error code: validation_type");
+      expect(line).toContain("Invalid value for [redacted]");
+      expect(line).toContain(recordId);
+      expect(line).not.toContain("ada@example.com");
+      expect(line).not.toContain("757-555-0100");
+      expect(line).not.toContain("Analytical Engines");
+      expect(line).not.toContain("Ada Lovelace");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("logs the Attio error code and still saves when follow-up task creation fails", async () => {
