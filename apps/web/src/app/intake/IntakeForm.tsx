@@ -28,6 +28,7 @@ import {
   postExpoLead,
   removeExpoLead,
   subscribeExpoQueue,
+  toVisitorError,
   type QueuedExpoLead,
 } from "@/lib/expoLeadQueue";
 
@@ -168,7 +169,7 @@ export function IntakeForm() {
     );
     if (!blocked) return;
     setReceipt(null);
-    setError(blocked.lastError || "This lead needs a correction before it can sync.");
+    setError(toVisitorError(blocked.lastError));
   }, [queue, receipt]);
 
   const pending = queue.filter((lead) => lead.status === "pending");
@@ -235,7 +236,7 @@ export function IntakeForm() {
     };
     const validated = validateExpoLeadPayload(payload);
     if (!validated.ok) {
-      setError(validated.error);
+      setError(toVisitorError(validated.error));
       return;
     }
 
@@ -265,9 +266,9 @@ export function IntakeForm() {
         window.sessionStorage.removeItem(DRAFT_KEY);
         return;
       }
-      setError(outcome.error || "Could not save this lead.");
+      setError(toVisitorError(outcome.error));
     } catch {
-      setError("This device could not store the lead. Keep the page open and try again.");
+      setError("We couldn't save this just now. Keep this page open and try again.");
     } finally {
       setSaving(false);
       setQueue(await listExpoLeads());
@@ -281,7 +282,7 @@ export function IntakeForm() {
           <div className="min-w-0">
             <AccelWordmark height={48} />
             <h1 className="mt-4 text-[2rem] leading-tight font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
-              Tell us how to follow up
+              How should we follow up?
             </h1>
             <p className="mt-3 max-w-xl text-lg leading-snug text-[#1B1B1B] sm:text-xl">{ACCEL_TAGLINE}</p>
             <p className="mt-1 max-w-xl text-base leading-snug text-[#5E5E5E]">{ACCEL_ONE_LINER}</p>
@@ -302,8 +303,8 @@ export function IntakeForm() {
           aria-live="polite"
         >
           {pending.length > 0
-            ? `${pending.length} waiting to sync. ${syncing ? "Syncing now." : "They stay on this device until the network returns."}`
-            : "Each consent box starts off. Leave it off unless the person agrees to that sentence."}
+            ? pendingStatus(pending.length, syncing)
+            : "The follow-up boxes start unchecked. Check one only if you agree."}
           {pending.length > 0 && (
             <button
               type="button"
@@ -311,7 +312,7 @@ export function IntakeForm() {
               disabled={syncing}
               className="mt-3 flex min-h-12 items-center rounded-full bg-[#0163FD] px-5 text-base font-semibold text-white disabled:opacity-60 sm:mt-0 sm:ml-3 sm:inline-flex"
             >
-              {syncing ? "Syncing…" : "Sync now"}
+              {syncing ? "Sending…" : "Send now"}
             </button>
           )}
         </div>
@@ -320,14 +321,18 @@ export function IntakeForm() {
           <div className="mb-5 space-y-3">
             {needsAttention.map((lead) => (
               <div key={lead.clientSubmissionId} role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-lg">
-                <p className="font-semibold">Needs a correction. {lead.payload.fullName || "A saved lead"} is still on this device.</p>
-                <p className="mt-1 text-[#1B1B1B]">{lead.lastError}</p>
+                <p className="font-semibold">
+                  {lead.payload.fullName
+                    ? `Please check this, ${lead.payload.fullName}. We need one correction before this can send.`
+                    : "Please check this. We need one correction before this can send."}
+                </p>
+                <p className="mt-1 text-[#1B1B1B]">{toVisitorError(lead.lastError)}</p>
                 <button
                   type="button"
                   onClick={() => void removeExpoLead(lead.clientSubmissionId).then(() => listExpoLeads().then(setQueue))}
                   className="mt-3 min-h-12 rounded-full border-2 border-[#1B1B1B] px-4 font-semibold"
                 >
-                  Remove from this device
+                  Remove this
                 </button>
               </div>
             ))}
@@ -338,48 +343,46 @@ export function IntakeForm() {
           <section className="rounded-3xl bg-white px-6 py-10 text-center shadow-sm" aria-live="polite">
             <p className="text-sm font-semibold tracking-[0.16em] text-[#0163FD] uppercase">{ACCEL_DISPLAY_NAME}</p>
             <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
-              {receipt.state === "synced" ? "Lead saved" : EXPO_OFFLINE_SAVED_MESSAGE}
+              {receipt.state === "synced" ? "Thanks, we've got it" : EXPO_OFFLINE_SAVED_MESSAGE}
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
-              {receipt.state === "synced"
-                ? `${receipt.name} is with the Accel Analysis team.`
-                : `${receipt.name} is stored on this device and will sync when the connection returns.`}
+              {`${receipt.name}, Accel Analysis will follow up.`}
             </p>
             {memoryWarning && receipt.state === "queued" && (
-              <p className="mt-3 text-lg font-semibold">Keep this page open until the lead syncs.</p>
+              <p className="mt-3 text-lg font-semibold">{"Keep this page open so we don't lose this."}</p>
             )}
             <button
               type="button"
               onClick={resetForm}
               className="mt-8 min-h-16 w-full rounded-2xl bg-[#0163FD] px-6 text-2xl font-semibold text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
             >
-              Next person
+              Done
             </button>
           </section>
         ) : (
           <form id={formId} onSubmit={(event) => void onSubmit(event)} className="space-y-6" noValidate>
             {error && (
               <div role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-xl text-[#1B1B1B]">
-                <span className="font-semibold">Needs a correction. </span>
+                <span className="font-semibold">Please check this. </span>
                 {error}
               </div>
             )}
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
-              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Person</h2>
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">About you</h2>
               <Field label="Full name" required value={draft.fullName} autoComplete="name" onChange={(value) => update("fullName", value)} />
-              <Field label="Email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={(value) => update("email", value)} hint="Email or phone is required." />
-              <Field label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={(value) => update("phone", value)} hint="Optional when email is filled in." />
+              <Field label="Email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={(value) => update("email", value)} hint="We'll need your email or your phone." />
+              <Field label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={(value) => update("phone", value)} hint="Add one if you'd rather we call or text." />
             </section>
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
-              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Organization</h2>
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Your organization</h2>
               <Field label="Organization" required autoComplete="organization" value={draft.organization} onChange={(value) => update("organization", value)} />
               <Field label="Role / title" required autoComplete="organization-title" value={draft.roleTitle} onChange={(value) => update("roleTitle", value)} />
               {nasaFields && (
                 <div>
                   <p className="text-xl font-semibold" id={`${formId}-org-type`}>
-                    Organization type <span className="text-[#0163FD]">Required</span>
+                    Your organization type <span className="text-[#0163FD]">Required</span>
                   </p>
                   <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" role="group" aria-labelledby={`${formId}-org-type`}>
                     {EXPO_ORG_TYPES.map((orgType) => {
@@ -397,7 +400,6 @@ export function IntakeForm() {
                           }`}
                         >
                           {orgType.label}
-                          {selected ? <span className="mt-1 block text-base font-semibold">Selected</span> : null}
                         </button>
                       );
                     })}
@@ -407,9 +409,9 @@ export function IntakeForm() {
             </section>
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
-              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">What they need</h2>
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">What you need</h2>
               <label className="block text-xl font-semibold" htmlFor={`${formId}-need`}>
-                In their words <span className="text-[#0163FD]">Required</span>
+                In your words <span className="text-[#0163FD]">Required</span>
               </label>
               <textarea
                 id={`${formId}-need`}
@@ -425,27 +427,25 @@ export function IntakeForm() {
 
             {nasaFields && (
               <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
-                <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Only if they ask</h2>
-                <p className="text-lg text-[#5E5E5E]">Leave these off unless the person asks about them.</p>
+                <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Want to hear more?</h2>
+                <p className="text-lg text-[#5E5E5E]">Optional.</p>
                 <CheckRow
                   checked={draft.powerNow}
                   onChange={(checked) => update("powerNow", checked)}
-                  label="Power NOW"
-                  detail="They asked about Power NOW."
+                  label="I'd like to hear about Power NOW."
                 />
                 <CheckRow
                   checked={draft.hiCoworkingEarlyAccess}
                   onChange={(checked) => update("hiCoworkingEarlyAccess", checked)}
-                  label="Hi Coworking Early Access"
-                  detail="They asked about Hi Coworking early access."
+                  label="I'd like to hear about Hi Coworking early access."
                 />
               </section>
             )}
 
             <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
-              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Consent</h2>
+              <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">How we can reach you</h2>
               <p className="text-lg text-[#1B1B1B]">
-                Three choices: email, text, and phone. All start unchecked. Check a box only after the person agrees to that sentence.
+                Email, text, and phone start unchecked. Check a box only if you agree to that sentence.
               </p>
               {EXPO_CONSENT_KEYS.map((key) => {
                 const item = EXPO_CONSENT_CATALOG[key];
@@ -484,7 +484,7 @@ export function IntakeForm() {
                 disabled={saving}
                 className="min-h-16 w-full rounded-2xl bg-[#0163FD] text-2xl font-semibold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
               >
-                {saving ? "Saving…" : "Save lead"}
+                {saving ? "Sending…" : "Send"}
               </button>
               <p className="mt-4 text-center text-base text-[#5E5E5E]">
                 {ACCEL_DISPLAY_NAME}
@@ -550,7 +550,7 @@ function CheckRow({
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
-  detail: string;
+  detail?: string;
 }) {
   return (
     <label className={`flex min-h-16 items-start gap-4 rounded-2xl border-2 bg-white p-4 ${checked ? "border-[#0163FD]" : "border-[#5E5E5E]/35"}`}>
@@ -561,12 +561,14 @@ function CheckRow({
         className="mt-1 h-8 w-8 shrink-0 accent-[#0163FD]"
       />
       <span>
-        <span className="block text-xl font-semibold">
-          {label}
-          {checked ? <span className="ml-2 text-base font-semibold text-[#0163FD]">Checked</span> : <span className="ml-2 text-base font-semibold text-[#5E5E5E]">Unchecked</span>}
-        </span>
-        <span className="mt-1 block text-lg leading-snug text-[#1B1B1B]">{detail}</span>
+        <span className="block text-xl font-semibold">{label}</span>
+        {detail ? <span className="mt-1 block text-lg leading-snug text-[#1B1B1B]">{detail}</span> : null}
       </span>
     </label>
   );
+}
+
+function pendingStatus(count: number, syncing: boolean): string {
+  const waiting = count === 1 ? "1 response is waiting to send." : `${count} responses are waiting to send.`;
+  return `${waiting} ${syncing ? "Sending now." : "We'll send when the connection is back."}`;
 }

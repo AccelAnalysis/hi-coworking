@@ -11,9 +11,10 @@ import {
   NASA_EXPO_EVENT,
   formatIsoEastern,
   resolveIntakeProfile,
+  validateExpoLeadPayload,
   type ExpoLeadPayload,
 } from "../../apps/functions/src/expo/nasaLeadModel";
-import { decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE } from "../../apps/web/src/lib/expoLeadQueue";
+import { decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE, toVisitorError } from "../../apps/web/src/lib/expoLeadQueue";
 
 const NOW = new Date("2026-10-20T18:05:00.000Z");
 const CAPTURED_AT_ET = "2026-10-20T14:05:00-04:00";
@@ -617,7 +618,59 @@ describe("NASA expo lead capture", () => {
     expect(form).not.toContain("webkitSpeechRecognition");
     expect(queue).toContain("indexedDB.open");
     expect(queue).toContain('"/api/expo/nasa-lead"');
-    expect(EXPO_OFFLINE_SAVED_MESSAGE).toBe("Saved — will sync");
+    expect(EXPO_OFFLINE_SAVED_MESSAGE).toBe("Thanks, we've got it");
+    expect(toVisitorError("Attio could not save this lead yet.")).toBe("We couldn't send this just now. Please try again.");
+    expect(toVisitorError("The booth could not save this lead (502).")).toBe("We couldn't send this. Please try again.");
+    expect(toVisitorError("More than one Attio person matches this phone. Add an email so the booth does not merge the wrong people.")).toBe(
+      "Add your email so we follow up with the right person.",
+    );
+    expect(toVisitorError("Enter your full name.")).toBe("Enter your full name.");
+    const invalid = validateExpoLeadPayload({});
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.error).toBe("Enter your full name.");
+
+    const intakeLayout = readFileSync("apps/web/src/app/intake/layout.tsx", "utf8");
+    const aliasLayout = readFileSync("apps/web/src/app/expo/nasa-2026/layout.tsx", "utf8");
+    const aliasPage = readFileSync("apps/web/src/app/expo/nasa-2026/page.tsx", "utf8");
+    expect(intakeLayout).toContain("Follow up · Accel Analysis");
+    expect(intakeLayout).toContain("Tell Accel Analysis how we should follow up with you.");
+    expect(intakeLayout).not.toContain("Lead intake");
+    expect(intakeLayout).not.toContain("Accel Intake");
+    expect(aliasLayout).not.toContain("Lead intake");
+    expect(aliasLayout).not.toContain("lead intake");
+    expect(aliasPage).toContain("Opening Accel Analysis…");
+    expect(aliasPage).not.toContain("intake…");
+    for (const phrase of [
+      "Save lead",
+      "Lead saved",
+      "Next person",
+      "What they need",
+      "In their words",
+      "Only if they ask",
+      "the person agrees",
+      "the person asks",
+      "They asked about",
+      "this device",
+      "waiting to sync",
+      "Sync now",
+      "A saved lead",
+      "Needs a correction",
+      ">Selected<",
+      "Unchecked",
+      "Checked<",
+    ]) {
+      expect(form).not.toContain(phrase);
+    }
+    expect(form).toContain("How should we follow up?");
+    expect(form).toContain("About you");
+    expect(form).toContain("What you need");
+    expect(form).toContain("In your words");
+    expect(form).toContain("I'd like to hear about Power NOW.");
+    expect(form).toContain("I'd like to hear about Hi Coworking early access.");
+    expect(form).toContain("email: false");
+    expect(EXPO_CONSENT_CATALOG.email.version).toBe("intake-consent-v1-email");
+    expect(EXPO_CONSENT_CATALOG.sms.version).toBe("intake-consent-v1-sms");
+    expect(EXPO_CONSENT_CATALOG.phone.version).toBe("intake-consent-v1-phone");
     expect(firebase).toContain('"/api/expo/nasa-lead"');
     expect(firebase).toContain('"functionId": "expo_submitNasaLead"');
     expect(main).toContain("expo_submitNasaLead");

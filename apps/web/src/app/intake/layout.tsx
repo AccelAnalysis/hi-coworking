@@ -2,12 +2,12 @@ import type { Metadata, Viewport } from "next";
 import { AccelBrandFrame } from "@/components/AccelBrandFrame";
 
 export const metadata: Metadata = {
-  title: "Lead intake · Accel Analysis",
-  description: "Tell Accel Analysis how to follow up. Put AI to work without overwhelming your team.",
+  title: "Follow up · Accel Analysis",
+  description: "Tell Accel Analysis how we should follow up with you.",
   robots: { index: false, follow: false },
   appleWebApp: {
     capable: true,
-    title: "Accel Intake",
+    title: "Accel Analysis",
     statusBarStyle: "black-translucent",
   },
 };

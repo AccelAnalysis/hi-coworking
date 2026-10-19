@@ -19,7 +19,7 @@ export default function NasaExpoIntakeAlias() {
 
   return (
     <main className="grid min-h-dvh place-items-center bg-[#F2F6FF] px-6 text-center text-[#1B1B1B]">
-      <p className="text-2xl font-semibold">Opening Accel Analysis intake…</p>
+      <p className="text-2xl font-semibold">Opening Accel Analysis…</p>
     </main>
   );
 }

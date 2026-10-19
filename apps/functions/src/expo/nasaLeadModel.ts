@@ -319,7 +319,7 @@ export function validateExpoLeadPayload(
   now = new Date(),
 ): { ok: true; lead: NormalizedExpoLead } | { ok: false; error: string } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { ok: false, error: "This lead could not be read. Enter it again." };
+    return { ok: false, error: "We couldn't read this. Please enter it again." };
   }
 
   const body = input as Record<string, unknown>;
@@ -334,29 +334,29 @@ export function validateExpoLeadPayload(
   const profile = resolveIntakeProfile(intakeContextFromBody(body));
 
   if (!fullName || fullName.length > 120) {
-    return { ok: false, error: "Enter the visitor's full name." };
+    return { ok: false, error: "Enter your full name." };
   }
   if (!organization || organization.length > 160) {
-    return { ok: false, error: "Enter their organization." };
+    return { ok: false, error: "Enter your organization." };
   }
   if (!roleTitle || roleTitle.length > 120) {
-    return { ok: false, error: "Enter their role or title." };
+    return { ok: false, error: "Enter your role or title." };
   }
   if (profile.fieldSet === "nasa-expo") {
     if (!isOrgType(body.orgType)) {
-      return { ok: false, error: "Choose an organization type." };
+      return { ok: false, error: "Choose your organization type." };
     }
   } else if (cleanLine(body.orgType) && !isOrgType(body.orgType)) {
-    return { ok: false, error: "Choose an organization type." };
+    return { ok: false, error: "Choose your organization type." };
   }
   if (!need || need.length > 500) {
-    return { ok: false, error: "Enter what they need, in their words." };
+    return { ok: false, error: "Tell us what you need, in your words." };
   }
   if (timing.length > 120) {
-    return { ok: false, error: "Timing should be a short note." };
+    return { ok: false, error: "Please keep timing to a short note." };
   }
   if (!UUID_PATTERN.test(clientSubmissionId)) {
-    return { ok: false, error: "This lead is missing its booth id. Enter it again." };
+    return { ok: false, error: "Please try sending this again." };
   }
 
   const email = emailRaw.length > 0 ? emailRaw : null;
@@ -369,19 +369,19 @@ export function validateExpoLeadPayload(
     return { ok: false, error: "That phone number doesn't look right." };
   }
   if (!email && !phone) {
-    return { ok: false, error: "Enter an email or a phone number." };
+    return { ok: false, error: "Enter your email or phone number." };
   }
 
   const interests = readInterests(body.interests);
   const consentFlags = readConsentFlags(body.consent);
   if (consentFlags.sms && !phone) {
-    return { ok: false, error: "Text consent needs a phone number." };
+    return { ok: false, error: "Add your phone number to agree to texts." };
   }
   if (consentFlags.phone && !phone) {
-    return { ok: false, error: "Phone consent needs a phone number." };
+    return { ok: false, error: "Add your phone number to agree to calls." };
   }
   if (consentFlags.email && !email) {
-    return { ok: false, error: "Email consent needs an email address." };
+    return { ok: false, error: "Add your email to agree to email." };
   }
 
   const capturedAt = resolveCapturedAt(body.submittedAt, now);
