@@ -133,7 +133,7 @@ npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat
 
 That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
 
-Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Thanks, we've got it** and keeps the response in IndexedDB until it can post. The page does not mention the device or the sync.
+Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Thanks, we've got it** and keeps the response in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that thank-you screen. After **Done**, the next person does not see the earlier name or error. The saved response stays on the iPad, and responses that are still waiting keep trying to send.
 
 ## Test without touching Attio
 

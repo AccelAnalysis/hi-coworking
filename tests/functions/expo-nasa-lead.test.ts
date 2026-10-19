@@ -14,7 +14,7 @@ import {
   validateExpoLeadPayload,
   type ExpoLeadPayload,
 } from "../../apps/functions/src/expo/nasaLeadModel";
-import { decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE, toVisitorError } from "../../apps/web/src/lib/expoLeadQueue";
+import { attentionForActiveReceipt, decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE, toVisitorError, type QueuedExpoLead } from "../../apps/web/src/lib/expoLeadQueue";
 
 const NOW = new Date("2026-10-20T18:05:00.000Z");
 const CAPTURED_AT_ET = "2026-10-20T14:05:00-04:00";
@@ -661,6 +661,9 @@ describe("NASA expo lead capture", () => {
     ]) {
       expect(form).not.toContain(phrase);
     }
+    expect(form).toContain("attentionForActiveReceipt");
+    expect(form).not.toContain("payload.fullName");
+    expect(form).not.toContain("needsAttention");
     expect(form).toContain("How should we follow up?");
     expect(form).toContain("About you");
     expect(form).toContain("What you need");
@@ -685,7 +688,50 @@ describe("NASA expo lead capture", () => {
     expect(doc).toContain("ATTIO_API_KEY");
     expect(doc).toContain("/intake");
   });
+
+  it("shows a correction only for the response still on screen", () => {
+    const earlier = queuedLead("earlier-id", "needs_attention", "Priya Shah", "Add your email so we follow up with the right person.");
+    const current = queuedLead("current-id", "needs_attention", "Jordan Hale", "Add your phone number to agree to texts.");
+    const waiting = queuedLead("waiting-id", "pending", "Alex Kim", null);
+
+    expect(attentionForActiveReceipt([earlier, current, waiting], null)).toBeNull();
+    expect(attentionForActiveReceipt([earlier, current, waiting], "missing")).toBeNull();
+    expect(attentionForActiveReceipt([earlier, current, waiting], "waiting-id")).toBeNull();
+    expect(attentionForActiveReceipt([earlier, current, waiting], "current-id")).toBe(current);
+    expect(attentionForActiveReceipt([earlier, current, waiting], "current-id")?.payload.fullName).toBe("Jordan Hale");
+    expect(attentionForActiveReceipt([earlier], "current-id")).toBeNull();
+  });
 });
+
+function queuedLead(
+  id: string,
+  status: QueuedExpoLead["status"],
+  fullName: string,
+  lastError: string | null,
+): QueuedExpoLead {
+  return {
+    clientSubmissionId: id,
+    payload: {
+      fullName,
+      organization: "Example Dynamics",
+      roleTitle: "Owner",
+      email: "",
+      phone: "2025550147",
+      orgType: "other",
+      need: "A private note that should stay off the next screen.",
+      timing: "",
+      interests: { powerNow: false, hiCoworkingEarlyAccess: false },
+      consent: { email: false, sms: false, phone: false },
+      submittedAt: "2026-10-20T18:05:00.000Z",
+      clientSubmissionId: id,
+    },
+    status,
+    attempts: 1,
+    lastError,
+    queuedAt: "2026-10-20T18:05:00.000Z",
+    lastAttemptAt: "2026-10-20T18:06:00.000Z",
+  };
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
