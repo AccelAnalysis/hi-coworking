@@ -1,8 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "Lead intake · Accel Analysis",
-  description: "Accel Analysis lead intake.",
+  title: "Follow up · Accel Analysis",
+  description: "Tell Accel Analysis how we should follow up with you.",
   robots: { index: false, follow: false },
 };
 

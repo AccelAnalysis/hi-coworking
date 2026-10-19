@@ -44,7 +44,7 @@ Each accepted lead appends one description line:
 
 `[WS:EXPO-NASA-2026-10-20 | event:nasa-expo-2026-10-20 | org:… | need:… | consent:… | by:NASA Expo booth | at:<ISO Eastern> | sub:<submission id>]`
 
-When the URL names the NASA Expo (`event=nasa-expo-2026-10-20`, the same id, or the list slug below), `captured_by` is `NASA Expo booth` and `source` is `EXPO-NASA-2026-10-20`. The form then asks for organization type and the two “only if they ask” interests. Other events store the event slug as the source and `captured_by` `Accel Analysis intake`. `captured_at` is an ISO timestamp in `America/New_York`, taken when the person is saved (including offline) as long as that time is within the last 14 days.
+When the URL names the NASA Expo (`event=nasa-expo-2026-10-20`, the same id, or the list slug below), `captured_by` is `NASA Expo booth` and `source` is `EXPO-NASA-2026-10-20`. The form then asks for organization type and two optional interests, Power NOW and Hi Coworking early access. Other events store the event slug as the source and `captured_by` `Accel Analysis intake`. `captured_at` is an ISO timestamp in `America/New_York`, taken when the person is saved (including offline) as long as that time is within the last 14 days.
 
 Each consent box stores yes or no, the wording version, the Eastern timestamp, and the source. The exact wording is copied into the note only when the box is checked. All three boxes start unchecked.
 
@@ -133,7 +133,7 @@ npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat
 
 That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
 
-Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Saved — will sync** and keeps the lead in IndexedDB until it can post.
+Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Thanks, we've got it** and keeps the response in IndexedDB until it can post. The page does not mention the device or the sync.
 
 ## Test without touching Attio
 
@@ -149,7 +149,7 @@ That run creates three fake leads against a mock Attio: an emailed visitor, the 
 npm run dev
 ```
 
-Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill a lead and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Saved — will sync**. The lead stays in IndexedDB. Use **Sync now** after the function is reachable, or turn the device offline and submit another visitor to see the same message without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
+Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill out the form and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Thanks, we've got it**. The response stays in IndexedDB. Use **Send now** after the function is reachable, or turn the device offline and submit again to see the same message without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
 
 ## Test three fake leads against Attio
 

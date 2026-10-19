@@ -1,7 +1,46 @@
 import type { ExpoLeadPayload } from "../../../functions/src/expo/nasaLeadModel";
 
 export const EXPO_LEAD_ENDPOINT = "/api/expo/nasa-lead";
-export const EXPO_OFFLINE_SAVED_MESSAGE = "Saved — will sync";
+export const EXPO_OFFLINE_SAVED_MESSAGE = "Thanks, we've got it";
+
+const VISITOR_ERROR_BY_MESSAGE: Record<string, string> = {
+  "This booth form cannot be submitted from that site.": "This page can't send from here. Please try again.",
+  "That lead is too large.": "That's too long to send. Please shorten it and try again.",
+  "Lead capture is not configured.": "We couldn't send this just now. Please try again.",
+  "Attio could not save this lead yet.": "We couldn't send this just now. Please try again.",
+  "More than one Attio person matches this phone. Add an email so the booth does not merge the wrong people.":
+    "Add your email so we follow up with the right person.",
+  "Method not allowed": "We couldn't send this. Please try again.",
+  Offline: "The connection dropped. We'll try again.",
+  "The network dropped before Attio confirmed the lead.": "The connection dropped before this sent.",
+  "This lead could not be read. Enter it again.": "We couldn't read this. Please enter it again.",
+  "Enter the visitor's full name.": "Enter your full name.",
+  "Enter their organization.": "Enter your organization.",
+  "Enter their role or title.": "Enter your role or title.",
+  "Choose an organization type.": "Choose your organization type.",
+  "Enter what they need, in their words.": "Tell us what you need, in your words.",
+  "Timing should be a short note.": "Please keep timing to a short note.",
+  "This lead is missing its booth id. Enter it again.": "Please try sending this again.",
+  "Enter an email or a phone number.": "Enter your email or phone number.",
+  "Text consent needs a phone number.": "Add your phone number to agree to texts.",
+  "Phone consent needs a phone number.": "Add your phone number to agree to calls.",
+  "Email consent needs an email address.": "Add your email to agree to email.",
+  "Could not save this lead.": "We couldn't send this. Please try again.",
+  "This lead needs a correction before it can sync.": "Please correct this before we can send it.",
+  "This device could not store the lead. Keep the page open and try again.":
+    "We couldn't save this just now. Keep this page open and try again.",
+};
+
+const INTERNAL_VISITOR_ERROR = /\b(attio|booth|leads?|sync(?:ing|ed)?|devices?|queues?|indexeddb)\b/i;
+
+export function toVisitorError(message: string | null | undefined): string {
+  const text = (message ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "Please try again.";
+  const known = VISITOR_ERROR_BY_MESSAGE[text];
+  if (known) return known;
+  if (INTERNAL_VISITOR_ERROR.test(text)) return "We couldn't send this. Please try again.";
+  return text;
+}
 
 const DB_NAME = "accel-nasa-expo-2026";
 const DB_VERSION = 1;
@@ -113,7 +152,7 @@ export async function postExpoLead(payload: ExpoLeadPayload): Promise<{
 }> {
   const online = typeof navigator === "undefined" ? true : navigator.onLine;
   if (!online) {
-    return { decision: "queue", error: "Offline" };
+    return { decision: "queue", error: "The connection dropped. We'll try again." };
   }
 
   try {
@@ -132,10 +171,10 @@ export async function postExpoLead(payload: ExpoLeadPayload): Promise<{
     const body = await response.json().catch(() => null) as { error?: string } | null;
     return {
       decision,
-      error: body?.error || `The booth could not save this lead (${response.status}).`,
+      error: toVisitorError(body?.error || "We couldn't send this. Please try again."),
     };
   } catch {
-    return { decision: "queue", error: "The network dropped before Attio confirmed the lead." };
+    return { decision: "queue", error: "The connection dropped before this sent." };
   }
 }
 
