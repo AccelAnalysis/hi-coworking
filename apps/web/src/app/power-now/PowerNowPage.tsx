@@ -286,11 +286,16 @@ export function PowerNowPage() {
     setSaving(true);
     try {
       const result = await flushPowerNowQueue({ force: true });
-      setReceipt((current) =>
-        current && result.syncedIds.includes(current.id) ? { ...current, state: "synced" } : current,
-      );
+      const synced = Boolean(receipt && result.syncedIds.includes(receipt.id));
+      if (synced) {
+        setReceipt((current) => (current ? { ...current, state: "synced" } : current));
+        return;
+      }
       const blocked = result.leads.find((lead) => lead.clientSubmissionId === receipt?.id && lead.status === "needs_attention");
-      if (blocked) setFormError(blocked.lastError || POWER_NOW_SEND_ERROR);
+      if (blocked) {
+        setReceipt(null);
+        setFormError(blocked.lastError || POWER_NOW_SEND_ERROR);
+      }
     } finally {
       setSaving(false);
     }
