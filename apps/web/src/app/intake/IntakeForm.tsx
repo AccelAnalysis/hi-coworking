@@ -32,6 +32,7 @@ import {
   toVisitorError,
   type QueuedExpoLead,
 } from "@/lib/expoLeadQueue";
+import { VisitorConfirmation } from "@/lib/visitorConfirmation";
 
 const DRAFT_KEY = "accel-analysis-intake-draft";
 
@@ -90,13 +91,13 @@ function readUrlContext(): UrlContext {
   };
 }
 
-export function IntakeForm() {
+export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
   const formId = useId();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [profile, setProfile] = useState<IntakeProfile>(() =>
-    resolveIntakeProfile({ explicit: true }),
+    resolveIntakeProfile({ event: presetEvent, explicit: true }),
   );
-  const [urlContext, setUrlContext] = useState<UrlContext>({ event: "", eventId: "", list: "" });
+  const [urlContext, setUrlContext] = useState<UrlContext>({ event: presetEvent, eventId: "", list: "" });
   const [honeypot, setHoneypot] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -107,6 +108,7 @@ export function IntakeForm() {
 
   useEffect(() => {
     const context = readUrlContext();
+    if (!context.event && !context.eventId && presetEvent) context.event = presetEvent;
     setUrlContext(context);
     setProfile(resolveIntakeProfile({ ...context, explicit: true }));
 
@@ -151,7 +153,7 @@ export function IntakeForm() {
       unsubscribe();
       window.removeEventListener("online", onOnline);
     };
-  }, []);
+  }, [presetEvent]);
 
   useEffect(() => {
     if (receipt) return;
@@ -184,6 +186,10 @@ export function IntakeForm() {
     setError(null);
     setReceipt(null);
     window.sessionStorage.removeItem(DRAFT_KEY);
+    window.setTimeout(() => {
+      const heading = document.getElementById("intake-heading");
+      if (heading instanceof HTMLElement) heading.focus();
+    }, 0);
   }
 
   async function syncNow() {
@@ -272,7 +278,11 @@ export function IntakeForm() {
         <div className="mx-auto flex max-w-3xl items-start justify-between gap-4">
           <div className="min-w-0">
             <AccelWordmark height={48} />
-            <h1 className="mt-4 text-[2rem] leading-tight font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
+            <h1
+              id="intake-heading"
+              tabIndex={-1}
+              className="mt-4 text-[2rem] leading-tight font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-[#03C9FF] sm:text-5xl"
+            >
               How should we follow up?
             </h1>
             <p className="mt-3 max-w-xl text-lg leading-snug text-[#1B1B1B] sm:text-xl">{ACCEL_TAGLINE}</p>
@@ -289,71 +299,54 @@ export function IntakeForm() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-6 pb-16 sm:px-8">
-        <div
-          className="mb-5 rounded-2xl border-2 border-[#5E5E5E]/25 bg-white px-5 py-4 text-lg leading-snug text-[#1B1B1B]"
-          aria-live="polite"
-        >
-          {pending.length > 0
-            ? pendingStatus(pending.length, syncing)
-            : "The follow-up boxes start unchecked. Check one only if you agree."}
-          {pending.length > 0 && (
+        {pending.length > 0 ? (
+          <div className="mb-5 rounded-2xl border-2 border-[#5E5E5E]/25 bg-white px-5 py-4 text-lg leading-snug text-[#1B1B1B]" role="status">
+            {pendingStatus(pending.length, syncing)}
             <button
               type="button"
               onClick={() => void syncNow()}
               disabled={syncing}
-              className="mt-3 flex min-h-12 items-center rounded-full bg-[#0163FD] px-5 text-base font-semibold text-white disabled:opacity-60 sm:mt-0 sm:ml-3 sm:inline-flex"
+              className="mt-3 flex min-h-12 items-center rounded-full bg-[#0163FD] px-5 text-base font-semibold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF] sm:mt-0 sm:ml-3 sm:inline-flex"
             >
               {syncing ? "Sending…" : "Send now"}
             </button>
-          )}
-        </div>
+          </div>
+        ) : null}
 
         {receipt ? (
-          <section className="rounded-3xl bg-white px-6 py-10 text-center shadow-sm" aria-live="polite">
-            <p className="text-sm font-semibold tracking-[0.16em] text-[#0163FD] uppercase">{ACCEL_DISPLAY_NAME}</p>
-            {activeAttention ? (
-              <>
-                <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
-                  Please check this
-                </h2>
-                <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
-                  {receipt.name
-                    ? `${receipt.name}, we need one correction before this can send.`
-                    : "We need one correction before this can send."}
-                </p>
-                <p className="mx-auto mt-3 max-w-xl text-xl leading-snug">{toVisitorError(activeAttention.lastError)}</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const id = receipt.id;
-                    void removeExpoLead(id).then(() => listExpoLeads().then(setQueue)).then(() => resetForm());
-                  }}
-                  className="mt-8 min-h-14 w-full rounded-2xl border-2 border-[#1B1B1B] px-6 text-xl font-semibold"
-                >
-                  Remove this
-                </button>
-              </>
-            ) : (
-              <>
-                <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
-                  {receipt.state === "synced" ? "Thanks, we've got it" : EXPO_OFFLINE_SAVED_MESSAGE}
-                </h2>
-                <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
-                  {`${receipt.name}, Accel Analysis will follow up.`}
-                </p>
-                {memoryWarning && receipt.state === "queued" && (
-                  <p className="mt-3 text-lg font-semibold">{"Keep this page open so we don't lose this."}</p>
-                )}
-              </>
-            )}
-            <button
-              type="button"
-              onClick={resetForm}
-              className="mt-8 min-h-16 w-full rounded-2xl bg-[#0163FD] px-6 text-2xl font-semibold text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
-            >
-              Done
-            </button>
-          </section>
+          activeAttention ? (
+            <section className="rounded-3xl bg-white px-6 py-10 text-center shadow-sm" role="alert">
+              <h2 className="text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
+                Please check this
+              </h2>
+              <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
+                {receipt.name
+                  ? `${receipt.name}, we need one correction before this can send.`
+                  : "We need one correction before this can send."}
+              </p>
+              <p className="mx-auto mt-3 max-w-xl text-xl leading-snug">{toVisitorError(activeAttention.lastError)}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = receipt.id;
+                  void removeExpoLead(id).then(() => listExpoLeads().then(setQueue)).then(() => resetForm());
+                }}
+                className="mt-8 min-h-14 w-full rounded-2xl border-2 border-[#1B1B1B] px-6 text-xl font-semibold focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
+              >
+                Remove this
+              </button>
+            </section>
+          ) : (
+            <VisitorConfirmation
+              variant="intake"
+              onStartNew={resetForm}
+              detail={
+                receipt.state === "queued"
+                  ? `${EXPO_OFFLINE_SAVED_MESSAGE}. We'll send it when the connection is back.${memoryWarning ? " Keep this page open so we don't lose this." : ""}`
+                  : undefined
+              }
+            />
+          )
         ) : (
           <form id={formId} onSubmit={(event) => void onSubmit(event)} className="space-y-6" noValidate>
             {error && (

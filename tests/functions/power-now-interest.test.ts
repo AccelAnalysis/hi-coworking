@@ -892,6 +892,14 @@ describe("Power NOW page boundaries", () => {
     expect(page).toContain("Apply to pitch");
     expect(page).toContain("Get pitch-night updates");
     expect(page).toContain("Contribute to the prize pack");
+    expect(page).toContain("/power-now/${item.id}#form-${item.id}");
+    expect(page).toContain("VisitorConfirmation");
+    expect(page).toContain("initialPath");
+    expect(readFileSync("apps/web/src/app/power-now/[path]/page.tsx", "utf8")).toContain("canonicalizePowerNowPath");
+    const confirmation = readFileSync("apps/web/src/lib/visitorConfirmation.tsx", "utf8");
+    expect(confirmation).toContain("Thanks, you're all set.");
+    expect(confirmation).toContain("Start a new entry");
+    expect(confirmation).toContain('role="status"');
     expect(page).not.toMatch(/\bbookings\b/i);
     expect(page).not.toMatch(/\bfree\b/i);
     expect(page).not.toContain('type="date"');

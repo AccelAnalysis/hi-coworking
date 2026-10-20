@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { NASA_EXPO_EVENT } from "@/lib/expoNasaLead";
 
 export const metadata: Metadata = {
   title: "Follow up · Accel Analysis",
@@ -14,5 +15,10 @@ export const viewport: Viewport = {
 };
 
 export default function ExpoAliasLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return (
+    <>
+      <meta httpEquiv="refresh" content={`1;url=/intake?event=${NASA_EXPO_EVENT}`} />
+      {children}
+    </>
+  );
 }

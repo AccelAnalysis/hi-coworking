@@ -15,6 +15,7 @@ import {
   validateExpoLeadPayload,
   type ExpoLeadPayload,
 } from "../../apps/functions/src/expo/nasaLeadModel";
+import { expoAliasBootScript } from "../../apps/web/src/lib/expoAliasBoot";
 import { attentionForActiveReceipt, decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE, toVisitorError, type QueuedExpoLead } from "../../apps/web/src/lib/expoLeadQueue";
 
 const NOW = new Date("2026-10-20T18:05:00.000Z");
@@ -647,7 +648,16 @@ describe("NASA expo lead capture", () => {
     expect(aliasLayout).not.toContain("Lead intake");
     expect(aliasLayout).not.toContain("lead intake");
     expect(aliasPage).toContain("Opening Accel Analysis…");
+    expect(aliasPage).toContain("expoAliasBootScript");
+    expect(aliasPage).toContain('id="expo-form"');
+    expect(aliasPage).toContain("Continue to the form");
+    expect(aliasPage).toContain("presetEvent={NASA_EXPO_EVENT}");
     expect(aliasPage).not.toContain("intake…");
+    expect(aliasLayout).toContain('httpEquiv="refresh"');
+    expect(aliasLayout).toContain("/intake?event=");
+    expect(expoAliasBootScript()).toContain("location.replace");
+    expect(expoAliasBootScript()).toContain("setTimeout(reveal");
+    expect(expoAliasBootScript()).not.toContain("</");
     for (const phrase of [
       "Save lead",
       "Lead saved",
@@ -672,6 +682,16 @@ describe("NASA expo lead capture", () => {
     expect(form).toContain("attentionForActiveReceipt");
     expect(form).not.toContain("payload.fullName");
     expect(form).not.toContain("needsAttention");
+    expect(form).not.toContain("The follow-up boxes");
+    expect(form).not.toContain("follow-up boxes");
+    expect(form).toContain("VisitorConfirmation");
+    const confirmation = readFileSync("apps/web/src/lib/visitorConfirmation.tsx", "utf8");
+    expect(confirmation).toContain("Thanks, you're all set.");
+    expect(confirmation).toContain("We've saved your info, and someone from Accel Analysis will follow up.");
+    expect(confirmation).toContain("Start a new entry");
+    expect(confirmation).toContain('role="status"');
+    expect(confirmation).toContain("headingRef.current?.focus()");
+    expect(confirmation).toContain("VISITOR_CONFIRM_IDLE_MS = 30_000");
     expect(form).toContain("How should we follow up?");
     expect(form).toContain("About you");
     expect(form).toContain("What you need");
@@ -695,6 +715,80 @@ describe("NASA expo lead capture", () => {
     expect(doc).toContain(INTAKE_PRIVACY_NOTICE);
     expect(doc).toContain("ATTIO_API_KEY");
     expect(doc).toContain("/intake");
+  });
+
+  it("reveals the booth form when the redirect never leaves the loader", () => {
+    const elements: Record<string, { hidden: boolean; setAttribute: (name: string) => void; removeAttribute: (name: string) => void }> = {
+      "expo-opening": {
+        hidden: false,
+        setAttribute(name: string) {
+          if (name === "hidden") this.hidden = true;
+        },
+        removeAttribute(name: string) {
+          if (name === "hidden") this.hidden = false;
+        },
+      },
+      "expo-form": {
+        hidden: true,
+        setAttribute(name: string) {
+          if (name === "hidden") this.hidden = true;
+        },
+        removeAttribute(name: string) {
+          if (name === "hidden") this.hidden = false;
+        },
+      },
+    };
+    const documentStub = {
+      getElementById(id: string) {
+        return elements[id] ?? null;
+      },
+    };
+    const historyCalls: unknown[][] = [];
+    const historyStub = {
+      replaceState(...args: unknown[]) {
+        historyCalls.push(args);
+      },
+    };
+    const locationStub = {
+      pathname: "/expo/nasa-2026",
+      search: "?utm_source=qr",
+      replace(url: string) {
+        locationStub.replaced = url;
+        throw new Error("navigation blocked");
+      },
+      replaced: "",
+    };
+    const timers: Array<() => void> = [];
+    const setTimeoutStub = (fn: () => void) => {
+      timers.push(fn);
+      return timers.length;
+    };
+    const run = new Function(
+      "location",
+      "document",
+      "history",
+      "setTimeout",
+      "URLSearchParams",
+      expoAliasBootScript(),
+    );
+    run(locationStub, documentStub, historyStub, setTimeoutStub, URLSearchParams);
+
+    expect(locationStub.replaced).toBe("/intake?utm_source=qr&event=nasa-expo-2026-10-20");
+    expect(elements["expo-form"]?.hidden).toBe(true);
+    expect(timers).toHaveLength(1);
+    timers[0]?.();
+    expect(elements["expo-opening"]?.hidden).toBe(true);
+    expect(elements["expo-form"]?.hidden).toBe(false);
+    expect(String(historyCalls[0]?.[2])).toContain("utm_source=qr");
+    expect(String(historyCalls[0]?.[2])).toContain("event=nasa-expo-2026-10-20");
+
+    locationStub.pathname = "/intake";
+    locationStub.search = "?event=nasa-expo-2026-10-20";
+    elements["expo-form"]!.hidden = true;
+    elements["expo-opening"]!.hidden = false;
+    timers[0]?.();
+    expect(elements["expo-form"]?.hidden).toBe(true);
+    expect(elements["expo-opening"]?.hidden).toBe(false);
   });
 
   it("shows a correction only for the response still on screen", () => {

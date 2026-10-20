@@ -179,7 +179,7 @@ npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat
 
 That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
 
-Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026` (it redirects and adds the event). If Wi-Fi drops, the iPad shows **Thanks, we've got it** and keeps the response in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that thank-you screen. After **Done**, the next person does not see the earlier name or error. The saved response stays on the iPad, and responses that are still waiting keep trying to send.
+Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026`. That address redirects and adds the event. If the redirect does not leave the page, the form on that same page is shown. After a successful submit the iPad shows **Thanks, you're all set.** **Start a new entry** clears it, and it also clears after 30 seconds with no taps. If Wi-Fi drops, the response stays in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that screen. The next person does not see the earlier name or error. Responses that are still waiting keep trying to send.
 
 ## Test without touching Attio
 
@@ -195,7 +195,7 @@ That run creates three fake leads against a mock Attio: an emailed visitor, the 
 npm run dev
 ```
 
-Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill out the form and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Thanks, we've got it**. The response stays in IndexedDB. Use **Send now** after the function is reachable, or turn the device offline and submit again to see the same message without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
+Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill out the form and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Thanks, you're all set.** The response stays in IndexedDB. Use **Send now** after the function is reachable, or turn the device offline and submit again to see the same confirmation without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
 
 ## Test three fake leads against Attio
 
