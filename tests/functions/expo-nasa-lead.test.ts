@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   EXPO_CONSENT_CATALOG,
@@ -223,6 +224,11 @@ async function submit(state: MockState, body: unknown, extra: Partial<Parameters
   });
 }
 
+beforeEach(() => {
+  process.env.ATTIO_INTAKE_ENABLED = "true";
+  resetIntakeLeadMemoryForTests();
+});
+
 describe("NASA expo lead capture", () => {
   it("formats booth time in Eastern Time", () => {
     expect(formatIsoEastern(NOW)).toBe(CAPTURED_AT_ET);
@@ -383,8 +389,8 @@ describe("NASA expo lead capture", () => {
     });
     try {
       const result = await submit(state, payload());
-      expect(result.status).toBe(502);
-      expect(result.body).toEqual({ ok: false, error: "Attio could not save this lead yet." });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ ok: true, stored: true, attioStatus: "failed" });
       expect(JSON.stringify(result.body)).not.toContain("expo-fake-jordan@example.com");
       const line = errors.find((message) => message.includes("Expo lead send failed"));
       expect(line).toContain("HTTP 400");
@@ -406,7 +412,7 @@ describe("NASA expo lead capture", () => {
     const body = payload();
     await handleExpoLeadHttp({ method: "POST", body, apiKey: API_KEY, fetchImpl, now: NOW });
     const retry = await handleExpoLeadHttp({ method: "POST", body, apiKey: API_KEY, fetchImpl, now: NOW });
-    expect(retry.body).toMatchObject({ action: "updated", noteStatus: "already_recorded", listStatus: "already_listed" });
+    expect(retry.body).toMatchObject({ ok: true, stored: true, duplicate: true });
     expect(state.people).toHaveLength(1);
     expect(state.notes).toHaveLength(1);
     expect(text(state.people[0], "description").match(/11111111-1111-4111-8111-111111111111/g)).toHaveLength(1);
@@ -487,7 +493,8 @@ describe("NASA expo lead capture", () => {
       fullName: "Alex Kim",
       clientSubmissionId: "44444444-4444-4444-8444-444444444444",
     }));
-    expect(result.status).toBe(409);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ ok: true, stored: true, attioStatus: "failed" });
     expect(state.people).toHaveLength(2);
     expect(state.notes).toHaveLength(0);
   });
@@ -499,7 +506,8 @@ describe("NASA expo lead capture", () => {
       apiKey: "",
       now: NOW,
     });
-    expect(missingKey.status).toBe(500);
+    expect(missingKey.status).toBe(200);
+    expect(missingKey.body).toMatchObject({ ok: true, stored: true });
     expect(JSON.stringify(missingKey.body)).not.toContain("ATTIO_API_KEY");
 
     const blocked = await handleExpoLeadHttp({

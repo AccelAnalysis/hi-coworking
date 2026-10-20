@@ -34,6 +34,13 @@ import {
 } from "./powerNowConfirmation";
 import { readPowerNowSecret } from "./powerNowConfirmationSecrets";
 import {
+  attioIntakeEnabled,
+  buildPowerNowIntakeLead,
+  defaultIntakeLeadStore,
+  saveIntakeLead,
+  type IntakeLeadStore,
+} from "./intakeLeadStore";
+import {
   PITCH_COMPETITION_LIST,
   POWER_NOW_RATE_LIMIT_ERROR,
   POWER_NOW_SEND_ERROR,
@@ -161,6 +168,8 @@ export async function handlePowerNowHttp(request: {
   rateLimiter?: PowerNowRateLimiter;
   consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
   confirmation?: PowerNowConfirmationOptions;
+  attioEnabled?: boolean;
+  leadStore?: IntakeLeadStore;
 }): Promise<{ status: number; body: Record<string, unknown>; extraHeaders?: Record<string, string> }> {
   const limiter = request.rateLimiter ?? sharedRateLimiter;
   const ip = request.ip?.trim() || "unknown";
@@ -177,43 +186,134 @@ export async function handlePowerNowHttp(request: {
     return { status: 400, body: { ok: false, error: validated.error, fields: validated.fields } };
   }
 
-  const apiKey = request.apiKey?.trim();
-  if (!apiKey) {
-    return { status: 500, body: { ok: false, error: "Lead capture is not configured." } };
+  const storedAt = (request.now ?? new Date()).toISOString();
+  const saved = await saveIntakeLead(
+    request.leadStore ?? defaultIntakeLeadStore(),
+    buildPowerNowIntakeLead(validated.lead, storedAt),
+  );
+  if (!saved.ok) {
+    return { status: 502, body: { ok: false, error: "Could not save this lead." } };
   }
-
-  try {
-    const raw = request.body && typeof request.body === "object"
-      ? request.body as Record<string, unknown>
-      : null;
-    const result = await ingestPowerNow(validated.lead, {
-      apiKey,
-      fetchImpl: request.fetchImpl,
-      consentLog: request.consentLog ?? writePowerNowConsentLog,
-      confirmation: {
-        ...request.confirmation,
-        now: request.confirmation?.now ?? request.now,
-        ip: request.confirmation?.ip ?? request.ip ?? undefined,
-        startedAt: request.confirmation?.startedAt ?? (typeof raw?.pnStartedAt === "string" ? raw.pnStartedAt : null),
-        captchaToken: request.confirmation?.captchaToken ?? (typeof raw?.recaptchaToken === "string" ? raw.recaptchaToken : null),
-      },
-    });
+  if (!saved.created) {
     return {
       status: 200,
-      body: {
-        ok: true,
-        accepted: true,
-        action: result.action,
-        path: result.path,
-        companyStatus: result.companyStatus,
-        listStatus: result.listStatus,
-        noteStatus: result.noteStatus,
-        taskStatus: result.taskStatus,
-      },
+      body: { ok: true, accepted: true, stored: true, duplicate: true, action: "duplicate", path: validated.lead.path },
     };
-  } catch (error) {
-    logAttioSendFailure("Power NOW", error);
-    return { status: 502, body: { ok: false, error: POWER_NOW_SEND_ERROR } };
+  }
+
+  const attioOn = request.attioEnabled ?? attioIntakeEnabled();
+  const apiKey = request.apiKey?.trim();
+  if (attioOn && apiKey) {
+    try {
+      const raw = request.body && typeof request.body === "object"
+        ? request.body as Record<string, unknown>
+        : null;
+      const result = await ingestPowerNow(validated.lead, {
+        apiKey,
+        fetchImpl: request.fetchImpl,
+        consentLog: request.consentLog ?? writePowerNowConsentLog,
+        confirmation: {
+          ...request.confirmation,
+          now: request.confirmation?.now ?? request.now,
+          ip: request.confirmation?.ip ?? request.ip ?? undefined,
+          startedAt: request.confirmation?.startedAt ?? (typeof raw?.pnStartedAt === "string" ? raw.pnStartedAt : null),
+          captchaToken: request.confirmation?.captchaToken ?? (typeof raw?.recaptchaToken === "string" ? raw.recaptchaToken : null),
+        },
+      });
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          accepted: true,
+          stored: true,
+          duplicate: false,
+          attioStatus: "saved",
+          action: result.action,
+          path: result.path,
+          companyStatus: result.companyStatus,
+          listStatus: result.listStatus,
+          noteStatus: result.noteStatus,
+          taskStatus: result.taskStatus,
+        },
+      };
+    } catch (error) {
+      logAttioSendFailure("Power NOW", error);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          accepted: true,
+          stored: true,
+          duplicate: false,
+          attioStatus: "failed",
+          action: "stored",
+          path: validated.lead.path,
+        },
+      };
+    }
+  }
+
+  await confirmStoredPowerNowLead(validated.lead, confirmationFromRequest(request));
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      accepted: true,
+      stored: true,
+      duplicate: false,
+      attioStatus: attioOn ? "skipped" : "disabled",
+      action: "stored",
+      path: validated.lead.path,
+    },
+  };
+}
+
+function confirmationFromRequest(request: {
+  body: unknown;
+  now?: Date;
+  ip?: string | null;
+  confirmation?: PowerNowConfirmationOptions;
+}): PowerNowConfirmationOptions {
+  const raw = request.body && typeof request.body === "object"
+    ? request.body as Record<string, unknown>
+    : null;
+  return {
+    ...request.confirmation,
+    now: request.confirmation?.now ?? request.now,
+    ip: request.confirmation?.ip ?? request.ip ?? undefined,
+    startedAt: request.confirmation?.startedAt ?? (typeof raw?.pnStartedAt === "string" ? raw.pnStartedAt : null),
+    captchaToken: request.confirmation?.captchaToken ?? (typeof raw?.recaptchaToken === "string" ? raw.recaptchaToken : null),
+  };
+}
+
+/** Same flag and allow-list as the Attio path. No Attio note when Attio is off. */
+async function confirmStoredPowerNowLead(
+  lead: NormalizedPowerNow,
+  confirmation: PowerNowConfirmationOptions,
+): Promise<void> {
+  const env = confirmation.env ?? process.env;
+  if (!confirmationEmailEnabled(env)) return;
+  try {
+    await runPowerNowConfirmation({
+      lead,
+      personRecordId: lead.clientSubmissionId,
+      env,
+      now: confirmation.now ?? new Date(),
+      ip: confirmation.ip ?? "unknown",
+      startedAt: confirmation.startedAt ?? null,
+      captchaToken: confirmation.captchaToken ?? null,
+      mailFetch: confirmation.mailFetch,
+      store: confirmation.store ?? createFirestoreConfirmationStore(),
+      resolveMx: confirmation.resolveMx,
+      verifyCaptcha: confirmation.verifyCaptcha,
+      readSecret: confirmation.readSecret ?? ((name) => readPowerNowSecret(name, env)),
+      onSuccess: async () => undefined,
+      onSendFailure: async (errorClass) => {
+        console.error("Power NOW confirmation email", { errorClass });
+      },
+    });
+  } catch {
+    console.error("Power NOW confirmation email", { errorClass: "SendFailed" });
   }
 }
 

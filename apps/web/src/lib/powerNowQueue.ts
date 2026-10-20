@@ -127,7 +127,7 @@ export async function postPowerNow(payload: PowerNowSubmission): Promise<{
   error: string | null;
   fields?: PowerNowFieldErrors;
 }> {
-  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
   if (!online) return { decision: "queue", error: "Offline" };
 
   try {

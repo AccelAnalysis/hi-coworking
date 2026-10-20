@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   CONFIRMATION_FAILURE_PREFIX,
@@ -297,6 +298,8 @@ async function submit(
 }
 
 beforeEach(() => {
+  process.env.ATTIO_INTAKE_ENABLED = "true";
+  resetIntakeLeadMemoryForTests();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 

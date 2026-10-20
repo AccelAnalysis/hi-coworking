@@ -30,6 +30,7 @@
     "deploy:admin-operating-calendar": "firebase deploy --config firebase.admin-calendar.json --project hi-coworking-plat --only functions:admin-operating-calendar",
     "deploy:payment-status-guard": "firebase deploy --config firebase.payment-status-guard.json --project hi-coworking-plat --only functions:admin_markPaymentStatus",
     "deploy:expo-lead": "firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead",
+    "export:intake-leads": "node scripts/export-intake-leads.mjs",
     "deploy:admin-event": "firebase deploy --config firebase.admin-events.json --project hi-coworking-plat --only functions:admin-event-save",
     "test": "npm run test:security",
     "test:rules": "firebase emulators:exec --project demo-hi-coworking --only firestore,storage \"vitest run tests/rules\"",

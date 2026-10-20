@@ -111,6 +111,8 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     const isolated = loadGraph("firebase/expo-lead-functions/src/index.ts");
     expect(isolated.secrets).toEqual(["ATTIO_API_KEY"]);
     expect(isolated.files.some((file) => file.endsWith("powerNowConfirmationSecrets.ts"))).toBe(true);
+    expect(isolated.files.some((file) => file.endsWith("powerNowIngest.ts"))).toBe(true);
+    expect(isolated.files.some((file) => file.endsWith("intakeLeadStore.ts"))).toBe(true);
     expect(isolated.files.some((file) => file.endsWith(`${path.sep}apps${path.sep}functions${path.sep}src${path.sep}index.ts`))).toBe(false);
     expect(isolated.files.some((file) => file.endsWith("eventMarketing.ts"))).toBe(false);
     expect(isolated.files.some((file) => file.endsWith("smsProvider.ts"))).toBe(false);
@@ -151,6 +153,7 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     expect(parsed.params.filter((param) => param.endsWith(":secret"))).toEqual(["ATTIO_API_KEY:secret"]);
     expect(parsed.params).toEqual(expect.arrayContaining([
       "ATTIO_API_KEY:secret",
+      "ATTIO_INTAKE_ENABLED:string",
       "POWER_NOW_CONFIRMATION_EMAIL_ENABLED:string",
       "POWER_NOW_CONFIRMATION_TEST_RECIPIENTS:string",
       "RECAPTCHA_ENTERPRISE_SITE_KEY:string",

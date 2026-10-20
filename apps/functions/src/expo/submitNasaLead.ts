@@ -4,8 +4,10 @@ import * as logger from "firebase-functions/logger";
 import { handleExpoLeadHttp } from "./nasaLeadIngest";
 
 /**
- * Public booth ingest. The browser posts the form here; Attio is called only
- * with ATTIO_API_KEY from the function environment. This path does not read a
+ * Public booth and Power NOW ingest. The lead is stored in Firestore.
+ * Attio runs only when ATTIO_INTAKE_ENABLED is true, and an Attio failure
+ * still returns success after the Firestore write. ATTIO_API_KEY stays bound
+ * so this isolated deploy does not change secrets. This path does not read a
  * microphone, kiosk transcript, or any voice capture.
  */
 const attioApiKey = defineSecret("ATTIO_API_KEY");

@@ -1,12 +1,58 @@
 # Accel Analysis lead intake
 
-Shared lead form for Accel Analysis. The page is Accel-branded. It does not show an event name. Visitors enter a lead on a phone, iPad, or laptop. The page writes an Attio person, links a company, adds the person to a known list when the URL names one, and stores consent in a person note plus a description tag. It does not record audio or any kiosk voice path.
+Shared lead form for Accel Analysis. The page is Accel-branded. It does not show an event name. Visitors enter a lead on a phone, iPad, or laptop. The page saves the lead in Firestore. Attio is not on the success path unless `ATTIO_INTAKE_ENABLED` is `true`. It does not record audio or any kiosk voice path.
 
 Public page: `/intake`
 
 NASA Expo alias: `/expo/nasa-2026` redirects to `/intake?event=nasa-expo-2026-10-20`. Existing QR codes keep working. The event slug is not rendered.
 
 Ingest: `POST /api/expo/nasa-lead` (Firebase Hosting rewrite to the `expo_submitNasaLead` Cloud Function)
+
+That one function is also the Power NOW Pitch, Watch, and Contribute ingest. Those pages post `form: "power-now"` to the same URL. There is no second function to deploy.
+
+## Firestore
+
+Accepted leads are written to `intakeLeads` in project `hi-coworking-plat`. The document id is `clientSubmissionId`, so an iPad retry does not create a second row. The document keeps the fields, consent (opt-in, wording version, wording, Eastern timestamp, source), event, interests, and `submittedAt`.
+
+Clients cannot read or write `intakeLeads`. `firestore.rules` denies both. The function uses the Admin SDK, which does not consult those rules, so Jonathan does not deploy rules before the booth. A collection with no allow rule is already closed to the public.
+
+Attio runs only when `ATTIO_INTAKE_ENABLED` is the string `true`. The deploy default is `false`. If Attio is called and it fails, the visitor still gets a success response after the Firestore write.
+
+Power NOW confirmation mail is unchanged: it sends only when `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is `true`, and only to `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` when that allow-list is set. With Attio off, the mail still follows that flag and allow-list. It does not write an Attio note.
+
+## Export
+
+From a machine signed in to `hi-coworking-plat`:
+
+```bash
+gcloud auth application-default login
+node scripts/export-intake-leads.mjs --out intake-leads.csv
+```
+
+The CSV has one row per lead, including consent version and timestamp columns, and it contains personal data. Do not commit it. The command prints the count, not the rows.
+
+## What Jonathan runs
+
+Hosting updates itself after this merges to `main`. That does not update Cloud Functions. Rules do not need a deploy. One workflow updates the function that serves the booth and Power NOW.
+
+1. Merge this pull request into `main`.
+2. In GitHub, open Actions → **Hi Coworking Firebase expo lead function**.
+3. Click **Run workflow**. Choose branch **main**.
+4. In the confirmation box, type exactly `deploy expo_submitNasaLead`.
+5. Run it and wait until the job is green. The OPTIONS check does not write a lead.
+6. On the booth iPad, open `https://hi-coworking.com/expo/nasa-2026`. If a blue **Send now** button is showing, tap it. That flushes leads already queued on the iPad. A reload also tries, after a short wait; **Send now** does not wait.
+
+Do not run a second function workflow. Do not deploy Firestore rules for this.
+
+### After the workflow is green
+
+Booth: open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20`, submit a fake name with an `example.com` email or a 555 phone number, and confirm the screen says **Thanks, we've got it**. Then run the export and find that `clientSubmissionId` with `kind` `expo`.
+
+Power NOW Pitch: open `https://forms.accelanalysis.com/power-now/pitch`, submit a fake pitch, and confirm the thanks screen. Export should show `kind` `power-now` and `path` `pitch`.
+
+Power NOW Contribute: open `https://forms.accelanalysis.com/power-now/contribute` and do the same. Export should show `path` `contribute`.
+
+Watch uses the same function: `https://forms.accelanalysis.com/power-now/watch`.
 
 Event context is read from `event`, `event_id`, and `list` on the form post (filled from the page query string). A post that omits those keys still uses the NASA Expo list, so older queued leads keep their destination. A post that sends the keys empty is a general Accel Analysis lead and is not added to that list. Unknown list slugs are stored on the note and are not sent to Attio.
 

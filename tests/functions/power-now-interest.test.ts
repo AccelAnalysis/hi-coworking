@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID,
@@ -251,6 +252,11 @@ async function submit(
     },
   });
 }
+
+beforeEach(() => {
+  process.env.ATTIO_INTAKE_ENABLED = "true";
+  resetIntakeLeadMemoryForTests();
+});
 
 describe("Power NOW forms host origin", () => {
   it("accepts pitch, watch, and contribute from https://forms.accelanalysis.com", async () => {
@@ -745,8 +751,8 @@ describe("Power NOW Attio payload mapping", () => {
     });
     try {
       const result = await submit(state, pitchBody());
-      expect(result.status).toBe(502);
-      expect(result.body).toEqual({ ok: false, error: POWER_NOW_SEND_ERROR });
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({ ok: true, stored: true, attioStatus: "failed", path: "pitch" });
       expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
       const line = errors.find((message) => message.includes("Power NOW send failed"));
       expect(line).toContain("HTTP 400");
@@ -836,7 +842,7 @@ describe("Power NOW Attio payload mapping", () => {
     const state = emptyState();
     await submit(state, pitchBody());
     const again = await submit(state, pitchBody());
-    expect(again.body).toMatchObject({ noteStatus: "already_recorded", taskStatus: "already_recorded" });
+    expect(again.body).toMatchObject({ ok: true, stored: true, duplicate: true });
     expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
     expect(state.tasks).toHaveLength(1);
   });
