@@ -92,13 +92,13 @@ Each accepted lead appends one description line:
 
 When the URL names the NASA Expo (`event=nasa-expo-2026-10-20`, the same id, or the list slug below), `captured_by` is `NASA Expo booth` and `source` is `EXPO-NASA-2026-10-20`. The form then asks for organization type and two optional interests, Power NOW and Hi Coworking early access. Other events store the event slug as the source and `captured_by` `Accel Analysis intake`. `captured_at` is an ISO timestamp in `America/New_York`, taken when the person is saved (including offline) as long as that time is within the last 14 days.
 
-Each consent box stores yes or no, the wording version, the Eastern timestamp, and the source. The exact wording is copied into the note only when the box is checked. All three boxes start unchecked.
+Each consent box stores yes or no, the wording version, the Eastern timestamp, and the source. The exact wording is copied into the note only when the box is checked. An unchecked box is stored as no.
 
 ## Privacy notice
 
-Draft, pending Jonathan’s approval. The form shows this text:
+The form shows this text under Privacy, then the checkbox labels from the catalog:
 
-Accel Analysis keeps what you type here so we can follow up on what you asked. The three boxes start unchecked. If you check one, we store yes, the exact wording version, the time in Eastern Time, and the source of this form. If you leave it unchecked, we store no. We do not sell this information. Questions: JHolman@AccelAnalysis.com or (757) 236-0651.
+We'll use your information only to follow up on what you asked about. Check a box only if you'd like that kind of update. You can unsubscribe anytime.
 
 ## Consent wording — cite these versions
 
@@ -179,7 +179,7 @@ npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat
 
 That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
 
-Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026`. That address redirects and adds the event. If the redirect does not leave the page, the form on that same page is shown. After a successful submit the iPad shows **Thanks, you're all set.** **Start a new entry** clears it, and it also clears after 30 seconds with no taps. If Wi-Fi drops, the response stays in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that screen. The next person does not see the earlier name or error. Responses that are still waiting keep trying to send.
+Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026`. That address redirects and adds the event. If the redirect does not leave the page, the form on that same page is shown. In Safari, use Share and then Add to Home Screen. The icon is named Accel Analysis and opens the form without the Safari address bar. In a browser that supports it, **Full screen** hides the browser chrome for that visit and disappears once the page is already full screen. After a successful submit the iPad shows **Thanks, you're all set.** **Start a new entry** clears it, and it also clears after 30 seconds with no taps, back on the same form. If Wi-Fi drops, the response stays in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that screen. A later visitor does not see the earlier name or error. Responses that are still waiting keep trying to send.
 
 ## Test without touching Attio
 

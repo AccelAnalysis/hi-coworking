@@ -30,9 +30,6 @@ export default function NasaExpoIntakeAlias() {
           <IntakeForm presetEvent={NASA_EXPO_EVENT} />
         </AccelBrandFrame>
       </div>
-      <noscript>
-        <style>{`#expo-opening{display:none!important}#expo-form[hidden]{display:block!important}`}</style>
-      </noscript>
     </>
   );
 }

@@ -21,7 +21,7 @@ export const ACCEL_TAGLINE = "Put AI to work without overwhelming your team.";
 export const ACCEL_ONE_LINER = "We redesign work so people and AI can work together productively.";
 
 export const INTAKE_PRIVACY_NOTICE =
-  "Accel Analysis keeps what you type here so we can follow up on what you asked. The three boxes start unchecked. If you check one, we store yes, the exact wording version, the time in Eastern Time, and the source of this form. If you leave it unchecked, we store no. We do not sell this information. Questions: JHolman@AccelAnalysis.com or (757) 236-0651.";
+  "We'll use your information only to follow up on what you asked about. Check a box only if you'd like that kind of update. You can unsubscribe anytime.";
 
 export const EXPO_LIST = {
   apiSlug: "nasa_expo_2026_10_20_leads",

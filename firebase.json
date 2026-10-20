@@ -50,6 +50,14 @@
       { "source": "/admin/analytics", "destination": "/admin/dashboard", "type": 301 },
       { "source": "/admin/analytics/**", "destination": "/admin/dashboard", "type": 301 }
     ],
+    "headers": [
+      {
+        "source": "/expo/accel-analysis.webmanifest",
+        "headers": [
+          { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" }
+        ]
+      }
+    ],
     "rewrites": [
       {
         "source": "/api/expo/nasa-lead",

@@ -49,10 +49,13 @@
   text-underline-offset: 3px;
 }
 
-.pn :focus-visible {
-  outline: 3px solid var(--midnight);
-  outline-offset: 3px;
-  box-shadow: 0 0 0 3px #fff;
+.pn :focus-visible,
+.pn input:focus-visible,
+.pn textarea:focus-visible,
+.pn select:focus-visible {
+  outline: 4px solid var(--midnight);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #fff;
 }
 
 .pn-skip {

@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { NASA_EXPO_EVENT } from "@/lib/expoNasaLead";
+import { BoothKioskGuard } from "@/components/BoothKiosk";
+import { boothKioskMetadata } from "@/lib/boothKiosk";
 
 export const metadata: Metadata = {
   title: "Follow up · Accel Analysis",
   description: "Tell Accel Analysis how we should follow up with you.",
   robots: { index: false, follow: false },
+  ...boothKioskMetadata,
 };
 
 export const viewport: Viewport = {
@@ -15,10 +17,5 @@ export const viewport: Viewport = {
 };
 
 export default function ExpoAliasLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <>
-      <meta httpEquiv="refresh" content={`1;url=/intake?event=${NASA_EXPO_EVENT}`} />
-      {children}
-    </>
-  );
+  return <BoothKioskGuard>{children}</BoothKioskGuard>;
 }

@@ -32,7 +32,17 @@ import {
   toVisitorError,
   type QueuedExpoLead,
 } from "@/lib/expoLeadQueue";
+import { BoothFullScreenButton } from "@/components/BoothKiosk";
+import {
+  collectIntakeFieldErrors,
+  firstIntakeField,
+  intakeFieldForMessage,
+  type IntakeFieldErrors,
+} from "@/lib/intakeFieldErrors";
 import { VisitorConfirmation } from "@/lib/visitorConfirmation";
+
+const CONTROL_FOCUS =
+  "focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#00072E]";
 
 const DRAFT_KEY = "accel-analysis-intake-draft";
 
@@ -100,6 +110,7 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
   const [urlContext, setUrlContext] = useState<UrlContext>({ event: presetEvent, eventId: "", list: "" });
   const [honeypot, setHoneypot] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<IntakeFieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [queue, setQueue] = useState<QueuedExpoLead[]>([]);
@@ -165,6 +176,23 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
     window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }, [draft, receipt]);
 
+  useEffect(() => {
+    const key = firstIntakeField(fieldErrors);
+    if (!key) return;
+    const root = document.querySelector(`[data-field="${key}"]`);
+    if (!(root instanceof HTMLElement)) return;
+    root.scrollIntoView({ block: "center", behavior: "auto" });
+    root.querySelector<HTMLElement>("input, textarea, select")?.focus();
+  }, [fieldErrors]);
+
+  useEffect(() => {
+    if (!error) return;
+    const summary = document.getElementById("intake-form-error");
+    if (!(summary instanceof HTMLElement)) return;
+    summary.scrollIntoView({ block: "center", behavior: "auto" });
+    summary.focus();
+  }, [error]);
+
   const pending = queue.filter((lead) => lead.status === "pending");
   const activeAttention = attentionForActiveReceipt(queue, receipt?.id);
   const nasaFields = profile.fieldSet === "nasa-expo";
@@ -184,11 +212,14 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
     setDraft(EMPTY_DRAFT);
     setHoneypot("");
     setError(null);
+    setFieldErrors({});
     setReceipt(null);
     window.sessionStorage.removeItem(DRAFT_KEY);
     window.setTimeout(() => {
       const heading = document.getElementById("intake-heading");
-      if (heading instanceof HTMLElement) heading.focus();
+      if (!(heading instanceof HTMLElement)) return;
+      heading.scrollIntoView({ block: "start", behavior: "auto" });
+      heading.focus();
     }, 0);
   }
 
@@ -207,9 +238,37 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
     }
   }
 
+  function showSubmitError(message: string) {
+    const key = intakeFieldForMessage(message);
+    if (key) {
+      setError(null);
+      setFieldErrors({ [key]: message });
+      return;
+    }
+    setFieldErrors({});
+    setError(message);
+  }
+
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    const fields = collectIntakeFieldErrors({
+      fullName: draft.fullName,
+      email: draft.email,
+      phone: draft.phone,
+      organization: draft.organization,
+      roleTitle: draft.roleTitle,
+      orgType: draft.orgType,
+      need: draft.need,
+      timing: draft.timing,
+      nasaFields,
+      consent: draft.consent,
+    });
+    if (firstIntakeField(fields)) {
+      setFieldErrors(fields);
+      return;
+    }
+    setFieldErrors({});
     const payload: ExpoLeadPayload = {
       fullName: draft.fullName,
       organization: draft.organization,
@@ -233,7 +292,7 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
     };
     const validated = validateExpoLeadPayload(payload);
     if (!validated.ok) {
-      setError(toVisitorError(validated.error));
+      showSubmitError(toVisitorError(validated.error));
       return;
     }
 
@@ -263,7 +322,7 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
         window.sessionStorage.removeItem(DRAFT_KEY);
         return;
       }
-      setError(toVisitorError(outcome.error));
+      showSubmitError(toVisitorError(outcome.error));
     } catch {
       setError("We couldn't save this just now. Keep this page open and try again.");
     } finally {
@@ -288,13 +347,16 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
             <p className="mt-3 max-w-xl text-lg leading-snug text-[#1B1B1B] sm:text-xl">{ACCEL_TAGLINE}</p>
             <p className="mt-1 max-w-xl text-base leading-snug text-[#5E5E5E]">{ACCEL_ONE_LINER}</p>
           </div>
-          <button
-            type="button"
-            onClick={resetForm}
-            className="mt-1 min-h-14 shrink-0 rounded-full border-2 border-[#0163FD] px-5 text-lg font-semibold text-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
-          >
-            Clear
-          </button>
+          <div className="mt-1 flex shrink-0 flex-col items-stretch gap-2">
+            <BoothFullScreenButton />
+            <button
+              type="button"
+              onClick={resetForm}
+              className="min-h-14 rounded-full border-2 border-[#0163FD] px-5 text-lg font-semibold text-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
+            >
+              Clear
+            </button>
+          </div>
         </div>
       </header>
 
@@ -349,68 +411,104 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
           )
         ) : (
           <form id={formId} onSubmit={(event) => void onSubmit(event)} className="space-y-6" noValidate>
-            {error && (
-              <div role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-xl text-[#1B1B1B]">
+            {error ? (
+              <div
+                id="intake-form-error"
+                role="alert"
+                tabIndex={-1}
+                className={`rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-xl text-[#1B1B1B] ${CONTROL_FOCUS}`}
+              >
                 <span className="font-semibold">Please check this. </span>
                 {error}
               </div>
-            )}
+            ) : null}
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
               <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">About you</h2>
-              <Field label="Full name" required value={draft.fullName} autoComplete="name" onChange={(value) => update("fullName", value)} />
-              <Field label="Email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={(value) => update("email", value)} hint="We'll need your email or your phone." />
-              <Field label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={(value) => update("phone", value)} hint="Add one if you'd rather we call or text." />
+              <Field field="fullName" label="Full name" required value={draft.fullName} autoComplete="name" error={fieldErrors.fullName} onChange={(value) => update("fullName", value)} />
+              <Field field="email" label="Email" type="email" inputMode="email" autoComplete="email" value={draft.email} error={fieldErrors.email} onChange={(value) => update("email", value)} hint="We'll need your email or your phone." />
+              <Field field="phone" label="Phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} error={fieldErrors.phone} onChange={(value) => update("phone", value)} hint="Add one if you'd rather we call or text." />
             </section>
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
               <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">Your organization</h2>
-              <Field label="Organization" required autoComplete="organization" value={draft.organization} onChange={(value) => update("organization", value)} />
-              <Field label="Role / title" required autoComplete="organization-title" value={draft.roleTitle} onChange={(value) => update("roleTitle", value)} />
+              <Field field="organization" label="Organization" required autoComplete="organization" value={draft.organization} error={fieldErrors.organization} onChange={(value) => update("organization", value)} />
+              <Field field="roleTitle" label="Role / title" required autoComplete="organization-title" value={draft.roleTitle} error={fieldErrors.roleTitle} onChange={(value) => update("roleTitle", value)} />
               {nasaFields && (
-                <div>
-                  <p className="text-xl font-semibold" id={`${formId}-org-type`}>
+                <fieldset data-field="orgType" className="min-w-0 border-0 p-0" aria-required="true">
+                  <legend className="text-xl font-semibold" id={`${formId}-org-type`}>
                     Your organization type <span className="text-[#0163FD]">Required</span>
-                  </p>
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" role="group" aria-labelledby={`${formId}-org-type`}>
+                  </legend>
+                  <div
+                    className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2"
+                    role="radiogroup"
+                    aria-labelledby={`${formId}-org-type`}
+                    aria-required="true"
+                    aria-invalid={fieldErrors.orgType ? true : undefined}
+                    aria-describedby={fieldErrors.orgType ? `${formId}-org-type-error` : undefined}
+                  >
                     {EXPO_ORG_TYPES.map((orgType) => {
                       const selected = draft.orgType === orgType.id;
                       return (
-                        <button
+                        <label
                           key={orgType.id}
-                          type="button"
-                          aria-pressed={selected}
-                          onClick={() => update("orgType", orgType.id)}
-                          className={`min-h-16 rounded-2xl border-2 px-4 text-left text-xl font-semibold focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF] ${
+                          className={`flex min-h-16 items-center gap-3 rounded-2xl border-2 px-4 text-left text-xl font-semibold text-[#1B1B1B] has-[:focus-visible]:outline has-[:focus-visible]:outline-4 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[#00072E] ${
                             selected
-                              ? "border-[#0163FD] bg-[#0163FD] text-white"
-                              : "border-[#5E5E5E]/35 bg-white text-[#1B1B1B]"
+                              ? "border-[#0163FD] bg-[#F2F6FF]"
+                              : "border-[#5E5E5E]/35 bg-white"
                           }`}
                         >
+                          <input
+                            type="radio"
+                            name={`${formId}-org-type`}
+                            value={orgType.id}
+                            required
+                            checked={selected}
+                            onChange={() => update("orgType", orgType.id)}
+                            aria-describedby={fieldErrors.orgType ? `${formId}-org-type-error` : undefined}
+                            className={`h-6 w-6 shrink-0 ${CONTROL_FOCUS}`}
+                          />
                           {orgType.label}
-                        </button>
+                        </label>
                       );
                     })}
                   </div>
-                </div>
+                  {fieldErrors.orgType ? (
+                    <p id={`${formId}-org-type-error`} role="alert" className="mt-2 text-base font-semibold text-[#9B1C1C]">
+                      {fieldErrors.orgType}
+                    </p>
+                  ) : null}
+                </fieldset>
               )}
             </section>
 
             <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
               <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">What you need</h2>
-              <label className="block text-xl font-semibold" htmlFor={`${formId}-need`}>
-                In your words <span className="text-[#0163FD]">Required</span>
-              </label>
-              <textarea
-                id={`${formId}-need`}
-                required
-                rows={4}
-                maxLength={500}
-                value={draft.need}
-                onChange={(event) => update("need", event.target.value)}
-                className="mt-2 w-full rounded-2xl border-2 border-[#5E5E5E]/35 bg-white px-4 py-4 text-xl leading-snug outline-none focus:border-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
-              />
-              <Field label="Timing" value={draft.timing} onChange={(value) => update("timing", value)} hint="Optional. This quarter, next fiscal year, or whenever." />
+              <div data-field="need">
+                <label className="block text-xl font-semibold" htmlFor={`${formId}-need`}>
+                  In your words <span className="text-[#0163FD]">Required</span>
+                </label>
+                <textarea
+                  id={`${formId}-need`}
+                  required
+                  aria-required="true"
+                  aria-invalid={fieldErrors.need ? true : undefined}
+                  aria-describedby={fieldErrors.need ? `${formId}-need-error` : undefined}
+                  rows={4}
+                  maxLength={500}
+                  value={draft.need}
+                  onChange={(event) => update("need", event.target.value)}
+                  className={`mt-2 w-full rounded-2xl border-2 bg-white px-4 py-4 text-xl leading-snug ${CONTROL_FOCUS} ${
+                    fieldErrors.need ? "border-[#9B1C1C]" : "border-[#5E5E5E]/35"
+                  }`}
+                />
+                {fieldErrors.need ? (
+                  <p id={`${formId}-need-error`} role="alert" className="mt-2 text-base font-semibold text-[#9B1C1C]">
+                    {fieldErrors.need}
+                  </p>
+                ) : null}
+              </div>
+              <Field field="timing" label="Timing" value={draft.timing} error={fieldErrors.timing} onChange={(value) => update("timing", value)} hint="Optional. This quarter, next fiscal year, or whenever." />
             </section>
 
             {nasaFields && (
@@ -432,9 +530,6 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
 
             <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
               <h2 className="text-2xl font-bold text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif]">How we can reach you</h2>
-              <p className="text-lg text-[#1B1B1B]">
-                Email, text, and phone start unchecked. Check a box only if you agree to that sentence.
-              </p>
               {EXPO_CONSENT_KEYS.map((key) => {
                 const item = EXPO_CONSENT_CATALOG[key];
                 return (
@@ -477,9 +572,9 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
               <p className="mt-4 text-center text-base text-[#5E5E5E]">
                 {ACCEL_DISPLAY_NAME}
                 {" · "}
-                <a className="font-semibold text-[#0163FD] underline" href="tel:+17572360651">{ACCEL_PHONE_DISPLAY}</a>
+                {ACCEL_PHONE_DISPLAY}
                 {" · "}
-                <a className="font-semibold text-[#0163FD] underline" href={`mailto:${ACCEL_EMAIL}`}>{ACCEL_EMAIL}</a>
+                {ACCEL_EMAIL}
               </p>
             </div>
           </form>
@@ -490,41 +585,62 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
 }
 
 function Field({
+  field,
   label,
   value,
   onChange,
   hint,
   required,
+  error,
   type = "text",
   inputMode,
   autoComplete,
 }: {
+  field: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
   hint?: string;
   required?: boolean;
+  error?: string;
   type?: string;
   inputMode?: "email" | "tel" | "text";
   autoComplete?: string;
 }) {
   const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
   return (
-    <div>
+    <div data-field={field}>
       <label htmlFor={id} className="text-xl font-semibold">
         {label} {required ? <span className="text-[#0163FD]">Required</span> : null}
       </label>
+      {hint ? (
+        <p id={hintId} className="mt-2 text-base text-[#5E5E5E]">
+          {hint}
+        </p>
+      ) : null}
       <input
         id={id}
         type={type}
         inputMode={inputMode}
         autoComplete={autoComplete}
         required={required}
+        aria-required={required || undefined}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 min-h-16 w-full rounded-2xl border-2 border-[#5E5E5E]/35 bg-white px-4 text-xl outline-none focus:border-[#0163FD] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#03C9FF]"
+        className={`mt-2 min-h-16 w-full rounded-2xl border-2 bg-white px-4 text-xl ${CONTROL_FOCUS} ${
+          error ? "border-[#9B1C1C]" : "border-[#5E5E5E]/35"
+        }`}
       />
-      {hint ? <p className="mt-2 text-base text-[#5E5E5E]">{hint}</p> : null}
+      {error ? (
+        <p id={errorId} role="alert" className="mt-2 text-base font-semibold text-[#9B1C1C]">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

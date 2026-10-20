@@ -14,6 +14,7 @@ export {
   INTAKE_PRIVACY_NOTICE,
   NASA_EXPO_EVENT,
   isNasaExpoEvent,
+  normalizePhone,
   resolveIntakeProfile,
   validateExpoLeadPayload,
 } from "../../../functions/src/expo/nasaLeadModel";

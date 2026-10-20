@@ -15,7 +15,9 @@ import {
   validateExpoLeadPayload,
   type ExpoLeadPayload,
 } from "../../apps/functions/src/expo/nasaLeadModel";
+import { BOOTH_MANIFEST, boothFullscreenApiAvailable, boothHrefStaysInFlow, requestBoothFullscreen } from "../../apps/web/src/lib/boothKiosk";
 import { expoAliasBootScript } from "../../apps/web/src/lib/expoAliasBoot";
+import { collectIntakeFieldErrors, firstIntakeField } from "../../apps/web/src/lib/intakeFieldErrors";
 import { attentionForActiveReceipt, decideLeadSubmitOutcome, EXPO_OFFLINE_SAVED_MESSAGE, toVisitorError, type QueuedExpoLead } from "../../apps/web/src/lib/expoLeadQueue";
 
 const NOW = new Date("2026-10-20T18:05:00.000Z");
@@ -651,10 +653,14 @@ describe("NASA expo lead capture", () => {
     expect(aliasPage).toContain("expoAliasBootScript");
     expect(aliasPage).toContain('id="expo-form"');
     expect(aliasPage).toContain("Continue to the form");
+    expect(aliasPage.indexOf("Continue to the form")).toBeLessThan(aliasPage.indexOf('id="expo-form"'));
+    expect(aliasPage).not.toContain("<noscript>");
+    expect(aliasPage).not.toContain("http-equiv");
     expect(aliasPage).toContain("presetEvent={NASA_EXPO_EVENT}");
     expect(aliasPage).not.toContain("intake…");
-    expect(aliasLayout).toContain('httpEquiv="refresh"');
-    expect(aliasLayout).toContain("/intake?event=");
+    expect(aliasLayout).not.toContain("httpEquiv");
+    expect(aliasLayout).not.toContain("refresh");
+    expect(aliasPage).toContain("href={`/intake?event=${NASA_EXPO_EVENT}`}");
     expect(expoAliasBootScript()).toContain("location.replace");
     expect(expoAliasBootScript()).toContain("setTimeout(reveal");
     expect(expoAliasBootScript()).not.toContain("</");
@@ -713,8 +719,33 @@ describe("NASA expo lead capture", () => {
       expect(doc).toContain(item.wording);
     }
     expect(doc).toContain(INTAKE_PRIVACY_NOTICE);
+    expect(INTAKE_PRIVACY_NOTICE).toBe(
+      "We'll use your information only to follow up on what you asked about. Check a box only if you'd like that kind of update. You can unsubscribe anytime.",
+    );
     expect(doc).toContain("ATTIO_API_KEY");
     expect(doc).toContain("/intake");
+    expect(form).not.toContain("start unchecked");
+    expect(form).not.toContain("mailto:");
+    expect(form).not.toContain("tel:");
+    expect(form).toContain("aria-invalid");
+    expect(form).toContain("aria-describedby");
+    expect(form).toContain('aria-required="true"');
+    expect(form).toContain("required");
+    expect(form).toContain("focus-visible:outline-4");
+    expect(form).not.toContain("outline-none");
+    expect(handler).not.toContain("INTAKE_PRIVACY_NOTICE");
+
+    const powerNow = readFileSync("apps/web/src/app/power-now/PowerNowPage.tsx", "utf8");
+    const powerCss = readFileSync("apps/web/src/app/power-now/power-now.css", "utf8");
+    for (const phrase of ["start unchecked", "only if they ask", "Save lead", "Next person", "the person agrees", "boxes start unchecked"]) {
+      expect(form).not.toContain(phrase);
+      expect(powerNow).not.toContain(phrase);
+    }
+    expect(powerNow).toContain('required={required}');
+    expect(powerNow).toContain("aria-required={required || undefined}");
+    expect(powerCss).toContain("outline: 4px solid var(--midnight)");
+    expect(powerCss).toContain(".pn textarea:focus-visible");
+    expect(powerCss).toContain(".pn select:focus-visible");
   });
 
   it("reveals the booth form when the redirect never leaves the loader", () => {
@@ -789,6 +820,60 @@ describe("NASA expo lead capture", () => {
     timers[0]?.();
     expect(elements["expo-form"]?.hidden).toBe(true);
     expect(elements["expo-opening"]?.hidden).toBe(false);
+  });
+
+  it("lists every missing booth field and keeps kiosk navigation on the form", () => {
+    const missing = collectIntakeFieldErrors({
+      fullName: "",
+      email: "",
+      phone: "",
+      organization: "",
+      roleTitle: "",
+      orgType: "",
+      need: "",
+      timing: "",
+      nasaFields: true,
+      consent: { email: false, sms: false, phone: false },
+    });
+    expect(missing).toMatchObject({
+      fullName: "Enter your full name.",
+      email: "Enter your email or phone number.",
+      phone: "Enter your email or phone number.",
+      organization: "Enter your organization.",
+      roleTitle: "Enter your role or title.",
+      orgType: "Choose your organization type.",
+      need: "Tell us what you need, in your words.",
+    });
+    expect(missing.timing).toBeUndefined();
+    expect(firstIntakeField(missing)).toBe("fullName");
+    expect(JSON.parse(readFileSync("apps/web/public/expo/accel-analysis.webmanifest", "utf8"))).toEqual(BOOTH_MANIFEST);
+    expect(BOOTH_MANIFEST.display_override).toEqual(["fullscreen"]);
+    expect(BOOTH_MANIFEST.display).toBe("standalone");
+    expect(BOOTH_MANIFEST.name).toBe("Accel Analysis");
+    expect(BOOTH_MANIFEST.start_url).toBe("/intake?event=nasa-expo-2026-10-20");
+    const page = "https://hi-coworking.com/intake?event=nasa-expo-2026-10-20";
+    expect(boothHrefStaysInFlow("/intake?event=nasa-expo-2026-10-20", page)).toBe(true);
+    expect(boothHrefStaysInFlow("/expo/nasa-2026", page)).toBe(true);
+    expect(boothHrefStaysInFlow("https://accelanalysis.com", page)).toBe(false);
+    expect(boothHrefStaysInFlow("mailto:JHolman@AccelAnalysis.com", page)).toBe(false);
+    expect(boothHrefStaysInFlow("tel:+17572360651", page)).toBe(false);
+    const calls: string[] = [];
+    requestBoothFullscreen({
+      requestFullscreen() {
+        calls.push("standard");
+      },
+      webkitRequestFullscreen() {
+        calls.push("webkit");
+      },
+    });
+    expect(calls).toEqual(["standard"]);
+    requestBoothFullscreen({
+      webkitRequestFullscreen() {
+        calls.push("webkit");
+      },
+    });
+    expect(calls).toEqual(["standard", "webkit"]);
+    expect(boothFullscreenApiAvailable({})).toBe(false);
   });
 
   it("shows a correction only for the response still on screen", () => {

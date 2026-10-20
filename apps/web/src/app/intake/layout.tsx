@@ -1,15 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { AccelBrandFrame } from "@/components/AccelBrandFrame";
+import { BoothKioskGuard } from "@/components/BoothKiosk";
+import { boothKioskMetadata } from "@/lib/boothKiosk";
 
 export const metadata: Metadata = {
   title: "Follow up · Accel Analysis",
   description: "Tell Accel Analysis how we should follow up with you.",
   robots: { index: false, follow: false },
-  appleWebApp: {
-    capable: true,
-    title: "Accel Analysis",
-    statusBarStyle: "black-translucent",
-  },
+  ...boothKioskMetadata,
 };
 
 export const viewport: Viewport = {
@@ -20,5 +18,9 @@ export const viewport: Viewport = {
 };
 
 export default function IntakeLayout({ children }: { children: React.ReactNode }) {
-  return <AccelBrandFrame>{children}</AccelBrandFrame>;
+  return (
+    <AccelBrandFrame>
+      <BoothKioskGuard>{children}</BoothKioskGuard>
+    </AccelBrandFrame>
+  );
 }
