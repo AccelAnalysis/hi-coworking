@@ -56,6 +56,15 @@ export type QueuedExpoLead = {
   lastAttemptAt: string | null;
 };
 
+/** A shared booth only shows a correction for the response still on screen. */
+export function attentionForActiveReceipt(
+  leads: readonly QueuedExpoLead[],
+  receiptId: string | null | undefined,
+): QueuedExpoLead | null {
+  if (!receiptId) return null;
+  return leads.find((lead) => lead.clientSubmissionId === receiptId && lead.status === "needs_attention") ?? null;
+}
+
 export type ExpoSubmitDecision = "saved" | "queue" | "rejected";
 
 const listeners = new Set<() => void>();

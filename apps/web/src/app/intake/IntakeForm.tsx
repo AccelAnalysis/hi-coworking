@@ -21,6 +21,7 @@ import {
 import { AccelWordmark } from "@/components/AccelWordmark";
 import {
   EXPO_OFFLINE_SAVED_MESSAGE,
+  attentionForActiveReceipt,
   enqueueExpoLead,
   expoQueueInMemory,
   flushExpoLeads,
@@ -162,18 +163,8 @@ export function IntakeForm() {
     window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }, [draft, receipt]);
 
-  useEffect(() => {
-    if (!receipt || receipt.state !== "queued") return;
-    const blocked = queue.find(
-      (lead) => lead.clientSubmissionId === receipt.id && lead.status === "needs_attention",
-    );
-    if (!blocked) return;
-    setReceipt(null);
-    setError(toVisitorError(blocked.lastError));
-  }, [queue, receipt]);
-
   const pending = queue.filter((lead) => lead.status === "pending");
-  const needsAttention = queue.filter((lead) => lead.status === "needs_attention");
+  const activeAttention = attentionForActiveReceipt(queue, receipt?.id);
   const nasaFields = profile.fieldSet === "nasa-expo";
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -317,39 +308,43 @@ export function IntakeForm() {
           )}
         </div>
 
-        {needsAttention.length > 0 && (
-          <div className="mb-5 space-y-3">
-            {needsAttention.map((lead) => (
-              <div key={lead.clientSubmissionId} role="alert" className="rounded-2xl border-2 border-[#1B1B1B] bg-white px-5 py-4 text-lg">
-                <p className="font-semibold">
-                  {lead.payload.fullName
-                    ? `Please check this, ${lead.payload.fullName}. We need one correction before this can send.`
-                    : "Please check this. We need one correction before this can send."}
-                </p>
-                <p className="mt-1 text-[#1B1B1B]">{toVisitorError(lead.lastError)}</p>
-                <button
-                  type="button"
-                  onClick={() => void removeExpoLead(lead.clientSubmissionId).then(() => listExpoLeads().then(setQueue))}
-                  className="mt-3 min-h-12 rounded-full border-2 border-[#1B1B1B] px-4 font-semibold"
-                >
-                  Remove this
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
         {receipt ? (
           <section className="rounded-3xl bg-white px-6 py-10 text-center shadow-sm" aria-live="polite">
             <p className="text-sm font-semibold tracking-[0.16em] text-[#0163FD] uppercase">{ACCEL_DISPLAY_NAME}</p>
-            <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
-              {receipt.state === "synced" ? "Thanks, we've got it" : EXPO_OFFLINE_SAVED_MESSAGE}
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
-              {`${receipt.name}, Accel Analysis will follow up.`}
-            </p>
-            {memoryWarning && receipt.state === "queued" && (
-              <p className="mt-3 text-lg font-semibold">{"Keep this page open so we don't lose this."}</p>
+            {activeAttention ? (
+              <>
+                <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
+                  Please check this
+                </h2>
+                <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
+                  {receipt.name
+                    ? `${receipt.name}, we need one correction before this can send.`
+                    : "We need one correction before this can send."}
+                </p>
+                <p className="mx-auto mt-3 max-w-xl text-xl leading-snug">{toVisitorError(activeAttention.lastError)}</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = receipt.id;
+                    void removeExpoLead(id).then(() => listExpoLeads().then(setQueue)).then(() => resetForm());
+                  }}
+                  className="mt-8 min-h-14 w-full rounded-2xl border-2 border-[#1B1B1B] px-6 text-xl font-semibold"
+                >
+                  Remove this
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className="mt-3 text-4xl font-bold tracking-tight text-[#00072E] [font-family:var(--font-aa-display),Georgia,serif] sm:text-5xl">
+                  {receipt.state === "synced" ? "Thanks, we've got it" : EXPO_OFFLINE_SAVED_MESSAGE}
+                </h2>
+                <p className="mx-auto mt-4 max-w-xl text-2xl leading-snug text-[#1B1B1B]">
+                  {`${receipt.name}, Accel Analysis will follow up.`}
+                </p>
+                {memoryWarning && receipt.state === "queued" && (
+                  <p className="mt-3 text-lg font-semibold">{"Keep this page open so we don't lose this."}</p>
+                )}
+              </>
             )}
             <button
               type="button"
