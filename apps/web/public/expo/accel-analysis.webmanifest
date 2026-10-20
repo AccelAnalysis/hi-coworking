@@ -1,0 +1,33 @@
+{
+  "name": "Accel Analysis",
+  "short_name": "Accel Analysis",
+  "description": "Tell Accel Analysis how we should follow up with you.",
+  "id": "/intake?event=nasa-expo-2026-10-20",
+  "start_url": "/intake?event=nasa-expo-2026-10-20",
+  "scope": "/",
+  "display_override": ["fullscreen"],
+  "display": "standalone",
+  "background_color": "#F2F6FF",
+  "theme_color": "#F2F6FF",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/expo/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/expo/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/expo/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

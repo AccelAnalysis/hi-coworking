@@ -955,6 +955,7 @@ function LongField({
 }) {
   const helpId = `${id}-help`;
   const errorId = `${id}-error`;
+  const required = label.includes("*");
   return (
     <div className={error ? "pn-field pn-field-error" : "pn-field"} data-field={field}>
       <label htmlFor={id}>{label}</label>
@@ -963,6 +964,8 @@ function LongField({
         id={id}
         maxLength={600}
         value={value}
+        required={required}
+        aria-required={required || undefined}
         aria-invalid={error ? true : undefined}
         aria-describedby={[help ? helpId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined}
         onChange={(event) => onChange(event.target.value)}
