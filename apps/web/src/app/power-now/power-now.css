@@ -167,6 +167,20 @@
   color: var(--blue);
 }
 
+/*
+  Card actions are links so they open the form even before the client bundle
+  runs. `.pn a` would otherwise paint them as underlined body links.
+*/
+.pn a.pn-btn-outline,
+.pn a.pn-btn-outline:focus,
+.pn a.pn-btn-outline:focus-visible,
+.pn a.pn-btn-outline:visited {
+  background: #fff;
+  border-color: var(--blue);
+  color: var(--blue);
+  text-decoration: none;
+}
+
 .pn .pn-btn-outline:hover,
 .pn .pn-btn-outline:active,
 .pn .pn-card-active .pn-btn-outline,
@@ -548,11 +562,14 @@
   padding: 24px;
 }
 
+.pn-thanks h2,
 .pn-thanks h3 {
-  font-family: var(--pn-body), "Open Sans", Arial, sans-serif;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 28px;
   margin: 0 0 8px;
+}
+
+.pn-thanks .pn-btn {
+  margin-top: 16px;
 }
 
 .pn-thanks p {

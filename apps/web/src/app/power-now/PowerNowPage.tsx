@@ -30,6 +30,7 @@ import {
   type PowerNowSubmission,
 } from "@/lib/powerNowQueue";
 import { powerNowRecaptchaToken, preloadPowerNowRecaptcha } from "@/lib/powerNowRecaptcha";
+import { VisitorConfirmation, useVisitorConfirmBehavior } from "@/lib/visitorConfirmation";
 
 const QUESTIONS = (
   <p>
@@ -156,8 +157,8 @@ const PATHS: Array<{ id: PowerNowPath; title: string; body: string }> = [
   },
 ];
 
-export function PowerNowPage() {
-  const [active, setActive] = useState<PowerNowPath | null>(null);
+export function PowerNowPage({ initialPath = null }: { initialPath?: PowerNowPath | null }) {
+  const [active, setActive] = useState<PowerNowPath | null>(initialPath);
   const [pitch, setPitch] = useState<PitchDraft>(EMPTY_PITCH);
   const [watch, setWatch] = useState<WatchDraft>(EMPTY_WATCH);
   const [contribute, setContribute] = useState<ContributeDraft>(EMPTY_CONTRIBUTE);
@@ -282,6 +283,18 @@ export function PowerNowPage() {
     if (path === "contribute") setContribute(EMPTY_CONTRIBUTE);
   }
 
+  function beginNewEntry(path: PowerNowPath) {
+    setReceipt(null);
+    setFormError(null);
+    setFieldErrors({});
+    setMemoryWarning(false);
+    clearPath(path);
+    window.setTimeout(() => {
+      const heading = document.getElementById(`h-${path}`);
+      if (heading instanceof HTMLElement) heading.focus();
+    }, 0);
+  }
+
   async function tryAgain() {
     setSaving(true);
     try {
@@ -388,15 +401,18 @@ export function PowerNowPage() {
                 <div className={active === item.id ? "pn-card pn-card-active" : "pn-card"} key={item.id} id={`card-${item.id}`}>
                   <h3>{item.title}</h3>
                   <p>{item.body}</p>
-                  <button
-                    type="button"
+                  <a
+                    href={`/power-now/${item.id}#form-${item.id}`}
                     className="pn-btn pn-btn-outline"
                     aria-controls={`form-${item.id}`}
                     aria-expanded={active === item.id}
-                    onClick={() => openPath(item.id)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      openPath(item.id);
+                    }}
                   >
                     {item.title}
-                  </button>
+                  </a>
                 </div>
               ))}
             </div>
@@ -415,6 +431,7 @@ export function PowerNowPage() {
               receipt={receipt?.path === "pitch" ? receipt : null}
               memoryWarning={memoryWarning}
               onTryAgain={() => void tryAgain()}
+              onStartNew={() => beginNewEntry("pitch")}
               onSubmit={(event) => {
                 const payload = basePayload("pitch", {
                   fullName: `${pitch.firstName} ${pitch.lastName}`.trim(),
@@ -450,6 +467,7 @@ export function PowerNowPage() {
               receipt={receipt?.path === "watch" ? receipt : null}
               memoryWarning={memoryWarning}
               onTryAgain={() => void tryAgain()}
+              onStartNew={() => beginNewEntry("watch")}
               onSubmit={(event) => {
                 const payload = basePayload("watch", {
                   fullName: watch.name,
@@ -474,6 +492,7 @@ export function PowerNowPage() {
               receipt={receipt?.path === "contribute" ? receipt : null}
               memoryWarning={memoryWarning}
               onTryAgain={() => void tryAgain()}
+              onStartNew={() => beginNewEntry("contribute")}
               onSubmit={(event) => {
                 const payload = basePayload("contribute", {
                   fullName: contribute.name,
@@ -694,6 +713,7 @@ type PanelProps<T> = {
   receipt: Receipt | null;
   memoryWarning: boolean;
   onTryAgain: () => void;
+  onStartNew: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -709,6 +729,7 @@ function PanelShell<T>({
   receipt,
   memoryWarning,
   onTryAgain,
+  onStartNew,
   onSubmit,
   children,
 }: PanelProps<T> & { title: string; submitLabel: string; children: ReactNode }) {
@@ -721,7 +742,7 @@ function PanelShell<T>({
       aria-labelledby={`h-${titleToPath(title)}`}
     >
       <form noValidate onSubmit={(event) => { event.preventDefault(); onSubmit(event); }}>
-        <h2 id={`h-${titleToPath(title)}`}>{title}</h2>
+        <h2 id={`h-${titleToPath(title)}`} tabIndex={-1}>{title}</h2>
         {children}
         {formError ? <p className="pn-form-error" role="alert">{formError}</p> : null}
         {errors.path ? <p className="pn-form-error" role="alert">{errors.path}</p> : null}
@@ -733,45 +754,44 @@ function PanelShell<T>({
           <a className="pn-privacy-link" href="#privacy">How we use your information</a>
         </div>
       </form>
-      {receipt ? <Thanks receipt={receipt} memoryWarning={memoryWarning} onTryAgain={onTryAgain} /> : null}
+      {receipt ? <Thanks receipt={receipt} memoryWarning={memoryWarning} onTryAgain={onTryAgain} onStartNew={onStartNew} /> : null}
     </div>
   );
 }
 
-function Thanks({ receipt, memoryWarning, onTryAgain }: { receipt: Receipt; memoryWarning: boolean; onTryAgain: () => void }) {
+function Thanks({
+  receipt,
+  memoryWarning,
+  onTryAgain,
+  onStartNew,
+}: {
+  receipt: Receipt;
+  memoryWarning: boolean;
+  onTryAgain: () => void;
+  onStartNew: () => void;
+}) {
   if (receipt.state === "queued") {
-    return (
-      <div className="pn-thanks" role="status" aria-live="polite">
-        <h3>{POWER_NOW_QUEUED_MESSAGE}</h3>
-        <p>We’ll send it when you’re back online. It isn’t on the list until it sends.</p>
-        {memoryWarning ? <p>This browser can’t keep that saved copy after a refresh.</p> : null}
-        <button type="button" className="pn-btn pn-btn-outline" onClick={onTryAgain}>Try again</button>
-        {QUESTIONS}
-      </div>
-    );
+    return <QueuedThanks memoryWarning={memoryWarning} onTryAgain={onTryAgain} onStartNew={onStartNew} />;
   }
-  if (receipt.path === "pitch") {
-    return (
-      <div className="pn-thanks" role="status" aria-live="polite">
-        <h3>Thanks, {receipt.firstName}. You’re on the Power NOW pitch interest list.</h3>
-        <p>We’ll email you at {receipt.email} to set up a short conversation. Joining the list doesn’t reserve a pitch slot.</p>
-        {QUESTIONS}
-      </div>
-    );
-  }
-  if (receipt.path === "watch") {
-    return (
-      <div className="pn-thanks" role="status" aria-live="polite">
-        <h3>You’re on the Power NOW audience list, {receipt.firstName}.</h3>
-        <p>We’ll send you details about upcoming Power NOW pitch nights by {receipt.channels}.</p>
-        {QUESTIONS}
-      </div>
-    );
-  }
+  return <VisitorConfirmation variant="power-now" onStartNew={onStartNew} />;
+}
+
+function QueuedThanks({
+  memoryWarning,
+  onTryAgain,
+  onStartNew,
+}: {
+  memoryWarning: boolean;
+  onTryAgain: () => void;
+  onStartNew: () => void;
+}) {
+  const headingRef = useVisitorConfirmBehavior(onStartNew);
   return (
-    <div className="pn-thanks" role="status" aria-live="polite">
-      <h3>Thank you, {receipt.firstName}. We received your offer from {receipt.business}.</h3>
-      <p>We’ll be in touch to talk through the details and confirm them in writing.</p>
+    <div className="pn-thanks" role="status">
+      <h2 ref={headingRef} tabIndex={-1}>{POWER_NOW_QUEUED_MESSAGE}</h2>
+      <p>We’ll send it when you’re back online. It isn’t on the list until it sends.</p>
+      {memoryWarning ? <p>This browser can’t keep that saved copy after a refresh.</p> : null}
+      <button type="button" className="pn-btn pn-btn-outline" onClick={onTryAgain}>Try again</button>
       {QUESTIONS}
     </div>
   );
