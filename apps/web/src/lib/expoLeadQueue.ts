@@ -159,7 +159,7 @@ export async function postExpoLead(payload: ExpoLeadPayload): Promise<{
   decision: ExpoSubmitDecision;
   error: string | null;
 }> {
-  const online = typeof navigator === "undefined" ? true : navigator.onLine;
+  const online = typeof navigator === "undefined" || navigator.onLine !== false;
   if (!online) {
     return { decision: "queue", error: "The connection dropped. We'll try again." };
   }

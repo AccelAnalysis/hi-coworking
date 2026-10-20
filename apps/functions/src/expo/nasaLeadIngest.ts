@@ -12,6 +12,13 @@ import {
   validateExpoLeadPayload,
   type NormalizedExpoLead,
 } from "./nasaLeadModel";
+import {
+  attioIntakeEnabled,
+  buildExpoIntakeLead,
+  defaultIntakeLeadStore,
+  saveIntakeLead,
+  type IntakeLeadStore,
+} from "./intakeLeadStore";
 import { canonicalizePowerNowPath, POWER_NOW_FORM } from "./powerNowModel";
 import type { PowerNowConfirmationOptions } from "./powerNowConfirmation";
 import { handlePowerNowHttp, type PowerNowConsentLog, type PowerNowRateLimiter } from "./powerNowIngest";
@@ -133,6 +140,8 @@ export async function handleExpoLeadHttp(request: {
   rateLimiter?: PowerNowRateLimiter;
   consentLog?: (entry: PowerNowConsentLog) => Promise<void>;
   confirmation?: PowerNowConfirmationOptions;
+  attioEnabled?: boolean;
+  leadStore?: IntakeLeadStore;
 }): Promise<ExpoHttpResult> {
   const headers = corsHeaders(request.origin, request.method, request.body);
   if (request.origin && !isAllowedOrigin(request.origin, request.method, request.body)) {
@@ -172,6 +181,8 @@ export async function handleExpoLeadHttp(request: {
       rateLimiter: request.rateLimiter,
       consentLog: request.consentLog,
       confirmation: request.confirmation,
+      attioEnabled: request.attioEnabled,
+      leadStore: request.leadStore,
     });
     return {
       status: powerNow.status,
@@ -185,44 +196,75 @@ export async function handleExpoLeadHttp(request: {
     return { status: 400, headers, body: { ok: false, error: validated.error } };
   }
 
-  const apiKey = request.apiKey?.trim();
-  if (!apiKey) {
-    return {
-      status: 500,
-      headers,
-      body: { ok: false, error: "Lead capture is not configured." },
-    };
+  const storedAt = (request.now ?? new Date()).toISOString();
+  const saved = await saveIntakeLead(
+    request.leadStore ?? defaultIntakeLeadStore(),
+    buildExpoIntakeLead(validated.lead, storedAt),
+  );
+  if (!saved.ok) {
+    return { status: 502, headers, body: { ok: false, error: "Could not save this lead." } };
   }
-
-  try {
-    const result = await ingestNasaExpoLead(validated.lead, {
-      apiKey,
-      fetchImpl: request.fetchImpl,
-    });
+  if (!saved.created) {
     return {
       status: 200,
       headers,
-      body: {
-        ok: true,
-        accepted: true,
-        action: result.action,
-        personRecordId: result.personRecordId,
-        companyStatus: result.companyStatus,
-        listStatus: result.listStatus,
-        noteStatus: result.noteStatus,
-      },
-    };
-  } catch (error) {
-    if (error instanceof ExpoLeadError) {
-      return { status: error.status, headers, body: { ok: false, error: error.message } };
-    }
-    logAttioSendFailure("Expo lead", error);
-    return {
-      status: 502,
-      headers,
-      body: { ok: false, error: "Attio could not save this lead yet." },
+      body: { ok: true, accepted: true, stored: true, duplicate: true, action: "duplicate" },
     };
   }
+
+  const attioOn = request.attioEnabled ?? attioIntakeEnabled();
+  const apiKey = request.apiKey?.trim();
+  if (attioOn && apiKey) {
+    try {
+      const result = await ingestNasaExpoLead(validated.lead, {
+        apiKey,
+        fetchImpl: request.fetchImpl,
+      });
+      return {
+        status: 200,
+        headers,
+        body: {
+          ok: true,
+          accepted: true,
+          stored: true,
+          duplicate: false,
+          attioStatus: "saved",
+          action: result.action,
+          personRecordId: result.personRecordId,
+          companyStatus: result.companyStatus,
+          listStatus: result.listStatus,
+          noteStatus: result.noteStatus,
+        },
+      };
+    } catch (error) {
+      logAttioSendFailure("Expo lead", error);
+      return {
+        status: 200,
+        headers,
+        body: {
+          ok: true,
+          accepted: true,
+          stored: true,
+          duplicate: false,
+          attioStatus: "failed",
+          action: "stored",
+        },
+      };
+    }
+  }
+
+  return {
+    status: 200,
+    headers,
+    body: {
+      ok: true,
+      accepted: true,
+      stored: true,
+      duplicate: false,
+      attioStatus: attioOn ? "skipped" : "disabled",
+      action: "stored",
+    },
+  };
 }
 
 async function findOrCreateCompany(

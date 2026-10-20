@@ -721,6 +721,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // --- intakeLeads/{leadId} ---
+    // Booth and Power NOW leads. Document id is clientSubmissionId.
+    // Cloud Functions write with the Admin SDK. Clients cannot read or write.
+    match /intakeLeads/{leadId} {
+      allow read, write: if false;
+    }
+
     // Power NOW confirmation mail: suppression and send counters. Admin SDK only.
     match /powerNowEmailSuppression/{emailHash} {
       allow read, write: if false;

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
   CONFIRMATION_FAILURE_PREFIX,
@@ -297,6 +298,8 @@ async function submit(
 }
 
 beforeEach(() => {
+  process.env.ATTIO_INTAKE_ENABLED = "true";
+  resetIntakeLeadMemoryForTests();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
@@ -860,6 +863,8 @@ describe("Power NOW confirmation config surface", () => {
     ]) {
       const envFile = readFileSync(envPath, "utf8");
       expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
+      expect(envFile).toMatch(/^ATTIO_INTAKE_ENABLED=$/m);
+      expect(envFile).not.toMatch(/^ATTIO_INTAKE_ENABLED=true$/m);
       expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
       expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
       expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
@@ -870,6 +875,8 @@ describe("Power NOW confirmation config surface", () => {
 
     const expoLeadEnv = readFileSync("firebase/expo-lead-functions/.env.hi-coworking-plat", "utf8");
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true$/m);
+    expect(expoLeadEnv).toMatch(/^ATTIO_INTAKE_ENABLED=$/m);
+    expect(expoLeadEnv).not.toMatch(/^ATTIO_INTAKE_ENABLED=true$/m);
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
     expect(expoLeadEnv).toMatch(new RegExp(`^RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}$`, "m"));
     expect(expoLeadEnv).not.toMatch(/^RESEND_API_KEY=/m);
