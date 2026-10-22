@@ -123,6 +123,20 @@ jobs:
           tests/functions/membership-recovery.test.ts
           tests/unit
 
+      - name: Configure nonfunctional emulator-only webhook fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No provider credentials: never read live Secret Manager for demo tests.
+          test ! -e apps/functions/.secret.local
+          cat > apps/functions/.secret.local <<'EOF'
+          STRIPE_SECRET_KEY=sk_test_onboarding_emulator_only
+          STRIPE_WEBHOOK_SECRET=whsec_onboarding_emulator_only
+          INTUIT_CLIENT_ID=
+          INTUIT_CLIENT_SECRET=
+          SEAM_API_KEY=
+          EOF
+
       - name: Run active transaction integration tests
         run: >-
           npx firebase emulators:exec
@@ -130,6 +144,7 @@ jobs:
           --only auth,firestore,functions
           "npx vitest run
           tests/functions/onboarding-booking-recovery.test.ts
+          tests/functions/onboarding-stripe-http.test.ts
           tests/functions/booking-journey.test.ts
           tests/functions/bookstore-commerce.test.ts
           tests/functions/events-v2.test.ts

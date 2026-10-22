@@ -47,7 +47,7 @@ export async function createAccessGrant(
     if (!booking || String(booking.status).toUpperCase() !== "CONFIRMED" || booking.start !== start || booking.end !== end || accessResourceForBooking(booking) !== resourceId || booking.userId !== userId) return false;
     const prior = existing.data();
     // Legacy/ambiguous claims have no explicit false marker: never automatically reissue them.
-    const safelyRetryable = prior?.providerAttempted === false && prior.status === "pending" &&
+    const safelyRetryable = prior?.providerAttempted === false && !prior.revocationRequestedAt && prior.status === "pending" &&
       (["blocked", "retryable"].includes(prior.programmingStatus) || Number(prior.leaseExpiresAt || 0) <= now);
     if (existing.exists && !safelyRetryable) return false;
     tx.set(grantRef, {
@@ -112,7 +112,7 @@ export async function createAccessGrant(
   };
   const prepared = await db.runTransaction(async (tx) => {
     const current = await tx.get(grantRef);
-    if (current.data()?.leaseToken !== leaseToken || current.data()?.status !== "pending") return false;
+    if (current.data()?.revocationRequestedAt || current.data()?.leaseToken !== leaseToken || current.data()?.status !== "pending") return false;
     tx.update(grantRef, { ...grant, programmingStatus: "programming" });
     return true;
   });
@@ -146,7 +146,7 @@ export async function createAccessGrant(
   const canProgram = await db.runTransaction(async (tx) => {
     const current = await tx.get(grantRef);
     const booking = (await tx.get(db.collection("bookings").doc(bookingId))).data();
-    if (current.data()?.leaseToken !== leaseToken || current.data()?.providerAttempted !== false || current.data()?.status !== "pending") return false;
+    if (current.data()?.revocationRequestedAt || current.data()?.leaseToken !== leaseToken || current.data()?.providerAttempted !== false || current.data()?.status !== "pending") return false;
     if (!booking || String(booking.status).toUpperCase() !== "CONFIRMED" || booking.start !== start || booking.end !== end || accessResourceForBooking(booking) !== resourceId || booking.userId !== userId) return false;
     // Commit the irreversible boundary BEFORE making any network request.
     tx.update(grantRef, { providerAttempted: true, providerAttemptedAt: Date.now(), programmingStatus: "programming", doorId, updatedAt: Date.now() });
@@ -193,7 +193,7 @@ export async function createAccessGrant(
   // Preserve cancellation/expiry and any activation webhook that raced the provider response.
   const mayDeliver = await db.runTransaction(async (tx) => {
     const current = await tx.get(grantRef);
-    if (["revoked", "expired"].includes(current.data()?.status)) return false;
+    if (current.data()?.revocationRequestedAt || ["revoked", "expired"].includes(current.data()?.status)) return false;
     tx.update(grantRef, {
       status: current.data()?.status === "active" ? "active" : "pending",
       programmingStatus: current.data()?.status === "active" ? "active" : codeStatus,
@@ -208,7 +208,7 @@ export async function createAccessGrant(
     if (seamCodeId) {
       try {
         await deleteCode(apiKey, door.seamDeviceId, seamCodeId);
-        await codeRef.update({ status: "revoked", updatedAt: Date.now() });
+        await codeRef.update({ revocationStatus: "awaiting_confirmation", updatedAt: Date.now() });
       } catch {
         await grantRef.update({ staffAttentionRequired: true, failureReason: "Provider credential removal requires reconciliation", updatedAt: Date.now() });
       }
@@ -286,6 +286,12 @@ export const access_escalateStalled = onSchedule({ schedule: "every 15 minutes",
   const pending = await db.collection("accessGrants").where("status", "in", ["pending", "active"]).get();
   for (const doc of pending.docs) {
     const grant = doc.data();
+    if (grant.revocationRequestedAt && grant.revocationStatus !== "completed") {
+      if (now - grant.revocationRequestedAt >= 15 * 60000 && !grant.staffAttentionRequired) {
+        await doc.ref.update({ staffAttentionRequired: true, failureReason: "Provider credential removal remains unconfirmed; staff reconciliation required", updatedAt: now });
+      }
+      continue;
+    }
     if (grant.endsAt <= now) continue;
     if (grant.providerAttempted === false && (["blocked", "retryable"].includes(grant.programmingStatus) || grant.leaseExpiresAt <= now)) {
       try {
@@ -330,70 +336,81 @@ export async function revokeAccessGrant(
   reason: "cancellation" | "no_show" | "admin" | "expired",
   revokedBy: string = "system"
 ): Promise<void> {
-  const apiKey = seamApiKey.value();
-
   const grantSnap = await db.collection("accessGrants").doc(grantId).get();
   if (!grantSnap.exists) {
     logger.warn("revokeAccessGrant: grant not found", { grantId });
     return;
   }
-  const grant = grantSnap.data()!;
-
-  if (grant.status === "revoked" || grant.status === "expired") {
-    logger.info("revokeAccessGrant: already revoked/expired", { grantId, status: grant.status });
-    return;
-  }
-
-  // Find associated access code
-  const codesSnap = await db
-    .collection("accessCodes")
-    .where("grantId", "==", grantId)
-    .where("status", "in", ["programming", "active"])
-    .get();
-
-  const doorSnap = await db.collection("doors").doc(grant.doorId).get();
-  const door = doorSnap.data();
-
   const now = Date.now();
-
-  // Revoke each active code via Seam
-  for (const codeDoc of codesSnap.docs) {
+  // Atomically fence provisioning and read its durable attempt marker. If programming won
+  // this transaction race, its result must be reconciled instead of assuming no code exists.
+  const grant = await db.runTransaction(async (tx) => {
+    const current = await tx.get(grantSnap.ref);
+    const data = current.data();
+    if (!data || data.status === "revoked" || data.status === "expired") return null;
+    tx.update(grantSnap.ref, { revocationRequestedAt: now, revocationStatus: "pending", updatedAt: now });
+    return data;
+  });
+  if (!grant) return;
+  const codesSnap = await db.collection("accessCodes").where("grantId", "==", grantId).get();
+  const doorId = typeof grant.doorId === "string" && grant.doorId.trim() && !grant.doorId.includes("/") ? grant.doorId : undefined;
+  const door = doorId ? (await db.collection("doors").doc(doorId).get()).data() : undefined;
+  const deviceId = typeof door?.seamDeviceId === "string" && door.seamDeviceId.trim() ? door.seamDeviceId : undefined;
+  const unresolvedCodes = codesSnap.docs.filter((doc) => !["revoked", "expired"].includes(doc.data().status));
+  // An explicit pre-provider marker is required to declare a never-issued grant locally safe.
+  for (const codeDoc of unresolvedCodes) {
     const code = codeDoc.data();
-    if (code.seamCodeId && door?.seamDeviceId) {
-      try {
-        await deleteCode(apiKey, door.seamDeviceId, code.seamCodeId);
-        logger.info("Seam code deleted on revoke", { seamCodeId: code.seamCodeId, grantId, reason });
-      } catch (err: unknown) {
-        logger.error("Failed to delete Seam code on revoke", {
-          seamCodeId: code.seamCodeId,
-          grantId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    if (code.seamCodeId) {
+      if (!deviceId) {
+        await codeDoc.ref.update({ revocationStatus: "blocked", updatedAt: now });
+        continue;
       }
+      try {
+        await deleteCode(seamApiKey.value(), deviceId, code.seamCodeId);
+      } catch {
+        await codeDoc.ref.update({ revocationStatus: "failed", updatedAt: now });
+        logger.error("Provider credential removal requires reconciliation", { grantId, codeId: codeDoc.id });
+        continue;
+      }
+    } else if (grant.providerAttempted !== false || grant.status === "active") {
+      await codeDoc.ref.update({ revocationStatus: "blocked", updatedAt: now });
+      continue;
     }
-    await codeDoc.ref.update({ status: "revoked", updatedAt: now });
+    // Delete API acceptance is not physical removal; only provider removal events confirm it.
+    // https://www.seam.co/docs/low-level-apis/smart-locks/access-codes/deleting-access-codes
+    await codeDoc.ref.update(code.seamCodeId
+      ? { revocationStatus: "awaiting_confirmation", updatedAt: now }
+      : { status: "revoked", revocationStatus: "completed", updatedAt: now });
   }
 
-  // Update grant status
-  await grantSnap.ref.update({
-    status: "revoked",
-    revokedAt: now,
-    revokedBy,
-    revokeReason: reason,
-    updatedAt: now,
+  // Re-read transactionally so a removal webhook racing this request wins over stale state.
+  const result = await db.runTransaction(async (tx) => {
+    const currentGrant = (await tx.get(grantSnap.ref)).data()!;
+    const currentCodes = await tx.get(db.collection("accessCodes").where("grantId", "==", grantId));
+    const remaining = currentCodes.docs.filter((doc) => !["revoked", "expired"].includes(doc.data().status));
+    const unknownAttempt = currentCodes.empty && (currentGrant.providerAttempted !== false || currentGrant.status === "active");
+    if (remaining.length || unknownAttempt) {
+      const blocked = unknownAttempt || remaining.some((doc) => ["blocked", "failed"].includes(doc.data().revocationStatus));
+      // Unconfirmed removal must not appear as a ready credential in existing clients.
+      tx.update(grantSnap.ref, { revocationStatus: blocked ? "blocked" : "awaiting_confirmation", staffAttentionRequired: true,
+        failureReason: blocked ? "Credential removal is unconfirmed; staff must reconcile provider state" : "Awaiting provider confirmation of credential removal", updatedAt: now });
+      return blocked ? "blocked" : "awaiting_confirmation";
+    }
+    for (const doc of currentCodes.docs) tx.update(doc.ref, { revocationStatus: "completed", updatedAt: now });
+    tx.update(grantSnap.ref, { status: "revoked", revocationStatus: "completed", staffAttentionRequired: false, failureReason: "", revokedAt: now,
+      revokedBy, revokeReason: reason, updatedAt: now });
+    return "completed";
   });
-
-  // Log event
-  await logAccessEvent({
-    bookingId: grant.bookingId,
-    grantId,
-    doorId: grant.doorId,
-    userId: grant.userId,
-    eventType: reason === "no_show" ? "no_show_revoke" : "grant_revoked",
-    performedBy: revokedBy,
-    notes: `Grant revoked: ${reason}`,
-  });
-
+  if (result !== "completed") {
+    await logAccessEvent({ bookingId: grant.bookingId, grantId, doorId, userId: grant.userId,
+      eventType: "grant_revoke_pending", performedBy: revokedBy, notes: result });
+    throw new HttpsError("failed-precondition", result === "blocked"
+      ? "Access credential removal requires staff reconciliation. Cancellation can be retried after access is resolved."
+      : "Access credential removal is awaiting provider confirmation. Retry cancellation after removal is confirmed.");
+  }
+  await logAccessEvent({ bookingId: grant.bookingId, grantId, doorId, userId: grant.userId,
+    eventType: reason === "no_show" ? "no_show_revoke" : "grant_revoked", performedBy: revokedBy,
+    notes: `Grant revoked: ${reason}` });
   logger.info("Access grant revoked", { grantId, reason, revokedBy });
 }
 
@@ -703,11 +720,14 @@ export async function handleSeamEvent(event: {
       grantId = codeData.grantId;
       doorId = doorId ?? codeData.doorId;
 
+      // Documented lifecycle names and their historical aliases:
+      // https://www.seam.co/docs/low-level-apis/smart-locks/access-codes/migrating-to-access-code-lifecycle-events
+      // created/mutations_requested are deliberately not readiness evidence.
       // Map Seam event types to our internal code statuses
       let newStatus: string | undefined;
-      if (event_type === "access_code.set") newStatus = "active";
-      else if (event_type === "access_code.removed") newStatus = "revoked";
-      else if (event_type === "access_code.failed") newStatus = "failed";
+      if (["access_code.set", "access_code.issued", "access_code.set_on_device", "access_code.scheduled_on_device"].includes(event_type)) newStatus = "active";
+      else if (["access_code.removed", "access_code.deleted", "access_code.removed_from_device"].includes(event_type)) newStatus = "revoked";
+      else if (["access_code.failed", "access_code.failed_to_issue", "access_code.failed_to_update", "access_code.failed_to_set_on_device"].includes(event_type)) newStatus = "failed";
 
       if (grantId) {
         const grantRef = db.collection("accessGrants").doc(grantId);
@@ -719,7 +739,20 @@ export async function handleSeamEvent(event: {
           bookingId = grant.bookingId;
           const bookingSnap = bookingId ? await tx.get(db.collection("bookings").doc(bookingId)) : null;
           const booking = bookingSnap?.data();
-          if (["revoked", "expired"].includes(grant.status) || ["revoked", "expired"].includes(freshCode.data()!.status)) return;
+          if (newStatus === "revoked") {
+            const allCodes = await tx.get(db.collection("accessCodes").where("grantId", "==", grantId));
+            const allRemoved = allCodes.docs.every((doc) => doc.id === codeSnap.docs[0].id || ["revoked", "expired"].includes(doc.data().status));
+            tx.update(codeSnap.docs[0].ref, { status: "revoked", revocationStatus: "completed", removedAt: now, updatedAt: now });
+            if (allRemoved) tx.update(grantRef, { status: "revoked", activationStatus: "revoked", revocationStatus: "completed", staffAttentionRequired: false, failureReason: "", revokedAt: now, updatedAt: now });
+            return;
+          }
+          if (["access_code.failed_to_delete", "access_code.failed_to_remove_from_device", "access_code.delay_in_removing_from_device"].includes(event_type)) {
+            if (["revoked", "expired"].includes(freshCode.data()!.status)) return;
+            tx.update(codeSnap.docs[0].ref, { revocationStatus: "failed", updatedAt: now });
+            tx.update(grantRef, { revocationStatus: "blocked", staffAttentionRequired: true, failureReason: "Provider failed to remove credential; staff reconciliation required", updatedAt: now });
+            return;
+          }
+          if (grant.revocationRequestedAt || ["revoked", "expired"].includes(grant.status) || ["revoked", "expired"].includes(freshCode.data()!.status)) return;
           // Revalidate booking status/window in the same transaction: cancellation or rescheduling wins.
           if (newStatus === "active" && (!booking || String(booking.status).toUpperCase() !== "CONFIRMED" ||
               (grant.resourceId && accessResourceForBooking(booking) !== grant.resourceId) ||
@@ -730,8 +763,6 @@ export async function handleSeamEvent(event: {
             tx.update(grantRef, { status: "active", programmingStatus: "active", activationStatus: "active", updatedAt: now });
           } else if (newStatus === "failed") {
             tx.update(grantRef, { status: "pending", programmingStatus: "failed", activationStatus: "failed", staffAttentionRequired: true, updatedAt: now });
-          } else if (newStatus === "revoked") {
-            tx.update(grantRef, { status: "revoked", activationStatus: "revoked", updatedAt: now });
           }
         });
       }
@@ -759,8 +790,19 @@ export async function handleSeamEvent(event: {
   // Map Seam event types to internal event types
   const eventTypeMap: Record<string, string> = {
     "access_code.set": "code_active",
+    "access_code.issued": "code_active",
+    "access_code.set_on_device": "code_active",
+    "access_code.scheduled_on_device": "code_active",
     "access_code.removed": "code_revoked",
+    "access_code.deleted": "code_revoked",
+    "access_code.removed_from_device": "code_revoked",
+    "access_code.failed_to_delete": "code_revoke_failed",
+    "access_code.failed_to_remove_from_device": "code_revoke_failed",
+    "access_code.delay_in_removing_from_device": "code_revoke_failed",
     "access_code.failed": "code_failed",
+    "access_code.failed_to_issue": "code_failed",
+    "access_code.failed_to_update": "code_failed",
+    "access_code.failed_to_set_on_device": "code_failed",
     "lock.unlocked": "door_unlocked",
     "device.connected": "device_online",
     "device.disconnected": "device_offline",
@@ -784,7 +826,7 @@ export async function handleSeamEvent(event: {
 async function logAccessEvent(params: {
   bookingId?: string;
   grantId?: string;
-  doorId: string;
+  doorId?: string;
   userId?: string;
   eventType: string;
   providerPayload?: Record<string, unknown>;

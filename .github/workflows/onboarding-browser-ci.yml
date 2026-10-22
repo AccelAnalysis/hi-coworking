@@ -1,0 +1,101 @@
+name: Onboarding mocked browser smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "packages/shared/**"
+      - "tests/browser/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/onboarding-browser-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onboarding-browser-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  mocked-browser:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "false"
+      NEXT_PUBLIC_FIREBASE_API_KEY: demo-key
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: demo-hi-coworking.firebaseapp.com
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: demo-hi-coworking
+      NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
+      NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+      NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+      SKIP_BOOKSTORE_SYNC: "true"
+    steps:
+      - name: Checkout exact pull-request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked application dependencies
+        run: npm ci
+
+      - name: Build shared contracts
+        run: npm run build:shared
+
+      - name: Install isolated pinned browser tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/browser-tools" --no-save --package-lock=false playwright@1.58.2
+          "$RUNNER_TEMP/browser-tools/node_modules/.bin/playwright" install --with-deps chromium
+
+      - name: Run desktop and mobile mocked onboarding checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NODE_PATH="$RUNNER_TEMP/browser-tools/node_modules"
+          export BROWSER_ARTIFACT_DIR="$RUNNER_TEMP/onboarding-browser-artifacts"
+          mkdir -p "$BROWSER_ARTIFACT_DIR"
+          npm run dev --workspace web -- --hostname 127.0.0.1 --port 3100 > "$BROWSER_ARTIFACT_DIR/server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3100/book > /dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$BROWSER_ARTIFACT_DIR/server.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            cat "$BROWSER_ARTIFACT_DIR/server.log"
+            exit 1
+          fi
+          # No credentials or live API calls: the test mocks/blocks all non-local requests.
+          node tests/browser/onboarding-catalog-smoke.cjs
+
+      - name: Upload internal browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-browser-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/onboarding-browser-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Verify repository dependency files unchanged
+        run: git diff --exit-code -- package.json package-lock.json

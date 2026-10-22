@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mock = vi.hoisted(() => ({ docs: new Map<string, any>(), create: vi.fn(), serial: 0 }));
+const mock = vi.hoisted(() => ({ docs: new Map<string, any>(), create: vi.fn(), remove: vi.fn(), serial: 0 }));
 vi.mock("firebase-functions/params", () => ({ defineSecret: () => ({ value: () => "test-only-secret" }) }));
 vi.mock("firebase-functions/v2/https", () => ({ onCall: (...args: any[]) => args.at(-1), onRequest: (...args: any[]) => args.at(-1), HttpsError: Error }));
-vi.mock("../../apps/functions/src/providers/seamProvider", () => ({ createTimeBoundCode: mock.create, deleteCode: vi.fn(), remoteUnlock: vi.fn(), getDeviceStatus: vi.fn(), validateSeamSignature: () => false }));
+vi.mock("../../apps/functions/src/providers/seamProvider", () => ({ createTimeBoundCode: mock.create, deleteCode: mock.remove, remoteUnlock: vi.fn(), getDeviceStatus: vi.fn(), validateSeamSignature: () => false }));
 vi.mock("../../apps/functions/node_modules/firebase-admin/lib/index.js", () => {
   const ref = (path: string): any => ({
     id: path.split("/").at(-1), path,
@@ -34,9 +34,9 @@ vi.mock("../../apps/functions/node_modules/firebase-admin/lib/index.js", () => {
 });
 import { processNoShows } from "../../apps/functions/src/scheduled/accessCleanup";
 import { processEnrollment, enrollContact } from "../../apps/functions/src/nurture";
-import { createAccessGrant, handleSeamEvent, access_onBookingCreated } from "../../apps/functions/src/access";
+import { createAccessGrant, revokeAccessGrant, handleSeamEvent, access_onBookingCreated } from "../../apps/functions/src/access";
 
-beforeEach(() => { mock.docs.clear(); mock.create.mockReset(); mock.serial = 0; mock.docs.set("bookings/booking1", { status: "CONFIRMED", resourceId: "desk1", userId: "user1", start: 1000000, end: 2000000 }); });
+beforeEach(() => { mock.docs.clear(); mock.create.mockReset(); mock.remove.mockReset(); mock.serial = 0; mock.docs.set("bookings/booking1", { status: "CONFIRMED", resourceId: "desk1", userId: "user1", start: 1000000, end: 2000000 }); });
 const grant = () => mock.docs.get("accessGrants/booking_booking1");
 const create = () => createAccessGrant("booking1", "desk1", "user1", 1000000, 2000000);
 function seedDoor() {
@@ -204,5 +204,91 @@ describe("legacy nurture enrollment continuity", () => {
     expect(await enrollContact("MEMBER_INACTIVE", contact, `inactive:${now - 50 * 86400000}`)).toEqual([]);
     mock.docs.set("nurtureEnrollments/legacy-daily-id", { ...legacy, enrolledAt: now - 120 * 86400000 });
     expect(await enrollContact("MEMBER_INACTIVE", contact, `inactive:${now - 50 * 86400000}`)).toHaveLength(1);
+  });
+});
+
+
+describe("revocation of durable pre-provider and ambiguous grants", () => {
+  it("locally revokes a never-issued no-door grant and remains idempotent", async () => {
+    await create();
+    expect(grant().doorId).toBeUndefined();
+    await revokeAccessGrant("booking_booking1", "cancellation");
+    await revokeAccessGrant("booking_booking1", "cancellation");
+    expect(grant()).toMatchObject({ status: "revoked", revocationStatus: "completed" });
+    expect(mock.remove).not.toHaveBeenCalled();
+  });
+  it("does not report success when a missing-door grant has an issued provider code", async () => {
+    mock.docs.set("accessGrants/issued", { status: "pending", providerAttempted: true, bookingId: "booking1" });
+    mock.docs.set("accessCodes/issued-code", { grantId: "issued", status: "programming", seamCodeId: "provider-code" });
+    await expect(revokeAccessGrant("issued", "cancellation")).rejects.toThrow();
+    expect(mock.docs.get("accessGrants/issued")).toMatchObject({ status: "pending", revocationStatus: "blocked", staffAttentionRequired: true });
+    expect(mock.docs.get("accessCodes/issued-code").status).toBe("programming");
+    expect(mock.remove).not.toHaveBeenCalled();
+  });
+  it("escalates an ambiguous provider attempt without a recorded code", async () => {
+    mock.docs.set("accessGrants/ambiguous", { status: "pending", providerAttempted: true, bookingId: "booking1" });
+    await expect(revokeAccessGrant("ambiguous", "cancellation")).rejects.toThrow();
+    expect(mock.docs.get("accessGrants/ambiguous").revocationStatus).toBe("blocked");
+  });
+  it("preserves code state on provider removal failure, then allows a safe deletion retry", async () => {
+    seedDoor();
+    mock.docs.set("accessGrants/issued", { status: "active", providerAttempted: true, doorId: "door1", bookingId: "booking1" });
+    mock.docs.set("accessCodes/issued-code", { grantId: "issued", status: "active", seamCodeId: "provider-code" });
+    mock.remove.mockRejectedValueOnce(new Error("timeout"));
+    await expect(revokeAccessGrant("issued", "cancellation")).rejects.toThrow();
+    expect(mock.docs.get("accessCodes/issued-code").status).toBe("active");
+    mock.remove.mockResolvedValueOnce(undefined);
+    await expect(revokeAccessGrant("issued", "cancellation")).rejects.toThrow();
+    expect(mock.docs.get("accessCodes/issued-code")).toMatchObject({ status: "active", revocationStatus: "awaiting_confirmation" });
+    expect(mock.docs.get("accessGrants/issued")).toMatchObject({ status: "active", staffAttentionRequired: true });
+    await handleSeamEvent({ event_type: "access_code.removed_from_device", access_code_id: "provider-code" });
+    await revokeAccessGrant("issued", "cancellation");
+    expect(mock.docs.get("accessCodes/issued-code").status).toBe("revoked");
+    expect(mock.docs.get("accessGrants/issued")).toMatchObject({ status: "revoked", revocationStatus: "completed" });
+  });
+});
+
+
+describe("authoritative provider removal reconciliation", () => {
+  it("allows removal confirmations through the revocation fence and waits for every code", async () => {
+    mock.docs.set("accessGrants/multi", { status: "active", bookingId: "booking1", revocationRequestedAt: Date.now(), revocationStatus: "blocked" });
+    for (const id of ["one", "two"]) mock.docs.set(`accessCodes/${id}`, { grantId: "multi", status: "active", seamCodeId: id });
+    await handleSeamEvent({ event_type: "access_code.deleted", access_code_id: "one" });
+    expect(mock.docs.get("accessGrants/multi").status).toBe("active");
+    await handleSeamEvent({ event_type: "access_code.removed_from_device", access_code_id: "two" });
+    expect(mock.docs.get("accessGrants/multi")).toMatchObject({ status: "revoked", revocationStatus: "completed" });
+  });
+  it("a failed-to-delete event retains possible physical access and escalates", async () => {
+    mock.docs.set("accessGrants/failed", { status: "active", bookingId: "booking1", revocationRequestedAt: Date.now() });
+    mock.docs.set("accessCodes/failed", { grantId: "failed", status: "active", seamCodeId: "failed" });
+    await handleSeamEvent({ event_type: "access_code.failed_to_delete", access_code_id: "failed" });
+    expect(mock.docs.get("accessCodes/failed")).toMatchObject({ status: "active", revocationStatus: "failed" });
+    expect(mock.docs.get("accessGrants/failed")).toMatchObject({ status: "active", revocationStatus: "blocked", staffAttentionRequired: true });
+  });
+});
+
+
+describe("documented Seam lifecycle event names", () => {
+  function seedPending() {
+    const start = Date.now() + 600000; const end = start + 3600000;
+    mock.docs.set("bookings/booking1", { status: "CONFIRMED", resourceId: "desk1", userId: "user1", start, end });
+    mock.docs.set("accessGrants/lifecycle", { status: "pending", bookingId: "booking1", resourceId: "desk1", startsAt: start - 300000, endsAt: end + 300000 });
+    mock.docs.set("accessCodes/lifecycle", { grantId: "lifecycle", status: "programming", seamCodeId: "lifecycle" });
+  }
+  it.each(["access_code.issued", "access_code.set_on_device", "access_code.scheduled_on_device"])("accepts programmed evidence %s", async (event_type) => {
+    seedPending();
+    await handleSeamEvent({ event_type, access_code_id: "lifecycle" });
+    expect(mock.docs.get("accessGrants/lifecycle").status).toBe("active");
+  });
+  it.each(["access_code.created", "access_code.mutations_requested"])("does not infer readiness from %s", async (event_type) => {
+    seedPending();
+    await handleSeamEvent({ event_type, access_code_id: "lifecycle" });
+    expect(mock.docs.get("accessGrants/lifecycle").status).toBe("pending");
+  });
+  it.each(["access_code.failed_to_issue", "access_code.failed_to_update", "access_code.failed_to_set_on_device"])("surfaces provisioning failure %s", async (event_type) => {
+    seedPending();
+    await handleSeamEvent({ event_type, access_code_id: "lifecycle" });
+    expect(mock.docs.get("accessGrants/lifecycle")).toMatchObject({ status: "pending", staffAttentionRequired: true });
+    expect(mock.docs.get("accessCodes/lifecycle").status).toBe("failed");
   });
 });

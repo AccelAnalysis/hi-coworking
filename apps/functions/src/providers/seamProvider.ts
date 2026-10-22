@@ -98,7 +98,7 @@ export async function deleteCode(
     device_id: deviceId,
     access_code_id: seamCodeId,
   });
-  logger.info("Seam code deleted", { deviceId, seamCodeId });
+  logger.info("Seam code deletion requested; awaiting provider confirmation", { deviceId, seamCodeId });
 }
 
 /**
