@@ -137,7 +137,8 @@ provider. Entitlement lookup recognizes only the selected mode's Price IDs.
 
 Before approved deployment, set the non-secret mode in that exact project's
 configuration and verify the corresponding secret binding privately. The demo CI
-writes an ephemeral `.env.demo-hi-coworking` with `STRIPE_MODE=test`; it is not a
-production configuration file and must not be committed. Annual billing remains
+appends non-secret `STRIPE_MODE=test` to the existing `.env.demo-hi-coworking`
+only in its temporary workspace, preserving other demo settings. This is not a
+production configuration change; no provider secrets are committed. Annual billing remains
 disabled. Actual Stripe-to-staging delivery and real provider acceptance are still
 release gates even when emulator and mocked tests pass.
