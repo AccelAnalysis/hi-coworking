@@ -785,6 +785,7 @@ export default function BookingExperienceWithDeskChange() {
               <label className="text-sm font-medium text-slate-800">
                 <span className="mb-2 flex items-center gap-2"><Clock3 className="h-4 w-4" /> Start</span>
                 <select
+                  aria-label="Start time"
                   value={startValue}
                   onChange={(event) => changeStart(event.target.value)}
                   disabled={loadingSchedule || startOptions.length === 0}
@@ -798,6 +799,7 @@ export default function BookingExperienceWithDeskChange() {
               <label className="text-sm font-medium text-slate-800">
                 <span className="mb-2 flex items-center gap-2"><Clock3 className="h-4 w-4" /> End</span>
                 <select
+                  aria-label="End time"
                   value={endValue}
                   onChange={(event) => setEndValue(event.target.value)}
                   disabled={loadingSchedule || endOptions.length === 0}

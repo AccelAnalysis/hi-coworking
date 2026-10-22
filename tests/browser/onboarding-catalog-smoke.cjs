@@ -69,7 +69,7 @@ async function runViewport(browser, name, viewport) {
     await page.goto(`${ORIGIN}/book?date=${tomorrow}`);
     await page.getByRole('button', { name: /^Meeting room Check/ }).click();
     await page.getByLabel('Published setup (optional)').selectOption('test-room');
-    await page.getByLabel(/^Start/).selectOption('08:00');
+    await page.getByLabel('Start time', { exact: true }).selectOption('08:00');
     await page.getByRole('button', { name: 'Check meeting room', exact: true }).click();
     await page.getByRole('button', { name: 'Review meeting room', exact: true }).waitFor();
     assert.equal(calls.at(-1).setupId, 'test-room');
@@ -79,7 +79,7 @@ async function runViewport(browser, name, viewport) {
     const quoteStarted = new Promise((resolve) => { delayedQuoteSeen = resolve; });
     await page.getByRole('checkbox', { name: /Projector/ }).check();
     await bounded(quoteStarted, "Delayed quote request");
-    await page.getByLabel(/^Start/).selectOption('10:00');
+    await page.getByLabel('Start time', { exact: true }).selectOption('10:00');
     const oldResponse = page.waitForResponse((response) => response.url().endsWith('/booking_createQuote'));
     releaseQuote();
     await (await oldResponse).finished();
