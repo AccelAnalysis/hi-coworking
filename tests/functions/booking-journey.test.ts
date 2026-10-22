@@ -183,6 +183,7 @@ async function createMember(
     displayName: "Booking Test Member",
     role: "member",
     membershipStatus: "active",
+    expiresAt: Date.now() + 30 * DAY_MS,
     plan,
     createdAt: Date.now(),
   });

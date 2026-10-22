@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Loader2, Clock, Users } from "lucide-react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { AppShell } from "@/components/AppShell";
 import { PublicSiteGate } from "@/components/PublicSiteGate";
 import { useAuth } from "@/lib/authContext";
+import { authPath, membershipPath } from "@/lib/purchaseNavigation";
 import { functions } from "@/lib/firebase";
 import {
   MEMBERSHIP_TIERS,
@@ -37,20 +38,36 @@ function coworkingOnlyFeatures(features: string[]) {
 }
 
 export default function PricingPage() {
-  const { user } = useAuth();
+  const { user, userDoc, loading: authLoading } = useAuth();
+  const [selectedTier, setSelectedTier] = useState<string | null>(null);
+  const [requestedInterval, setRequestedInterval] = useState("month");
+  const hasMembership = ["active", "trial", "pastDue"].includes(userDoc?.membershipStatus ?? "none");
+  useEffect(() => {
+    const restore = () => {
+      const params = new URLSearchParams(window.location.search);
+      setSelectedTier(params.get("tier"));
+      setRequestedInterval(params.get("interval") === "year" ? "year" : "month");
+    };
+    restore();
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   const [loadingTier, setLoadingTier] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubscribe = async (tierId: string) => {
-    if (!user) return;
+    if (!user || hasMembership) return;
+    if (requestedInterval === "year") { setError("Annual checkout is not available yet. Choose monthly billing to continue."); return; }
+    window.history.pushState(null, "", membershipPath(tierId));
+    setSelectedTier(tierId);
     setLoadingTier(tierId);
     setError(null);
 
     try {
       const result = await createCheckout({
         tierId,
-        successUrl: `${window.location.origin}/my-hi?payment=success`,
-        cancelUrl: `${window.location.origin}/pricing?payment=cancelled`,
+        successUrl: `${window.location.origin}/pricing/complete`,
+        cancelUrl: `${window.location.origin}${membershipPath(tierId)}&payment=cancelled`,
       });
 
       if (result.data.url) {
@@ -77,6 +94,9 @@ export default function PricingPage() {
             </p>
           </div>
 
+          {requestedInterval === "year" && <div role="status" className="mb-6 rounded-xl bg-amber-50 p-4 text-amber-950">Your annual selection is saved, but annual checkout is not available yet. <button className="underline" onClick={() => { setRequestedInterval("month"); window.history.pushState(null, "", membershipPath(selectedTier || "coworking")); }}>Choose monthly billing instead</button></div>}
+          {selectedTier && <p className="mb-6 text-center text-slate-600">Selected plan: {MEMBERSHIP_TIERS.find((tier) => tier.id === selectedTier)?.name || "Choose a plan below"}. Review the plan before continuing to payment.</p>}
+          {hasMembership && <div role="status" className="mb-6 rounded-xl bg-emerald-50 p-4 text-emerald-950">You already have a membership. Manage it or contact us to change your plan rather than purchasing another subscription. <Link className="underline" href="/account/bookings">View account</Link> · <Link className="underline" href="/contact">Manage membership with our team</Link></div>}
           {error && (
             <div className="max-w-md mx-auto mb-8 p-4 rounded-xl bg-red-50 text-red-700 text-sm text-center border border-red-200">
               {error}
@@ -169,10 +189,12 @@ export default function PricingPage() {
                       ))}
                     </ul>
 
-                    {user ? (
+                    {hasMembership ? (
+                      <Link href="/contact" className="mt-8 block text-center py-3 rounded-full border border-slate-200">Manage membership</Link>
+                    ) : user ? (
                       <button
                         onClick={() => handleSubscribe(tier.id)}
-                        disabled={loadingTier !== null}
+                        disabled={authLoading || loadingTier !== null || requestedInterval === "year"}
                         className={`mt-8 w-full py-3 rounded-full font-medium transition-all duration-300 shadow-lg disabled:opacity-60 disabled:cursor-not-allowed ${
                           isPopular
                             ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
@@ -189,7 +211,7 @@ export default function PricingPage() {
                       </button>
                     ) : (
                       <Link
-                        href="/register"
+                        href={authPath("register", membershipPath(tier.id, requestedInterval === "year" ? "year" : "month"))}
                         className={`mt-8 block text-center py-3 rounded-full font-medium transition-all duration-300 shadow-lg ${
                           isPopular
                             ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"

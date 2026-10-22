@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 /**
  * Webhook Idempotency Helper (PR-09)
  *
  * Uses webhookEvents/{eventId} to de-duplicate incoming webhook events.
- * If an event has already been processed, returns false so the caller
- * can skip re-processing.
+ * Completed work is skipped; failed or expired claims can be retried.
+ * Handlers must keep side effects idempotent because delivery is at least once.
  */
 
 import * as admin from "firebase-admin";
@@ -13,27 +14,29 @@ import type { WebhookEventDocData } from "./types";
 function getDb() { return admin.firestore(); }
 
 /**
- * Ensure a webhook event is processed at most once.
+ * Claim a webhook attempt with a bounded lease and fenced completion.
  *
- * @returns `true` if this is a new event and the caller should proceed.
+ * @returns a fencing token if this event was claimed and the caller should proceed.
  *          `false` if it was already processed (caller should skip).
  */
 export async function ensureIdempotent(
   eventId: string,
   provider: string
-): Promise<boolean> {
+): Promise<string | false> {
   const db = getDb();
   const ref = db.collection("webhookEvents").doc(eventId);
 
+  const attemptToken = randomUUID();
   try {
     const result = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       if (snap.exists) {
-        logger.info(`Webhook event ${eventId} already processed, skipping`, {
-          provider,
-          processedAt: snap.data()?.processedAt,
-        });
-        return false;
+        const previous = snap.data()!;
+        if (previous.result === "success") return false;
+        // A concurrent delivery must be retried, not acknowledged as complete.
+        if (previous.result === "processing" && previous.leaseExpiresAt > Date.now()) {
+          throw new Error(`Webhook ${eventId} is still processing`);
+        }
       }
 
       const doc: WebhookEventDocData = {
@@ -42,8 +45,8 @@ export async function ensureIdempotent(
         processedAt: Date.now(),
       };
 
-      tx.set(ref, doc);
-      return true;
+      tx.set(ref, { ...doc, result: "processing", attemptToken, leaseExpiresAt: Date.now() + 5 * 60_000 });
+      return attemptToken;
     });
 
     return result;
@@ -59,7 +62,13 @@ export async function ensureIdempotent(
  */
 export async function markWebhookResult(
   eventId: string,
-  result: string
+  result: string,
+  attemptToken: string
 ): Promise<void> {
-  await getDb().collection("webhookEvents").doc(eventId).update({ result });
+  const ref = getDb().collection("webhookEvents").doc(eventId);
+  await getDb().runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data();
+    if (current?.attemptToken !== attemptToken) throw new Error(`Webhook claim lost: ${eventId}`);
+    tx.update(ref, { result, leaseExpiresAt: 0, completedAt: Date.now() });
+  });
 }

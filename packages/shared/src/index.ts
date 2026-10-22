@@ -313,6 +313,16 @@ export const bookingSchema = z.object({
   end: z.number(),   // Timestamp
   status: bookingStatusSchema,
   totalPrice: z.number(),
+  totalCents: z.number().int().nonnegative().optional(),
+  subtotalCents: z.number().int().nonnegative().optional(),
+  spaceSubtotalCents: z.number().int().nonnegative().optional(),
+  addOnTotalCents: z.number().int().nonnegative().optional(),
+  attendeeCount: z.number().int().positive().optional(),
+  setup: z.object({
+    id: z.string(), name: z.string(), capacity: z.number().int().positive(),
+    resourceId: z.string(), serviceType: z.enum(["DESK", "CONFERENCE"]), layoutPath: z.string(),
+  }).nullable().optional(),
+  addOns: z.array(z.object({ id: z.string(), name: z.string(), priceCents: z.number().int().nonnegative() })).optional(),
   paymentMethod: z.enum(["STRIPE", "CREDITS"]),
   createdAt: z.number()
 });

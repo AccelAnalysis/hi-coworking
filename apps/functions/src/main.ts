@@ -9,6 +9,10 @@ export const rfx_cleanupResponseUploadGrants = legacy.rfx_cleanupResponseUploadG
 export const access_expireGrants = legacy.access_expireGrants;
 export const access_noShowRevoke = legacy.access_noShowRevoke;
 export const onReferralWritten = legacy.onReferralWritten;
+export const access_adminRetryProvisioning = legacy.access_adminRetryProvisioning;
+export const access_onMailUpdated = legacy.access_onMailUpdated;
+export const access_onBookingCreated = legacy.access_onBookingCreated;
+export const access_escalateStalled = legacy.access_escalateStalled;
 export const access_getMyGrants = legacy.access_getMyGrants;
 export const access_adminRevoke = legacy.access_adminRevoke;
 export const access_adminUnlock = legacy.access_adminUnlock;
@@ -209,3 +213,5 @@ export {
   space_adminUpsertAddOn,
   space_adminSetSetupPublished,
 } from "./spaceCatalog";
+
+export { booking_adminListPaymentRecovery } from "./bookingFlexTransaction";

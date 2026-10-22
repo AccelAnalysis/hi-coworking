@@ -1,15 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
+import { authPath, safeNextPath } from "@/lib/purchaseNavigation";
 import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [next, setNext] = useState("/account/bookings");
+  useEffect(() => {
+    const update = () => setNext(safeNextPath(new URLSearchParams(window.location.search).get("next")));
+    update();
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, []);
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +33,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push("/my-hi");
+      router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -53,6 +61,8 @@ export default function LoginPage() {
             Sign in to book spaces and manage your Hi Coworking membership.
           </p>
 
+          <p className="mb-4 text-sm text-slate-600">Booked as a guest? Enter the checkout email and request a password reset to prove access to that inbox and set your password. A booking reference alone cannot claim an account.</p>
+          {resetSent && <p role="status" className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">If an account exists, check that inbox (including spam) for a recovery link, then return here to sign in. Your selection is saved.</p>}
           <form onSubmit={handleLogin} className="space-y-4">
             {error && (
               <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm font-medium border border-red-100">
@@ -91,17 +101,17 @@ export default function LoginPage() {
                     setResetSending(true);
                     setError("");
                     try {
-                      await sendPasswordResetEmail(auth, email);
+                      await sendPasswordResetEmail(auth, email.trim(), { url: `${window.location.origin}${authPath("login", next)}` });
                       setResetSent(true);
                     } catch {
-                      setError("Failed to send reset email. Please check the address.");
+                      setError("We could not request a recovery email. Try again shortly or contact Hi Coworking. Do not create or pay for another booking.");
                     } finally {
                       setResetSending(false);
                     }
                   }}
                   className="text-xs text-indigo-600 hover:text-indigo-700 font-medium disabled:opacity-50"
                 >
-                  {resetSending ? "Sending..." : resetSent ? "Reset email sent!" : "Forgot password?"}
+                  {resetSending ? "Sending..." : resetSent ? "Recovery email requested" : "Forgot password / claim account?"}
                 </button>
               </div>
               <input
@@ -125,7 +135,7 @@ export default function LoginPage() {
         </div>
         <div className="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-600">
           Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-indigo-600 font-semibold hover:text-indigo-700">
+          <Link href={authPath("register", next)} className="text-indigo-600 font-semibold hover:text-indigo-700">
             Sign up
           </Link>
         </div>

@@ -38,7 +38,13 @@ import {
 // ---------- Types ----------
 
 interface GrantWithCode extends AccessGrantDoc {
-  code?: AccessCodeDoc;
+  code?: AccessCodeDoc & { queuedAt?: number; deliveryStatus?: string };
+  attendanceStatus?: string;
+  attendanceReviewRequired?: boolean;
+  programmingStatus?: string;
+  deliveryStatus?: string;
+  staffAttentionRequired?: boolean;
+  failureReason?: string;
 }
 
 type DoorStatusLive = {
@@ -455,6 +461,8 @@ function AdminAccessContent() {
                           </td>
                           <td className="px-4 py-3 space-y-1">
                             {grantStatusBadge(grant.status)}
+                            {grant.attendanceReviewRequired && <span className="text-xs font-semibold text-amber-700">Attendance unknown — review, do not assume no-show</span>}
+                            {grant.staffAttentionRequired && <span className="text-xs font-semibold text-red-700">Staff attention required</span>}
                             {codeStatusBadge(grant.code?.status)}
                           </td>
                           <td className="px-4 py-3">
@@ -494,9 +502,12 @@ function AdminAccessContent() {
                                 {grant.code?.seamCodeId && (
                                   <div><span className="font-semibold">Seam Code ID:</span> <code className="font-mono">{grant.code.seamCodeId}</code></div>
                                 )}
-                                {grant.code?.deliveredAt && (
-                                  <div><span className="font-semibold">PIN delivered:</span> {fmt(grant.code.deliveredAt)}</div>
+                                <div><span className="font-semibold">Programming:</span> {grant.programmingStatus || grant.code?.status || "unknown"}</div>
+                                <div><span className="font-semibold">Delivery:</span> {grant.deliveryStatus || "unverified"} (queue acceptance is not delivery)</div>
+                                {(grant.code?.queuedAt || grant.code?.deliveredAt) && (
+                                  <div><span className="font-semibold">PIN queue timestamp:</span> {fmt(grant.code.queuedAt || grant.code.deliveredAt!)} — receipt unverified</div>
                                 )}
+                                {grant.failureReason && <div className="text-red-600">{grant.failureReason}. Reconcile the provider before issuing another credential.</div>}
                                 {grant.code?.failureReason && (
                                   <div className="text-red-600"><span className="font-semibold">Failure:</span> {grant.code.failureReason}</div>
                                 )}

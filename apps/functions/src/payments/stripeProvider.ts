@@ -1,3 +1,4 @@
+import { invoiceSubscriptionId } from "./membership";
 /**
  * Stripe Provider Adapter (PR-10)
  *
@@ -79,7 +80,8 @@ export class StripeProvider implements PaymentProvider {
       };
     }
 
-    const session = await this.stripe.checkout.sessions.create(sessionConfig);
+    const session = await this.stripe.checkout.sessions.create(sessionConfig, input.metadata?.checkoutAttemptId
+      ? { idempotencyKey: `membership-checkout-${input.metadata.checkoutAttemptId}` } : undefined);
     logger.info("Stripe checkout session created", {
       sessionId: session.id,
       uid: input.uid,
@@ -90,6 +92,14 @@ export class StripeProvider implements PaymentProvider {
       url: session.url || "",
       provider: "stripe",
     };
+  }
+
+  async retrieveSubscription(id: string) {
+    return this.stripe.subscriptions.retrieve(id);
+  }
+
+  async retrieveCheckoutSession(id: string) {
+    return this.stripe.checkout.sessions.retrieve(id);
   }
 
   private async findPaymentIntent(input: {
@@ -248,9 +258,13 @@ export class StripeProvider implements PaymentProvider {
     }
 
     switch (event.type) {
-      case "checkout.session.completed": {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded": {
         const session = event.data.object as Stripe.Checkout.Session;
         const sessionMetadata = session.metadata || {};
+        if (session.payment_status !== "paid" && session.payment_status !== "no_payment_required") {
+          return { eventId: event.id, action: "unknown" };
+        }
         return {
           eventId: event.id,
           action: "payment_succeeded",
@@ -261,11 +275,14 @@ export class StripeProvider implements PaymentProvider {
             uid: sessionMetadata.uid || "",
             plan: sessionMetadata.plan || "",
             checkoutSessionId: session.id,
+            amountTotal: String(session.amount_total ?? ""),
+            currency: session.currency || "",
+            checkoutMode: session.mode || "",
             paymentIntentId: paymentIntentIdFromSession(session),
             subscriptionId:
               typeof session.subscription === "string"
                 ? session.subscription
-                : "",
+                : session.subscription?.id || "",
             customerId:
               typeof session.customer === "string"
                 ? session.customer
@@ -273,6 +290,13 @@ export class StripeProvider implements PaymentProvider {
           },
         };
       }
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        return { eventId: event.id, action: "payment_failed", status: "failed",
+          paymentId: session.metadata?.paymentId || undefined,
+          metadata: { ...session.metadata, checkoutSessionId: session.id } };
+      }
+      case "invoice.paid":
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
         return {
@@ -281,8 +305,7 @@ export class StripeProvider implements PaymentProvider {
           status: "paid",
           metadata: {
             subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
+              invoiceSubscriptionId(invoice),
             customerId:
               typeof invoice.customer === "string"
                 ? invoice.customer
@@ -298,11 +321,12 @@ export class StripeProvider implements PaymentProvider {
           status: "failed",
           metadata: {
             subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
+              invoiceSubscriptionId(invoice),
           },
         };
       }
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
         return {
@@ -312,7 +336,7 @@ export class StripeProvider implements PaymentProvider {
           metadata: {
             subscriptionId: subscription.id,
             uid: subscription.metadata?.uid || "",
-            reason: "subscription_cancelled",
+            reason: "subscription_changed",
           },
         };
       }

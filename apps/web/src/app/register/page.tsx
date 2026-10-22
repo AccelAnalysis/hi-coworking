@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { authPath, safeNextPath } from "@/lib/purchaseNavigation";
 import { Loader2 } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const [next, setNext] = useState("/account/bookings");
+  useEffect(() => {
+    const update = () => setNext(safeNextPath(new URLSearchParams(window.location.search).get("next")));
+    update();
+    window.addEventListener("popstate", update);
+    return () => window.removeEventListener("popstate", update);
+  }, []);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,12 +31,12 @@ export default function RegisterPage() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(userCredential.user, { displayName: name });
-      router.push("/my-hi");
+      router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")));
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
       if (firebaseError.code === "auth/email-already-in-use") {
-        setError("This email is already registered.");
+        setError("This email already has an account. Sign in below, or use “Forgot password / claim account” on the sign-in page to verify access to that inbox. Your selection is saved.");
       } else if (firebaseError.code === "auth/weak-password") {
         setError("Password should be at least 6 characters.");
       } else {
@@ -96,6 +104,7 @@ export default function RegisterPage() {
               </label>
               <input
                 id="password"
+                minLength={6}
                 type="password"
                 required
                 value={password}
@@ -116,7 +125,7 @@ export default function RegisterPage() {
         </div>
         <div className="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-600">
           Already have an account?{" "}
-          <Link href="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">
+          <Link href={authPath("login", next)} className="text-indigo-600 font-semibold hover:text-indigo-700">
             Sign in
           </Link>
         </div>

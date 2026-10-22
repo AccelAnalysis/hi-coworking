@@ -1,3 +1,4 @@
+import { createMembershipCheckout } from "./payments/membershipCheckout";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { beforeUserCreated } from "firebase-functions/v2/identity";
@@ -159,6 +160,10 @@ import { access_expireGrants, access_noShowRevoke } from "./scheduled/accessClea
 import {
   createAccessGrant,
   access_getMyGrants,
+  access_onBookingCreated,
+  access_onMailUpdated,
+  access_adminRetryProvisioning,
+  access_escalateStalled,
   access_adminRevoke,
   access_adminUnlock,
   access_adminResendPin,
@@ -182,6 +187,10 @@ export { onReferralWritten };
 // Access Control Functions
 export {
   access_getMyGrants,
+  access_onBookingCreated,
+  access_onMailUpdated,
+  access_adminRetryProvisioning,
+  access_escalateStalled,
   access_adminRevoke,
   access_adminUnlock,
   access_adminResendPin,
@@ -665,11 +674,12 @@ export const leads_onNewLead = onDocumentCreated("leads/{leadId}", async (event)
  * Writes to leads/{leadId} with type "contact".
  */
 export const leads_submitContact = onCall(async (request) => {
-  const { name, email, message, source } = request.data as {
+  const { name, email, message, source, marketingOptIn } = request.data as {
     name: string;
     email: string;
     message: string;
     source?: string;
+    marketingOptIn?: boolean;
   };
 
   if (!name || !email) {
@@ -684,6 +694,8 @@ export const leads_submitContact = onCall(async (request) => {
     message: message || "",
     source: source || "contact_page",
     type: "contact",
+    marketingOptIn: marketingOptIn === true,
+    ...(marketingOptIn === true ? { marketingConsentAt: Date.now(), marketingConsentSource: "contact_form_checkbox" } : {}),
     interests: [],
     interestScore: 0,
     createdAt: Date.now(),
@@ -728,51 +740,8 @@ export const stripe_createCheckoutSession = onCall(
     const uid = request.auth.uid;
     const email = request.auth.token.email || "";
 
-    // Create a pending payment in the ledger first
-    const payment = await createPayment({
-      uid,
-      provider: "stripe",
-      amount: tier.amountCents,
-      currency: tier.currency,
-      purpose: "membership",
-      purposeRefId: tier.id,
-      status: "pending",
-    });
-
-    // Create Stripe checkout session
-    const provider = new StripeProvider(
-      stripeSecretKey.value(),
-      stripeWebhookSecret.value()
-    );
-
-    const session = await provider.createCheckoutSession({
-      uid,
-      amount: tier.amountCents,
-      currency: tier.currency,
-      purpose: "membership",
-      purposeRefId: tier.id,
-      successUrl,
-      cancelUrl,
-      metadata: {
-        email,
-        stripePriceId: tier.stripePriceId,
-        paymentId: payment.id,
-        plan: tier.id,
-      },
-    });
-
-    logger.info("Checkout session created", {
-      uid,
-      tierId,
-      sessionId: session.sessionId,
-      paymentId: payment.id,
-    });
-
-    return {
-      sessionId: session.sessionId,
-      url: session.url,
-      paymentId: payment.id,
-    };
+    const provider = new StripeProvider(stripeSecretKey.value(), stripeWebhookSecret.value());
+    return createMembershipCheckout(provider, { uid, email, tierId, successUrl, cancelUrl });
   }
 );
 
@@ -1453,10 +1422,10 @@ export const qb_paymentsWebhook = onRequest(
           });
         }
       }
-      await markWebhookResult(result.eventId, "success");
+      await markWebhookResult(result.eventId, "success", isNew);
     } catch (err) {
       logger.error("QB webhook processing error", { eventId: result.eventId, err });
-      await markWebhookResult(result.eventId, `error: ${err}`);
+      await markWebhookResult(result.eventId, `error: ${err}`, isNew);
     }
 
     res.status(200).json({ received: true });

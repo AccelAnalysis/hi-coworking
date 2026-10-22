@@ -23,6 +23,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
+import { BookingPaymentRecoveryPanel } from "@/components/BookingPaymentRecoveryPanel";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
@@ -298,6 +299,8 @@ function AdminPaymentsContent() {
             <strong>Financial state is read-only here.</strong> Admins can no longer mark a provider transaction paid, failed, or refunded from this ledger. Membership changes, booking refunds, event refunds, and bookstore refunds must use their authoritative transaction workflows.
           </p>
         </div>
+
+        <BookingPaymentRecoveryPanel />
 
         {(error || message) && (
           <div className={`mt-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>

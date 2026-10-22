@@ -37,9 +37,7 @@ export const access_expireGrants = onSchedule(
  * Revokes grants where the booking start + NO_SHOW_GRACE_MINUTES has passed
  * but no code_used event has been recorded — indicating a no-show.
  */
-export const access_noShowRevoke = onSchedule(
-  { schedule: "every 15 minutes", secrets: [seamApiKey] },
-  async () => {
+export async function processNoShows(): Promise<void> {
     const now = Date.now();
     const noShowCutoff = now - NO_SHOW_GRACE_MINUTES * 60 * 1000;
 
@@ -70,13 +68,31 @@ export const access_noShowRevoke = onSchedule(
           .get();
 
         if (usedEventsSnap.empty) {
-          // No usage recorded — treat as no-show
+          const grant = doc.data();
+          // An unlocked state/event does not prove door entry or identify attendance.
+          // https://www.seam.co/smartlocks/capabilities/remote-unlock
+          // Never infer absence from missing/unsupported telemetry. Re-enabling automatic
+          // revocation requires explicit config AND a staff-confirmed absence for this grant.
+          const confirmedAbsent = grant.attendanceStatus === "no_show_confirmed" &&
+            typeof grant.attendanceConfirmedBy === "string" && grant.attendanceConfirmedBy.length > 0 &&
+            Number(grant.attendanceConfirmedAt) >= Number(grant.startsAt);
+          if (process.env.ACCESS_NO_SHOW_REVOKE_ENABLED !== "true" || !confirmedAbsent) {
+            if (grant.attendanceStatus !== "attendance_unknown" && !confirmedAbsent) {
+              await doc.ref.update({ attendanceStatus: "attendance_unknown", attendanceReviewRequired: true, updatedAt: now });
+              logger.warn("No-show attendance unknown; paid access retained", { grantId });
+            }
+            return;
+          }
           noShowCount++;
           await revokeAccessGrant(grantId, "no_show", "system");
         }
       })
     );
 
-    logger.info(`access_noShowRevoke: processed ${snap.size} candidates, revoked ${noShowCount} no-shows`);
-  }
+    logger.info(`access_noShowRevoke: processed ${snap.size} candidates, revoked ${noShowCount} confirmed no-shows`);
+}
+
+export const access_noShowRevoke = onSchedule(
+  { schedule: "every 15 minutes", secrets: [seamApiKey] },
+  processNoShows,
 );

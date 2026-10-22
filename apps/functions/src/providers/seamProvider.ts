@@ -144,25 +144,28 @@ export async function getDeviceStatus(
   };
 }
 
-/**
- * Validate a Seam webhook signature.
- * Seam signs with HMAC-SHA256 using the webhook secret.
+/** Verify Seam's Svix webhook signature, including replay-window protection.
+ * https://github.com/seamapi/javascript (Webhooks)
+ * https://docs.svix.com/receiving/verifying-payloads/how
  */
 export function validateSeamSignature(
   payload: string,
-  signature: string,
-  webhookSecret: string
+  headers: { id?: string; timestamp?: string; signature?: string },
+  webhookSecret: string,
+  now = Date.now()
 ): boolean {
-  const expected = crypto
-    .createHmac("sha256", webhookSecret)
-    .update(payload)
-    .digest("hex");
+  const { id, timestamp, signature } = headers;
+  if (!id || !timestamp || !signature || !webhookSecret.startsWith("whsec_")) return false;
+  if (!/^\d+$/.test(timestamp) || Math.abs(now / 1000 - Number(timestamp)) > 300) return false;
   try {
-    return crypto.timingSafeEqual(
-      Buffer.from(signature, "hex"),
-      Buffer.from(expected, "hex")
-    );
-  } catch {
-    return false;
-  }
+    const key = Buffer.from(webhookSecret.slice(6), "base64");
+    if (!key.length) return false;
+    const expected = crypto.createHmac("sha256", key).update(`${id}.${timestamp}.${payload}`).digest();
+    return signature.split(" ").some((part) => {
+      const [version, encoded] = part.split(",");
+      if (version !== "v1" || !encoded) return false;
+      const actual = Buffer.from(encoded, "base64");
+      return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+    });
+  } catch { return false; }
 }
