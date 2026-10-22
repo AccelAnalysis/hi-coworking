@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { subscriptionMembership } from "./membership";
 /**
  * Stripe Webhook Handler + Entitlement Updater (PR-10)
  *
@@ -61,17 +63,24 @@ export async function handleStripeWebhook(
   }
 
   // Idempotency check
-  const isNew = await ensureIdempotent(result.eventId, "stripe");
+  let isNew: string | false;
+  try {
+    isNew = await ensureIdempotent(result.eventId, "stripe");
+  } catch (err) {
+    logger.warn("Stripe webhook claim unavailable; retry required", { eventId: result.eventId, err });
+    return { status: 500, body: { error: "Retry required" } };
+  }
   if (!isNew) {
     return { status: 200, body: { received: true, skipped: true } };
   }
 
   try {
+    await syncMembership(result, provider);
     await processWebhookResult(result, intuitClientId, intuitClientSecret);
-    await markWebhookResult(result.eventId, "success");
+    await markWebhookResult(result.eventId, "success", isNew);
   } catch (err) {
     logger.error("Stripe webhook processing error", { eventId: result.eventId, err });
-    await markWebhookResult(result.eventId, `error: ${err}`);
+    await markWebhookResult(result.eventId, `error: ${err}`, isNew);
     return { status: 500, body: { error: "Processing failed" } };
   }
 
@@ -117,18 +126,43 @@ async function handlePaymentSucceeded(
 ): Promise<void> {
   const uid = result.metadata?.uid;
   const subscriptionId = result.metadata?.subscriptionId;
-  const plan = result.metadata?.plan;
 
   // Update existing payment doc if we have a paymentId
   if (result.paymentId) {
-    await updatePaymentStatus(result.paymentId, "paid", {
-      providerRefs: {
+    const paymentRef = getDb().collection("payments").doc(result.paymentId);
+    const fulfill = await getDb().runTransaction(async (tx) => {
+      const payment = (await tx.get(paymentRef)).data();
+      if (!payment || payment.provider !== "stripe"
+        || Number(result.metadata?.amountTotal) !== payment.amount
+        || result.metadata?.currency?.toLowerCase() !== payment.currency?.toLowerCase()
+        || result.metadata?.uid !== payment.uid
+        || result.metadata?.purpose !== payment.purpose
+        || (payment.purposeRefId || "") !== (result.metadata?.purposeRefId || "")
+        || result.metadata?.checkoutMode !== (payment.purpose === "membership" ? "subscription" : "payment")
+        || (payment.providerRefs?.stripeCheckoutSessionId
+          && payment.providerRefs.stripeCheckoutSessionId !== result.metadata?.checkoutSessionId)) {
+        throw new Error(`Stripe checkout does not match payment ledger: ${result.paymentId}`);
+      }
+      // Refund/cancellation is terminal even when a distinct success event arrives late.
+      if (["refunded", "cancelled", "canceled"].includes(payment.status)) return false;
+      const refs: Record<string, string> = {
         stripeSubscriptionId: subscriptionId || "",
         stripeCustomerId: result.metadata?.customerId || "",
         ...(result.metadata?.checkoutSessionId ? { stripeCheckoutSessionId: result.metadata.checkoutSessionId } : {}),
         ...(result.metadata?.paymentIntentId ? { stripePaymentIntentId: result.metadata.paymentIntentId } : {}),
-      },
+      };
+      tx.update(paymentRef, {
+        status: "paid", updatedAt: Date.now(),
+        ...Object.fromEntries(Object.entries(refs).map(([key, value]) => [`providerRefs.${key}`, value])),
+      });
+      return true;
     });
+    if (!fulfill) return;
+  }
+
+  if (result.metadata?.purpose === "booking" && result.metadata?.holdId && result.paymentId) {
+    const { finalizePaidBooking } = await import("../bookingFlexTransaction.js");
+    await finalizePaidBooking(result.metadata.holdId, result.paymentId);
   }
 
   // Events v2 finalization consumes the authoritative capacity hold. Do this
@@ -139,11 +173,6 @@ async function handlePaymentSucceeded(
     holdId: result.metadata?.holdId,
     paymentId: result.paymentId,
   });
-
-  // Provision membership entitlements
-  if (uid && plan) {
-    await provisionMembership(uid, plan, subscriptionId);
-  }
 
   // Handle Referral Payouts (PR-16)
   if (result.metadata?.purpose === "referral" && result.metadata.purposeRefId) {
@@ -161,13 +190,13 @@ async function handlePaymentSucceeded(
   // Handle Bookstore Fulfillment (PR-19)
   if (result.metadata?.bookId) {
     const bookId = result.metadata.bookId;
-    const purchaseId = `purchase_${result.eventId}_${bookId}`;
+    const purchaseId = `purchase_${result.paymentId || result.metadata?.checkoutSessionId || result.eventId}_${bookId}`;
     await getDb().collection("bookPurchases").doc(purchaseId).set({
       id: purchaseId,
       bookId: bookId,
       userId: uid || null,
       email: result.metadata.email || null,
-      stripeSessionId: result.eventId,
+      stripeSessionId: result.metadata?.checkoutSessionId || result.eventId,
       variantId: result.metadata.variantId || null,
       quantity: parseInt(result.metadata.quantity || "1"),
       accessGrantedAt: Date.now(),
@@ -340,50 +369,80 @@ async function finalizeVendorTablePurchase(result: WebhookResult): Promise<void>
  */
 async function handlePaymentFailed(result: WebhookResult): Promise<void> {
   if (result.paymentId) {
-    await updatePaymentStatus(result.paymentId, "failed");
+    const paymentRef = getDb().collection("payments").doc(result.paymentId);
+    await getDb().runTransaction(async (tx) => {
+      const payment = (await tx.get(paymentRef)).data();
+      if (payment && payment.provider === "stripe" && !["paid", "refunded", "cancelled", "canceled"].includes(payment.status)) {
+        tx.update(paymentRef, { status: "failed", updatedAt: Date.now() });
+      }
+    });
   }
 
-  const uid = result.metadata?.uid;
-  const reason = result.metadata?.reason;
-
-  if (uid) {
-    const updates: Record<string, unknown> = { updatedAt: Date.now() };
-
-    if (reason === "subscription_cancelled") {
-      updates.membershipStatus = "cancelled";
-      updates.plan = null;
-      updates.expiresAt = Date.now();
-    } else {
-      updates.membershipStatus = "pastDue";
-    }
-
-    await getDb().collection("users").doc(uid).update(updates);
-    logger.info("Membership status downgraded", { uid, reason, updates });
-  }
+  // Membership state is reconciled from Stripe, never inferred from a failed
+  // one-time booking payment or a stale invoice event.
 }
 
-/**
- * Set membership entitlements on the user doc after a successful subscription.
- */
-async function provisionMembership(
-  uid: string,
-  plan: string,
-  subscriptionId?: string
-): Promise<void> {
-  const now = Date.now();
-  const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
-
-  const updates: Record<string, unknown> = {
-    membershipStatus: "active",
-    plan,
-    expiresAt,
-    updatedAt: now,
-  };
-
-  if (subscriptionId) {
-    updates["features.stripeSubscriptionId"] = subscriptionId;
+/** Fetch latest state so delayed renewal/cancellation events cannot regress it. */
+export async function syncMembership(result: WebhookResult, provider: StripeProvider): Promise<void> {
+  const subscriptionId = result.metadata?.subscriptionId;
+  if (!subscriptionId) return;
+  const mappingRef = getDb().collection("stripeSubscriptions").doc(subscriptionId);
+  const syncToken = randomUUID();
+  await getDb().runTransaction(async (tx) => {
+    const mapping = (await tx.get(mappingRef)).data();
+    if (mapping?.syncToken && mapping.syncLeaseExpiresAt > Date.now()) {
+      throw new Error(`Subscription reconciliation is in progress: ${subscriptionId}`);
+    }
+    tx.set(mappingRef, { ...mapping, syncToken, syncLeaseExpiresAt: Date.now() + 5 * 60_000 }, { merge: true });
+  });
+  try {
+    // Fetch only after claiming the subscription lease. A worker that outlives its
+    // lease is fenced below, so its older API response cannot overwrite newer state.
+    const subscription = await provider.retrieveSubscription(subscriptionId);
+    const mapping = (await mappingRef.get()).data();
+    const owners = [subscription.metadata?.uid, mapping?.uid, result.metadata?.uid].filter(Boolean);
+    if (new Set(owners).size > 1) throw new Error(`Conflicting subscription ownership: ${subscriptionId}`);
+    let uid = owners[0];
+    if (!uid) {
+      const users = await getDb().collection("users")
+        .where("features.stripeSubscriptionId", "==", subscriptionId).limit(2).get();
+      if (users.size === 1) uid = users.docs[0].id;
+    }
+    if (!uid) throw new Error(`Subscription owner is unresolved: ${subscriptionId}`);
+    const userRef = getDb().collection("users").doc(uid);
+    const priorId = (await userRef.get()).data()?.features?.stripeSubscriptionId;
+    let priorIsTerminal = false;
+    if (priorId && priorId !== subscriptionId && !["canceled", "incomplete_expired"].includes(subscription.status)) {
+      const prior = await provider.retrieveSubscription(priorId);
+      priorIsTerminal = ["canceled", "incomplete_expired"].includes(prior.status);
+    }
+    await getDb().runTransaction(async (tx) => {
+      const [userSnap, mappingSnap] = await Promise.all([tx.get(userRef), tx.get(mappingRef)]);
+      const latestMapping = mappingSnap.data();
+      if (latestMapping?.syncToken !== syncToken) throw new Error(`Subscription claim lost: ${subscriptionId}`);
+      if (latestMapping.uid && latestMapping.uid !== uid) throw new Error(`Conflicting subscription ownership: ${subscriptionId}`);
+      const user = userSnap.data();
+      if (!user) throw new Error(`Subscription user does not exist: ${uid}`);
+      const existingId = user.features?.stripeSubscriptionId;
+      // An old subscription's cancellation must not revoke a replacement.
+      if (existingId && existingId !== subscriptionId) {
+        if (["canceled", "incomplete_expired"].includes(subscription.status)) {
+          tx.set(mappingRef, { uid, subscriptionId, syncToken: null, syncLeaseExpiresAt: 0 }, { merge: true });
+          return;
+        }
+        if (existingId !== priorId || !priorIsTerminal) {
+          throw new Error(`Conflicting membership subscriptions for ${uid}`);
+        }
+      }
+      tx.set(mappingRef, { uid, subscriptionId, syncToken: null, syncLeaseExpiresAt: 0, updatedAt: Date.now() }, { merge: true });
+      tx.update(userRef, { ...subscriptionMembership(subscription, provider.mode), updatedAt: Date.now() });
+    });
+  } catch (error) {
+    await getDb().runTransaction(async (tx) => {
+      if ((await tx.get(mappingRef)).data()?.syncToken === syncToken) {
+        tx.update(mappingRef, { syncToken: null, syncLeaseExpiresAt: 0 });
+      }
+    });
+    throw error;
   }
-
-  await getDb().collection("users").doc(uid).update(updates);
-  logger.info("Membership provisioned", { uid, plan, expiresAt });
 }

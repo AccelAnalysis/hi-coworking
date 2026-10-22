@@ -1,5 +1,7 @@
 "use client";
 
+import { accessMessage } from "@/lib/accessStatus";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
@@ -12,6 +14,8 @@ import {
   MapPin,
   ReceiptText,
 } from "lucide-react";
+import { AccountOrientation } from "@/components/AccountOrientation";
+import { BookingCatalogDetails } from "@/components/BookingCatalogDetails";
 import { AppShell } from "@/components/AppShell";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -38,6 +42,9 @@ type AccessGrantSummary = {
   startsAt: number;
   endsAt: number;
   grantStatus: string;
+  deliveryStatus?: string;
+  programmingStatus?: string;
+  staffAttentionRequired?: boolean;
   codeStatus: string | null;
   codeLast2: string | null;
   codeId: string | null;
@@ -72,20 +79,6 @@ function money(cents: number) {
   }).format(cents / 100);
 }
 
-function accessMessage(access?: AccessGrantSummary) {
-  if (!access) {
-    return "Access details will appear here after the facility credential is issued.";
-  }
-  if (access.grantStatus === "active" && access.codeStatus !== "failed") {
-    return access.codeLast2
-      ? `Your ${access.doorName} access code has been issued and ends in ${access.codeLast2}. The full code was sent securely.`
-      : `Your ${access.doorName} access credential is active.`;
-  }
-  if (access.codeStatus === "failed") {
-    return "Your booking is confirmed, but the access credential needs staff attention. Contact Hi Coworking before arrival.";
-  }
-  return "Your access credential is being prepared. Check again before arrival.";
-}
 
 export default function AccountBookingsPage() {
   return (
@@ -206,6 +199,8 @@ function AccountBookingsContent() {
           </Link>
         </div>
 
+        {user && <AccountOrientation key={user.uid} user={user} />}
+
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
           <section className="space-y-5">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -245,6 +240,8 @@ function AccountBookingsContent() {
                         Carrollton, VA
                       </span>
                     </div>
+
+                    <BookingCatalogDetails booking={booking} />
 
                     <div className="mt-5 rounded-xl bg-slate-50 p-4">
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -322,6 +319,7 @@ function AccountBookingsContent() {
                           {dateLabel(booking.start)} · {timeLabel(booking.start)}–
                           {timeLabel(booking.end)}
                         </p>
+                        <BookingCatalogDetails booking={booking} />
                       </div>
                       <div className="text-left sm:text-right">
                         <p className="text-sm font-medium text-slate-800">

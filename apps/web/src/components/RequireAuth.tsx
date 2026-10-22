@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { authPath } from "@/lib/purchaseNavigation";
 import { useAuth } from "@/lib/authContext";
 import { Loader2 } from "lucide-react";
 import type { UserRole, MembershipStatus } from "@hi/shared";
@@ -37,7 +38,7 @@ export function RequireAuth({ children, requiredRole, requiredMembershipStatus }
     if (loading) return;
 
     if (!user) {
-      router.push("/login");
+      router.replace(authPath("login", `${window.location.pathname}${window.location.search}${window.location.hash}`));
       return;
     }
 

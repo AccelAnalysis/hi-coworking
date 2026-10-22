@@ -44,7 +44,10 @@ export const booking_getAvailability = onCall(async (request) => {
 });
 
 export const booking_createQuote = onCall(async (request) => {
-  const { resourceId, deskChangePlanId, start, end } = request.data as {
+  const { resourceId, deskChangePlanId, start, end, setupId, addOnIds, attendeeCount } = request.data as {
+    setupId?: string;
+    addOnIds?: string[];
+    attendeeCount?: number;
     resourceId?: string;
     deskChangePlanId?: string;
     start: number;
@@ -54,5 +57,5 @@ export const booking_createQuote = onCall(async (request) => {
   await enforceBookingHorizon(start, request.auth?.uid);
   const busy = await getBusy(start, end);
   const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy);
-  return quoteForChoice(choice, start, end, request.auth?.uid);
+  return quoteForChoice(choice, start, end, request.auth?.uid, { setupId, addOnIds, attendeeCount });
 });

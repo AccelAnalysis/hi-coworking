@@ -5,6 +5,7 @@ import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/fire
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { nurtureEpisode, inactiveEpisode, hasMarketingConsent, previousEnrollmentBlocks } from "./nurturePolicy";
 import { SendGridProvider } from "./providers/emailProvider";
 
 if (admin.apps.length === 0) admin.initializeApp();
@@ -76,7 +77,7 @@ type Enrollment = {
   unsubscribeToken: string;
   enrolledAt: number;
   updatedAt: number;
-  lastDeliveredAt?: number;
+  lastAcceptedAt?: number;
   failureCount?: number;
 };
 
@@ -94,7 +95,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Thanks for reaching out to Hi Coworking",
         body: "Thanks for your interest in Hi Coworking. Take a look at the space, compare options, or plan a visit when it works for you.",
         ctaLabel: "Explore Hi Coworking",
-        ctaHref: "/visit",
+        ctaHref: "/book",
       },
       {
         id: "book",
@@ -110,7 +111,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "A workspace should fit the way you work",
         body: "Hi Coworking is designed for focused work, useful meetings, and a comfortable local workday. We would be glad to welcome you in.",
         ctaLabel: "Plan a visit",
-        ctaHref: "/visit",
+        ctaHref: "/book",
       },
     ],
   },
@@ -127,7 +128,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Your Hi Coworking visit is on the calendar",
         body: "Your booking is confirmed. Before you arrive, review your booking details and access information from your dashboard.",
         ctaLabel: "Open your dashboard",
-        ctaHref: "/dashboard",
+        ctaHref: "/account",
       },
       {
         id: "next-visit",
@@ -135,7 +136,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Make your next Hi Coworking visit easier",
         body: "If Hi Coworking is becoming part of your routine, compare membership options and reserve your next workspace while your preferred time is open.",
         ctaLabel: "View memberships",
-        ctaHref: "/membership",
+        ctaHref: "/pricing",
       },
     ],
   },
@@ -152,7 +153,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Welcome to Hi Coworking membership",
         body: "Your membership is active. Your dashboard keeps your bookings, membership details, and access information together.",
         ctaLabel: "Open member dashboard",
-        ctaHref: "/dashboard",
+        ctaHref: "/account",
       },
       {
         id: "member-book",
@@ -177,7 +178,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "A quick Hi Coworking membership check-in",
         body: "Your current membership period is approaching renewal. Review your plan and account so there are no surprises in your next work cycle.",
         ctaLabel: "Review membership",
-        ctaHref: "/dashboard/membership",
+        ctaHref: "/account",
       },
     ],
   },
@@ -231,7 +232,9 @@ function escapeHtml(value: string) {
 
 function campaignHref(value?: string) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return undefined;
-  return `${SITE_ORIGIN}${value}`;
+  // Also repair links in campaigns already persisted before the route correction.
+  const legacyRoutes: Record<string, string> = { "/visit": "/book", "/membership": "/pricing", "/dashboard": "/account", "/dashboard/membership": "/account" };
+  return `${SITE_ORIGIN}${legacyRoutes[value] || value}`;
 }
 
 function requireAdmin(request: { auth?: { uid: string; token: Record<string, unknown> } | null }) {
@@ -266,7 +269,7 @@ async function isSuppressed(emailHash: string, uid?: string) {
   return Boolean(user.data()?.marketingOptOut || user.data()?.doNotContact);
 }
 
-async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefId?: string) {
+export async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefId?: string) {
   const email = normalizeEmail(contact.email);
   if (!isValidEmail(email)) return [] as string[];
   const emailHash = stableHash(email);
@@ -283,7 +286,7 @@ async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefI
   for (const campaignDoc of campaignSnap.docs) {
     const campaign = campaignDoc.data() as Campaign;
     if (campaign.status !== "ACTIVE" || campaign.steps.length === 0) continue;
-    const identity = [campaign.id, contact.contactType, contact.contactId, signal, sourceRefId || "lifecycle"].join("|");
+    const identity = [campaign.id, contact.contactType, contact.contactId, signal, nurtureEpisode(signal, sourceRefId)].join("|");
     const id = cleanId(`enroll_${stableHash(identity)}`);
     const ref = db.collection(ENROLLMENTS).doc(id);
     const existing = await ref.get();
@@ -308,8 +311,23 @@ async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefI
       enrolledAt: now,
       updatedAt: now,
     };
-    await ref.create(enrollment);
-    created.push(id);
+    const inserted = await db.runTransaction(async (tx) => {
+      const snapshot = await tx.get(ref);
+      if (snapshot.exists) return false;
+      // Legacy IDs used booking IDs / scan dates. Consult the contact history in the same
+      // transaction as the canonical claim, so rollout cannot restart first-visit nurture.
+      if (signal === "BOOKING_CONFIRMED" || signal === "MEMBER_INACTIVE") {
+        const history = await tx.get(db.collection(ENROLLMENTS).where("contactId", "==", contact.contactId));
+        if (history.docs.some((doc) => {
+          const previous = doc.data();
+          return previous.campaignId === campaign.id && previous.contactType === contact.contactType &&
+            previous.sourceSignal === signal && previousEnrollmentBlocks(previous, signal, sourceRefId, now);
+        })) return false;
+      }
+      tx.create(ref, enrollment);
+      return true;
+    });
+    if (inserted) created.push(id);
   }
   return created;
 }
@@ -326,25 +344,28 @@ function renderMessage(enrollment: Enrollment, step: CampaignStep) {
   return { subject, html, text: `${body}\n\n${href || ""}\n\nManage follow-up preferences: ${unsubscribeHref}`.trim() };
 }
 
-async function advanceEnrollment(ref: FirebaseFirestore.DocumentReference, enrollment: Enrollment, campaign: Campaign, deliveredAt: number) {
+async function advanceEnrollment(ref: FirebaseFirestore.DocumentReference, enrollment: Enrollment, campaign: Campaign, acceptedAt: number) {
   const nextStepIndex = enrollment.nextStepIndex + 1;
   const next = campaign.steps[nextStepIndex];
   await ref.set({
     status: next ? "ACTIVE" : "COMPLETED",
     nextStepIndex,
-    nextDueAt: next ? deliveredAt + Math.max(0, next.delayHours) * 60 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
-    lastDeliveredAt: deliveredAt,
+    nextDueAt: next ? acceptedAt + Math.max(0, next.delayHours) * 60 * 60 * 1000 : Number.MAX_SAFE_INTEGER,
+    lastAcceptedAt: acceptedAt,
     failureCount: 0,
-    updatedAt: deliveredAt,
+    updatedAt: acceptedAt,
   }, { merge: true });
 }
 
-async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provider: SendGridProvider) {
+export async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provider: SendGridProvider) {
   const snap = await ref.get();
   if (!snap.exists) return;
   const enrollment = snap.data() as Enrollment;
   if (enrollment.status !== "ACTIVE" || enrollment.nextDueAt > Date.now()) return;
-  if (await isSuppressed(enrollment.emailHash, enrollment.uid)) {
+  const leadConsentMissing = enrollment.contactType === "lead" && !hasMarketingConsent(
+    (await db.collection("leads").doc(enrollment.contactId).get()).data() || {},
+  );
+  if (leadConsentMissing || await isSuppressed(enrollment.emailHash, enrollment.uid)) {
     await ref.set({ status: "SUPPRESSED", updatedAt: Date.now() }, { merge: true });
     return;
   }
@@ -370,19 +391,26 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
     return;
   }
 
-  const attempt = Math.max(0, Number(existingDelivery.data()?.attempts || 0)) + 1;
+  // A single transactional claim prevents concurrent schedules from sending the same step.
+  // An interrupted send is ambiguous: never blindly resend it, even after a lease expires.
   const now = Date.now();
-  await deliveryRef.set({
-    id: deliveryId,
-    enrollmentId: enrollment.id,
-    campaignId: campaign.id,
-    stepId: step.id,
-    email: enrollment.email,
-    status: "PROCESSING",
-    attempts: attempt,
-    startedAt: now,
-    updatedAt: now,
-  }, { merge: true });
+  const claimed = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(deliveryRef);
+    if (existing.exists) return false;
+    tx.create(deliveryRef, {
+      id: deliveryId, enrollmentId: enrollment.id, campaignId: campaign.id,
+      stepId: step.id, email: enrollment.email, status: "PROCESSING",
+      attempts: 1, startedAt: now, updatedAt: now,
+    });
+    return true;
+  });
+  if (!claimed) {
+    const current = (await deliveryRef.get()).data();
+    if (current?.status !== "SENT" && now - Number(current?.startedAt || 0) > 15 * 60000) {
+      await ref.set({ status: "FAILED", staffAttentionRequired: true, failureReason: "Delivery outcome requires provider reconciliation before retry", updatedAt: now }, { merge: true });
+    }
+    return;
+  }
 
   try {
     const message = renderMessage(enrollment, step);
@@ -400,12 +428,13 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const failureCount = (enrollment.failureCount || 0) + 1;
-    const retryDelayMinutes = Math.min(24 * 60, 15 * 2 ** Math.min(6, failureCount - 1));
     await deliveryRef.set({ status: "FAILED", error: message.slice(0, 500), updatedAt: Date.now() }, { merge: true });
     await ref.set({
-      status: failureCount >= 6 ? "FAILED" : "ACTIVE",
+      status: "FAILED",
+      staffAttentionRequired: true,
+      failureReason: "Provider send failed or outcome is unknown; reconcile before retry",
       failureCount,
-      nextDueAt: Date.now() + retryDelayMinutes * 60 * 1000,
+      nextDueAt: Number.MAX_SAFE_INTEGER,
       updatedAt: Date.now(),
     }, { merge: true });
     logger.error("Nurture delivery failed", { enrollmentId: enrollment.id, campaignId: campaign.id, stepId: step.id, failureCount, error: message });
@@ -449,14 +478,14 @@ export const nurture_scanLifecycle = onSchedule("every day 09:00", async () => {
     }
     const lastBookingAt = Number(data.lastBookingAt || 0);
     if (lastBookingAt > 0 && lastBookingAt <= inactiveCutoff) {
-      await enrollContact("MEMBER_INACTIVE", contact, `inactive:${new Date(now).toISOString().slice(0, 10)}`);
+      await enrollContact("MEMBER_INACTIVE", contact, inactiveEpisode(lastBookingAt));
     }
   }
 });
 
 export const nurture_onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) => {
   const data = event.data?.data();
-  if (!data) return;
+  if (!data || !hasMarketingConsent(data)) return;
   const email = normalizeEmail(data.email);
   if (!isValidEmail(email)) return;
   await enrollContact("LEAD_CREATED", {
@@ -476,7 +505,10 @@ export const nurture_onBookingCreated = onDocumentCreated("bookings/{bookingId}"
   const user = userSnap.data();
   const email = normalizeEmail(user?.email);
   if (!isValidEmail(email)) return;
-  await userSnap.ref.set({ lastBookingAt: Number(data.createdAt || Date.now()), updatedAt: Date.now() }, { merge: true });
+  await db.runTransaction(async (tx) => {
+    const current = await tx.get(userSnap.ref);
+    tx.set(userSnap.ref, { lastBookingAt: Math.max(Number(current.data()?.lastBookingAt || 0), Number(data.createdAt || Date.now())), updatedAt: Date.now() }, { merge: true });
+  });
   await enrollContact("BOOKING_CONFIRMED", {
     contactType: "user",
     contactId: uid,

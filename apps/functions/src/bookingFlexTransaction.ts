@@ -1,9 +1,11 @@
+import { loadBookingCatalog } from "./bookingCatalog";
 import { createHash, randomBytes } from "node:crypto";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { hasActiveMembership } from "./payments/membership";
 import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import {
@@ -69,6 +71,7 @@ type HoldData = {
   paymentId?: string;
   bookingId?: string;
   guestAccountCreated?: boolean;
+  recoveryId?: string;
 };
 
 function occupancyHoldId(parentHoldId: string, index: number) {
@@ -133,38 +136,44 @@ function consumeAccountCreditReservation(
   }, { merge: true });
 }
 
-async function ensureGuestAccount(guest?: GuestDetails) {
+// The deterministic UID makes a crash between Auth creation and profile creation
+// recoverable without ever treating an arbitrary existing email account as new.
+async function ensureGuestAccount(holdId: string, guest?: GuestDetails) {
   const email = guest?.email?.trim().toLowerCase();
   if (!email) throw new HttpsError("failed-precondition", "Guest email is missing.");
-
+  const checkoutUid = `booking_guest_${createHash("sha256").update(holdId).digest("hex")}`;
   let userRecord: admin.auth.UserRecord;
-  let created = false;
   try {
     userRecord = await admin.auth().getUserByEmail(email);
   } catch (error: unknown) {
-    const coded = error as { code?: string };
-    if (coded.code !== "auth/user-not-found") throw error;
-    userRecord = await admin.auth().createUser({
-      email,
-      displayName: guest?.name?.trim() || undefined,
-      emailVerified: false,
-    });
-    created = true;
+    if ((error as { code?: string }).code !== "auth/user-not-found") throw error;
+    try {
+      userRecord = await admin.auth().createUser({
+        uid: checkoutUid, email, displayName: guest?.name?.trim() || undefined,
+        emailVerified: false,
+      });
+    } catch (createError: unknown) {
+      if (!["auth/email-already-exists", "auth/uid-already-exists"].includes(
+        (createError as { code?: string }).code || "",
+      )) throw createError;
+      userRecord = await admin.auth().getUserByEmail(email);
+    }
   }
-
+  const created = userRecord.uid === checkoutUid;
+  if (!created) return { uid: userRecord.uid, created: false };
   const userRef = db().collection("users").doc(userRecord.uid);
-  await userRef.set({
-    uid: userRecord.uid,
-    email,
-    displayName: guest?.name?.trim() || userRecord.displayName || "",
-    phone: guest?.phone?.trim() || "",
-    role: "member",
-    membershipStatus: "none",
-    ...(created ? { createdAt: Date.now() } : {}),
-    updatedAt: Date.now(),
-  }, { merge: true });
-
-  return { uid: userRecord.uid, created };
+  const ownsProfile = await db().runTransaction(async (tx) => {
+    const existing = await tx.get(userRef);
+    if (existing.exists) return existing.data()?.guestCheckoutHoldId === holdId;
+    const now = Date.now();
+    tx.create(userRef, {
+      uid: userRecord.uid, email, displayName: guest?.name?.trim() || "",
+      phone: guest?.phone?.trim() || "", role: "member", membershipStatus: "none",
+      createdAt: now, updatedAt: now, guestCheckoutHoldId: holdId,
+    });
+    return true;
+  });
+  return { uid: userRecord.uid, created: ownsProfile };
 }
 
 async function issueAccessSafely(
@@ -202,6 +211,7 @@ async function createHoldAtomically(
   end: number,
   guest: GuestDetails | undefined,
   authenticatedUid?: string,
+  expectedTotalCents?: number,
 ) {
   return db().runTransaction(async (tx) => {
     const bookingQuery = db().collection("bookings").where("end", ">", start);
@@ -231,12 +241,18 @@ async function createHoldAtomically(
     const expiresAt = now + HOLD_MS;
     const durationHours = baseQuote.durationHours;
     const user = userSnap?.data();
-    let adjustedQuote: BookingQuote = { ...baseQuote };
+    const catalog = await loadBookingCatalog(choice, {
+      setupId: baseQuote.setup?.id,
+      addOnIds: baseQuote.addOns?.map((addon) => addon.id),
+      attendeeCount: baseQuote.attendeeCount,
+    }, (ref) => tx.get(ref), { start, end }, (query) => tx.get(query));
+    let adjustedQuote: BookingQuote = { ...baseQuote, ...catalog,
+      subtotalCents: baseQuote.spaceSubtotalCents ?? baseQuote.subtotalCents };
     let usageRef: FirebaseFirestore.DocumentReference | null = null;
     let usageData: MembershipUsage | null = null;
 
     if (authenticatedUid && choice.resourceType === "SEAT") {
-      const tier = user?.membershipStatus === "active" && user?.plan
+      const tier = hasActiveMembership(user) && user?.plan
         ? getDeskMembershipTierById(user.plan)
         : undefined;
       if (tier) {
@@ -296,6 +312,9 @@ async function createHoldAtomically(
       }
     }
 
+    adjustedQuote = { ...adjustedQuote, spaceSubtotalCents: adjustedQuote.subtotalCents,
+      subtotalCents: adjustedQuote.subtotalCents + catalog.addOnTotalCents };
+
     let creditReservations: Record<string, CreditReservation> = {};
     if (userRef && userSnap) {
       creditReservations = activeCreditReservations(
@@ -322,6 +341,10 @@ async function createHoldAtomically(
         accountCreditAppliedCents: 0,
         totalCents: adjustedQuote.subtotalCents,
       };
+    }
+
+    if (expectedTotalCents !== undefined && adjustedQuote.totalCents !== expectedTotalCents) {
+      throw new HttpsError("failed-precondition", "Your booking price changed. Refresh the quote and review the new total before paying.");
     }
 
     const occupancyHoldIds = choice.kind === "desk_change"
@@ -403,6 +426,8 @@ async function finalizeHeldBooking(
   userName: string,
   guestAccountCreated: boolean,
   paymentMethod: "STRIPE" | "ACCOUNT_CREDIT" | "MEMBERSHIP_HOURS",
+  allowExpiredPaidHold = false,
+  expectedPaymentId?: string,
 ) {
   const holdRef = db().collection("bookingHolds").doc(holdId);
   const initialSnap = await holdRef.get();
@@ -417,10 +442,16 @@ async function finalizeHeldBooking(
     const latestSnap = await tx.get(holdRef);
     if (!latestSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
     const hold = latestSnap.data() as HoldData;
+    if (expectedPaymentId) {
+      const payment = (await tx.get(db().collection("payments").doc(expectedPaymentId))).data();
+      if (!payment || payment.status !== "paid" || hold.paymentId !== expectedPaymentId) {
+        throw new HttpsError("failed-precondition", "Payment is no longer eligible for booking fulfillment.");
+      }
+    }
     if (hold.status === "CONSUMED" && hold.bookingId) {
       return { bookingId: hold.bookingId, createdNow: false };
     }
-    if (Number(hold.expiresAt || 0) <= Date.now()) {
+    if (Number(hold.expiresAt || 0) <= Date.now() && !allowExpiredPaidHold) {
       throw new HttpsError("deadline-exceeded", "Your hold expired. Please choose the space again.");
     }
 
@@ -488,9 +519,15 @@ async function finalizeHeldBooking(
       start: hold.start,
       end: hold.end,
       status: "CONFIRMED",
+      accessProvisioningStatus: "pending",
       totalPrice: (quote.totalCents || 0) / 100,
       totalCents: quote.totalCents || 0,
       subtotalCents: quote.subtotalCents || quote.totalCents || 0,
+      spaceSubtotalCents: quote.spaceSubtotalCents ?? quote.subtotalCents,
+      setup: quote.setup || null,
+      addOns: quote.addOns || [],
+      addOnTotalCents: quote.addOnTotalCents || 0,
+      attendeeCount: quote.attendeeCount || 1,
       accountCreditAppliedCents: quote.accountCreditAppliedCents || 0,
       paymentMethod,
       paymentId: hold.paymentId || null,
@@ -549,7 +586,7 @@ async function finalizeHeldBooking(
     return { bookingId: bookingRef.id, createdNow: true };
   });
 
-  if (result.createdNow) {
+  {
     const accessResourceId = initial.bookingKind === "desk_change" && initial.segments
       ? initial.segments[0].resourceId
       : initial.resourceId;
@@ -567,7 +604,11 @@ async function finalizeHeldBooking(
 export const booking_beginCheckout = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
   async (request) => {
-    const { resourceId, deskChangePlanId, start, end, successUrl, cancelUrl, guest } = request.data as {
+    const { resourceId, deskChangePlanId, start, end, successUrl, cancelUrl, guest, setupId, addOnIds, attendeeCount, expectedTotalCents } = request.data as {
+      expectedTotalCents?: number;
+      setupId?: string;
+      addOnIds?: string[];
+      attendeeCount?: number;
       resourceId?: string;
       deskChangePlanId?: string;
       start: number;
@@ -576,6 +617,10 @@ export const booking_beginCheckout = onCall(
       cancelUrl: string;
       guest?: GuestDetails;
     };
+    if ((expectedTotalCents !== undefined && (!Number.isSafeInteger(expectedTotalCents) || expectedTotalCents < 0))
+      || (setupId && expectedTotalCents === undefined)) {
+      throw new HttpsError("invalid-argument", "Review a current booking quote before checkout.");
+    }
     if ((!resourceId && !deskChangePlanId) || !successUrl || !cancelUrl) {
       throw new HttpsError("invalid-argument", "Space and return URLs are required.");
     }
@@ -587,7 +632,7 @@ export const booking_beginCheckout = onCall(
     await enforceBookingHorizon(start, request.auth?.uid);
     const busy = await getBusy(start, end);
     const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy);
-    const baseQuote = await quoteForChoice(choice, start, end, request.auth?.uid);
+    const baseQuote = await quoteForChoice(choice, start, end, request.auth?.uid, { setupId, addOnIds, attendeeCount });
     const holdRef = db().collection("bookingHolds").doc();
     const holdSecret = randomBytes(24).toString("hex");
     const held = await createHoldAtomically(
@@ -599,6 +644,7 @@ export const booking_beginCheckout = onCall(
       end,
       guest,
       request.auth?.uid,
+      expectedTotalCents,
     );
     const quote = held.quote;
 
@@ -636,7 +682,7 @@ export const booking_beginCheckout = onCall(
       currency: quote.currency,
       purpose: "booking",
       purposeRefId: holdRef.id,
-      successUrl,
+      successUrl: (() => { const url = new URL(successUrl); url.searchParams.set("holdId", holdRef.id); return url.toString(); })(),
       cancelUrl,
       mode: "payment",
       lineItemLabel: `${quote.resourceName} · ${quote.durationHours} hour${quote.durationHours === 1 ? "" : "s"}`,
@@ -672,76 +718,154 @@ export const booking_beginCheckout = onCall(
   },
 );
 
+export type PaidBookingResult =
+  | { success: true; bookingId: string; alreadyFinalized: boolean }
+  | { success: false; status: "recovery_required"; recoveryId: string; message: string }
+  | { success: false; status: "cancelled"; message: string };
+
+// Called only after Stripe verification/ledger confirmation, or by an authorized
+// purchaser through the callable below. No browser state is needed by the webhook.
+export async function finalizePaidBooking(holdId: string, paymentId: string): Promise<PaidBookingResult> {
+  const holdRef = db().collection("bookingHolds").doc(holdId);
+  const paymentRef = db().collection("payments").doc(paymentId);
+  const [holdSnap, paymentSnap] = await Promise.all([holdRef.get(), paymentRef.get()]);
+  const hold = holdSnap.data() as HoldData | undefined;
+  const payment = paymentSnap.data();
+  if (payment && ["refunded", "cancelled"].includes(payment.status)) {
+    return { success: false, status: "cancelled", message: "This booking payment was cancelled or refunded. Check your account or contact staff." };
+  }
+  if (!payment || payment.status !== "paid" || payment.provider !== "stripe"
+    || payment.purpose !== "booking" || payment.purposeRefId !== holdId) {
+    throw new HttpsError("failed-precondition", "Payment has not been confirmed for this booking.");
+  }
+  const recover = async (reason: string): Promise<PaidBookingResult> => {
+    const recoveryId = `booking_${paymentId}`;
+    const confirmed = await db().runTransaction(async (tx) => {
+      const ref = db().collection("bookingPaymentRecovery").doc(recoveryId);
+      const [existing, latestHold, latestPayment] = await Promise.all([
+        tx.get(ref), tx.get(holdRef), tx.get(paymentRef),
+      ]);
+      const latest = latestHold.data();
+      if (latest?.status === "CONSUMED" && latest.bookingId) return { bookingId: String(latest.bookingId), replacement: false };
+      const resolution = existing.data();
+      if (resolution?.status === "RESOLVED" && typeof resolution.replacementBookingId === "string") {
+        const replacement = await tx.get(db().collection("bookings").doc(resolution.replacementBookingId));
+        if (replacement.data()?.status === "CONFIRMED" && replacement.data()?.paymentId === paymentId) {
+          return { bookingId: replacement.id, replacement: true };
+        }
+      }
+      if (existing.exists && resolution?.status !== "OPEN") return null;
+      if (latestPayment.data()?.status !== "paid") return null;
+      // Never reset a staff resolution when Stripe replays a successful event.
+      if (!existing.exists) tx.create(ref, {
+        id: recoveryId, holdId, paymentId, userId: hold?.userId || payment.uid,
+        amountCents: payment.amount, currency: payment.currency,
+        providerRefs: payment.providerRefs || {}, reason,
+        status: "OPEN", requiredAction: "ALTERNATE_RESERVATION_OR_REFUND",
+        createdAt: Date.now(), dueAt: Date.now(),
+      });
+      tx.set(paymentRef, { fulfillmentStatus: "recovery_required", recoveryId }, { merge: true });
+      if (latestHold.exists) tx.set(holdRef, { recoveryId, fulfillmentStatus: "recovery_required" }, { merge: true });
+      return null;
+    });
+    if (confirmed) return confirmed.replacement
+      ? { success: true, bookingId: confirmed.bookingId, alreadyFinalized: true }
+      : finalizePaidBooking(holdId, paymentId);
+    logger.error("Paid booking requires staff recovery", { holdId, paymentId, recoveryId, reason });
+    return { success: false, status: "recovery_required", recoveryId,
+      message: "Payment received. Your booking needs staff assistance to arrange a space or refund. Do not pay again." };
+  };
+  if (!hold) return recover("hold_missing");
+  if (hold.paymentId !== paymentId || Number(payment.amount) !== Number(hold.quote.totalCents)
+    || String(payment.currency).toLowerCase() !== String(hold.quote.currency || "usd").toLowerCase()) {
+    return recover("payment_hold_mismatch");
+  }
+  if (hold.status === "CONSUMED" && hold.bookingId) {
+    const booking = await db().collection("bookings").doc(hold.bookingId).get();
+    if (!booking.exists || booking.data()?.status !== "CONFIRMED") {
+      // A later cancellation is authoritative. Never recreate physical access
+      // or rewrite fulfillment just because Stripe delivers an older event.
+      return { success: false, status: "cancelled", message: "This booking was cancelled. Check your account or contact staff." };
+    }
+    await issueAccessSafely(hold.bookingId,
+      hold.bookingKind === "desk_change" && hold.segments ? hold.segments[0].resourceId : hold.resourceId,
+      hold.userId, hold.start, hold.end);
+    await paymentRef.set({ fulfillmentStatus: "confirmed", bookingId: hold.bookingId }, { merge: true });
+    return { success: true, bookingId: hold.bookingId, alreadyFinalized: true };
+  }
+  if (hold.recoveryId) return recover("previous_recovery_required");
+  const expired = Number(hold.expiresAt || 0) <= Date.now();
+  if (hold.start <= Date.now()) return recover("booking_start_passed");
+  // Released credits/hours may already have been spent elsewhere. Never silently
+  // debit them a second time or grant a discounted booking without an entitlement.
+  if (expired && (hold.quote.accountCreditAppliedCents > 0 || hold.quote.includedHoursApplied > 0)) {
+    return recover("expired_benefit_reservation");
+  }
+  const account = hold.userId.startsWith("guest:")
+    ? await ensureGuestAccount(holdId, hold.guest || undefined)
+    : { uid: hold.userId, created: false };
+  const owner = await admin.auth().getUser(account.uid);
+  try {
+    // An expired cash-only hold may be recovered only after the transaction
+    // rechecks both bookings and all active competing holds.
+    const result = await finalizeHeldBooking(holdId, account.uid,
+      owner.displayName || owner.email || "Guest", account.created, "STRIPE", expired, paymentId);
+    await paymentRef.set({ fulfillmentStatus: "confirmed", bookingId: result.bookingId }, { merge: true });
+    return { success: true, bookingId: result.bookingId, alreadyFinalized: !result.createdNow };
+  } catch (error) {
+    if (["aborted", "deadline-exceeded"].includes((error as { code?: string }).code || "")) {
+      return recover("space_unavailable");
+    }
+    // Transient errors must reach Stripe so its retry can finish processing.
+    throw error;
+  }
+}
+
 export const booking_finalizeCheckout = onCall(
   { secrets: [seamApiKey] },
   async (request) => {
     const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
     if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
     const holdRef = db().collection("bookingHolds").doc(holdId);
-    const holdSnap = await holdRef.get();
-    if (!holdSnap.exists) throw new HttpsError("not-found", "Booking hold not found.");
-    const hold = holdSnap.data() as HoldData;
-
-    const authOwns = Boolean(request.auth && hold.userId === request.auth.uid);
-    const secretMatches = Boolean(
-      holdSecret && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"),
-    );
-    if (!authOwns && !secretMatches) {
+    const snap = await holdRef.get();
+    if (!snap.exists) throw new HttpsError("not-found", "Booking hold not found.");
+    const hold = snap.data() as HoldData;
+    const secretMatches = Boolean(holdSecret
+      && hold.secretHash === createHash("sha256").update(holdSecret).digest("hex"));
+    if (!(request.auth && hold.userId === request.auth.uid) && !secretMatches) {
       throw new HttpsError("permission-denied", "This booking hold does not belong to you.");
     }
-
-    if (hold.status === "CONSUMED" && hold.bookingId) {
-      let customToken: string | undefined;
-      if (
-        !request.auth
-        && secretMatches
-        && hold.guestAccountCreated === true
-        && typeof hold.userId === "string"
-        && !hold.userId.startsWith("guest:")
-      ) {
-        customToken = await admin.auth().createCustomToken(hold.userId, { bookingCheckout: true });
+    if (!hold.paymentId) throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
+    const result = await finalizePaidBooking(holdId, hold.paymentId);
+    if (!result.success) return result;
+    const completed = (await holdRef.get()).data() as HoldData;
+    // Only this checkout's genuinely new account can be signed in using its
+    // high-entropy hold secret. Existing account recovery requires verified login.
+    let customToken: string | undefined;
+    if (secretMatches && completed.guestAccountCreated === true
+      && Date.now() < completed.createdAt + 30 * 60_000) {
+      const account = await admin.auth().getUser(completed.userId);
+      if (!account.emailVerified && account.providerData.length === 0
+        && Object.keys(account.customClaims || {}).length === 0) {
+        const candidate = await admin.auth().createCustomToken(completed.userId, { bookingCheckout: true });
+        const claimed = await db().runTransaction(async (tx) => {
+          const [latest, profile] = await Promise.all([
+            tx.get(holdRef), tx.get(db().collection("users").doc(completed.userId)),
+          ]);
+          const data = profile.data();
+          if (latest.data()?.guestSignInClaimedAt || data?.guestCheckoutHoldId !== holdId
+            || data?.role !== "member" || data?.membershipStatus !== "none") return false;
+          tx.update(holdRef, { guestSignInClaimedAt: Date.now() });
+          return true;
+        });
+        if (claimed) customToken = candidate;
       }
-      return {
-        success: true,
-        bookingId: hold.bookingId,
-        alreadyFinalized: true,
-        customToken,
-      };
     }
-
-    if (Number(hold.expiresAt || 0) <= Date.now()) {
-      await holdRef.update({ status: "EXPIRED", expiredAt: Date.now() });
-      throw new HttpsError("deadline-exceeded", "Your booking hold expired before payment completed.");
-    }
-    if (!hold.paymentId) {
-      throw new HttpsError("failed-precondition", "No payment is associated with this hold.");
-    }
-    const paymentSnap = await db().collection("payments").doc(hold.paymentId).get();
-    if (!paymentSnap.exists || paymentSnap.data()?.status !== "paid") {
-      throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
-    }
-
-    const guestAccount = request.auth
-      ? { uid: request.auth.uid, created: false }
-      : await ensureGuestAccount(hold.guest || undefined);
-    const finalUserId = guestAccount.uid;
-    const result = await finalizeHeldBooking(
-      holdId,
-      finalUserId,
-      String(request.auth?.token.name || request.auth?.token.email || hold.guest?.name || "Guest"),
-      guestAccount.created,
-      "STRIPE",
-    );
-
-    const customToken = !request.auth && guestAccount.created
-      ? await admin.auth().createCustomToken(finalUserId, { bookingCheckout: true })
-      : undefined;
-
-    return {
-      success: true,
-      bookingId: result.bookingId,
-      customToken,
-    };
+    const booking = (await db().collection("bookings").doc(result.bookingId).get()).data();
+    const bookingDetails = booking ? {
+      setup: booking.setup || null, addOns: booking.addOns || [], attendeeCount: booking.attendeeCount || 1,
+    } : undefined;
+    return { ...result, customToken, bookingDetails };
   },
 );
 
@@ -773,3 +897,20 @@ export const booking_onDeskChangeBookingUpdated = onDocumentUpdated(
     if (changed > 0) await batch.commit();
   },
 );
+
+// Recovery is not a successful booking or a refund. Give payment administrators
+// a bounded, explicit work queue; resolution follows verified provider evidence.
+export const booking_adminListPaymentRecovery = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
+  if (!["admin", "master"].includes(String(request.auth.token.role))) {
+    throw new HttpsError("permission-denied", "Only payment administrators can view recovery cases.");
+  }
+  const snapshot = await db().collection("bookingPaymentRecovery").where("status", "==", "OPEN").limit(100).get();
+  const cases = snapshot.docs.map((doc) => {
+    const value = doc.data();
+    return { id: doc.id, holdId: value.holdId, paymentId: value.paymentId, userId: value.userId,
+      amountCents: value.amountCents, currency: value.currency, reason: value.reason,
+      status: value.status, requiredAction: value.requiredAction, createdAt: value.createdAt };
+  }).sort((a, b) => a.createdAt - b.createdAt);
+  return { cases };
+});

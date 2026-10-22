@@ -1,3 +1,5 @@
+import { loadBookingCatalog, type CatalogSelection, type BookingCatalogSnapshot } from "./bookingCatalog";
+import { hasActiveMembership } from "./payments/membership";
 import { HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import {
@@ -75,7 +77,8 @@ export type MembershipUsage = {
   updatedAt: number;
 };
 
-export type BookingQuote = {
+export type BookingQuote = Partial<BookingCatalogSnapshot> & {
+  spaceSubtotalCents?: number;
   resourceId: string;
   resourceName: string;
   resourceType: "SEAT" | "MODE";
@@ -159,8 +162,8 @@ export async function bookingWindowDaysFor(uid?: string) {
   if (!uid) return GUEST_BOOKING_WINDOW_DAYS;
   const userSnap = await db().collection("users").doc(uid).get();
   const user = userSnap.data();
-  if (user?.membershipStatus !== "active" || !user?.plan) return GUEST_BOOKING_WINDOW_DAYS;
-  return getTierById(user.plan)?.bookingWindowDays ?? GUEST_BOOKING_WINDOW_DAYS;
+  if (!hasActiveMembership(user)) return GUEST_BOOKING_WINDOW_DAYS;
+  return getTierById(user!.plan)?.bookingWindowDays ?? GUEST_BOOKING_WINDOW_DAYS;
 }
 
 export async function enforceBookingHorizon(start: number, uid?: string) {
@@ -398,6 +401,7 @@ export async function quoteForChoice(
   start: number,
   end: number,
   uid?: string,
+  selection: CatalogSelection = {},
 ): Promise<BookingQuote> {
   validateWindow(start, end);
   await enforceBookingHorizon(start, uid);
@@ -417,7 +421,7 @@ export async function quoteForChoice(
   let user: FirebaseFirestore.DocumentData | undefined;
   if (uid) user = (await db().collection("users").doc(uid).get()).data();
 
-  if (uid && user && choice.resourceType === "SEAT" && user.membershipStatus === "active" && user.plan) {
+  if (uid && user && choice.resourceType === "SEAT" && hasActiveMembership(user)) {
     const tier = getDeskMembershipTierById(user.plan);
     if (tier) {
       membershipName = tier.name;
@@ -444,6 +448,10 @@ export async function quoteForChoice(
     dailyCapApplied = uncapped >= GUEST_DAILY_CAP_CENTS;
   }
 
+  const catalog = await loadBookingCatalog(choice, selection, undefined, { start, end });
+  const spaceSubtotalCents = subtotalCents;
+  subtotalCents += catalog.addOnTotalCents;
+
   const creditReservations = activeCreditReservations(user?.accountCreditReservations);
   const accountCreditAvailableCents = uid
     ? Math.max(0, Math.round(Number(user?.accountCreditCents || 0)) - reservedCreditCents(creditReservations))
@@ -451,6 +459,8 @@ export async function quoteForChoice(
   const accountCreditAppliedCents = Math.min(subtotalCents, accountCreditAvailableCents);
 
   return {
+    ...catalog,
+    spaceSubtotalCents,
     resourceId: choice.resourceId,
     resourceName: choice.resourceName,
     resourceType: choice.resourceType,

@@ -1,3 +1,4 @@
+import { assertCatalogReschedule, type BookingCatalogSnapshot } from "./bookingCatalog";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
@@ -21,7 +22,7 @@ const OPEN_HOUR = 8;
 const CLOSE_HOUR = 20;
 
 type ResourceType = "SEAT" | "MODE";
-type BookingData = {
+type BookingData = Partial<BookingCatalogSnapshot> & {
   id: string;
   resourceId: string;
   resourceName?: string;
@@ -359,6 +360,8 @@ async function createRescheduleHold(
         "This booking is no longer available to reschedule.",
       );
     }
+
+    await assertCatalogReschedule(latest, start, end, (ref) => tx.get(ref), (query) => tx.get(query));
 
     const bookingConflict = bookingRange.docs.some((doc) => {
       if (doc.id === booking.id) return false;
@@ -850,6 +853,8 @@ export const booking_reschedule = onCall(
             "The booking changed before rescheduling could finish. Your original booking is unchanged.",
           );
         }
+
+        await assertCatalogReschedule(latestBooking, start, end, (doc) => tx.get(doc), (query) => tx.get(query));
 
         tx.update(ref, {
           start,

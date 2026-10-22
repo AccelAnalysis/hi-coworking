@@ -3,19 +3,25 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { signInWithCustomToken } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { bookingHoldKey, LEGACY_HOLD_KEY, parseBookingHold, type BookingHold } from "@/lib/bookingRecovery";
+import { authPath } from "@/lib/purchaseNavigation";
 import { httpsCallable } from "firebase/functions";
 import { CheckCircle2, Loader2 } from "lucide-react";
+import { BookingCatalogDetails, type BookingCatalogSnapshot } from "@/components/BookingCatalogDetails";
 import { AppShell } from "@/components/AppShell";
-import { auth, functions } from "@/lib/firebase";
+import { auth, db, functions } from "@/lib/firebase";
 
 const finalizeCheckout = httpsCallable<
   { holdId: string; holdSecret?: string },
   {
-    success: boolean;
+    success: true;
     bookingId: string;
     alreadyFinalized?: boolean;
     customToken?: string;
-  }
+    bookingDetails?: BookingCatalogSnapshot;
+  } | { success: false; status: "recovery_required"; recoveryId: string; message?: string }
+    | { success: false; status: "cancelled"; message: string }
 >(functions, "booking_finalizeCheckout");
 
 const finalizeAdminMemberCheckout = httpsCallable<
@@ -25,7 +31,8 @@ const finalizeAdminMemberCheckout = httpsCallable<
 
 type State =
   | { kind: "loading" }
-  | { kind: "success"; bookingId: string; accountReady: boolean }
+  | { kind: "success"; bookingId: string; accountReady: boolean; customToken?: string; bookingDetails?: BookingCatalogSnapshot }
+  | { kind: "recovery"; recoveryId: string; message: string }
   | { kind: "error"; message: string };
 
 function sleep(ms: number) {
@@ -34,17 +41,25 @@ function sleep(ms: number) {
 
 export default function BookingCompletePage() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [retry, setRetry] = useState(0);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const alreadyConfirmed = params.get("bookingId");
     if (alreadyConfirmed) {
-      setState({
-        kind: "success",
-        bookingId: alreadyConfirmed,
-        accountReady: Boolean(auth.currentUser),
+      let cancelled = false;
+      // A query string is never evidence of payment or a confirmed booking.
+      void auth.authStateReady().then(async () => {
+        if (!auth.currentUser) throw new Error("Sign in with the booking account to verify this reservation. Do not pay again.");
+        const snapshot = await getDoc(doc(db, "bookings", alreadyConfirmed));
+        if (!snapshot.exists() || snapshot.data().status !== "CONFIRMED") throw new Error("We could not verify a confirmed reservation. Check your account or contact Hi Coworking before paying again.");
+        if (!cancelled) setState({ kind: "success", bookingId: snapshot.id, accountReady: true, bookingDetails: snapshot.data() as BookingCatalogSnapshot });
+      }).catch(() => {
+        if (!cancelled) setState({ kind: "error", message: "Sign in with the booking account to check this reservation, or contact Hi Coworking. This link alone does not confirm a booking. Do not pay again." });
       });
-      return;
+      return () => { cancelled = true; };
     }
 
     const adminHoldId = params.get("adminHoldId");
@@ -85,16 +100,13 @@ export default function BookingCompletePage() {
       return () => { cancelled = true; };
     }
 
-    let stored: {
-      holdId?: string;
-      holdSecret?: string;
-      expiresAt?: number;
-    } | null = null;
+    const expectedHoldId = params.get("holdId");
+    let stored: BookingHold | null = null;
     try {
-      const raw = window.localStorage.getItem(
-        "hi-coworking-booking-hold",
-      );
-      stored = raw ? JSON.parse(raw) : null;
+      // A return for one checkout must never consume another tab's hold.
+      const raw = window.localStorage.getItem(expectedHoldId ? bookingHoldKey(expectedHoldId) : LEGACY_HOLD_KEY);
+      stored = parseBookingHold(raw, expectedHoldId);
+      if (!stored && expectedHoldId) stored = parseBookingHold(window.localStorage.getItem(LEGACY_HOLD_KEY), expectedHoldId);
     } catch {
       stored = null;
     }
@@ -119,29 +131,30 @@ export default function BookingCompletePage() {
           });
           if (cancelled) return;
 
-          let accountReady = Boolean(auth.currentUser);
-          if (result.data.customToken) {
-            try {
-              await signInWithCustomToken(
-                auth,
-                result.data.customToken,
-              );
-              accountReady = true;
-            } catch (signInError) {
-              console.error(
-                "Booking confirmed but automatic account sign-in failed",
-                signInError,
-              );
+          if (!result.data.success) {
+            if (result.data.status === "cancelled") {
+              setState({ kind: "error", message: result.data.message });
+              return;
             }
+            setState({ kind: "recovery", recoveryId: result.data.recoveryId, message: result.data.message || "Payment was received, but the reservation needs staff review. A recovery case has been queued; this does not mean a refund has been issued. Do not pay again." });
+            return;
           }
-
-          window.localStorage.removeItem(
-            "hi-coworking-booking-hold",
-          );
+          let accountReady = false;
+          if (auth.currentUser && !result.data.customToken) {
+            try {
+              const booking = await getDoc(doc(db, "bookings", result.data.bookingId));
+              accountReady = booking.exists() && booking.data().userId === auth.currentUser.uid;
+            } catch { /* A different signed-in account must verify the purchaser inbox. */ }
+          }
+          if (cancelled) return;
+          // Keep the hold secret in this browser so refresh/back can recover status.
+          // Never silently replace an unrelated signed-in account with the purchaser.
           setState({
             kind: "success",
             bookingId: result.data.bookingId,
             accountReady,
+            customToken: result.data.customToken,
+            bookingDetails: result.data.bookingDetails,
           });
           return;
         } catch (error) {
@@ -164,7 +177,7 @@ export default function BookingCompletePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retry]);
 
   return (
     <AppShell>
@@ -176,8 +189,7 @@ export default function BookingCompletePage() {
               Confirming your booking…
             </h1>
             <p className="mt-2 text-slate-600">
-              We are reconciling payment, securing the space, and preparing
-              access.
+              We are checking the server’s payment and booking status. Confirmation does not depend on keeping this page open.
             </p>
           </div>
         ) : state.kind === "success" ? (
@@ -193,15 +205,26 @@ export default function BookingCompletePage() {
               Your reservation is saved. Access is issued only against the
               confirmed booking, and booking management lives in Account.
             </p>
+            {state.bookingDetails && <BookingCatalogDetails booking={state.bookingDetails} />}
             {!state.accountReady && (
               <p className="mx-auto mt-4 max-w-lg rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                The booking is confirmed. Log in with the member account to
-                view or manage it; do not pay again.
+                Your booking is confirmed. To manage it on another visit, sign in using the checkout email. If you have not set a password, choose “Forgot password / claim account” and verify access to that inbox. Do not pay again.
               </p>
             )}
+            {state.customToken && <div className="mt-5">
+              <button disabled={claiming} className="rounded-full border border-slate-300 px-5 py-3 disabled:opacity-50" onClick={async () => {
+                setClaiming(true); setClaimError("");
+                try {
+                  await signInWithCustomToken(auth, state.customToken!);
+                  setState({ kind: "success", bookingId: state.bookingId, accountReady: true, bookingDetails: state.bookingDetails });
+                } catch { setClaimError("Your booking is still confirmed. Use the email recovery link on the sign-in page to access your account."); }
+                finally { setClaiming(false); }
+              }}>{claiming ? "Signing in…" : auth.currentUser ? "Switch to the purchaser’s account" : "Continue to your booking account"}</button>
+              {claimError && <p role="alert" className="mt-2 text-sm text-amber-900">{claimError}</p>}
+            </div>}
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
               <Link
-                href="/account/bookings"
+                href={state.accountReady ? "/account/bookings" : authPath("login", "/account/bookings")}
                 className="inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 py-3 font-medium text-white hover:bg-slate-800"
               >
                 View booking
@@ -220,12 +243,15 @@ export default function BookingCompletePage() {
         ) : (
           <div className="w-full rounded-2xl bg-amber-50 p-6 text-center">
             <h1 className="text-2xl font-semibold text-amber-950">
-              We need to verify this checkout.
+              {state.kind === "recovery" ? "Payment received — booking needs review" : "We need to verify this checkout."}
             </h1>
             <p className="mt-3 leading-7 text-amber-900">
               {state.message}
             </p>
+            {state.kind === "recovery" && <p className="mt-3 text-sm text-amber-900">Recovery reference: {state.recoveryId}. Do not pay again. A refund is not confirmed unless our team confirms it.</p>}
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
+              <button onClick={() => { setState({ kind: "loading" }); setRetry((value) => value + 1); }} className="rounded-full border border-amber-300 px-6 py-3 font-medium">Check status again</button>
+              <Link href={authPath("login", "/account/bookings")} className="rounded-full border border-amber-300 px-6 py-3 font-medium">Sign in / recover account</Link>
               <Link
                 href="/contact"
                 className="inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 py-3 font-medium text-white"

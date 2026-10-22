@@ -100,8 +100,8 @@ export const CONFERENCE_ROOM_MAX_CAPACITY = 10;
 
 // --- Lookup Helpers ---
 
-export function getTierByPriceId(priceId: string): MembershipTier | undefined {
-  return MEMBERSHIP_TIERS.find((t) => t.stripePriceId === priceId);
+export function getTierByPriceId(priceId: string, mode: StripeMode = "live"): MembershipTier | undefined {
+  return MEMBERSHIP_TIERS.find((t) => getCheckoutTier(t.id, mode).stripePriceId === priceId);
 }
 
 export function getTierById(tierId: string): MembershipTier | undefined {
@@ -114,4 +114,32 @@ export function getDeskMembershipTierById(tierId: string): MembershipTier | unde
   return tier && (tier.id === "coworking" || tier.id === "coworking_plus")
     ? tier
     : undefined;
+}
+
+/** Mode-specific catalog IDs verified against HiCoworking Stripe on 2026-10-22.
+ * These are public identifiers, never credentials. Live IDs above stay unchanged.
+ */
+export type StripeMode = "test" | "live";
+export const TEST_STRIPE_PRICE_IDS: Record<MembershipTierId, string> = {
+  virtual: "price_1UTSpMAHu8lEXCs8ckhUivNq",
+  coworking: "price_1UTSpJAHu8lEXCs8kWSFrW6V",
+  coworking_plus: "price_1UTSpFAHu8lEXCs8LLnGZSDp",
+};
+export function resolveStripeMode(secretKey: string, configuredMode = process.env.STRIPE_MODE,
+  projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT): StripeMode {
+  if (configuredMode !== "test" && configuredMode !== "live") throw new Error("Explicit STRIPE_MODE=test or live is required");
+  const keyMode = /^(?:sk|rk)_(test|live)_/.exec(secretKey)?.[1];
+  if (keyMode !== configuredMode) throw new Error("Stripe key mode does not match STRIPE_MODE");
+  if (!projectId) throw new Error("Firebase project identity is required for Stripe mode isolation");
+  if ((configuredMode === "live") !== (projectId === "hi-coworking-plat")) {
+    throw new Error("Stripe mode is not permitted in this Firebase project");
+  }
+  return configuredMode;
+}
+export function getCheckoutTier(tierId: string, mode: StripeMode): MembershipTier {
+  const tier = getTierById(tierId);
+  if (!tier || (mode !== "test" && mode !== "live")) throw new Error("Membership price mapping is missing");
+  const stripePriceId = mode === "live" ? tier.stripePriceId : TEST_STRIPE_PRICE_IDS[tier.id];
+  if (!stripePriceId || !stripePriceId.startsWith("price_")) throw new Error("Membership price mapping is missing");
+  return { ...tier, stripePriceId };
 }

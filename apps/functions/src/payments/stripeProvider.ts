@@ -1,3 +1,5 @@
+import { resolveStripeMode, getCheckoutTier, type StripeMode } from "./stripeConfig";
+import { invoiceSubscriptionId } from "./membership";
 /**
  * Stripe Provider Adapter (PR-10)
  *
@@ -27,10 +29,12 @@ function paymentIntentIdFromSession(session: Stripe.Checkout.Session) {
 
 export class StripeProvider implements PaymentProvider {
   readonly name = "stripe" as const;
+  readonly mode: StripeMode;
   private stripe: Stripe;
   private webhookSecret: string;
 
   constructor(secretKey: string, webhookSecret: string) {
+    this.mode = resolveStripeMode(secretKey);
     this.stripe = new Stripe(secretKey, { apiVersion: "2026-01-28.clover" });
     this.webhookSecret = webhookSecret;
   }
@@ -39,6 +43,12 @@ export class StripeProvider implements PaymentProvider {
     input: CheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const isSubscription = input.mode !== "payment";
+    if (isSubscription) {
+      const tier = getCheckoutTier(input.metadata?.plan || "", this.mode);
+      if (input.metadata?.stripePriceId !== tier.stripePriceId || input.amount !== tier.amountCents || input.currency.toLowerCase() !== tier.currency) {
+        throw new Error("Membership checkout does not match the configured Stripe mode catalog");
+      }
+    }
     const checkoutMetadata = {
       ...(input.metadata || {}),
       uid: input.uid,
@@ -79,7 +89,8 @@ export class StripeProvider implements PaymentProvider {
       };
     }
 
-    const session = await this.stripe.checkout.sessions.create(sessionConfig);
+    const session = await this.stripe.checkout.sessions.create(sessionConfig, input.metadata?.checkoutAttemptId
+      ? { idempotencyKey: `membership-checkout-${input.metadata.checkoutAttemptId}` } : undefined);
     logger.info("Stripe checkout session created", {
       sessionId: session.id,
       uid: input.uid,
@@ -90,6 +101,18 @@ export class StripeProvider implements PaymentProvider {
       url: session.url || "",
       provider: "stripe",
     };
+  }
+
+  async retrieveSubscription(id: string) {
+    const subscription = await this.stripe.subscriptions.retrieve(id);
+    if (subscription.livemode !== (this.mode === "live")) throw new Error("Subscription Stripe mode mismatch");
+    return subscription;
+  }
+
+  async retrieveCheckoutSession(id: string) {
+    const session = await this.stripe.checkout.sessions.retrieve(id);
+    if (session.livemode !== (this.mode === "live")) throw new Error("Checkout Stripe mode mismatch");
+    return session;
   }
 
   private async findPaymentIntent(input: {
@@ -247,10 +270,16 @@ export class StripeProvider implements PaymentProvider {
       throw new Error("Invalid webhook signature");
     }
 
+    if (event.livemode !== (this.mode === "live")) throw new Error("Webhook Stripe mode mismatch");
+
     switch (event.type) {
-      case "checkout.session.completed": {
+      case "checkout.session.completed":
+      case "checkout.session.async_payment_succeeded": {
         const session = event.data.object as Stripe.Checkout.Session;
         const sessionMetadata = session.metadata || {};
+        if (session.payment_status !== "paid" && session.payment_status !== "no_payment_required") {
+          return { eventId: event.id, action: "unknown" };
+        }
         return {
           eventId: event.id,
           action: "payment_succeeded",
@@ -261,11 +290,14 @@ export class StripeProvider implements PaymentProvider {
             uid: sessionMetadata.uid || "",
             plan: sessionMetadata.plan || "",
             checkoutSessionId: session.id,
+            amountTotal: String(session.amount_total ?? ""),
+            currency: session.currency || "",
+            checkoutMode: session.mode || "",
             paymentIntentId: paymentIntentIdFromSession(session),
             subscriptionId:
               typeof session.subscription === "string"
                 ? session.subscription
-                : "",
+                : session.subscription?.id || "",
             customerId:
               typeof session.customer === "string"
                 ? session.customer
@@ -273,6 +305,13 @@ export class StripeProvider implements PaymentProvider {
           },
         };
       }
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        return { eventId: event.id, action: "payment_failed", status: "failed",
+          paymentId: session.metadata?.paymentId || undefined,
+          metadata: { ...session.metadata, checkoutSessionId: session.id } };
+      }
+      case "invoice.paid":
       case "invoice.payment_succeeded": {
         const invoice = event.data.object as Stripe.Invoice;
         return {
@@ -281,8 +320,7 @@ export class StripeProvider implements PaymentProvider {
           status: "paid",
           metadata: {
             subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
+              invoiceSubscriptionId(invoice),
             customerId:
               typeof invoice.customer === "string"
                 ? invoice.customer
@@ -298,11 +336,12 @@ export class StripeProvider implements PaymentProvider {
           status: "failed",
           metadata: {
             subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
+              invoiceSubscriptionId(invoice),
           },
         };
       }
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
         return {
@@ -312,7 +351,7 @@ export class StripeProvider implements PaymentProvider {
           metadata: {
             subscriptionId: subscription.id,
             uid: subscription.metadata?.uid || "",
-            reason: "subscription_cancelled",
+            reason: "subscription_changed",
           },
         };
       }

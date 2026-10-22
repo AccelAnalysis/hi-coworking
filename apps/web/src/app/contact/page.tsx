@@ -9,7 +9,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "@/lib/firebase";
 
 const submitContact = httpsCallable<
-  { name: string; email: string; message: string; source: string },
+  { name: string; email: string; message: string; source: string; marketingOptIn: boolean },
   { success: boolean }
 >(functions, "leads_submitContact");
 
@@ -17,6 +17,7 @@ export default function ContactPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +28,7 @@ export default function ContactPage() {
     setSending(true);
     setError(null);
     try {
-      await submitContact({ name: name.trim(), email: email.trim(), message: message.trim(), source: "contact_page" });
+      await submitContact({ name: name.trim(), email: email.trim(), message: message.trim(), source: "contact_page", marketingOptIn });
       setSent(true);
     } catch (err) {
       console.error("Contact form error:", err);
@@ -95,6 +96,10 @@ export default function ContactPage() {
                     className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 transition-all"
                   />
                 </div>
+                <label className="flex items-start gap-2 text-sm text-slate-600">
+                  <input type="checkbox" checked={marketingOptIn} onChange={(e) => setMarketingOptIn(e.target.checked)} />
+                  <span>Send me optional Hi Coworking news and offers. I can unsubscribe anytime. This is not required to receive a reply.</span>
+                </label>
                 <button
                   type="submit"
                   disabled={sending}

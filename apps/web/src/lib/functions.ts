@@ -646,6 +646,10 @@ export interface AccessGrantSummary {
   startsAt: number;
   endsAt: number;
   grantStatus: "pending" | "active" | "expired" | "revoked";
+  deliveryStatus?: "not_queued" | "queued" | "accepted" | "delivered" | "failed" | "unknown";
+  programmingStatus?: string;
+  activationStatus?: string;
+  staffAttentionRequired?: boolean;
   codeStatus: "programming" | "active" | "failed" | "expired" | "revoked" | null;
   codeLast2: string | null;
   codeId: string | null;

@@ -183,6 +183,7 @@ async function createMember(
     displayName: "Booking Test Member",
     role: "member",
     membershipStatus: "active",
+    expiresAt: Date.now() + 30 * DAY_MS,
     plan,
     createdAt: Date.now(),
   });
@@ -465,6 +466,22 @@ describe("booking journey", () => {
       },
       createdAt: Date.now(),
     });
+    // Deterministic never-issued grant: cancellation must not depend on asynchronous
+    // access-trigger timing, and no door/device is configured for this local-only grant.
+    await db.collection("accessGrants").doc("booking_refunded-booking").set({
+      id: "booking_refunded-booking",
+      bookingId: "refunded-booking",
+      resourceId: "seat-1",
+      userId: "booking-refund-resume",
+      startsAt: window.start - 5 * 60_000,
+      endsAt: window.end + 5 * 60_000,
+      status: "pending",
+      programmingStatus: "pending",
+      providerAttempted: false,
+      leaseExpiresAt: Date.now() + 5 * 60_000,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
     await db.collection("bookings").doc(
       "refunded-booking",
     ).set({
@@ -512,6 +529,10 @@ describe("booking journey", () => {
     ).data();
     expect(booking?.status).toBe("CANCELLED");
     expect(booking?.cancellationState).toBe("COMPLETE");
+    const access = (await db.collection("accessGrants").doc("booking_refunded-booking").get()).data();
+    expect(access?.doorId).toBeUndefined();
+    expect(access?.status).toBe("revoked");
+    expect(access?.revocationStatus).toBe("completed");
   });
 
   it("fails closed when a stale client calls the retired createBooking endpoint", async () => {
