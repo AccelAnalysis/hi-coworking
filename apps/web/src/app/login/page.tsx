@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -17,6 +17,12 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [resetSending, setResetSending] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [nextPath, setNextPath] = useState("/my-hi");
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next && next.startsWith("/") && !next.startsWith("//")) setNextPath(next);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +31,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.push("/my-hi");
+      router.push(nextPath);
     } catch (err: unknown) {
       console.error(err);
       const firebaseError = err as { code?: string };
@@ -70,7 +76,7 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
+                className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-900 placeholder:text-slate-400 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900"
                 placeholder="you@company.com"
               />
             </div>
@@ -110,14 +116,14 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 transition-all"
+                className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2 text-base text-slate-900 transition-all focus:border-transparent focus:outline-none focus:ring-2 focus:ring-slate-900"
               />
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
+              className="flex min-h-12 w-full items-center justify-center rounded-full bg-slate-900 font-semibold text-white shadow-lg shadow-slate-900/20 transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
             </button>
@@ -125,7 +131,7 @@ export default function LoginPage() {
         </div>
         <div className="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-600">
           Don&apos;t have an account?{" "}
-          <Link href="/register" className="text-indigo-600 font-semibold hover:text-indigo-700">
+          <Link href={`/register?next=${encodeURIComponent(nextPath)}`} className="text-indigo-600 font-semibold hover:text-indigo-700">
             Sign up
           </Link>
         </div>

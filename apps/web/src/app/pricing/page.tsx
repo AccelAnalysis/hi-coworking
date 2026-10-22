@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Loader2, Clock, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { AppShell } from "@/components/AppShell";
@@ -9,14 +9,17 @@ import { PublicSiteGate } from "@/components/PublicSiteGate";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
 import {
-  MEMBERSHIP_TIERS,
   GUEST_PRICING,
-  CONFERENCE_ROOM_CONFIG,
+  MEMBERSHIP_TIERS,
+  annualSavingsCents,
+  membershipChargeCents,
+  type BillingInterval,
+  type MembershipTierId,
 } from "@hi/shared";
 
 const createCheckout = httpsCallable<
-  { tierId: string; successUrl: string; cancelUrl: string },
-  { sessionId: string; url: string; paymentId: string }
+  { tierId: string; interval: BillingInterval; successUrl: string; cancelUrl: string },
+  { sessionId: string; url: string; paymentId: string; amountCents?: number; interval?: BillingInterval }
 >(functions, "stripe_createCheckoutSession");
 
 const INTEGRATED_RFXCHANGE_TERMS = [
@@ -36,201 +39,229 @@ function coworkingOnlyFeatures(features: string[]) {
   });
 }
 
+function money(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(cents / 100);
+}
+
 export default function PricingPage() {
   const { user } = useAuth();
-  const [loadingTier, setLoadingTier] = useState<string | null>(null);
+  const [interval, setInterval] = useState<BillingInterval>("month");
+  const [tierId, setTierId] = useState<MembershipTierId>("coworking");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [returnPath, setReturnPath] = useState("/pricing");
 
-  const handleSubscribe = async (tierId: string) => {
-    if (!user) return;
-    setLoadingTier(tierId);
+  useEffect(() => {
+    setReturnPath(`${window.location.pathname}${window.location.search}`);
+  }, []);
+
+  const selected = MEMBERSHIP_TIERS.find((tier) => tier.id === tierId) ?? MEMBERSHIP_TIERS[1];
+  const amountCents = membershipChargeCents(selected.amountCents, interval);
+  const features = coworkingOnlyFeatures(selected.features);
+  const authHref = `/login?next=${encodeURIComponent(returnPath)}`;
+  const registerHref = `/register?next=${encodeURIComponent(returnPath)}`;
+
+  const handleSubscribe = async () => {
+    if (!user) {
+      window.location.assign(authHref);
+      return;
+    }
+    setLoading(true);
     setError(null);
 
     try {
       const result = await createCheckout({
-        tierId,
+        tierId: selected.id,
+        interval,
         successUrl: `${window.location.origin}/my-hi?payment=success`,
         cancelUrl: `${window.location.origin}/pricing?payment=cancelled`,
       });
 
+      if (interval === "year" && (result.data.interval !== "year" || result.data.amountCents !== amountCents)) {
+        setError("Annual checkout is not live on the payment function yet, so this screen did not open Stripe. Monthly checkout still uses the existing Stripe prices. Deploy the main Cloud Functions bundle (stripe_createCheckoutSession) before accepting annual payments.");
+        setLoading(false);
+        return;
+      }
+
       if (result.data.url) {
         window.location.href = result.data.url;
+        return;
       }
+      setError("Stripe did not return a checkout link. No charge was made.");
     } catch (err: unknown) {
       console.error("Checkout error:", err);
-      setError("Failed to start checkout. Please try again.");
+      setError("Stripe checkout did not start. No charge was made. Confirm the Stripe secret is set on the Cloud Function and try again.");
     } finally {
-      setLoadingTier(null);
+      setLoading(false);
     }
   };
 
   return (
     <PublicSiteGate>
       <AppShell>
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-slate-900 mb-4">
-              Simple pricing for how you use the space
+        <div className="mx-auto w-full max-w-6xl overflow-x-hidden px-4 pb-28 pt-6 sm:px-6 lg:pb-10 lg:pt-10">
+          <div className="mb-6 max-w-2xl">
+            <p className="text-sm font-medium text-slate-500">Membership</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+              Choose a plan and pay
             </h1>
-            <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-              Book by the hour, become a coworking member for included time and lower rates, or choose Virtual Office when you do not need regular desk access.
+            <p className="mt-2 text-base leading-7 text-slate-600">
+              Monthly and annual prices stay on this screen with what the plan includes. Payment stays on Stripe.
             </p>
           </div>
 
-          {error && (
-            <div className="max-w-md mx-auto mb-8 p-4 rounded-xl bg-red-50 text-red-700 text-sm text-center border border-red-200">
+          {error ? (
+            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert">
               {error}
             </div>
-          )}
+          ) : null}
 
-          <div className="mb-10">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Clock className="h-3.5 w-3.5" /> Guest / Walk-In
-            </h2>
-            <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                <div>
-                  <h3 className="text-2xl font-bold text-slate-900">
-                    ${(GUEST_PRICING.hourlyRateCents / 100).toFixed(2)}
-                    <span className="text-base font-normal text-slate-500">/hr per seat</span>
-                  </h3>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Daily cap: ${(GUEST_PRICING.dailyCapCents / 100).toFixed(0)}/day per seat · Book up to {GUEST_PRICING.bookingWindowDays} days ahead
-                  </p>
-                </div>
-                <Link
-                  href="/book"
-                  className="inline-flex items-center justify-center px-6 py-3 rounded-full font-medium bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-sm transition-all"
-                >
-                  Book Hourly
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-10">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Users className="h-3.5 w-3.5" /> Membership Plans
-            </h2>
-            <div className="grid md:grid-cols-3 gap-6">
-              {MEMBERSHIP_TIERS.map((tier) => {
-                const isPopular = tier.id === "coworking";
-                const isVirtualOffice = tier.id === "virtual";
-                const visibleFeatures = coworkingOnlyFeatures(tier.features);
-                return (
-                  <div
-                    key={tier.id}
-                    className={`bg-white rounded-2xl p-6 md:p-8 shadow-sm flex flex-col relative ${
-                      isPopular
-                        ? "ring-2 ring-emerald-500/20 border border-emerald-200"
-                        : "ring-1 ring-slate-200"
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+              <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1">
+                {(["month", "year"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setInterval(value)}
+                    className={`min-h-11 rounded-xl px-3 text-sm font-semibold ${
+                      interval === value ? "bg-white text-slate-950 shadow-sm" : "text-slate-600"
                     }`}
                   >
-                    {isPopular && (
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-semibold text-white bg-emerald-600 px-3 py-1 rounded-full shadow-lg shadow-emerald-600/20 uppercase tracking-wider">
-                        Best for regular use
-                      </span>
-                    )}
-
-                    <h3 className="text-xl font-bold text-slate-900">{tier.name}</h3>
-                    <p className="mt-3">
-                      <span className="text-4xl font-extrabold text-slate-900">
-                        ${(tier.amountCents / 100).toFixed(0)}
-                      </span>
-                      <span className="text-lg text-slate-500 font-normal">/mo</span>
-                    </p>
-
-                    <div className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                      {isVirtualOffice ? (
-                        <>
-                          <p className="text-sm font-semibold text-emerald-900">No desk hours included</p>
-                          <p className="text-xs text-emerald-700 mt-0.5">Coworking desk use: $17.50/hr</p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-sm font-semibold text-emerald-900">
-                            {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
-                          </p>
-                          <p className="text-xs text-emerald-700 mt-0.5">
-                            Additional hours: {tier.id === "coworking" ? "20%" : "30%"} off the regular hourly price
-                          </p>
-                        </>
-                      )}
-                    </div>
-
-                    <ul className="mt-5 space-y-3 flex-1">
-                      {visibleFeatures.map((feature) => (
-                        <li key={feature} className="flex items-center gap-3 text-slate-600 text-sm">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-                            <Check size={12} strokeWidth={3} />
-                          </div>
-                          {feature}
-                        </li>
-                      ))}
-                    </ul>
-
-                    {user ? (
-                      <button
-                        onClick={() => handleSubscribe(tier.id)}
-                        disabled={loadingTier !== null}
-                        className={`mt-8 w-full py-3 rounded-full font-medium transition-all duration-300 shadow-lg disabled:opacity-60 disabled:cursor-not-allowed ${
-                          isPopular
-                            ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
-                            : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
-                        }`}
-                      >
-                        {loadingTier === tier.id ? (
-                          <span className="inline-flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" /> Redirecting...
-                          </span>
-                        ) : (
-                          isVirtualOffice ? "Choose Virtual Office" : "Become a Member"
-                        )}
-                      </button>
-                    ) : (
-                      <Link
-                        href="/register"
-                        className={`mt-8 block text-center py-3 rounded-full font-medium transition-all duration-300 shadow-lg ${
-                          isPopular
-                            ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
-                            : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
-                        }`}
-                      >
-                        {isVirtualOffice ? "Choose Virtual Office" : "Become a Member"}
-                      </Link>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mb-10">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Users className="h-3.5 w-3.5" /> Conference Room
-            </h2>
-            <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Conference Room</h3>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Private use for meetings, presentations, interviews, and small team sessions · Up to {CONFERENCE_ROOM_CONFIG.maxCapacity} people
-                  </p>
-                </div>
-                <div className="text-right">
-                  <span className="text-3xl font-bold text-slate-900">
-                    ${(CONFERENCE_ROOM_CONFIG.hourlyRateCents / 100).toFixed(0)}
-                  </span>
-                  <span className="text-base text-slate-500">/hr</span>
-                </div>
+                    {value === "month" ? "Monthly" : "Annual"}
+                  </button>
+                ))}
               </div>
-            </div>
+
+              <div className="mt-4 grid gap-3">
+                {MEMBERSHIP_TIERS.map((tier) => {
+                  const active = tier.id === selected.id;
+                  const monthly = membershipChargeCents(tier.amountCents, "month");
+                  const annual = membershipChargeCents(tier.amountCents, "year");
+                  return (
+                    <button
+                      key={tier.id}
+                      type="button"
+                      onClick={() => setTierId(tier.id)}
+                      className={`rounded-2xl border p-4 text-left ${
+                        active ? "border-slate-950 bg-slate-950 text-white" : "border-slate-200 bg-white text-slate-950"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-base font-semibold">{tier.name}</p>
+                          <p className={`mt-1 text-sm ${active ? "text-slate-300" : "text-slate-500"}`}>
+                            {tier.includedHoursPerMonth > 0
+                              ? `${tier.includedHoursPerMonth} desk hours included each month`
+                              : "Desk time at the public hourly rate"}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-lg font-semibold">{money(interval === "year" ? annual : monthly)}</p>
+                          <p className={`text-xs ${active ? "text-slate-300" : "text-slate-500"}`}>
+                            {interval === "year" ? "/year" : "/month"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs ${active ? "text-slate-300" : "text-slate-500"}`}>
+                        <span>{money(monthly)}/mo</span>
+                        <span>{money(annual)}/yr</span>
+                        <span>Save {money(annualSavingsCents(tier.amountCents))} annually</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <ul className="mt-5 space-y-2">
+                {features.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2 text-sm text-slate-700">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-5 text-sm text-slate-500">
+                Need a desk without a membership? Walk-in seats are {money(GUEST_PRICING.hourlyRateCents)}/hour.{" "}
+                <Link href="/book" className="font-medium text-slate-900 underline underline-offset-4">Book hourly</Link>
+              </p>
+            </section>
+
+            <aside className="min-w-0 rounded-3xl border border-slate-200 bg-slate-950 p-5 text-white lg:sticky lg:top-24">
+              <p className="text-sm text-slate-300">You are buying</p>
+              <h2 className="mt-2 text-2xl font-semibold">{selected.name}</h2>
+              <p className="mt-1 text-sm text-slate-300">
+                {interval === "year" ? "Billed once a year" : "Billed every month"} · Cancel in Stripe
+              </p>
+              <p className="mt-6 text-4xl font-semibold tracking-tight">{money(amountCents)}</p>
+              <p className="text-sm text-slate-300">{interval === "year" ? "per year" : "per month"}</p>
+              <ul className="mt-5 space-y-2 text-sm text-slate-200">
+                {features.slice(0, 4).map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
+              {user ? (
+                <button
+                  type="button"
+                  onClick={handleSubscribe}
+                  disabled={loading}
+                  className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-slate-950 disabled:opacity-60"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {loading ? "Opening Stripe…" : `Pay ${money(amountCents)} with Stripe`}
+                </button>
+              ) : (
+                <div className="mt-6 grid gap-2">
+                  <Link
+                    href={authHref}
+                    className="inline-flex min-h-12 items-center justify-center rounded-full bg-white px-4 text-sm font-semibold text-slate-950"
+                  >
+                    Sign in to pay
+                  </Link>
+                  <Link
+                    href={registerHref}
+                    className="inline-flex min-h-12 items-center justify-center rounded-full border border-white/20 px-4 text-sm font-semibold text-white"
+                  >
+                    Create an account
+                  </Link>
+                </div>
+              )}
+              <p className="mt-3 text-xs leading-5 text-slate-400">
+                Stripe hosts the card form. This page does not store card numbers.
+              </p>
+            </aside>
           </div>
 
-
-          <p className="text-center text-sm text-slate-500 mt-8">
-            Physical coworking bookings include Wi-Fi, coffee, and shared amenities. Memberships renew monthly. Cancel anytime.
-          </p>
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white px-4 py-3 lg:hidden">
+            <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">{selected.name}</p>
+                <p className="text-sm text-slate-600">{money(amountCents)} {interval === "year" ? "/year" : "/month"}</p>
+              </div>
+              {user ? (
+                <button
+                  type="button"
+                  onClick={handleSubscribe}
+                  disabled={loading}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {loading ? "Opening…" : "Pay with Stripe"}
+                </button>
+              ) : (
+                <Link
+                  href={authHref}
+                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-slate-950 px-4 text-sm font-semibold text-white"
+                >
+                  Sign in to pay
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       </AppShell>
     </PublicSiteGate>

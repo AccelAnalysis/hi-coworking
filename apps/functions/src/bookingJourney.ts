@@ -1,6 +1,7 @@
 export {
   booking_getAvailability,
   booking_createQuote,
+  booking_getDayOccupancy,
 } from "./bookingFlexPublic";
 
 export {

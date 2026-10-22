@@ -140,6 +140,7 @@ export const createBooking = onCall(async () => {
 export {
   booking_getAvailability,
   booking_createQuote,
+  booking_getDayOccupancy,
   booking_beginCheckout,
   booking_finalizeCheckout,
   booking_getCancellationPreview,
