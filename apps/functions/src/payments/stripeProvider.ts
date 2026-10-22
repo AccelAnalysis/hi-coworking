@@ -1,3 +1,4 @@
+import { resolveStripeMode, getCheckoutTier, type StripeMode } from "./stripeConfig";
 import { invoiceSubscriptionId } from "./membership";
 /**
  * Stripe Provider Adapter (PR-10)
@@ -28,10 +29,12 @@ function paymentIntentIdFromSession(session: Stripe.Checkout.Session) {
 
 export class StripeProvider implements PaymentProvider {
   readonly name = "stripe" as const;
+  readonly mode: StripeMode;
   private stripe: Stripe;
   private webhookSecret: string;
 
   constructor(secretKey: string, webhookSecret: string) {
+    this.mode = resolveStripeMode(secretKey);
     this.stripe = new Stripe(secretKey, { apiVersion: "2026-01-28.clover" });
     this.webhookSecret = webhookSecret;
   }
@@ -40,6 +43,12 @@ export class StripeProvider implements PaymentProvider {
     input: CheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const isSubscription = input.mode !== "payment";
+    if (isSubscription) {
+      const tier = getCheckoutTier(input.metadata?.plan || "", this.mode);
+      if (input.metadata?.stripePriceId !== tier.stripePriceId || input.amount !== tier.amountCents || input.currency.toLowerCase() !== tier.currency) {
+        throw new Error("Membership checkout does not match the configured Stripe mode catalog");
+      }
+    }
     const checkoutMetadata = {
       ...(input.metadata || {}),
       uid: input.uid,
@@ -95,11 +104,15 @@ export class StripeProvider implements PaymentProvider {
   }
 
   async retrieveSubscription(id: string) {
-    return this.stripe.subscriptions.retrieve(id);
+    const subscription = await this.stripe.subscriptions.retrieve(id);
+    if (subscription.livemode !== (this.mode === "live")) throw new Error("Subscription Stripe mode mismatch");
+    return subscription;
   }
 
   async retrieveCheckoutSession(id: string) {
-    return this.stripe.checkout.sessions.retrieve(id);
+    const session = await this.stripe.checkout.sessions.retrieve(id);
+    if (session.livemode !== (this.mode === "live")) throw new Error("Checkout Stripe mode mismatch");
+    return session;
   }
 
   private async findPaymentIntent(input: {
@@ -256,6 +269,8 @@ export class StripeProvider implements PaymentProvider {
       logger.error("Stripe webhook signature verification failed", { error });
       throw new Error("Invalid webhook signature");
     }
+
+    if (event.livemode !== (this.mode === "live")) throw new Error("Webhook Stripe mode mismatch");
 
     switch (event.type) {
       case "checkout.session.completed":

@@ -435,7 +435,7 @@ export async function syncMembership(result: WebhookResult, provider: StripeProv
         }
       }
       tx.set(mappingRef, { uid, subscriptionId, syncToken: null, syncLeaseExpiresAt: 0, updatedAt: Date.now() }, { merge: true });
-      tx.update(userRef, { ...subscriptionMembership(subscription), updatedAt: Date.now() });
+      tx.update(userRef, { ...subscriptionMembership(subscription, provider.mode), updatedAt: Date.now() });
     });
   } catch (error) {
     await getDb().runTransaction(async (tx) => {

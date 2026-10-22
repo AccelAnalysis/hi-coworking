@@ -8,7 +8,8 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
  * Actual HTTP -> signed Stripe parser -> ledger -> Auth/Firestore finalization.
  * No production handler or policy is copied/mocked/imported into this process.
  *
- * Before starting demo emulators, create an ephemeral apps/functions/.secret.local:
+ * Before starting demo emulators, set STRIPE_MODE=test in ephemeral
+ * apps/functions/.env.demo-hi-coworking and create apps/functions/.secret.local:
  * STRIPE_SECRET_KEY=sk_test_onboarding_emulator_only
  * STRIPE_WEBHOOK_SECRET=whsec_onboarding_emulator_only
  * INTUIT_CLIENT_ID=

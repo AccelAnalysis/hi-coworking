@@ -1,7 +1,7 @@
 import * as admin from "firebase-admin";
 import { HttpsError } from "firebase-functions/v2/https";
 import { StripeProvider } from "./stripeProvider";
-import { getTierById } from "./stripeConfig";
+import { getCheckoutTier, getTierById } from "./stripeConfig";
 import { hasActiveMembership } from "./membership";
 
 /** One durable checkout attempt per user. Retries reuse both ledger ID and Stripe key. */
@@ -9,13 +9,16 @@ export async function createMembershipCheckout(
   provider: StripeProvider,
   input: { uid: string; email: string; tierId: string; successUrl: string; cancelUrl: string },
 ) {
-  const tier = getTierById(input.tierId);
-  if (!tier) throw new HttpsError("not-found", "Unknown membership tier.");
+  if (!getTierById(input.tierId)) throw new HttpsError("not-found", "Unknown membership tier.");
+  const tier = getCheckoutTier(input.tierId, provider.mode);
   const db = admin.firestore();
   const userRef = db.collection("users").doc(input.uid);
   const attemptRef = db.collection("membershipCheckouts").doc(input.uid);
   // Expiration must be confirmed at Stripe, not guessed from a local clock.
   const previous = (await attemptRef.get()).data();
+  if (previous && (previous.stripeMode || "live") !== provider.mode) {
+    throw new HttpsError("failed-precondition", "Existing checkout belongs to a different Stripe mode; reconcile it before proceeding.");
+  }
   if (previous?.sessionId) {
     const session = await provider.retrieveCheckoutSession(previous.sessionId);
     if (session.status === "open") {
@@ -56,14 +59,14 @@ export async function createMembershipCheckout(
     }
     if (attemptSnap.exists) {
       const current = attemptSnap.data()!;
-      if (current.tierId !== input.tierId) throw new HttpsError("failed-precondition", "Another membership checkout is already in progress.");
+      if ((current.stripeMode || "live") !== provider.mode || current.tierId !== input.tierId) throw new HttpsError("failed-precondition", "Another membership checkout is already in progress.");
       return current;
     }
     const createdAt = Date.now();
-    const next = { ...input, paymentId: paymentRef.id, createdAt };
+    const next = { ...input, stripeMode: provider.mode, paymentId: paymentRef.id, createdAt };
     tx.set(attemptRef, next);
     tx.set(paymentRef, {
-      id: paymentRef.id, uid: input.uid, provider: "stripe", amount: tier.amountCents,
+      id: paymentRef.id, uid: input.uid, provider: "stripe", stripeMode: provider.mode, amount: tier.amountCents,
       currency: tier.currency, purpose: "membership", purposeRefId: tier.id,
       status: "pending", createdAt,
     });

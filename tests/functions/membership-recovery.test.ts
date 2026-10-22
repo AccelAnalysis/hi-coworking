@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Stripe from "stripe";
 
 const memory = vi.hoisted(() => ({ docs: new Map<string, any>(), sequence: 0, queue: Promise.resolve(), finalize: vi.fn() }));
@@ -45,7 +45,9 @@ const subscription = (overrides: any = {}) => ({
   ...overrides,
 }) as Stripe.Subscription;
 const input = { uid: "user1", email: "a@example.com", tierId: "coworking", successUrl: "https://example.com/success", cancelUrl: "https://example.com/cancel" };
-beforeEach(() => { memory.docs.clear(); memory.sequence = 0; memory.queue = Promise.resolve(); memory.finalize.mockReset(); memory.finalize.mockResolvedValue({ success: true }); });
+beforeEach(() => { vi.stubEnv("STRIPE_MODE", "test"); vi.stubEnv("GCLOUD_PROJECT", "demo-hi-coworking"); memory.docs.clear(); memory.sequence = 0; memory.queue = Promise.resolve(); memory.finalize.mockReset(); memory.finalize.mockResolvedValue({ success: true }); });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("membership authority", () => {
   it("fails closed for expired, missing, malformed, and inactive entitlement dates", () => {
@@ -72,7 +74,7 @@ describe("membership authority", () => {
 describe("Stripe webhook parsing", () => {
   async function parse(type: string, object: any) {
     const provider = new StripeProvider("sk_test_fake", "whsec_test");
-    const payload = JSON.stringify({ id: "evt_1", type, data: { object } });
+    const payload = JSON.stringify({ id: "evt_1", livemode: false, type, data: { object } });
     const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test" });
     return provider.handleWebhook(Buffer.from(payload), { "stripe-signature": signature });
   }
@@ -88,11 +90,28 @@ describe("Stripe webhook parsing", () => {
 });
 
 describe("checkout duplicate protection", () => {
-  function provider() { return {
+  function provider() { return { mode: "live",
     createCheckoutSession: vi.fn(async () => ({ sessionId: "cs_1", url: "https://checkout.stripe.com/test" })),
     retrieveCheckoutSession: vi.fn(async () => ({ id: "cs_1", status: "open", url: "https://checkout.stripe.com/test" })),
     retrieveSubscription: vi.fn(async () => subscription()),
   }; }
+  it("uses the test catalog and persists mode before creating checkout", async () => {
+    memory.docs.set("users/user1", { membershipStatus: "none" });
+    const p = { ...provider(), mode: "test" };
+    await createMembershipCheckout(p as any, input);
+    expect(p.createCheckoutSession.mock.calls[0][0].metadata.stripePriceId).toBe("price_1UTSpJAHu8lEXCs8kWSFrW6V");
+    expect(memory.docs.get("membershipCheckouts/user1").stripeMode).toBe("test");
+    expect([...memory.docs.values()].find((value) => value.purpose === "membership").stripeMode).toBe("test");
+  });
+  it("rejects an existing opposite-mode or legacy live attempt before provider calls", async () => {
+    for (const stripeMode of [undefined, "live"]) {
+      memory.docs.set("membershipCheckouts/user1", { tierId: "coworking", sessionId: "cs_live", ...(stripeMode && { stripeMode }) });
+      const p = { ...provider(), mode: "test" };
+      await expect(createMembershipCheckout(p as any, input)).rejects.toThrow(/different Stripe mode/);
+      expect(p.retrieveCheckoutSession).not.toHaveBeenCalled();
+      expect(p.createCheckoutSession).not.toHaveBeenCalled();
+    }
+  });
   it("concurrent attempts share a ledger and Stripe idempotency key", async () => {
     memory.docs.set("users/user1", { membershipStatus: "none" });
     const p = provider();
@@ -197,7 +216,7 @@ describe("signed Stripe webhook to durable booking finalization", () => {
   }
   async function deliver(eventId: string, overrides: any = {}, type = "checkout.session.completed") {
     const object = { id: "cs_1", payment_status: "paid", mode: "payment", amount_total: 1750, currency: "usd", payment_intent: "pi_1", metadata: { uid: "user1", paymentId: "pay1", purpose: "booking", purposeRefId: "hold1", holdId: "hold1" }, ...overrides };
-    const payload = JSON.stringify({ id: eventId, type, data: { object } });
+    const payload = JSON.stringify({ id: eventId, livemode: false, type, data: { object } });
     const signature = Stripe.webhooks.generateTestHeaderString({ payload, secret: "whsec_test" });
     return handleStripeWebhook(Buffer.from(payload), { "stripe-signature": signature }, "sk_test_fake", "whsec_test");
   }

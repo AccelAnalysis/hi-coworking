@@ -128,6 +128,8 @@ jobs:
         run: |
           set -euo pipefail
           # No provider credentials: never read live Secret Manager for demo tests.
+          test ! -e apps/functions/.env.demo-hi-coworking
+          printf 'STRIPE_MODE=test\n' > apps/functions/.env.demo-hi-coworking
           test ! -e apps/functions/.secret.local
           cat > apps/functions/.secret.local <<'EOF'
           STRIPE_SECRET_KEY=sk_test_onboarding_emulator_only

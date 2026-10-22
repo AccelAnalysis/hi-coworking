@@ -107,3 +107,37 @@ messages through the authorized marketing operations process. Backward-compatibl
 enrollment checks prevent new duplicates but do not silently cancel or rewrite
 historical queues. Unknown legacy timestamps conservatively block re-enrollment
 until reviewed; a new inactivity episode also retains a 90-day cooldown.
+
+## Explicit Stripe mode and isolated test catalog (PR100 follow-up)
+
+The runtime now requires non-secret `STRIPE_MODE=live` or `STRIPE_MODE=test`.
+It must agree with the bound Stripe key's mode and the Firebase project identity.
+Live mode is allowed only in the established live project `hi-coworking-plat`;
+test mode is rejected there. Use a separately approved staging project (or the
+`demo-hi-coworking` emulator project) for test mode. Missing/invalid mode, unknown
+key mode, missing project identity and cross-mode combinations fail closed.
+This code/configuration preparation is **not deployment or secret-binding approval**.
+
+`apps/functions/src/payments/stripeConfig.ts` selects the server-side catalog;
+clients cannot select a mode or submit their own membership Price ID. Live IDs
+remain unchanged. The following active USD/month licensed prices (interval count
+1) were verified in HiCoworking account `acct_1U3gxLAHu8lEXCs8` on 2026-10-22:
+
+| Tier | Monthly amount | Live Price | Isolated test Price |
+|---|---:|---|---|
+| virtual | $49 | `price_1U9J0xAHu8lEXCs8UHv7AAiz` | `price_1UTSpMAHu8lEXCs8ckhUivNq` |
+| coworking | $129 | `price_1U9J1CAHu8lEXCs8X1o0O5hG` | `price_1UTSpJAHu8lEXCs8kWSFrW6V` |
+| coworking_plus | $199 | `price_1U9J1KAHu8lEXCs8xZETzk7F` | `price_1UTSpFAHu8lEXCs8LLnGZSDp` |
+
+Never replace live IDs with test IDs or share a production Firestore database for
+test payment fulfillment. Existing checkout attempts are mode-bound; legacy
+attempts are treated as live and cannot be reused in test mode. Webhook event,
+retrieved Checkout Session and Subscription `livemode` must match the configured
+provider. Entitlement lookup recognizes only the selected mode's Price IDs.
+
+Before approved deployment, set the non-secret mode in that exact project's
+configuration and verify the corresponding secret binding privately. The demo CI
+writes an ephemeral `.env.demo-hi-coworking` with `STRIPE_MODE=test`; it is not a
+production configuration file and must not be committed. Annual billing remains
+disabled. Actual Stripe-to-staging delivery and real provider acceptance are still
+release gates even when emulator and mocked tests pass.
