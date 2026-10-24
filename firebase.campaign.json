@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "firebase/campaign-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "rm -rf firebase/campaign-functions/lib",
+      "npm run build --workspace functions -- --project ../../firebase/campaign-functions/tsconfig.json"
+    ]
+  }
+}

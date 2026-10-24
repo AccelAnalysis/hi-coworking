@@ -10,8 +10,7 @@
 // eventMarketing.ts (or main.ts / index.ts) here.
 //
 // events_processCampaignJobs is left out on purpose. It binds the Twilio
-// secrets and only sends jobs created by events_enqueueCampaignJobs, which
-// is not deployed. Deploy both from the main source at the Twilio launch.
+// secrets and deploys from firebase/campaign-functions instead.
 import "./bootstrap";
 
 export { nurture_process } from "../../../apps/functions/src/nurture";

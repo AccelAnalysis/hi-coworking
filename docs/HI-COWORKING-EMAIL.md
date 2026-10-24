@@ -70,8 +70,8 @@ same deploy from `main` after you type `deploy mail functions`. It never runs on
 push or merge.
 
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
-secrets, and it only sends jobs created by `events_enqueueCampaignJobs`, which
-is not deployed either. Deploy both from the main source when Twilio launches.
+secrets, so it deploys from its own bundle, `firebase/campaign-functions`
+(see `HI-COWORKING-CAMPAIGN-SMS.md`).
 
 ### Stale event notifications
 

@@ -22,6 +22,7 @@ firebase/booth-kiosk-functions/.secret.local
 firebase/expo-lead-functions/lib/
 firebase/mail-functions/lib/
 firebase/core-functions/lib/
+firebase/campaign-functions/lib/
 
 # Production
 *.log

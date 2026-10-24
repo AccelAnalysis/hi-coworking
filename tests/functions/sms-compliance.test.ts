@@ -107,7 +107,7 @@ describe("SMS consent gating at send time", () => {
   });
 
   it("routes every SMS job through the consent gate and the opt-out recorder", () => {
-    const source = readFileSync("apps/functions/src/eventMarketing.ts", "utf8");
+    const source = readFileSync("apps/functions/src/campaignJobs.ts", "utf8");
     expect(source).toContain("smsEligibleRecipients(recipients)");
     expect(source).toContain("recordSmsOptOuts(db, smsRecipients, result.optedOut)");
     expect(source).not.toContain("recipients.filter((r) => r.phone)");
