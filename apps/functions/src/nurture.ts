@@ -2,16 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
-import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
-import { SendGridProvider } from "./providers/emailProvider";
+import { ResendEmailProvider } from "./providers/emailProvider";
+import { resendApiKey } from "./providers/emailSecret";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
 const db = admin.firestore();
-const sendgridApiKey = defineSecret("SENDGRID_API_KEY");
-const FROM_EMAIL = "hello@hi-coworking.com";
 const SITE_ORIGIN = "https://hi-coworking.com";
 const CAMPAIGNS = "nurtureCampaigns";
 const ENROLLMENTS = "nurtureEnrollments";
@@ -339,7 +337,7 @@ async function advanceEnrollment(ref: FirebaseFirestore.DocumentReference, enrol
   }, { merge: true });
 }
 
-async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provider: SendGridProvider) {
+async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provider: ResendEmailProvider) {
   const snap = await ref.get();
   if (!snap.exists) return;
   const enrollment = snap.data() as Enrollment;
@@ -388,11 +386,11 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
     const message = renderMessage(enrollment, step);
     const result = await provider.send({
       to: enrollment.email,
-      from: FROM_EMAIL,
       subject: message.subject,
       html: message.html,
       text: message.text,
       categories: ["hi-coworking-nurture", campaign.stage.toLowerCase()],
+      idempotencyKey: `nurture/${deliveryId}`,
     });
     const sentAt = Date.now();
     await deliveryRef.set({ status: "SENT", sentAt, providerMessageId: result.messageId, updatedAt: sentAt }, { merge: true });
@@ -413,15 +411,15 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
 }
 
 export const nurture_process = onSchedule(
-  { schedule: "every 15 minutes", secrets: [sendgridApiKey] },
+  { schedule: "every 15 minutes", secrets: [resendApiKey] },
   async () => {
     await ensureDefaultCampaigns();
-    const apiKey = sendgridApiKey.value();
+    const apiKey = resendApiKey.value();
     if (!apiKey) {
-      logger.error("Nurture processor skipped because SENDGRID_API_KEY is not configured");
+      logger.error("Nurture processor skipped because HI_COWORKING_RESEND_API_KEY is not configured");
       return;
     }
-    const provider = new SendGridProvider(apiKey);
+    const provider = new ResendEmailProvider(apiKey);
     const snap = await db.collection(ENROLLMENTS).where("nextDueAt", "<=", Date.now()).limit(100).get();
     for (const doc of snap.docs) await processEnrollment(doc.ref, provider);
   },

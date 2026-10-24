@@ -41,13 +41,13 @@ const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const logger = __importStar(require("firebase-functions/logger"));
 const emailProvider_1 = require("./providers/emailProvider");
+const emailSecret_1 = require("./providers/emailSecret");
 const smsProvider_1 = require("./providers/smsProvider");
 const pushProvider_1 = require("./providers/pushProvider");
 const socialProvider_1 = require("./providers/socialProvider");
 const recipientResolver_1 = require("./providers/recipientResolver");
 const campaignRenderer_1 = require("./providers/campaignRenderer");
 // Secrets for campaign delivery providers
-const sendgridApiKey = (0, params_1.defineSecret)("SENDGRID_API_KEY");
 const twilioAccountSid = (0, params_1.defineSecret)("TWILIO_ACCOUNT_SID");
 const twilioAuthToken = (0, params_1.defineSecret)("TWILIO_AUTH_TOKEN");
 const twilioFromNumber = (0, params_1.defineSecret)("TWILIO_FROM_NUMBER");
@@ -56,7 +56,6 @@ const linkedinClientId = (0, params_1.defineSecret)("LINKEDIN_CLIENT_ID");
 const linkedinClientSecret = (0, params_1.defineSecret)("LINKEDIN_CLIENT_SECRET");
 const xClientId = (0, params_1.defineSecret)("X_CLIENT_ID");
 const xClientSecret = (0, params_1.defineSecret)("X_CLIENT_SECRET");
-const FROM_EMAIL = "events@hi-coworking.com";
 const MAX_RETRIES = 3;
 function getDb() {
     return admin.firestore();
@@ -186,7 +185,7 @@ exports.events_processCampaignJobs = (0, scheduler_1.onSchedule)({
     schedule: "*/5 * * * *",
     timeZone: "America/New_York",
     memory: "512MiB",
-    secrets: [sendgridApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber],
+    secrets: [emailSecret_1.resendApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber],
 }, async () => {
     const db = getDb();
     const now = Date.now();
@@ -198,8 +197,8 @@ exports.events_processCampaignJobs = (0, scheduler_1.onSchedule)({
         .limit(25)
         .get();
     // Initialize providers (only if secrets are available)
-    const emailProvider = sendgridApiKey.value()
-        ? new emailProvider_1.SendGridProvider(sendgridApiKey.value())
+    const emailProvider = emailSecret_1.resendApiKey.value()
+        ? new emailProvider_1.ResendEmailProvider(emailSecret_1.resendApiKey.value())
         : null;
     const smsProvider = twilioAccountSid.value() && twilioAuthToken.value() && twilioFromNumber.value()
         ? new smsProvider_1.TwilioSmsProvider(twilioAccountSid.value(), twilioAuthToken.value(), twilioFromNumber.value())
@@ -220,13 +219,12 @@ exports.events_processCampaignJobs = (0, scheduler_1.onSchedule)({
             const recipients = await (0, recipientResolver_1.resolveRecipients)(campaign.id, claimed.type, campaign.eventId, campaign.audienceRules);
             let totalSent = 0;
             let totalFailed = 0;
-            // --- Email delivery via SendGrid ---
+            // --- Email delivery via Resend ---
             if (campaign.channels.includes("email") && emailProvider) {
                 const emailRecipients = recipients.filter((r) => r.email);
                 if (emailRecipients.length > 0) {
                     const messages = emailRecipients.map((r) => ({
                         to: r.email,
-                        from: FROM_EMAIL,
                         subject: (0, campaignRenderer_1.renderEmailSubject)(claimed.type, { ...ctx, recipientName: r.displayName }),
                         html: (0, campaignRenderer_1.renderEmailHtml)(claimed.type, { ...ctx, recipientName: r.displayName }),
                     }));

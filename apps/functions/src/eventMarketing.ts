@@ -4,7 +4,8 @@ import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
-import { SendGridProvider } from "./providers/emailProvider";
+import { ResendEmailProvider } from "./providers/emailProvider";
+import { resendApiKey } from "./providers/emailSecret";
 import { TwilioSmsProvider } from "./providers/smsProvider";
 import { FcmPushProvider } from "./providers/pushProvider";
 import { getSocialProvider } from "./providers/socialProvider";
@@ -19,7 +20,6 @@ import {
 } from "./providers/campaignRenderer";
 
 // Secrets for campaign delivery providers
-const sendgridApiKey = defineSecret("SENDGRID_API_KEY");
 const twilioAccountSid = defineSecret("TWILIO_ACCOUNT_SID");
 const twilioAuthToken = defineSecret("TWILIO_AUTH_TOKEN");
 const twilioFromNumber = defineSecret("TWILIO_FROM_NUMBER");
@@ -93,7 +93,6 @@ interface SocialPostDoc {
   error?: string;
 }
 
-const FROM_EMAIL = "events@hi-coworking.com";
 const MAX_RETRIES = 3;
 
 function getDb() {
@@ -246,7 +245,7 @@ export const events_processCampaignJobs = onSchedule(
     schedule: "*/5 * * * *",
     timeZone: "America/New_York",
     memory: "512MiB",
-    secrets: [sendgridApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber],
+    secrets: [resendApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber],
   },
   async () => {
     const db = getDb();
@@ -260,8 +259,8 @@ export const events_processCampaignJobs = onSchedule(
       .get();
 
     // Initialize providers (only if secrets are available)
-    const emailProvider = sendgridApiKey.value()
-      ? new SendGridProvider(sendgridApiKey.value())
+    const emailProvider = resendApiKey.value()
+      ? new ResendEmailProvider(resendApiKey.value())
       : null;
     const smsProvider =
       twilioAccountSid.value() && twilioAuthToken.value() && twilioFromNumber.value()
@@ -293,13 +292,12 @@ export const events_processCampaignJobs = onSchedule(
         let totalSent = 0;
         let totalFailed = 0;
 
-        // --- Email delivery via SendGrid ---
+        // --- Email delivery via Resend ---
         if (campaign.channels.includes("email") && emailProvider) {
           const emailRecipients = recipients.filter((r) => r.email);
           if (emailRecipients.length > 0) {
             const messages = emailRecipients.map((r) => ({
               to: r.email!,
-              from: FROM_EMAIL,
               subject: renderEmailSubject(claimed.type, { ...ctx, recipientName: r.displayName }),
               html: renderEmailHtml(claimed.type, { ...ctx, recipientName: r.displayName }),
             }));

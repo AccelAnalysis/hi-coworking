@@ -640,7 +640,7 @@ export const leads_submitLead = onRequest(
 
 /**
  * Firestore trigger: fires when a new lead is created.
- * Logs to admin feed (email notification can be added via SendGrid later).
+ * Logs to admin feed (email notification can be added via Resend later).
  */
 export const leads_onNewLead = onDocumentCreated("leads/{leadId}", async (event) => {
   const snap = event.data;
@@ -656,7 +656,7 @@ export const leads_onNewLead = onDocumentCreated("leads/{leadId}", async (event)
     source: lead.source,
   });
 
-  // TODO (PR-14): Send email notification to admin via SendGrid
+  // TODO (PR-14): Send email notification to admin via Resend
   // TODO (PR-14): Create notification doc in notifications/{adminUid}/{notifId}
 });
 

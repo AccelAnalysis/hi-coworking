@@ -1074,7 +1074,7 @@ Run 1 adds no new production application secret. Existing product Functions stil
 require their separately managed secrets; this branch does not rotate or print
 them. The current source declares these existing Secret Manager bindings:
 `RECAPTCHA_SECRET_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-`INTUIT_CLIENT_ID`, `INTUIT_CLIENT_SECRET`, `SAM_GOV_API_KEY`, `SENDGRID_API_KEY`,
+`INTUIT_CLIENT_ID`, `INTUIT_CLIENT_SECRET`, `SAM_GOV_API_KEY`, `HI_COWORKING_RESEND_API_KEY`,
 `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`,
 `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`, `X_CLIENT_ID`, `X_CLIENT_SECRET`,
 `SEAM_API_KEY`, and `SEAM_WEBHOOK_SECRET`. Verify their versions and IAM bindings

@@ -134,6 +134,7 @@ describe("Admin member operations source contract", () => {
     expect(deployIndex).toContain("admin_membershipChangePlan");
     expect(deployIndex).toContain("admin_bookingForMemberBeginCheckout");
     expect(deployIndex).not.toContain("SENDGRID");
+    expect(deployIndex).not.toContain("RESEND_API_KEY");
     expect(deployWorkflow).toContain("adminMembershipAuthority.ts");
     expect(deployWorkflow).toContain("adminMemberOperationsAuthority.ts");
     expect(deployWorkflow).toContain("adminMemberBookingAuthority.ts");

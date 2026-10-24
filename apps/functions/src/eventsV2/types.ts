@@ -4,7 +4,6 @@ export const WAITLIST_CLAIM_MS = 30 * 60 * 1000;
 export const DEFAULT_REFUND_CUTOFF_HOURS = 24;
 export const DEFAULT_MAX_TICKETS = 8;
 export const PUBLIC_SITE_URL = process.env.PUBLIC_SITE_URL || "https://hi-coworking.com";
-export const FROM_EMAIL = "events@hi-coworking.com";
 
 export type EventStatusV2 = "draft" | "published" | "cancelled" | "completed";
 export type RegistrationStatusV2 = "CONFIRMED" | "CANCELLED" | "REFUND_PENDING" | "REFUNDED";

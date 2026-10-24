@@ -218,14 +218,18 @@ describe("admin event save CORS", () => {
     expect(deployWorkflow).not.toContain("functions:booking");
   });
 
-  it("loads save and publish without the SendGrid secret, and leaves mail delivery on the notification worker", () => {
+  it("loads save and publish without the Resend mail secret, and leaves mail delivery on the notification worker", () => {
     const loaded = sourceFilesReachableFrom("firebase/admin-event-functions/src/index.ts");
     expect(loaded.length).toBeGreaterThan(1);
     for (const file of loaded) {
-      expect(readFileSync(file, "utf8")).not.toContain("SENDGRID_API_KEY");
+      const source = readFileSync(file, "utf8");
+      expect(source).not.toContain("SENDGRID");
+      expect(source).not.toContain("providers/emailSecret");
     }
-    expect(notificationsSource).toContain('defineSecret("SENDGRID_API_KEY")');
-    expect(notificationsSource).toContain("new SendGridProvider(apiKey)");
+    expect(notificationsSource).toContain('import { resendApiKey } from "../providers/emailSecret"');
+    expect(notificationsSource).toContain("secrets: [resendApiKey]");
+    expect(notificationsSource).toContain("new ResendEmailProvider(apiKey)");
+    expect(notificationsSource).not.toContain("SENDGRID");
     expect(notificationsSource).toContain("events_v2ProcessNotificationJobs");
 
     const entry = resolve("firebase/admin-event-functions/lib/firebase/admin-event-functions/src/index.js");
@@ -234,7 +238,7 @@ describe("admin event save CORS", () => {
       const { declaredParams } = require("firebase-functions/params");
       require(${JSON.stringify(entry)});
       const names = declaredParams.map((param) => param.name);
-      if (names.includes("SENDGRID_API_KEY")) {
+      if (names.includes("HI_COWORKING_RESEND_API_KEY") || names.includes("RESEND_API_KEY") || names.includes("SENDGRID_API_KEY")) {
         console.error(names.join(","));
         process.exit(2);
       }
@@ -258,6 +262,7 @@ describe("admin event save CORS", () => {
     expect(publicRead).toContain('event.status === "published"');
     expect(publicRead).not.toContain("requireAdmin");
     expect(publicRead).not.toContain("SENDGRID_API_KEY");
+    expect(publicRead).not.toContain("HI_COWORKING_RESEND_API_KEY");
     expect(publicRead).toContain("adminEventCallableOptions");
   });
 });
