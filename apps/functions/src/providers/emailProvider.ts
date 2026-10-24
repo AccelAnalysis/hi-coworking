@@ -35,6 +35,11 @@ export interface EmailMessage {
    * deduplicated by Resend for 24 hours and edited content is not blocked.
    */
   idempotencyKey?: string;
+  /**
+   * Extra MIME headers, for example List-Unsubscribe and
+   * List-Unsubscribe-Post on marketing mail. Resend passes them through.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface EmailProvider {
@@ -97,6 +102,7 @@ type ResendPayload = {
   text?: string;
   reply_to?: string;
   tags?: Array<{ name: string; value: string }>;
+  headers?: Record<string, string>;
 };
 
 /**
@@ -130,6 +136,7 @@ export class ResendEmailProvider implements EmailProvider {
       ...(message.text ? { text: message.text } : {}),
       ...(replyTo ? { reply_to: replyTo } : {}),
       ...(tags.length ? { tags } : {}),
+      ...(message.headers && Object.keys(message.headers).length ? { headers: { ...message.headers } } : {}),
     };
   }
 

@@ -14,7 +14,17 @@ import { ResendEmailProvider } from "./providers/emailProvider";
 import { resendApiKey } from "./providers/emailSecret";
 import { TwilioSmsProvider } from "./providers/smsProvider";
 import { FcmPushProvider } from "./providers/pushProvider";
-import { resolveRecipients } from "./providers/recipientResolver";
+import { resolveRecipients, type Recipient } from "./providers/recipientResolver";
+import {
+  emailHash,
+  ensureUnsubscribeTokens,
+  filterMarketingRecipients,
+  listUnsubscribeHeaders,
+  loadSuppressedHashes,
+  normalizeEmail,
+  unsubscribeUrl,
+} from "./providers/marketingPreferences";
+import type { EmailMessage } from "./providers/emailProvider";
 import { smsEligibleRecipients } from "./providers/smsCompliance";
 import { recordSmsOptOuts } from "./providers/smsOptOut";
 import {
@@ -201,6 +211,50 @@ async function claimJob(
   });
 }
 
+/**
+ * One message per allowed recipient, each with its own unsubscribe link in
+ * the footer and RFC 8058 one-click List-Unsubscribe headers.
+ */
+export function buildCampaignEmailMessages(
+  jobType: string,
+  ctx: CampaignContext,
+  recipients: Array<Recipient & { email: string; emailHash: string }>,
+  tokens: Map<string, string>,
+  env: NodeJS.ProcessEnv = process.env,
+): EmailMessage[] {
+  const messages: EmailMessage[] = [];
+  for (const r of recipients) {
+    const token = tokens.get(r.emailHash);
+    // No token, no send: marketing mail always carries a working opt-out.
+    if (!token) continue;
+    const url = unsubscribeUrl(token, env);
+    const personal = { ...ctx, recipientName: r.displayName, unsubscribeUrl: url };
+    messages.push({
+      to: r.email,
+      subject: renderEmailSubject(jobType, personal),
+      html: renderEmailHtml(jobType, personal),
+      headers: listUnsubscribeHeaders(url),
+      categories: ["event-campaign"],
+    });
+  }
+  return messages;
+}
+
+/** Drops opted-out, do-not-contact and suppressed addresses, then builds the mail. */
+async function prepareCampaignEmails(
+  recipients: Recipient[],
+  jobType: string,
+  ctx: CampaignContext,
+  now: number,
+): Promise<{ messages: EmailMessage[]; skipped: number }> {
+  const db = getDb();
+  const withEmail = recipients.filter((r) => normalizeEmail(r.email));
+  const suppressed = await loadSuppressedHashes(db, withEmail.map((r) => emailHash(r.email!)));
+  const { allowed, skipped } = filterMarketingRecipients(withEmail, suppressed);
+  const tokens = await ensureUnsubscribeTokens(db, allowed, now);
+  return { messages: buildCampaignEmailMessages(jobType, ctx, allowed, tokens), skipped };
+}
+
 type SmsSender = Pick<TwilioSmsProvider, "sendBatch">;
 
 async function sendCampaignSms(
@@ -271,18 +325,14 @@ export const events_processCampaignJobs = onSchedule(
 
         // Email via Resend (not affected by the SMS switch).
         if (campaign.channels.includes("email") && emailProvider) {
-          const emailRecipients = recipients.filter((r) => r.email);
-          if (emailRecipients.length > 0) {
-            const result = await emailProvider.sendBatch(
-              emailRecipients.map((r) => ({
-                to: r.email!,
-                subject: renderEmailSubject(claimed.type, { ...ctx, recipientName: r.displayName }),
-                html: renderEmailHtml(claimed.type, { ...ctx, recipientName: r.displayName }),
-              })),
-            );
+          const { messages, skipped } = await prepareCampaignEmails(recipients, claimed.type, ctx, now);
+          if (messages.length > 0) {
+            const result = await emailProvider.sendBatch(messages);
             totalSent += result.sent;
             totalFailed += result.failed;
-            logger.info("Email batch sent", { sent: result.sent, failed: result.failed });
+            logger.info("Email batch sent", { sent: result.sent, failed: result.failed, skipped });
+          } else if (skipped > 0) {
+            logger.info("Email batch skipped", { skipped });
           }
         }
 
