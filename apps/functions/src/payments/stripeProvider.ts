@@ -15,6 +15,7 @@ import type {
   WebhookResult,
   PaymentStatus,
 } from "./types";
+import { parseSubscriptionInvoice, type InvoiceLike } from "./stripeInvoice";
 
 function safeMetadataValue(value?: string) {
   return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -278,33 +279,44 @@ export class StripeProvider implements PaymentProvider {
           },
         };
       }
-      case "invoice.payment_succeeded": {
-        const invoice = event.data.object as Stripe.Invoice;
-        return {
-          eventId: event.id,
-          action: "payment_succeeded",
-          status: "paid",
-          metadata: {
-            subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
-            customerId:
-              typeof invoice.customer === "string"
-                ? invoice.customer
-                : "",
-          },
-        };
-      }
+      case "invoice.payment_succeeded":
       case "invoice.payment_failed": {
-        const invoice = event.data.object as Stripe.Invoice;
+        const info = parseSubscriptionInvoice(event.data.object as unknown as InvoiceLike);
+        if (!info.subscriptionId) {
+          logger.info("Stripe invoice event without a subscription, ignoring", {
+            type: event.type,
+            invoiceId: info.invoiceId,
+          });
+          return { eventId: event.id, action: "unknown" };
+        }
+        let { uid, plan } = info;
+        if (!uid) {
+          try {
+            const subscription = await this.stripe.subscriptions.retrieve(info.subscriptionId);
+            uid = subscription.metadata?.uid || "";
+            plan = plan || subscription.metadata?.plan || "";
+          } catch (error) {
+            // Non-fatal: the webhook falls back to the stored subscription ID on users.
+            logger.warn("Could not retrieve subscription for invoice", {
+              subscriptionId: info.subscriptionId,
+              invoiceId: info.invoiceId,
+              error,
+            });
+          }
+        }
+        const succeeded = event.type === "invoice.payment_succeeded";
         return {
           eventId: event.id,
-          action: "payment_failed",
-          status: "failed",
+          action: succeeded ? "subscription_invoice_paid" : "subscription_invoice_failed",
+          status: succeeded ? "paid" : "failed",
           metadata: {
-            subscriptionId:
-              (invoice as unknown as Record<string, unknown>).subscription as string
-              || "",
+            subscriptionId: info.subscriptionId,
+            customerId: info.customerId,
+            invoiceId: info.invoiceId,
+            billingReason: info.billingReason,
+            uid,
+            plan,
+            periodEndMs: String(info.periodEndMs),
           },
         };
       }
