@@ -39,11 +39,11 @@ export function welcomeBannerCopy(input: {
   if (membershipActive && activeTier) {
     return {
       state: "active",
-      title: `Welcome to Hi Coworking. Your ${activeTier.name} membership is active.`,
+      title: `Welcome to Hi Coworking. Your ${activeTier.name} plan is active.`,
       body: membershipSummary(activeTier),
     };
   }
-  const plan = returnedTier ? `${returnedTier.name} membership` : "membership";
+  const plan = returnedTier ? `${returnedTier.name} plan` : "membership";
   return {
     state: "activating",
     title: "Payment received. Welcome to Hi Coworking.",

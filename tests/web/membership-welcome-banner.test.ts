@@ -28,7 +28,7 @@ describe("membership copy on /my-hi", () => {
   it("names the active plan once the webhook has activated it", () => {
     const copy = welcomeBannerCopy({ membershipActive: true, activeTier: tier("virtual"), returnedTier: tier("virtual") });
     expect(copy.state).toBe("active");
-    expect(copy.title).toBe("Welcome to Hi Coworking. Your Virtual Office membership is active.");
+    expect(copy.title).toBe("Welcome to Hi Coworking. Your Virtual Office plan is active.");
   });
 
   it("shows an activating state, naming the plan from the return URL when known", () => {
@@ -36,7 +36,7 @@ describe("membership copy on /my-hi", () => {
       state: "activating",
       title: "Payment received. Welcome to Hi Coworking.",
     });
-    expect(welcomeBannerCopy({ membershipActive: false, returnedTier: tier("coworking") }).body).toContain("Coworking Member membership");
+    expect(welcomeBannerCopy({ membershipActive: false, returnedTier: tier("coworking") }).body).toContain("Coworking Member plan");
     expect(welcomeBannerCopy({ membershipActive: false }).body).toContain("your membership now");
   });
 
