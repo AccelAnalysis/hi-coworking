@@ -3,6 +3,11 @@
 All outbound app email goes through Resend from `hello@hi-coworking.com`.
 Inbound mail for the domain stays on Microsoft 365; Resend only sends.
 
+Every message carries `Reply-To: hicoworking@accelanalysis.com`, the monitored
+inbox. `hello@hi-coworking.com` is a sending address only: it has no tested
+inbox yet, so email copy never asks people to write to it. Copy that says
+"reply to this email or write to us" names `hicoworking@accelanalysis.com`.
+
 The client is `apps/functions/src/providers/emailProvider.ts`
 (`ResendEmailProvider`). It calls the Resend REST API with `fetch`, so there is
 no SDK dependency.
@@ -27,7 +32,7 @@ reads `RESEND_API_KEY`, and sends from accelanalysis.com. See
 | --- | --- | --- | --- |
 | `HI_COWORKING_RESEND_API_KEY` | Secret Manager secret, bound with `defineSecret` in `providers/emailSecret.ts` | `firebase functions:secrets:set HI_COWORKING_RESEND_API_KEY --project hi-coworking-plat` | Yes |
 | `HI_COWORKING_EMAIL_FROM` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Default `Hi Coworking <hello@hi-coworking.com>`. A bare address gets the "Hi Coworking" display name. |
-| `HI_COWORKING_EMAIL_REPLY_TO` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Unset by default, so replies go to the sender. |
+| `HI_COWORKING_EMAIL_REPLY_TO` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Default `hicoworking@accelanalysis.com` (`DEFAULT_EMAIL_REPLY_TO`). A message that sets its own `replyTo` wins over both. |
 
 Never put the key in git, an `.env` file, or a workflow. The repository is public.
 
@@ -88,6 +93,21 @@ activation; a later redelivery of the same event retries the send.
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
 secrets, so it deploys from its own bundle, `firebase/campaign-functions`
 (see `HI-COWORKING-CAMPAIGN-SMS.md`).
+
+### Rolling out a Reply-To or sender change
+
+The Reply-To default lives in `providers/emailProvider.ts`, which each mail
+function bundles at deploy time. A change takes effect only after every
+sending function is redeployed:
+
+| Function | Bundle | Deploy |
+| --- | --- | --- |
+| `nurture_process`, `events_v2ProcessNotificationJobs` | `firebase.mail.json` | Manual: the mail workflow or the `firebase.mail.json` command above |
+| `events_processCampaignJobs` | `firebase.campaign.json` | Manual: `npx firebase deploy --config firebase.campaign.json --project hi-coworking-plat --only functions:events_processCampaignJobs --non-interactive` |
+| `stripe_webhook` (membership welcome) | `firebase.core.json` | Manual: the core workflow or the `firebase.core.json` command above |
+
+A push to `main` that touches `emailProvider.ts` also redeploys the admin
+event bundle automatically, but none of its functions send email.
 
 ### Stale event notifications
 

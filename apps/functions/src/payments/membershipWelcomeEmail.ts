@@ -23,9 +23,12 @@ import type { WebhookResult } from "./types";
 export const MEMBERSHIP_WELCOME_TEMPLATE = "membership-welcome-v1";
 export const MEMBERSHIP_WELCOME_CATEGORY = "membership_welcome";
 export const SENT_EMAILS_COLLECTION = "sentEmails";
-export const CONTACT_EMAIL = "hello@hi-coworking.com";
-/** Street address used for bookstore pickup and Power NOW mail in this repo. */
+/** Monitored inbox for member replies and questions. Also the default Reply-To. */
+export const CONTACT_EMAIL = "hicoworking@accelanalysis.com";
+/** Street address confirmed by Jonathan (Oct 24, 2026). */
 export const SPACE_ADDRESS = "15373 Carrollton Blvd, Carrollton, VA 23314";
+/** Staffed hours confirmed by Jonathan (Oct 24, 2026). */
+export const SPACE_HOURS = "Monday to Friday, 8 AM to 5 PM";
 /** A "sending" claim older than this is treated as abandoned and may be retried. */
 export const STALE_CLAIM_MS = 10 * 60 * 1000;
 
@@ -73,7 +76,7 @@ export function renderMembershipWelcomeEmail(input: {
   if (!tier) return null;
   const origin = (input.origin || siteOrigin()).replace(/\/+$/, "");
   const bookUrl = `${origin}/book`;
-  const accountUrl = `${origin}/account/bookings`;
+  const accountUrl = `${origin}/my-hi`;
   const pricingUrl = `${origin}/pricing`;
   const greetingName = (input.firstName || "").trim();
   const greeting = greetingName ? `Hi ${greetingName},` : "Hi there,";
@@ -85,8 +88,10 @@ export function renderMembershipWelcomeEmail(input: {
   const bookLine = tier.includedHoursPerMonth > 0
     ? `Book a desk or the meeting room online. Choose a date and we'll show the hours that are open and check live availability. Your included hours are applied automatically when you book.`
     : `Book a desk or the meeting room online whenever you want to work from the space. Choose a date and we'll show the hours that are open and check live availability.`;
-  const accountLine = "Your account page shows your membership, upcoming bookings, access details, and any account credit.";
-  const renewLine = "Your membership renews monthly. To change or cancel it, or for help with anything else, reply to this email or write to us at hello@hi-coworking.com.";
+  const accountLine = "Your My Hi page shows your membership, upcoming bookings, access details, and any account credit.";
+  const hoursLine = `Open ${SPACE_HOURS}.`;
+  const renewLine = "Your membership renews monthly. To update your payment method, view invoices, change your plan, or cancel, open My Hi and choose Manage membership & billing. If you cancel, your membership stays active until the end of the period you've paid for.";
+  const helpLine = `For help with anything else, reply to this email or write to us at ${CONTACT_EMAIL}.`;
 
   const p = "margin:0 0 16px;font-size:16px;line-height:1.7;color:#475569";
   const h2 = "margin:28px 0 10px;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b";
@@ -107,11 +112,13 @@ export function renderMembershipWelcomeEmail(input: {
     + `<h2 style="${h2}">Using the space</h2>`
     + `<p style="${p}">${escapeHtml(bookLine)}</p>`
     + `<p style="margin:24px 0"><a href="${escapeHtml(bookUrl)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:650">Book a desk</a></p>`
-    + `<p style="${p}">${escapeHtml(accountLine)} <a href="${escapeHtml(accountUrl)}" style="${link}">Open your account</a></p>`
+    + `<p style="${p}">${escapeHtml(accountLine)} <a href="${escapeHtml(accountUrl)}" style="${link}">Open My Hi</a></p>`
     + `<h2 style="${h2}">Find us</h2>`
-    + `<p style="${p}">Hi Coworking<br>${escapeHtml(SPACE_ADDRESS)}</p>`
+    + `<p style="${p}">Hi Coworking<br>${escapeHtml(SPACE_ADDRESS)}<br>${escapeHtml(hoursLine)}</p>`
     + `<h2 style="${h2}">Your membership</h2>`
-    + `<p style="${p}">${escapeHtml(renewLine).replace(escapeHtml(CONTACT_EMAIL), `<a href="mailto:${CONTACT_EMAIL}" style="${link}">${CONTACT_EMAIL}</a>`)} <a href="${escapeHtml(pricingUrl)}" style="${link}">Compare plans</a></p>`
+    + `<p style="${p}">${escapeHtml(renewLine)}</p>`
+    + `<p style="margin:0 0 16px"><a href="${escapeHtml(accountUrl)}" style="${link}">Manage membership &amp; billing</a> · <a href="${escapeHtml(pricingUrl)}" style="${link}">Compare plans</a></p>`
+    + `<p style="${p}">${escapeHtml(helpLine).replace(escapeHtml(CONTACT_EMAIL), `<a href="mailto:${CONTACT_EMAIL}" style="${link}">${CONTACT_EMAIL}</a>`)}</p>`
     + `<p style="${p}">We look forward to seeing you,<br>The Hi Coworking team</p>`
     + `<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:1.6;color:#64748b">You're receiving this email because you joined Hi Coworking on the ${escapeHtml(tier.name)} plan. Hi Coworking · ${escapeHtml(SPACE_ADDRESS)} · <a href="mailto:${CONTACT_EMAIL}" style="color:#475569">${CONTACT_EMAIL}</a></p>`
     + `</div></body></html>`;
@@ -129,15 +136,19 @@ export function renderMembershipWelcomeEmail(input: {
     `Book a desk: ${bookUrl}`,
     "",
     `${accountLine}`,
-    `Your account: ${accountUrl}`,
+    `Open My Hi: ${accountUrl}`,
     "",
     "FIND US",
     "Hi Coworking",
     SPACE_ADDRESS,
+    hoursLine,
     "",
     "YOUR MEMBERSHIP",
     renewLine,
+    `Manage membership & billing: ${accountUrl}`,
     `Compare plans: ${pricingUrl}`,
+    "",
+    helpLine,
     "",
     "We look forward to seeing you,",
     "The Hi Coworking team",

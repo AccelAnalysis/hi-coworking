@@ -96,9 +96,15 @@ describe("membership welcome email copy", () => {
         expect(body).toContain(tier.name);
         expect(body).toContain(`$${tier.amountCents / 100}/month`);
         expect(body).toContain(`${ORIGIN}/book`);
-        expect(body).toContain(`${ORIGIN}/account/bookings`);
+        expect(body).toContain(`${ORIGIN}/my-hi`);
+        expect(body).not.toContain("/account/bookings");
+        expect(body).not.toContain("billing.stripe.com");
         expect(body).toContain(CONTACT_EMAIL);
+        expect(body).not.toContain("hello@hi-coworking.com");
         expect(body).toContain(SPACE_ADDRESS);
+        expect(body).toContain("Monday to Friday, 8 AM to 5 PM");
+        expect(body).toContain("update your payment method, view invoices, change your plan, or cancel");
+        expect(body).toContain("Manage membership &");
         expect(body).toContain("Hi Jordan,");
         expect(body).toContain(`Book up to ${tier.bookingWindowDays} days ahead`);
       }
@@ -239,7 +245,7 @@ describe("sendMembershipWelcomeEmail", () => {
     expect(sent).toHaveLength(1);
   });
 
-  it("sends from hello@hi-coworking.com via the Resend REST API, without logging the recipient", async () => {
+  it("sends from hello@hi-coworking.com with Reply-To hicoworking@accelanalysis.com via the Resend REST API, without logging the recipient", async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), init: init || {} });
@@ -251,6 +257,7 @@ describe("sendMembershipWelcomeEmail", () => {
     const payload = JSON.parse(String(calls[0].init.body));
     expect(calls[0].url).toBe("https://api.resend.com/emails");
     expect(payload.from).toBe("Hi Coworking <hello@hi-coworking.com>");
+    expect(payload.reply_to).toBe("hicoworking@accelanalysis.com");
     expect(payload.to).toEqual(["member@example.com"]);
     expect(payload.html).toContain("Welcome to Hi Coworking");
     expect(payload.text).toContain("Virtual Office");

@@ -7,7 +7,9 @@ import * as logger from "firebase-functions/logger";
  * The API key comes from the Secret Manager secret named by
  * RESEND_API_KEY_SECRET_NAME (see ./emailSecret.ts). It is never read from
  * git, an .env file, or logs. The sender defaults to hello@hi-coworking.com
- * and can be overridden with the HI_COWORKING_EMAIL_FROM env var.
+ * and can be overridden with the HI_COWORKING_EMAIL_FROM env var. Every
+ * message carries Reply-To hicoworking@accelanalysis.com unless the message
+ * sets replyTo or HI_COWORKING_EMAIL_REPLY_TO overrides it.
  *
  * The Power NOW confirmation mail for expo_submitNasaLead has its own Resend
  * client in ../expo/powerNowConfirmation.ts and does not use this module.
@@ -69,9 +71,15 @@ export function emailFrom(env: NodeJS.ProcessEnv = process.env): string {
   return `Hi Coworking <${raw}>`;
 }
 
-/** Optional Reply-To for app mail. Unset by default, matching the previous provider. */
-export function emailReplyTo(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env.HI_COWORKING_EMAIL_REPLY_TO?.trim() || undefined;
+/**
+ * Monitored inbox for replies to Hi Coworking mail. hello@hi-coworking.com is
+ * the sending address only; it has no tested inbox yet.
+ */
+export const DEFAULT_EMAIL_REPLY_TO = "hicoworking@accelanalysis.com";
+
+/** Reply-To for all app mail. HI_COWORKING_EMAIL_REPLY_TO overrides the default. */
+export function emailReplyTo(env: NodeJS.ProcessEnv = process.env): string {
+  return env.HI_COWORKING_EMAIL_REPLY_TO?.trim() || DEFAULT_EMAIL_REPLY_TO;
 }
 
 /** Resend tag names and values allow only ASCII letters, digits, "_" and "-". */
