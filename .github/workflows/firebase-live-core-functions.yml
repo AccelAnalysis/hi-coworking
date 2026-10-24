@@ -1,0 +1,102 @@
+name: Hi Coworking Firebase core functions
+
+# Manual only. Never runs on push or merge.
+# Deploys the 44 main-default functions from firebase/core-functions, which
+# does not load eventMarketing.ts (no Twilio, LinkedIn or X secrets).
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy core functions to deploy the 44 listed default-codebase functions only'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-core-functions
+  cancel-in-progress: false
+
+jobs:
+  deploy-core-functions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+      DEPLOY_CONFIRMATION: ${{ inputs.confirm }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Require the typed confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Refusing to deploy from ${GITHUB_REF}. Run this workflow from main." >&2
+            exit 1
+          fi
+          if [[ "${DEPLOY_CONFIRMATION}" != "deploy core functions" ]]; then
+            echo "Confirmation did not match. Type exactly: deploy core functions" >&2
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard the Firebase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const rc = JSON.parse(fs.readFileSync('.firebaserc', 'utf8'));
+          const project = rc.projects && rc.projects.default;
+          if (project !== 'hi-coworking-plat') {
+            throw new Error(`Refusing to deploy: .firebaserc default project is ${project || '(missing)'}, expected hi-coworking-plat.`);
+          }
+          NODE
+
+      - name: Confirm the bundle's secrets exist in Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
+          missing=()
+          for name in RECAPTCHA_SECRET_KEY STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET INTUIT_CLIENT_ID INTUIT_CLIENT_SECRET SAM_GOV_API_KEY SEAM_API_KEY SEAM_WEBHOOK_SECRET; do
+            enabled="$(gcloud secrets versions list "${name}" --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1 || true)"
+            if [[ -z "${enabled}" ]]; then missing+=("${name}"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "No enabled version in hi-coworking-plat for: ${missing[*]}. No secret values were printed." >&2
+            exit 1
+          fi
+
+      # firebase.core.json's predeploy builds the isolated bundle first.
+      # --only keeps every other default-codebase function in place. Never add the force flag.
+      - name: Deploy the 44 core functions only
+        run: npx firebase deploy --config firebase.core.json --project hi-coworking-plat --only functions:admin_backfillQBO,functions:admin_syncPaymentToQBO,functions:authBeforeCreate,functions:businessReferral_confirmConsent,functions:businessReferral_create,functions:businessReferral_createDispute,functions:businessReferral_prepareEvidenceAccess,functions:businessReferral_progress,functions:businessReferral_resolveDispute,functions:businessReferral_respond,functions:businessReferral_send,functions:businessReferral_updateConsent,functions:businessReferral_withdrawConsent,functions:createBooking,functions:createBookingQuote,functions:enrichment_link,functions:enrichment_search,functions:health,functions:intuit_checkConnection,functions:intuit_getAuthUrl,functions:intuit_oauthCallback,functions:leads_onNewLead,functions:leads_submitContact,functions:leads_submitLead,functions:notify_eventRegistration,functions:notify_paymentCreated,functions:notify_referralUpdate,functions:notify_rfxCreated,functions:notify_rfxResponse,functions:org_create,functions:org_purchaseSeats,functions:payments_createQuickBooksInvoice,functions:payments_pollQBInvoices,functions:profile_update,functions:qb_chargeCard,functions:qb_createCheckout,functions:qb_paymentsWebhook,functions:qb_refundCharge,functions:referral_onStatusChange,functions:rfx_listManaged,functions:setUserRole,functions:stripe_createCheckoutSession,functions:stripe_webhook,functions:territory_list_released --non-interactive

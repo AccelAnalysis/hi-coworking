@@ -1,0 +1,14 @@
+{
+  "name": "hi-coworking-core-functions",
+  "private": true,
+  "main": "lib/firebase/core-functions/src/index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "firebase-functions": "^7.4.0",
+    "stripe": "^20.3.1",
+    "zod": "^4.3.6"
+  }
+}

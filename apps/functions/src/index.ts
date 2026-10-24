@@ -119,12 +119,9 @@ import {
   events_joinWaitlist,
 } from "./events";
 import { events_upsertSeries, events_extendHorizon, events_setSeriesOccurrenceOverride } from "./eventSeries";
-import {
-  events_enqueueCampaignJobs,
-  events_processCampaignJobs,
-  events_generateShareKits,
-  events_processSocialPosts,
-} from "./eventMarketing";
+// eventMarketing (Twilio, LinkedIn and X secrets) is exported from main.ts,
+// not from here, so firebase/core-functions can load this file without
+// declaring those secrets.
 import { events_onMediaUploaded } from "./eventMedia";
 import { bookstore_createCheckoutSession } from "./bookstore";
 import { bookstore_getDownloadLink } from "./digitalFulfillment";
@@ -238,10 +235,6 @@ export {
   events_upsertSeries,
   events_extendHorizon,
   events_setSeriesOccurrenceOverride,
-  events_enqueueCampaignJobs,
-  events_processCampaignJobs,
-  events_generateShareKits,
-  events_processSocialPosts,
   events_onMediaUploaded,
 };
 
