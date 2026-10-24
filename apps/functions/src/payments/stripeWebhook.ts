@@ -432,7 +432,7 @@ async function handleSubscriptionInvoice(result: WebhookResult): Promise<void> {
         plan: meta.plan || "",
         periodEndMs: Number(meta.periodEndMs) || 0,
       }, now)
-      : failedPaymentUpdates(user, { invoiceId }, now);
+      : failedPaymentUpdates(user, { invoiceId, periodEndMs: Number(meta.periodEndMs) || 0 }, now);
     if (!updates) return null;
     tx.update(userRef, updates);
     return updates;

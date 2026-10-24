@@ -139,6 +139,17 @@ describe("renewal updates", () => {
   });
 });
 
+describe("renewal after cancellation", () => {
+  it("does not reactivate a cancelled membership from a late paid invoice", () => {
+    const now = 1_800_000_000_000;
+    expect(renewalUpdates(
+      { membershipStatus: "cancelled", plan: null, expiresAt: now },
+      { invoiceId: "in_late", subscriptionId: "sub_1", plan: "virtual", periodEndMs: now + 20 * DAY_MS },
+      now,
+    )).toBeNull();
+  });
+});
+
 describe("failed payment updates", () => {
   const now = 1_800_000_000_000;
 
@@ -163,6 +174,20 @@ describe("failed payment updates", () => {
 
   it("ignores a failure for an invoice that was already paid", () => {
     expect(failedPaymentUpdates({ lastPaidInvoiceId: "in_2" }, { invoiceId: "in_2" }, now)).toBeNull();
+  });
+
+  it("ignores a delayed failure for an older invoice that a later payment superseded", () => {
+    const periodEndMs = now - 10 * DAY_MS;
+    // Paid through a later period (invoice B), then A's failure arrives late.
+    const user = { membershipStatus: "active", lastPaidInvoiceId: "in_B", expiresAt: now + 25 * DAY_MS };
+    expect(failedPaymentUpdates(user, { invoiceId: "in_A", periodEndMs }, now)).toBeNull();
+    // A failure for the current, unpaid period is still recorded.
+    expect(failedPaymentUpdates(user, { invoiceId: "in_C", periodEndMs: now + 30 * DAY_MS }, now))
+      .toMatchObject({ pastDue: true, lastFailedInvoiceId: "in_C" });
+  });
+
+  it("does not touch a cancelled membership", () => {
+    expect(failedPaymentUpdates({ membershipStatus: "cancelled" }, { invoiceId: "in_2" }, now)).toBeNull();
   });
 });
 

@@ -119,6 +119,9 @@ export interface MemberBillingState {
  * Updates for a paid renewal invoice, or null when it was already applied.
  * expiresAt is absolute (period end + grace) and never moves backwards, so a
  * replayed or out-of-order event cannot extend access twice.
+ * A cancelled membership is never reactivated here: a late renewal event must
+ * not undo customer.subscription.deleted. A new subscription goes through
+ * Checkout, and checkout.session.completed provisions it.
  */
 export function renewalUpdates(
   user: MemberBillingState,
@@ -126,6 +129,7 @@ export function renewalUpdates(
   now: number,
 ): Record<string, unknown> | null {
   if (info.invoiceId && user.lastPaidInvoiceId === info.invoiceId) return null;
+  if (user.membershipStatus === "cancelled") return null;
 
   const paidThrough = info.periodEndMs > 0
     ? info.periodEndMs + RENEWAL_GRACE_DAYS * DAY_MS
@@ -147,7 +151,9 @@ export function renewalUpdates(
 
 /**
  * Updates for a failed renewal invoice, or null when there is nothing to do:
- * the same failure was already recorded, or that invoice has since been paid.
+ * the same failure was already recorded, that invoice has since been paid, or
+ * access is already paid through the failed invoice's period (a delayed
+ * failure for an older invoice that a later payment superseded).
  * Keeps the first pastDueAt so the timestamp marks when payment first failed.
  * membershipStatus is left unchanged: the member keeps access while Stripe
  * retries the payment. Access ends only via customer.subscription.deleted,
@@ -155,10 +161,14 @@ export function renewalUpdates(
  */
 export function failedPaymentUpdates(
   user: MemberBillingState,
-  info: Pick<SubscriptionInvoiceInfo, "invoiceId">,
+  info: Pick<SubscriptionInvoiceInfo, "invoiceId"> & Partial<Pick<SubscriptionInvoiceInfo, "periodEndMs">>,
   now: number,
 ): Record<string, unknown> | null {
   if (info.invoiceId && user.lastPaidInvoiceId === info.invoiceId) return null;
+  if (user.membershipStatus === "cancelled") return null;
+  if (info.periodEndMs && info.periodEndMs > 0 && (user.expiresAt || 0) >= info.periodEndMs + RENEWAL_GRACE_DAYS * DAY_MS) {
+    return null;
+  }
   if (info.invoiceId && user.lastFailedInvoiceId === info.invoiceId && user.pastDue) return null;
 
   const updates: Record<string, unknown> = {
