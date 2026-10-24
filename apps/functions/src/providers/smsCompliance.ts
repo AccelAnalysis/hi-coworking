@@ -22,7 +22,7 @@ export const HI_SMS_CONSENT_TEXT =
 export const HI_SMS_CONSENT_VERSION = "HC-SMS-CONSENT-v1";
 
 export const SMS_TERMS_PATH = "/sms-terms";
-export const SMS_SUPPORT_EMAIL = "hello@hi-coworking.com";
+export const SMS_SUPPORT_EMAIL = "hicoworking@accelanalysis.com";
 
 export const SMS_CONSENT_SOURCES = ["member-signup", "preferences", "event-pitch-form", "event-prize-form"] as const;
 export type SmsConsentSource = (typeof SMS_CONSENT_SOURCES)[number];

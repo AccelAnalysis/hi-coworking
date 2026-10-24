@@ -118,6 +118,7 @@ jobs:
           tests/functions/payment-ledger-authority.test.ts
           tests/functions/payment-ledger-undefined-fields.test.ts
           tests/functions/stripe-subscription-invoices.test.ts
+          tests/functions/membership-welcome-email.test.ts
           tests/functions/booking-policy.test.ts
           tests/functions/booking-operating-calendar.test.ts
           tests/functions/booking-operating-calendar-deployment-source.test.ts

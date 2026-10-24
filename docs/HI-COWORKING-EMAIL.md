@@ -3,6 +3,11 @@
 All outbound app email goes through Resend from `hello@hi-coworking.com`.
 Inbound mail for the domain stays on Microsoft 365; Resend only sends.
 
+Every message carries `Reply-To: hicoworking@accelanalysis.com`, the monitored
+inbox. `hello@hi-coworking.com` is a sending address only: it has no tested
+inbox yet, so email copy never asks people to write to it. Copy that says
+"reply to this email or write to us" names `hicoworking@accelanalysis.com`.
+
 The client is `apps/functions/src/providers/emailProvider.ts`
 (`ResendEmailProvider`). It calls the Resend REST API with `fetch`, so there is
 no SDK dependency.
@@ -14,6 +19,7 @@ no SDK dependency.
 | `nurture_process` (every 15 min) | Nurture campaign steps | `POST /emails`, tags `hi-coworking-nurture` + stage, idempotency key `nurture/<deliveryId>/<payload hash>` |
 | `events_v2ProcessNotificationJobs` (every 5 min) | Event confirmations, reminders, waitlist, cancellations, refunds | `POST /emails`, tag `event-transactional`, idempotency key `event-notification/<jobId>/<payload hash>` |
 | `events_processCampaignJobs` | Event marketing campaign email | `POST /emails/batch` in chunks of 100, one rendered copy per recipient |
+| `stripe_webhook` (core bundle) | Membership welcome email on `checkout.session.completed` with `purpose=membership` | `POST /emails`, tags `membership_welcome` + `transactional`, idempotency key `membership-welcome/<checkoutSessionId>/<payload hash>` |
 
 The Power NOW confirmation sent by `expo_submitNasaLead` is separate. It has
 its own Resend client in `apps/functions/src/expo/powerNowConfirmation.ts`,
@@ -26,7 +32,7 @@ reads `RESEND_API_KEY`, and sends from accelanalysis.com. See
 | --- | --- | --- | --- |
 | `HI_COWORKING_RESEND_API_KEY` | Secret Manager secret, bound with `defineSecret` in `providers/emailSecret.ts` | `firebase functions:secrets:set HI_COWORKING_RESEND_API_KEY --project hi-coworking-plat` | Yes |
 | `HI_COWORKING_EMAIL_FROM` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Default `Hi Coworking <hello@hi-coworking.com>`. A bare address gets the "Hi Coworking" display name. |
-| `HI_COWORKING_EMAIL_REPLY_TO` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Unset by default, so replies go to the sender. |
+| `HI_COWORKING_EMAIL_REPLY_TO` | Env var | `apps/functions/.env.hi-coworking-plat` | No. Default `hicoworking@accelanalysis.com` (`DEFAULT_EMAIL_REPLY_TO`). A message that sets its own `replyTo` wins over both. |
 
 Never put the key in git, an `.env` file, or a workflow. The repository is public.
 
@@ -69,9 +75,39 @@ The manual GitHub workflow **Hi Coworking Firebase mail functions** runs the
 same deploy from `main` after you type `deploy mail functions`. It never runs on
 push or merge.
 
+`stripe_webhook` is not in this bundle either. It deploys from the core
+bundle (`firebase.core.json`), which binds `HI_COWORKING_RESEND_API_KEY` for
+the membership welcome email:
+
+```bash
+npx firebase deploy --config firebase.core.json --project hi-coworking-plat \
+  --only functions:stripe_webhook --non-interactive
+```
+
+The welcome email is transactional: it ignores the marketing opt-out and has no
+unsubscribe link. It sends at most once per Checkout session, tracked in
+`sentEmails/<checkoutSessionId>` (status `sending`, `sent`, or `failed`). A send
+failure is logged and recorded but never fails the webhook or the membership
+activation; a later redelivery of the same event retries the send.
+
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
 secrets, so it deploys from its own bundle, `firebase/campaign-functions`
 (see `HI-COWORKING-CAMPAIGN-SMS.md`).
+
+### Rolling out a Reply-To or sender change
+
+The Reply-To default lives in `providers/emailProvider.ts`, which each mail
+function bundles at deploy time. A change takes effect only after every
+sending function is redeployed:
+
+| Function | Bundle | Deploy |
+| --- | --- | --- |
+| `nurture_process`, `events_v2ProcessNotificationJobs` | `firebase.mail.json` | Manual: the mail workflow or the `firebase.mail.json` command above |
+| `events_processCampaignJobs` | `firebase.campaign.json` | Manual: `npx firebase deploy --config firebase.campaign.json --project hi-coworking-plat --only functions:events_processCampaignJobs --non-interactive` |
+| `stripe_webhook` (membership welcome) | `firebase.core.json` | Manual: the core workflow or the `firebase.core.json` command above |
+
+A push to `main` that touches `emailProvider.ts` also redeploys the admin
+event bundle automatically, but none of its functions send email.
 
 ### Stale event notifications
 

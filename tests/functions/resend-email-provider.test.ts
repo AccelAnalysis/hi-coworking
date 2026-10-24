@@ -11,6 +11,7 @@ vi.mock("firebase-functions/logger", () => ({
 
 import {
   DEFAULT_EMAIL_FROM,
+  DEFAULT_EMAIL_REPLY_TO,
   EmailSendError,
   RESEND_API_KEY_SECRET_NAME,
   ResendEmailProvider,
@@ -55,7 +56,7 @@ beforeEach(() => {
 });
 
 describe("ResendEmailProvider", () => {
-  it("sends one message from hello@hi-coworking.com with the bearer key, tags and timeout", async () => {
+  it("sends one message from hello@hi-coworking.com, Reply-To hicoworking@accelanalysis.com, with the bearer key, tags and timeout", async () => {
     const { fetchImpl, calls } = mockFetch([{ status: 200, body: { id: "re_123" } }]);
     const provider = new ResendEmailProvider(API_KEY, { fetchImpl, env: {} });
 
@@ -76,6 +77,7 @@ describe("ResendEmailProvider", () => {
     expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
     expect(body(calls[0])).toEqual({
       from: "Hi Coworking <hello@hi-coworking.com>",
+      reply_to: "hicoworking@accelanalysis.com",
       to: [RECIPIENT],
       subject: "Welcome",
       html: "<p>Hi</p>",
@@ -94,7 +96,9 @@ describe("ResendEmailProvider", () => {
     expect(emailFrom({})).toBe(DEFAULT_EMAIL_FROM);
     expect(emailFrom({ HI_COWORKING_EMAIL_FROM: "team@hi-coworking.com" })).toBe("Hi Coworking <team@hi-coworking.com>");
     expect(emailFrom({ HI_COWORKING_EMAIL_FROM: "Events <events@hi-coworking.com>" })).toBe("Events <events@hi-coworking.com>");
-    expect(emailReplyTo({})).toBeUndefined();
+    expect(emailReplyTo({})).toBe(DEFAULT_EMAIL_REPLY_TO);
+    expect(DEFAULT_EMAIL_REPLY_TO).toBe("hicoworking@accelanalysis.com");
+    expect(emailReplyTo({ HI_COWORKING_EMAIL_REPLY_TO: "   " })).toBe("hicoworking@accelanalysis.com");
     expect(emailReplyTo({ HI_COWORKING_EMAIL_REPLY_TO: " help@hi-coworking.com " })).toBe("help@hi-coworking.com");
 
     const { fetchImpl, calls } = mockFetch([{ status: 200, body: { id: "a" } }, { status: 200, body: { id: "b" } }]);
@@ -182,6 +186,7 @@ describe("ResendEmailProvider", () => {
     expect(body(calls[1])).toHaveLength(50);
     expect(first[7]).toEqual({
       from: DEFAULT_EMAIL_FROM,
+      reply_to: DEFAULT_EMAIL_REPLY_TO,
       to: ["person7@example.com"],
       subject: "Subject 7",
       html: "<p>Hello 7</p>",
@@ -206,7 +211,7 @@ describe("ResendEmailProvider", () => {
 describe("Hi Coworking mail wiring", () => {
   const read = (path: string) => readFileSync(path, "utf8");
 
-  it("binds the dedicated Resend secret only on the three mail workers", () => {
+  it("binds the dedicated Resend secret only on the three mail workers and stripe_webhook", () => {
     expect(RESEND_API_KEY_SECRET_NAME).toBe("HI_COWORKING_RESEND_API_KEY");
     const secretModule = read("apps/functions/src/providers/emailSecret.ts");
     expect(secretModule).toContain("defineSecret(RESEND_API_KEY_SECRET_NAME)");
@@ -227,8 +232,13 @@ describe("Hi Coworking mail wiring", () => {
     expect(users.map((file) => file.replace(/\\/g, "/")).sort()).toEqual([
       "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
+      "apps/functions/src/index.ts",
       "apps/functions/src/nurture.ts",
     ]);
+    // stripe_webhook (core bundle) binds it for the membership welcome email.
+    const index = read("apps/functions/src/index.ts");
+    expect(index).toContain('import { resendApiKey } from "./providers/emailSecret";');
+    expect(index).toContain("secrets: [stripeSecretKey, stripeWebhookSecret, intuitClientId, intuitClientSecret, resendApiKey]");
   });
 
   it("leaves no SendGrid code, config or docs behind", () => {
