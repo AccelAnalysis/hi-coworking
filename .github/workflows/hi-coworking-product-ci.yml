@@ -131,6 +131,8 @@ jobs:
           tests/functions/public-event-actions.test.ts
           tests/functions/expo-nasa-lead.test.ts
           tests/functions/intake-lead-store.test.ts
+          tests/functions/stripe-subscription-updated.test.ts
+          tests/functions/billing-portal.test.ts
           tests/functions/power-now-confirmation.test.ts
           tests/functions/power-now-interest.test.ts
           tests/functions/power-now-pitch-fields.test.ts

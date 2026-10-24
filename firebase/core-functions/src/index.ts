@@ -1,4 +1,4 @@
-// Isolated deploy source for the 44 default-codebase functions that main
+// Isolated deploy source for the 45 default-codebase functions that main
 // exports and that are deployed in hi-coworking-plat today.
 //
 // apps/functions/src/main.ts also loads eventMarketing.ts, which declares the
@@ -38,6 +38,7 @@ export {
   leads_onNewLead,
   leads_submitContact,
   leads_submitLead,
+  members_createBillingPortalSession,
   notify_eventRegistration,
   notify_paymentCreated,
   notify_referralUpdate,

@@ -16,6 +16,7 @@ import type {
   PaymentStatus,
 } from "./types";
 import { parseSubscriptionInvoice, type InvoiceLike } from "./stripeInvoice";
+import { parseSubscriptionUpdate, type SubscriptionLike } from "./stripeSubscription";
 
 function safeMetadataValue(value?: string) {
   return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -317,6 +318,26 @@ export class StripeProvider implements PaymentProvider {
             uid,
             plan,
             periodEndMs: String(info.periodEndMs),
+          },
+        };
+      }
+      case "customer.subscription.updated": {
+        const info = parseSubscriptionUpdate(
+          event.data.object as unknown as SubscriptionLike,
+          event.created,
+        );
+        return {
+          eventId: event.id,
+          action: "subscription_updated",
+          metadata: {
+            subscriptionId: info.subscriptionId,
+            customerId: info.customerId,
+            uid: info.uid,
+            status: info.status,
+            priceId: info.priceId,
+            cancelAtPeriodEnd: String(info.cancelAtPeriodEnd),
+            cancelAtMs: String(info.cancelAtMs),
+            eventCreatedMs: String(info.eventCreatedMs),
           },
         };
       }
