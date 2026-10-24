@@ -14,6 +14,7 @@ no SDK dependency.
 | `nurture_process` (every 15 min) | Nurture campaign steps | `POST /emails`, tags `hi-coworking-nurture` + stage, idempotency key `nurture/<deliveryId>/<payload hash>` |
 | `events_v2ProcessNotificationJobs` (every 5 min) | Event confirmations, reminders, waitlist, cancellations, refunds | `POST /emails`, tag `event-transactional`, idempotency key `event-notification/<jobId>/<payload hash>` |
 | `events_processCampaignJobs` | Event marketing campaign email | `POST /emails/batch` in chunks of 100, one rendered copy per recipient |
+| `stripe_webhook` (core bundle) | Membership welcome email on `checkout.session.completed` with `purpose=membership` | `POST /emails`, tags `membership_welcome` + `transactional`, idempotency key `membership-welcome/<checkoutSessionId>/<payload hash>` |
 
 The Power NOW confirmation sent by `expo_submitNasaLead` is separate. It has
 its own Resend client in `apps/functions/src/expo/powerNowConfirmation.ts`,
@@ -68,6 +69,21 @@ that in non-interactive mode without `--force`; never pass `--force`).
 The manual GitHub workflow **Hi Coworking Firebase mail functions** runs the
 same deploy from `main` after you type `deploy mail functions`. It never runs on
 push or merge.
+
+`stripe_webhook` is not in this bundle either. It deploys from the core
+bundle (`firebase.core.json`), which binds `HI_COWORKING_RESEND_API_KEY` for
+the membership welcome email:
+
+```bash
+npx firebase deploy --config firebase.core.json --project hi-coworking-plat \
+  --only functions:stripe_webhook --non-interactive
+```
+
+The welcome email is transactional: it ignores the marketing opt-out and has no
+unsubscribe link. It sends at most once per Checkout session, tracked in
+`sentEmails/<checkoutSessionId>` (status `sending`, `sent`, or `failed`). A send
+failure is logged and recorded but never fails the webhook or the membership
+activation; a later redelivery of the same event retries the send.
 
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
 secrets, so it deploys from its own bundle, `firebase/campaign-functions`

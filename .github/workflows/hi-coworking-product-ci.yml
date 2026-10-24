@@ -143,6 +143,7 @@ jobs:
           tests/functions/sms-compliance.test.ts
           tests/functions/terms-acceptance.test.ts
           tests/functions/campaign-unsubscribe.test.ts
+          tests/functions/membership-welcome-email.test.ts
           tests/web/public-rfx-quarantine.test.ts
 
       - name: Run active transaction integration tests

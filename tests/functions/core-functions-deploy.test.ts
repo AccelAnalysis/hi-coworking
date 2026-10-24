@@ -68,6 +68,7 @@ const ONLY = "functions:admin_backfillQBO,functions:admin_syncPaymentToQBO,funct
 const CORE_IDS = ONLY.split(",").map((entry) => entry.replace("functions:", "")).sort();
 const DEPLOY = `npx firebase deploy --config firebase.core.json --project hi-coworking-plat --only ${ONLY} --non-interactive`;
 const CORE_SECRETS = [
+  "HI_COWORKING_RESEND_API_KEY",
   "INTUIT_CLIENT_ID",
   "INTUIT_CLIENT_SECRET",
   "RECAPTCHA_SECRET_KEY",

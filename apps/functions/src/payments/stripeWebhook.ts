@@ -15,6 +15,7 @@ import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
 import { maybeFinalizeEventV2Checkout } from "../eventWebhookBridge";
+import { sendMembershipWelcomeEmail } from "./membershipWelcomeEmail";
 import {
   failedPaymentUpdates,
   isFirstSubscriptionInvoice,
@@ -54,7 +55,8 @@ export async function handleStripeWebhook(
   stripeSecretKey: string,
   stripeWebhookSecret: string,
   intuitClientId?: string,
-  intuitClientSecret?: string
+  intuitClientSecret?: string,
+  resendApiKey?: string
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const provider = new StripeProvider(stripeSecretKey, stripeWebhookSecret);
 
@@ -73,7 +75,7 @@ export async function handleStripeWebhook(
   }
 
   try {
-    await processWebhookResult(result, intuitClientId, intuitClientSecret);
+    await processWebhookResult(result, intuitClientId, intuitClientSecret, resendApiKey);
     await markWebhookResult(result.eventId, "success");
   } catch (err) {
     logger.error("Stripe webhook processing error", { eventId: result.eventId, err });
@@ -90,11 +92,12 @@ export async function handleStripeWebhook(
 async function processWebhookResult(
   result: WebhookResult,
   intuitClientId?: string,
-  intuitClientSecret?: string
+  intuitClientSecret?: string,
+  resendApiKey?: string
 ): Promise<void> {
   switch (result.action) {
     case "payment_succeeded":
-      await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret);
+      await handlePaymentSucceeded(result, intuitClientId, intuitClientSecret, resendApiKey);
       break;
     case "payment_failed":
       await handlePaymentFailed(result);
@@ -123,7 +126,8 @@ async function processWebhookResult(
 async function handlePaymentSucceeded(
   result: WebhookResult,
   intuitClientId?: string,
-  intuitClientSecret?: string
+  intuitClientSecret?: string,
+  resendApiKey?: string
 ): Promise<void> {
   const uid = result.metadata?.uid;
   const subscriptionId = result.metadata?.subscriptionId;
@@ -153,6 +157,12 @@ async function handlePaymentSucceeded(
   // Provision membership entitlements
   if (uid && plan) {
     await provisionMembership(uid, plan, subscriptionId);
+
+    // Welcome email, once per Checkout session. Never throws, so a send
+    // failure cannot fail the webhook or undo the activation above.
+    if (result.metadata?.purpose === "membership") {
+      await sendMembershipWelcomeEmail(result, { apiKey: resendApiKey });
+    }
   }
 
   // Handle Referral Payouts (PR-16)
