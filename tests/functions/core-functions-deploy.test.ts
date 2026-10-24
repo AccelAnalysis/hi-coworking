@@ -63,8 +63,8 @@ function loadManifest(source: string): Stack {
   return JSON.parse(output) as Stack;
 }
 
-// The 44 default-codebase functions that main exports and that are deployed today.
-const ONLY = "functions:admin_backfillQBO,functions:admin_syncPaymentToQBO,functions:authProvisionOnCreate,functions:businessReferral_confirmConsent,functions:businessReferral_create,functions:businessReferral_createDispute,functions:businessReferral_prepareEvidenceAccess,functions:businessReferral_progress,functions:businessReferral_resolveDispute,functions:businessReferral_respond,functions:businessReferral_send,functions:businessReferral_updateConsent,functions:businessReferral_withdrawConsent,functions:createBooking,functions:createBookingQuote,functions:enrichment_link,functions:enrichment_search,functions:health,functions:intuit_checkConnection,functions:intuit_getAuthUrl,functions:intuit_oauthCallback,functions:leads_onNewLead,functions:leads_submitContact,functions:leads_submitLead,functions:notify_eventRegistration,functions:notify_paymentCreated,functions:notify_referralUpdate,functions:notify_rfxCreated,functions:notify_rfxResponse,functions:org_create,functions:org_purchaseSeats,functions:payments_createQuickBooksInvoice,functions:payments_pollQBInvoices,functions:profile_update,functions:qb_chargeCard,functions:qb_createCheckout,functions:qb_paymentsWebhook,functions:qb_refundCharge,functions:referral_onStatusChange,functions:rfx_listManaged,functions:setUserRole,functions:stripe_createCheckoutSession,functions:stripe_webhook,functions:territory_list_released";
+// The 45 default-codebase functions that main exports (44 deployed before members_createBillingPortalSession).
+const ONLY = "functions:admin_backfillQBO,functions:admin_syncPaymentToQBO,functions:authProvisionOnCreate,functions:businessReferral_confirmConsent,functions:businessReferral_create,functions:businessReferral_createDispute,functions:businessReferral_prepareEvidenceAccess,functions:businessReferral_progress,functions:businessReferral_resolveDispute,functions:businessReferral_respond,functions:businessReferral_send,functions:businessReferral_updateConsent,functions:businessReferral_withdrawConsent,functions:createBooking,functions:createBookingQuote,functions:enrichment_link,functions:enrichment_search,functions:health,functions:intuit_checkConnection,functions:intuit_getAuthUrl,functions:intuit_oauthCallback,functions:leads_onNewLead,functions:leads_submitContact,functions:leads_submitLead,functions:members_createBillingPortalSession,functions:notify_eventRegistration,functions:notify_paymentCreated,functions:notify_referralUpdate,functions:notify_rfxCreated,functions:notify_rfxResponse,functions:org_create,functions:org_purchaseSeats,functions:payments_createQuickBooksInvoice,functions:payments_pollQBInvoices,functions:profile_update,functions:qb_chargeCard,functions:qb_createCheckout,functions:qb_paymentsWebhook,functions:qb_refundCharge,functions:referral_onStatusChange,functions:rfx_listManaged,functions:setUserRole,functions:stripe_createCheckoutSession,functions:stripe_webhook,functions:territory_list_released";
 const CORE_IDS = ONLY.split(",").map((entry) => entry.replace("functions:", "")).sort();
 const DEPLOY = `npx firebase deploy --config firebase.core.json --project hi-coworking-plat --only ${ONLY} --non-interactive`;
 const CORE_SECRETS = [
@@ -87,7 +87,7 @@ describe("isolated core functions deploy", () => {
   const trigger = yaml.split(/^jobs:/m)[0] ?? "";
 
   it("deploys into the default codebase from its own source on Node 22", () => {
-    expect(CORE_IDS).toHaveLength(44);
+    expect(CORE_IDS).toHaveLength(45);
     expect(config.functions.source).toBe("firebase/core-functions");
     expect(config.functions.codebase).toBeUndefined();
     expect(config.functions.region).toBe("us-central1");
@@ -118,7 +118,7 @@ describe("isolated core functions deploy", () => {
     expect(main).toContain('export { createBookingQuote, createBooking } from "./retiredBookingEndpoints";');
   });
 
-  it("emits exactly the 44 functions, identical to main's, with no Twilio, LinkedIn, or X secrets", () => {
+  it("emits exactly the 45 functions, identical to main's, with no Twilio, LinkedIn, or X secrets", () => {
     expect(existsSync("firebase/core-functions/lib/firebase/core-functions/src/index.js")).toBe(true);
     expect(existsSync("apps/functions/lib/main.js")).toBe(true);
     const core = loadManifest("firebase/core-functions");
@@ -137,7 +137,7 @@ describe("isolated core functions deploy", () => {
     expect((main.params ?? []).map((param) => param.name)).toContain("TWILIO_ACCOUNT_SID");
   });
 
-  it("has a manual-only workflow gated by a typed confirmation that deploys just the 44 with --only", () => {
+  it("has a manual-only workflow gated by a typed confirmation that deploys just the 45 with --only", () => {
     expect(trigger).toContain("workflow_dispatch:");
     expect(trigger).not.toContain("push:");
     expect(trigger).not.toContain("pull_request");

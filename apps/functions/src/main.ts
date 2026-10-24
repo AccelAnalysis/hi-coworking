@@ -106,6 +106,7 @@ export const leads_submitContact = legacy.leads_submitContact;
 export { expo_submitNasaLead } from "./expo/submitNasaLead";
 export const stripe_createCheckoutSession = legacy.stripe_createCheckoutSession;
 export const stripe_webhook = legacy.stripe_webhook;
+export const members_createBillingPortalSession = legacy.members_createBillingPortalSession;
 export const qb_createCheckout = legacy.qb_createCheckout;
 export { admin_markPaymentStatus } from "./adminPaymentLegacyGuard";
 export const intuit_getAuthUrl = legacy.intuit_getAuthUrl;

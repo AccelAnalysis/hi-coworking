@@ -21,6 +21,10 @@ import {
   renewalUpdates,
   type MemberBillingState,
 } from "./stripeInvoice";
+import {
+  subscriptionUpdatedUpdates,
+  type MemberSubscriptionState,
+} from "./stripeSubscription";
 
 function getDb() { return admin.firestore(); }
 
@@ -102,6 +106,9 @@ async function processWebhookResult(
     case "subscription_invoice_paid":
     case "subscription_invoice_failed":
       await handleSubscriptionInvoice(result);
+      break;
+    case "subscription_updated":
+      await handleSubscriptionUpdated(result);
       break;
     case "refund":
       if (result.paymentId) {
@@ -471,4 +478,60 @@ async function provisionMembership(
 
   await getDb().collection("users").doc(uid).update(updates);
   logger.info("Membership provisioned", { uid, plan, expiresAt });
+}
+
+/**
+ * customer.subscription.updated, e.g. a plan change or cancellation made in
+ * the Stripe Customer Portal. Keeps plan, the scheduled end date, and the
+ * Stripe customer ID in step with the subscription. Idempotent per event
+ * (webhookEvents) and ordered per member (lastSubscriptionEventAt), and never
+ * changes membershipStatus: see subscriptionUpdatedUpdates.
+ */
+async function handleSubscriptionUpdated(result: WebhookResult): Promise<void> {
+  const meta = result.metadata || {};
+  const subscriptionId = meta.subscriptionId || "";
+  if (!subscriptionId) return;
+
+  const uid = await resolveSubscriptionMember(meta.uid, subscriptionId);
+  if (!uid) {
+    logger.warn("No member found for subscription update", { subscriptionId });
+    return;
+  }
+
+  const info = {
+    subscriptionId,
+    customerId: meta.customerId || "",
+    uid,
+    status: meta.status || "",
+    priceId: meta.priceId || "",
+    cancelAtPeriodEnd: meta.cancelAtPeriodEnd === "true",
+    cancelAtMs: Number(meta.cancelAtMs) || 0,
+    eventCreatedMs: Number(meta.eventCreatedMs) || 0,
+  };
+
+  const userRef = getDb().collection("users").doc(uid);
+  const decision = await getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists) return { apply: false as const, reason: "no_user_doc" };
+    const user = (snap.data() || {}) as MemberSubscriptionState;
+    const next = subscriptionUpdatedUpdates(user, info, Date.now());
+    if (next.apply) tx.update(userRef, next.updates);
+    return next;
+  });
+
+  if (decision.unknownPrice) {
+    logger.warn("Subscription price is not a known membership tier; plan left unchanged", {
+      uid,
+      subscriptionId,
+      priceId: info.priceId,
+    });
+  }
+  logger.info("Subscription update processed", {
+    uid,
+    subscriptionId,
+    applied: decision.apply,
+    reason: decision.apply ? undefined : decision.reason,
+    plan: decision.apply ? decision.updates.plan : undefined,
+    cancelAtPeriodEnd: info.cancelAtPeriodEnd,
+  });
 }

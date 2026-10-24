@@ -50,6 +50,7 @@ export interface WebhookResult {
     | "payment_failed"
     | "subscription_invoice_paid"
     | "subscription_invoice_failed"
+    | "subscription_updated"
     | "refund"
     | "unknown";
   paymentId?: string;
