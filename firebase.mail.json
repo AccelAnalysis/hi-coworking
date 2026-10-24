@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "firebase/mail-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "rm -rf firebase/mail-functions/lib",
+      "npm run build --workspace functions -- --project ../../firebase/mail-functions/tsconfig.json"
+    ]
+  }
+}
