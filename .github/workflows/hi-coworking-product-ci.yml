@@ -135,6 +135,7 @@ jobs:
           tests/functions/expo-lead-deploy-workflow.test.ts
           tests/functions/mail-functions-deploy.test.ts
           tests/functions/core-functions-deploy.test.ts
+          tests/functions/auth-provisioning.test.ts
           tests/functions/campaign-functions-deploy.test.ts
           tests/functions/resend-email-provider.test.ts
           tests/functions/sms-compliance.test.ts

@@ -18,7 +18,7 @@
 export {
   admin_backfillQBO,
   admin_syncPaymentToQBO,
-  authBeforeCreate,
+  authProvisionOnCreate,
   businessReferral_confirmConsent,
   businessReferral_create,
   businessReferral_createDispute,
