@@ -203,6 +203,10 @@ function AccountBookingsContent() {
   const membershipEnds = membershipActive
     ? membershipEndsLabel(userDoc as { cancelAtPeriodEnd?: unknown; cancelAt?: unknown })
     : null;
+  // Invoice failures flag pastDue on an active membership (access continues
+  // while Stripe retries), so prompt the member to fix their card.
+  const paymentRetrying = membershipActive
+    && (userDoc as { pastDue?: unknown } | null | undefined)?.pastDue === true;
   const accountCreditCents = Math.max(
     0,
     Number(userWithCredit?.accountCreditCents || 0),
@@ -410,6 +414,12 @@ function AccountBookingsContent() {
               {membershipEnds ? (
                 <p className="mt-1 text-sm font-semibold text-amber-200">
                   {membershipEnds}
+                </p>
+              ) : null}
+              {paymentRetrying ? (
+                <p className="mt-1 text-sm font-semibold text-amber-200">
+                  Your last payment didn&apos;t go through. Update your payment
+                  method to keep your membership.
                 </p>
               ) : null}
               {membershipActive && membershipTier ? (

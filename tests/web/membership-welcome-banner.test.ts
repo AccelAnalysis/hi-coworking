@@ -101,6 +101,7 @@ describe("self-serve billing on /my-hi", () => {
     const page = readFileSync("apps/web/src/app/account/bookings/page.tsx", "utf8");
     expect(page).toContain("{hasBillingAccount ? <BillingPortalButton /> : null}");
     expect(page).toContain("membershipEndsLabel(");
+    expect(page).toContain("?.pastDue === true");
   });
 });
 
