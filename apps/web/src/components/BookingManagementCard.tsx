@@ -384,16 +384,26 @@ export function BookingManagementCard({
                     Keep the same space and duration. The new booking time is
                     committed only after availability and access are ready.
                   </p>
+                  <p id={`reschedule-hours-${bookingId}`} className="mt-1 text-sm text-slate-600">
+                    Hi Coworking is open Monday to Friday, 8 AM to 5 PM. The
+                    moved booking must start and end within those hours.
+                  </p>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     <input
                       type="date"
+                      aria-label="New date"
+                      aria-describedby={`reschedule-hours-${bookingId}`}
                       value={dateValue}
                       onChange={(event) => setDateValue(event.target.value)}
                       className="rounded-xl border border-slate-200 bg-white px-3 py-3"
                     />
                     <input
                       type="time"
+                      aria-label="New start time"
+                      aria-describedby={`reschedule-hours-${bookingId}`}
                       step={1800}
+                      min="08:00"
+                      max="16:30"
                       value={timeValue}
                       onChange={(event) => setTimeValue(event.target.value)}
                       className="rounded-xl border border-slate-200 bg-white px-3 py-3"

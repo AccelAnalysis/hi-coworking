@@ -1,7 +1,9 @@
 import { onCall } from "firebase-functions/v2/https";
 import {
   CLOSE_HOUR,
+  HOURS_MESSAGE,
   LOCATION_TIME_ZONE,
+  OPEN_DAYS,
   OPEN_HOUR,
   RESOURCE_CONFIG,
   enforceBookingHorizon,
@@ -34,6 +36,8 @@ export const booking_getAvailability = onCall(async (request) => {
     operatingHours: {
       openHour: OPEN_HOUR,
       closeHour: CLOSE_HOUR,
+      openDays: OPEN_DAYS,
+      summary: HOURS_MESSAGE,
       timeZone: LOCATION_TIME_ZONE,
     },
     options,

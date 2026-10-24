@@ -10,6 +10,7 @@ import { getPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import { GUEST_BOOKING_WINDOW_DAYS, getTierById } from "./payments/stripeConfig";
 import { createAccessGrant, revokeAccessGrant, seamApiKey } from "./access";
+import { bookingHoursViolation } from "./bookingOperatingCalendar";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -17,8 +18,6 @@ const LOCATION_TIME_ZONE = "America/New_York";
 const INCREMENT_MS = 30 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOLD_MS = 15 * 60 * 1000;
-const OPEN_HOUR = 8;
-const CLOSE_HOUR = 20;
 
 type ResourceType = "SEAT" | "MODE";
 type BookingData = {
@@ -124,13 +123,9 @@ function validateWindow(start: number, end: number) {
   if (startClock.dayKey !== endDayClock.dayKey) {
     throw new HttpsError("invalid-argument", "Bookings must remain within one day.");
   }
-  const endClock = clock(end);
-  if (
-    startClock.minutes < OPEN_HOUR * 60
-    || endClock.minutes > CLOSE_HOUR * 60
-  ) {
-    throw new HttpsError("failed-precondition", "That time is outside operating hours.");
-  }
+  // Monday to Friday, 8 AM to 5 PM facility time.
+  const hoursViolation = bookingHoursViolation(start, end);
+  if (hoursViolation) throw new HttpsError("failed-precondition", hoursViolation);
   if (start < Date.now()) {
     throw new HttpsError("failed-precondition", "The new start time must be in the future.");
   }

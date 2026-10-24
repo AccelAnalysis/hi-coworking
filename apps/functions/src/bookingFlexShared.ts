@@ -8,12 +8,22 @@ import {
   getDeskMembershipTierById,
   getTierById,
 } from "./payments/stripeConfig";
+import {
+  BOOKING_CLOSE_HOUR,
+  BOOKING_HOURS_MESSAGE,
+  BOOKING_OPEN_DAYS,
+  BOOKING_OPEN_HOUR,
+  bookingHoursViolation,
+} from "./bookingOperatingCalendar";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
 export const HOLD_MS = 15 * 60 * 1000;
-export const OPEN_HOUR = 8;
-export const CLOSE_HOUR = 20;
+// Monday to Friday, 8 AM to 5 PM facility time (see bookingOperatingCalendar).
+export const OPEN_HOUR = BOOKING_OPEN_HOUR;
+export const CLOSE_HOUR = BOOKING_CLOSE_HOUR;
+export const OPEN_DAYS = BOOKING_OPEN_DAYS;
+export const HOURS_MESSAGE = BOOKING_HOURS_MESSAGE;
 export const INCREMENT_MS = 30 * 60 * 1000;
 export const LOCATION_TIME_ZONE = "America/New_York";
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -143,13 +153,8 @@ export function validateWindow(start: number, end: number) {
   if (localDayKey(start) !== localDayKey(end - 1)) {
     throw new HttpsError("invalid-argument", "Bookings must start and end on the same day.");
   }
-  const startClock = localClock(start);
-  const endClock = localClock(end);
-  const startMinutes = startClock.hour * 60 + startClock.minute;
-  const endMinutes = endClock.hour * 60 + endClock.minute;
-  if (startMinutes < OPEN_HOUR * 60 || endMinutes > CLOSE_HOUR * 60) {
-    throw new HttpsError("failed-precondition", "That time is outside current operating hours.");
-  }
+  const hoursViolation = bookingHoursViolation(start, end);
+  if (hoursViolation) throw new HttpsError("failed-precondition", hoursViolation);
   if (start < Date.now() - 60_000) {
     throw new HttpsError("failed-precondition", "That time has already passed.");
   }

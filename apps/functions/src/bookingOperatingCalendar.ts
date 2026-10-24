@@ -2,16 +2,25 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 
 export const BOOKING_TIME_ZONE = "America/New_York";
+// Jonathan's rule (Oct 24, 2026): bookings run Monday to Friday, 8 AM to 5 PM
+// facility time. Every booking path (flex desk, meeting room, reschedule,
+// admin booking for a member) and the admin-editable operating calendar stay
+// inside this outer limit. Admins can still narrow it with closures.
+export const BOOKING_OPEN_HOUR = 8;
+export const BOOKING_CLOSE_HOUR = 17;
 export const BOOKING_EARLIEST_TIME = "08:00";
-export const BOOKING_LATEST_TIME = "20:00";
+export const BOOKING_LATEST_TIME = "17:00";
+export const BOOKING_HOURS_MESSAGE = "Hi Coworking is open Monday to Friday, 8 AM to 5 PM.";
+export const BOOKING_WEEKEND_MESSAGE = `Hi Coworking is closed on weekends. ${BOOKING_HOURS_MESSAGE}`;
+export const BOOKING_OUTSIDE_HOURS_MESSAGE = `Bookings must start at 8 AM or later and end by 5 PM. ${BOOKING_HOURS_MESSAGE}`;
 
 const SETTINGS_COLLECTION = "bookingSettings";
 const SETTINGS_DOCUMENT = "operatingHours";
 const EXCEPTIONS_COLLECTION = "bookingScheduleExceptions";
 const AUDIT_COLLECTION = "bookingScheduleAudit";
 const INCREMENT_MINUTES = 30;
-const EARLIEST_MINUTES = 8 * 60;
-const LATEST_MINUTES = 20 * 60;
+const EARLIEST_MINUTES = BOOKING_OPEN_HOUR * 60;
+const LATEST_MINUTES = BOOKING_CLOSE_HOUR * 60;
 
 export type BookingDayKey = "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat";
 export type BookingScheduleExceptionKind = "OPEN" | "CLOSED";
@@ -60,6 +69,45 @@ export const DEFAULT_WEEKLY_HOURS: WeeklyHours = {
 };
 
 const DAY_KEYS: BookingDayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+export const BOOKING_OPEN_DAYS: readonly BookingDayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+
+export function isBookableWeekday(day: BookingDayKey) {
+  return BOOKING_OPEN_DAYS.includes(day);
+}
+
+const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: BOOKING_TIME_ZONE,
+  weekday: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function facilityWeekdayAndMinutes(timestamp: number) {
+  const values = Object.fromEntries(
+    weekdayFormatter.formatToParts(new Date(timestamp)).map((part) => [part.type, part.value]),
+  );
+  const day = String(values.weekday || "").slice(0, 3).toLowerCase() as BookingDayKey;
+  return { day, minutes: Number(values.hour) * 60 + Number(values.minute) };
+}
+
+/**
+ * The fixed outer limit for any booking window, independent of the editable
+ * calendar: a weekday, starting at or after 8 AM and ending by 5 PM facility
+ * time. Callers check same-day and 30-minute rules first. Returns a
+ * customer-facing reason, or null when the window is inside the limit.
+ */
+export function bookingHoursViolation(start: number, end: number): string | null {
+  const startClock = facilityWeekdayAndMinutes(start);
+  if (!isBookableWeekday(startClock.day)) return BOOKING_WEEKEND_MESSAGE;
+  const endClock = facilityWeekdayAndMinutes(end);
+  // A window ending exactly at midnight reads as 00:00 the next day.
+  const endMinutes = endClock.day === startClock.day ? endClock.minutes : 24 * 60;
+  if (startClock.minutes < EARLIEST_MINUTES || endMinutes > LATEST_MINUTES) {
+    return BOOKING_OUTSIDE_HOURS_MESSAGE;
+  }
+  return null;
+}
 
 function db() {
   if (admin.apps.length === 0) admin.initializeApp();
@@ -123,21 +171,27 @@ function normalizeDay(value: unknown, fallback: WeeklyDayHours): WeeklyDayHours 
   if (
     !Number.isFinite(openMinutes)
     || !Number.isFinite(closeMinutes)
-    || openMinutes < EARLIEST_MINUTES
-    || closeMinutes > LATEST_MINUTES
     || openMinutes % INCREMENT_MINUTES !== 0
     || closeMinutes % INCREMENT_MINUTES !== 0
     || closeMinutes <= openMinutes
   ) {
     return { ...fallback };
   }
-  return { isOpen, openTime, closeTime };
+  // Hours saved under the old 8 AM–8 PM limit are trimmed to 8 AM–5 PM.
+  const clampedOpen = Math.max(EARLIEST_MINUTES, openMinutes);
+  const clampedClose = Math.min(LATEST_MINUTES, closeMinutes);
+  if (clampedClose <= clampedOpen) return { ...fallback };
+  return { isOpen, openTime: minutesToTime(clampedOpen), closeTime: minutesToTime(clampedClose) };
 }
 
 export function normalizeWeeklyHours(value: unknown): WeeklyHours {
   const raw = (value || {}) as Record<string, unknown>;
   return Object.fromEntries(
-    DAY_KEYS.map((day) => [day, normalizeDay(raw[day], DEFAULT_WEEKLY_HOURS[day])]),
+    DAY_KEYS.map((day) => {
+      const hours = normalizeDay(raw[day], DEFAULT_WEEKLY_HOURS[day]);
+      // Weekends are always closed for bookings.
+      return [day, isBookableWeekday(day) ? hours : { ...hours, isOpen: false }];
+    }),
   ) as WeeklyHours;
 }
 
@@ -208,7 +262,10 @@ export function resolveDayIntervals(
   weekly: WeeklyHours,
   exceptions: Array<Pick<BookingScheduleException, "date" | "kind" | "allDay" | "startTime" | "endTime">>,
 ): BookingOpenInterval[] {
-  const day = weekly[weekdayForDate(date)];
+  const dayKey = weekdayForDate(date);
+  // Weekends stay closed, even with a special opening on file.
+  if (!isBookableWeekday(dayKey)) return [];
+  const day = weekly[dayKey];
   let intervals: MinuteInterval[] = day.isOpen
     ? [{ start: timeToMinutes(day.openTime), end: timeToMinutes(day.closeTime) }]
     : [];
@@ -309,6 +366,8 @@ export async function assertWindowWithinOperatingCalendar(start: number, end: nu
   if (startClock.date !== endClockForDay.date) {
     throw new HttpsError("invalid-argument", "Bookings must start and end on the same day.");
   }
+  const hoursViolation = bookingHoursViolation(start, end);
+  if (hoursViolation) throw new HttpsError("failed-precondition", hoursViolation);
   const endClock = localClock(end);
   const day = await getResolvedBookingDay(startClock.date);
   const contained = day.intervals.some((interval) => (
@@ -319,7 +378,7 @@ export async function assertWindowWithinOperatingCalendar(start: number, end: nu
     throw new HttpsError(
       "failed-precondition",
       day.isOpen
-        ? "That time falls outside the available hours for this date."
+        ? "That time falls outside the available hours for this date. Choose one of the times shown for that day."
         : "Hi Coworking is closed for bookings on this date.",
     );
   }
@@ -393,10 +452,12 @@ async function affectedBookingsForClosure(
   startTime: string | null,
   endTime: string | null,
 ) {
-  const effectiveStart = allDay ? BOOKING_EARLIEST_TIME : startTime!;
-  const effectiveEnd = allDay ? BOOKING_LATEST_TIME : endTime!;
-  const start = facilityWallTimeToTimestamp(date, effectiveStart);
-  const end = facilityWallTimeToTimestamp(date, effectiveEnd);
+  // An all-day closure covers the whole local day, so bookings made under the
+  // old 8 AM–8 PM hours are still counted.
+  const start = facilityWallTimeToTimestamp(date, allDay ? "00:00" : startTime!);
+  const end = allDay
+    ? facilityWallTimeToTimestamp(date, "23:30") + 30 * 60 * 1000
+    : facilityWallTimeToTimestamp(date, endTime!);
   const snap = await db().collection("bookings").where("end", ">", start).get();
   const affected = snap.docs
     .map((doc): AffectedBookingRecord => ({ id: doc.id, ...doc.data() }))
@@ -437,6 +498,7 @@ export const booking_adminGetOperatingCalendar = onCall(async (request) => {
     timeZone: BOOKING_TIME_ZONE,
     earliestTime: BOOKING_EARLIEST_TIME,
     latestTime: BOOKING_LATEST_TIME,
+    openDays: BOOKING_OPEN_DAYS,
     weekly,
     exceptions,
   };
@@ -454,6 +516,9 @@ export const booking_adminSetWeeklyHours = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Choose a valid day of the week.");
   }
   validateRange(openTime, closeTime);
+  if (isOpen && !isBookableWeekday(day)) {
+    throw new HttpsError("invalid-argument", `Weekends can't be opened for bookings. ${BOOKING_HOURS_MESSAGE}`);
+  }
   const ref = db().collection(SETTINGS_COLLECTION).doc(SETTINGS_DOCUMENT);
   const snap = await ref.get();
   const weekly = normalizeWeeklyHours(snap.data()?.weekly);
@@ -488,6 +553,9 @@ export const booking_adminAddException = onCall(async (request) => {
   }
   if (kind === "OPEN" && actor.role !== "admin" && actor.role !== "master") {
     throw new HttpsError("permission-denied", "Only an admin can add special opening hours.");
+  }
+  if (kind === "OPEN" && !isBookableWeekday(weekdayForDate(date))) {
+    throw new HttpsError("invalid-argument", `Special openings can't be added on a weekend. ${BOOKING_HOURS_MESSAGE}`);
   }
   const normalizedAllDay = kind === "CLOSED" && Boolean(allDay);
   let normalizedStart: string | null = null;
