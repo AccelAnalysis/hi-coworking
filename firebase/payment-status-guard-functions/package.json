@@ -3,9 +3,9 @@
   "private": true,
   "main": "lib/firebase/payment-status-guard-functions/src/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
-    "firebase-functions": "^7.2.5"
+    "firebase-functions": "^7.4.0"
   }
 }

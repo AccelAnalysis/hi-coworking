@@ -71,7 +71,7 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     expect(yaml).not.toContain("TWILIO_");
     expect(yaml).toContain("hi-coworking-plat");
     expect(yaml).toContain("FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT");
-    expect(yaml).toContain('node-version: "20"');
+    expect(yaml).toContain('node-version: "22"');
   });
 
   it("checks the Attio secret without reading or printing it, then smoke-tests with OPTIONS", () => {

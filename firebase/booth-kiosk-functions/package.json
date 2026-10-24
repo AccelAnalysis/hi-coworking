@@ -3,13 +3,13 @@
   "private": true,
   "main": "lib/firebase/booth-kiosk-functions/src/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "firebase-functions": "^7.2.5"
+    "firebase-functions": "^7.4.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.30",
