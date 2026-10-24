@@ -135,7 +135,7 @@ export function MicroCoworkingSection() {
     <section className="py-20 md:py-32 px-6 md:px-12 max-w-7xl mx-auto">
       <div className="grid md:grid-cols-2 gap-16 items-center">
         <div className="space-y-6">
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight">What is a Micro-Coworking Space?</h2>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">What is a Micro-Coworking Space?</h2>
           <p className="text-lg text-slate-600 leading-relaxed">
             It&apos;s intentionally intimate. Instead of hundreds of desks and constant noise, Hi Coworking offers a calm, efficient workspace built around how people actually work today.
           </p>

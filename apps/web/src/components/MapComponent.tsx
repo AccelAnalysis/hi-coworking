@@ -41,7 +41,7 @@ export function MapComponent() {
       L.marker(position, { icon: customIcon })
         .addTo(map)
         .bindPopup(
-          `<div style="text-align:center;font-family:sans-serif;">
+          `<div style="text-align:center;font-family:var(--font-dm-sans),Arial,sans-serif;">
             <strong>Hi Coworking</strong><br/>Carrollton, VA<br/>
             <a href="${directionsUrl}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:6px;padding:4px 12px;background:#0f172a;color:#fff;border-radius:6px;text-decoration:none;font-size:13px;">Get Directions</a>
           </div>`

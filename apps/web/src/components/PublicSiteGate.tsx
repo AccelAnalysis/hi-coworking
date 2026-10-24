@@ -24,7 +24,7 @@ function ComingSoonTopbar() {
       aria-label="Primary navigation"
     >
       <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 py-2.5 md:min-h-[4.5rem] md:px-12">
-        <a href="#launch-countdown-title" className="inline-flex min-w-0 items-center gap-2 text-slate-900 no-underline">
+        <a href="#launch-countdown-title" className="font-logo inline-flex min-w-0 items-center gap-2 text-slate-900 no-underline">
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-sm font-bold text-white">
             Hi
           </span>

@@ -171,7 +171,7 @@ export function ComingSoonExperience() {
 
       <nav className="sticky top-0 z-40 bg-white/85 backdrop-blur-md border-b border-white/30">
         <div className="max-w-7xl mx-auto px-6 md:px-12 py-4 flex items-center justify-between">
-          <div className="font-bold text-xl tracking-tight flex items-center gap-2">
+          <div className="font-logo font-bold text-xl tracking-tight flex items-center gap-2">
             <div className="w-8 h-8 bg-slate-900 rounded-2xl rounded-bl-none flex items-center justify-center text-white text-sm font-bold">Hi</div>
             <span>Coworking</span>
           </div>
@@ -195,7 +195,7 @@ export function ComingSoonExperience() {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/60 text-emerald-800 text-xs font-semibold uppercase border border-emerald-100 shadow-sm">
             <MapPin size={12} /> Space opening soon
           </div>
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-slate-900 leading-[1.05]">
+          <h1 className="font-display text-5xl md:text-7xl font-semibold tracking-tight text-slate-900 leading-[1.05]">
             Big ideas.<br />
             <span className="text-slate-400">Intimate space.</span>
           </h1>
@@ -225,7 +225,7 @@ export function ComingSoonExperience() {
       <section id="concept" className="py-16 md:py-24 px-6 md:px-12 max-w-7xl mx-auto relative z-10">
         <div className="grid md:grid-cols-2 gap-16 items-center">
           <div className="space-y-6">
-            <h2 className="text-3xl md:text-4xl font-bold">What is a Micro-Coworking Space?</h2>
+            <h2 className="font-display text-3xl md:text-4xl font-semibold">What is a Micro-Coworking Space?</h2>
             <p className="text-lg text-slate-600 leading-relaxed">
               It&apos;s intentionally intimate. Instead of hundreds of desks and constant noise, Hi Coworking offers a calm, efficient workspace built around how people actually work today.
             </p>
@@ -276,7 +276,7 @@ export function ComingSoonExperience() {
       {/* Who It's For */}
       <section className="py-16 md:py-24 px-6 md:px-12 max-w-7xl mx-auto relative z-10">
         <div className="text-center mb-12">
-          <h2 className="text-3xl font-bold mb-4">Who Hi Coworking Is For</h2>
+          <h2 className="font-display text-3xl font-semibold mb-4">Who Hi Coworking Is For</h2>
           <p className="text-slate-600">If any of this sounds familiar, you&apos;re in the right place.</p>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -302,7 +302,7 @@ export function ComingSoonExperience() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-800 text-xs font-semibold tracking-wide uppercase border border-blue-100 mb-6">
               <TrendingUp size={12} /> Why This Matters Locally
             </div>
-            <h2 className="text-3xl md:text-4xl font-bold">Why Hi Coworking Exists</h2>
+            <h2 className="font-display text-3xl md:text-4xl font-semibold">Why Hi Coworking Exists</h2>
           </div>
           <div className="grid md:grid-cols-3 gap-8">
             {([
@@ -329,7 +329,7 @@ export function ComingSoonExperience() {
           <div className="relative z-10">
             <div className="md:flex justify-between items-end mb-12 border-b border-slate-800 pb-8">
               <div className="max-w-xl">
-                <h2 className="text-3xl font-bold mb-4">What We&apos;re Building (Together)</h2>
+                <h2 className="font-display text-3xl font-semibold mb-4">What We&apos;re Building (Together)</h2>
                 <p className="text-slate-400">
                   Hi Coworking will open in phases. Some services launch immediately. Others will be added based on real interest and local demand.
                 </p>
@@ -402,7 +402,7 @@ export function ComingSoonExperience() {
       {/* Survey Callout */}
       <section id="community" className="py-12 px-6 md:px-12 max-w-7xl mx-auto relative z-10">
         <div className="bg-emerald-50/70 backdrop-blur-md rounded-2xl p-8 md:p-12 text-center max-w-4xl mx-auto border border-emerald-100 shadow-xl shadow-emerald-100/50">
-          <h2 className="text-2xl md:text-3xl font-bold text-emerald-950 mb-4">Help Shape the Space</h2>
+          <h2 className="font-display text-2xl md:text-3xl font-semibold text-emerald-950 mb-4">Help Shape the Space</h2>
           <p className="text-emerald-800 mb-8 max-w-2xl mx-auto">
             Hi Coworking isn&apos;t being designed in a vacuum. Before opening, we&apos;re collecting input from the people who will actually use the space.
           </p>
@@ -420,7 +420,7 @@ export function ComingSoonExperience() {
 
       <section id="ecosystem" className="py-16 md:py-24 px-6 md:px-12 max-w-7xl mx-auto relative z-10">
         <div className="text-center mb-12">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">While We Build the Space, Events and the Bookstore Are Open</h2>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold mb-4">While We Build the Space, Events and the Bookstore Are Open</h2>
           <p className="text-slate-600 max-w-3xl mx-auto">
             Hi Coworking is opening soon. You can reserve a seat or browse the bookstore now.
           </p>
@@ -447,7 +447,7 @@ export function ComingSoonExperience() {
       <section id="access" className="py-16 md:py-24 px-6 md:px-12 max-w-7xl mx-auto border-t border-slate-200 relative z-10">
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold mb-3">Get Early Access</h2>
+            <h2 className="font-display text-3xl font-semibold mb-3">Get Early Access</h2>
             <p className="text-slate-600">
               Join the list for launch updates and early booking invitations.
             </p>

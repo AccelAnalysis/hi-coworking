@@ -73,7 +73,7 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-dvh flex flex-col items-center justify-center bg-slate-50 p-4">
-      <Link href="/" className="flex items-center gap-2 mb-8">
+      <Link href="/" className="font-logo flex items-center gap-2 mb-8">
         <div className="w-10 h-10 bg-slate-900 rounded-2xl rounded-bl-none flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-slate-900/20">Hi</div>
         <span className="font-bold text-2xl tracking-tight text-slate-900">Coworking</span>
       </Link>

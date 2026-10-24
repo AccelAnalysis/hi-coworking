@@ -106,7 +106,7 @@ function Shelf({ title, intro, books, userId }: {
   return (
     <section className="py-10 md:py-14">
       <div className="mb-7 max-w-2xl">
-        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{title}</h2>
+        <h2 className="font-display text-2xl font-semibold tracking-tight text-slate-950">{title}</h2>
         {intro && <p className="mt-2 text-sm leading-6 text-slate-600">{intro}</p>}
       </div>
       <div className="grid gap-x-7 gap-y-10 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -156,7 +156,7 @@ export default function BookstorePage() {
       <main className="mx-auto w-full max-w-7xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
         <header className="max-w-3xl py-8 md:py-12">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">Bookstore</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.03em] text-slate-950 md:text-6xl">
+          <h1 className="font-display mt-3 text-4xl font-semibold tracking-[-0.03em] text-slate-950 md:text-6xl">
             Books worth keeping close.
           </h1>
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 md:text-lg">

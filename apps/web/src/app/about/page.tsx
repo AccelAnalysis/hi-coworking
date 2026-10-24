@@ -19,7 +19,7 @@ export default function AboutPage() {
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/50 backdrop-blur-sm text-emerald-800 text-xs font-semibold tracking-wide uppercase border border-emerald-100 shadow-sm mb-6">
           <MapPin size={12} /> Carrollton, VA
         </div>
-        <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-slate-900 mb-6">
+        <h1 className="font-display text-4xl md:text-6xl font-semibold tracking-tight text-slate-900 mb-6">
           Big ideas.<br /><span className="text-slate-400">Intimate space.</span>
         </h1>
         <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-light">

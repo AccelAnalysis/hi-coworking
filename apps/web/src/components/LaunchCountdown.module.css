@@ -27,7 +27,8 @@
   margin: 0;
   color: #0f172a;
   font-size: clamp(1.75rem, 4.5vw, 3.4rem);
-  font-weight: 750;
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 600;
   letter-spacing: -0.04em;
   line-height: 1.05;
 }
