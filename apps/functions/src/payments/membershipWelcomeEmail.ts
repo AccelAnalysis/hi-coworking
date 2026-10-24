@@ -80,8 +80,8 @@ export function renderMembershipWelcomeEmail(input: {
   const price = `${money(tier.amountCents)}/month`;
   const highlights = planHighlights(tier);
 
-  const subject = `Welcome to Hi Coworking. Your ${tier.name} membership is active`;
-  const intro = `Thank you for joining Hi Coworking. Your ${tier.name} membership (${price}) is active, and we're glad to have you with us.`;
+  const subject = `Welcome to Hi Coworking. Your ${tier.name} plan is active`;
+  const intro = `Thank you for joining Hi Coworking. Your ${tier.name} plan (${price}) is active, and we're glad to have you with us.`;
   const bookLine = tier.includedHoursPerMonth > 0
     ? `Book a desk or the meeting room online. Choose a date and we'll show the hours that are open and check live availability. Your included hours are applied automatically when you book.`
     : `Book a desk or the meeting room online whenever you want to work from the space. Choose a date and we'll show the hours that are open and check live availability.`;
@@ -113,7 +113,7 @@ export function renderMembershipWelcomeEmail(input: {
     + `<h2 style="${h2}">Your membership</h2>`
     + `<p style="${p}">${escapeHtml(renewLine).replace(escapeHtml(CONTACT_EMAIL), `<a href="mailto:${CONTACT_EMAIL}" style="${link}">${CONTACT_EMAIL}</a>`)} <a href="${escapeHtml(pricingUrl)}" style="${link}">Compare plans</a></p>`
     + `<p style="${p}">We look forward to seeing you,<br>The Hi Coworking team</p>`
-    + `<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:1.6;color:#64748b">You're receiving this email because you started a ${escapeHtml(tier.name)} membership with Hi Coworking. Hi Coworking · ${escapeHtml(SPACE_ADDRESS)} · <a href="mailto:${CONTACT_EMAIL}" style="color:#475569">${CONTACT_EMAIL}</a></p>`
+    + `<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:1.6;color:#64748b">You're receiving this email because you joined Hi Coworking on the ${escapeHtml(tier.name)} plan. Hi Coworking · ${escapeHtml(SPACE_ADDRESS)} · <a href="mailto:${CONTACT_EMAIL}" style="color:#475569">${CONTACT_EMAIL}</a></p>`
     + `</div></body></html>`;
 
   const text = [
@@ -143,7 +143,7 @@ export function renderMembershipWelcomeEmail(input: {
     "The Hi Coworking team",
     "",
     "--",
-    `You're receiving this email because you started a ${tier.name} membership with Hi Coworking.`,
+    `You're receiving this email because you joined Hi Coworking on the ${tier.name} plan.`,
     `Hi Coworking · ${SPACE_ADDRESS} · ${CONTACT_EMAIL}`,
   ].join("\n");
 

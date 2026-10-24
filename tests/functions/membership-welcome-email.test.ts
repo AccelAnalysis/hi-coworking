@@ -91,7 +91,7 @@ describe("membership welcome email copy", () => {
   it("renders every plan from the plan definitions, with HTML and plain text", () => {
     for (const tier of MEMBERSHIP_TIERS) {
       const copy = renderMembershipWelcomeEmail({ planId: tier.id, firstName: "Jordan", origin: ORIGIN })!;
-      expect(copy.subject).toBe(`Welcome to Hi Coworking. Your ${tier.name} membership is active`);
+      expect(copy.subject).toBe(`Welcome to Hi Coworking. Your ${tier.name} plan is active`);
       for (const body of [copy.html, copy.text]) {
         expect(body).toContain(tier.name);
         expect(body).toContain(`$${tier.amountCents / 100}/month`);
@@ -158,7 +158,7 @@ describe("sendMembershipWelcomeEmail", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       to: "member@example.com",
-      subject: "Welcome to Hi Coworking. Your Virtual Office membership is active",
+      subject: "Welcome to Hi Coworking. Your Virtual Office plan is active",
       idempotencyKey: "membership-welcome/cs_test_1",
       categories: ["membership_welcome", "transactional"],
     });
