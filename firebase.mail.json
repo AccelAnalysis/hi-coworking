@@ -3,7 +3,7 @@
     "source": "firebase/mail-functions",
     "region": "us-central1",
     "predeploy": [
-      "node -e \"require('fs').rmSync('firebase/mail-functions/lib',{recursive:true,force:true})\"",
+      "rm -rf firebase/mail-functions/lib",
       "npm run build --workspace functions -- --project ../../firebase/mail-functions/tsconfig.json"
     ]
   }

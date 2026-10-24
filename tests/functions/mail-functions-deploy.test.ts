@@ -50,7 +50,11 @@ describe("isolated mail functions deploy", () => {
     expect(config.functions.source).toBe("firebase/mail-functions");
     expect(config.functions.codebase).toBeUndefined();
     expect(config.functions.region).toBe("us-central1");
-    expect(config.functions.predeploy.join("\n")).toContain("firebase/mail-functions/tsconfig.json");
+    // The Firebase CLI mangles `node -e "...{...}"` predeploy commands, so keep these plain.
+    expect(config.functions.predeploy).toEqual([
+      "rm -rf firebase/mail-functions/lib",
+      "npm run build --workspace functions -- --project ../../firebase/mail-functions/tsconfig.json",
+    ]);
     expect(pkg.main).toBe("lib/firebase/mail-functions/src/index.js");
     expect(readFileSync(".gitignore", "utf8")).toContain("firebase/mail-functions/lib/");
   });
