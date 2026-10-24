@@ -13,6 +13,12 @@ export interface CampaignContext {
   eventUrl?: string;
   recipientName?: string;
   copyVariants?: Record<string, string>;
+  /** One-click unsubscribe link for this recipient (marketing email opt-out). */
+  unsubscribeUrl?: string;
+}
+
+function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function renderEmailSubject(jobType: string, ctx: CampaignContext): string {
@@ -39,7 +45,10 @@ export function renderEmailHtml(jobType: string, ctx: CampaignContext): string {
   const url = ctx.eventUrl || "https://hi-coworking.com/events";
 
   const header = `<div style="background:#0f172a;color:#fff;padding:24px 32px;border-radius:12px 12px 0 0;"><h1 style="margin:0;font-size:20px;">Hi Coworking</h1></div>`;
-  const footer = `<div style="padding:16px 32px;font-size:12px;color:#94a3b8;">You received this because you're part of the Hi Coworking community.<br/><a href="${url}" style="color:#6366f1;">View event</a></div>`;
+  const unsubscribe = ctx.unsubscribeUrl
+    ? ` &middot; <a href="${escapeAttribute(ctx.unsubscribeUrl)}" style="color:#6366f1;">Unsubscribe</a> from Hi Coworking event emails`
+    : "";
+  const footer = `<div style="padding:16px 32px;font-size:12px;color:#94a3b8;">You received this because you're part of the Hi Coworking community.<br/><a href="${url}" style="color:#6366f1;">View event</a>${unsubscribe}</div>`;
 
   let body = "";
   switch (jobType) {

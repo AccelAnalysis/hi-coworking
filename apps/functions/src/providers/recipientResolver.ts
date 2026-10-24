@@ -9,6 +9,9 @@ export interface Recipient {
   fcmToken?: string;
   /** users/{uid}.smsConsent. SMS goes only to recipients with optIn true. */
   smsConsent?: unknown;
+  /** users/{uid}.marketingOptOut / doNotContact. Campaign email skips either. */
+  marketingOptOut?: unknown;
+  doNotContact?: unknown;
 }
 
 /**
@@ -68,6 +71,8 @@ export async function resolveRecipients(
           displayName: data.displayName || data.name,
           phone: data.phone,
           smsConsent: data.smsConsent,
+          marketingOptOut: data.marketingOptOut,
+          doNotContact: data.doNotContact,
         });
       }
     }
@@ -87,6 +92,8 @@ export async function resolveRecipients(
           displayName: recipient.displayName || userData.displayName || userData.name,
           fcmToken: userData.fcmToken,
           smsConsent: userData.smsConsent,
+          marketingOptOut: userData.marketingOptOut,
+          doNotContact: userData.doNotContact,
         });
       } else {
         enriched.push(recipient);

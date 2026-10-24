@@ -194,6 +194,9 @@ export {
   nurture_updateMyPreferences,
 } from "./nurture";
 
+// Campaign email one-click unsubscribe (also in firebase/campaign-functions).
+export { marketing_unsubscribe } from "./marketingUnsubscribe";
+
 export {
   space_getPublishedCatalog,
   space_adminGetCatalog,

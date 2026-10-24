@@ -8,6 +8,7 @@ import { auth } from "@/lib/firebase";
 import { Loader2 } from "lucide-react";
 import { SmsConsentCheckbox } from "@/components/sms/SmsConsentCheckbox";
 import { HI_SMS_CONSENT_VERSION, normalizeUsMobile, setMemberSmsConsent } from "@/lib/smsConsent";
+import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH, recordTermsAcceptance } from "@/lib/termsAcceptance";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -16,12 +17,17 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!termsAccepted) {
+      setError("Please agree to the Terms of Service and Privacy Policy to create an account.");
+      return;
+    }
     const smsPhone = smsConsent ? normalizeUsMobile(phone) : null;
     if (smsConsent && !smsPhone) {
       setError("To get texts, enter a 10-digit US mobile number, or leave the text box unchecked.");
@@ -32,6 +38,8 @@ export default function RegisterPage() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(userCredential.user, { displayName: name });
+      // Record the clickwrap acceptance on the server (version + server time).
+      await recordTermsAcceptance(HI_TERMS_VERSION);
       if (smsPhone) {
         try {
           await setMemberSmsConsent({
@@ -151,9 +159,31 @@ export default function RegisterPage() {
 
             <SmsConsentCheckbox checked={smsConsent} onChange={setSmsConsent} />
 
+            <div className="flex items-start gap-3 text-sm leading-6 text-slate-600">
+              <input
+                id="terms-acceptance"
+                type="checkbox"
+                required
+                checked={termsAccepted}
+                onChange={(event) => setTermsAccepted(event.target.checked)}
+                className="mt-1 h-5 w-5 shrink-0"
+              />
+              <label htmlFor="terms-acceptance">
+                I agree to the{" "}
+                <Link href={TERMS_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link href={PRIVACY_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                  Privacy Policy
+                </Link>
+                . <span className="text-slate-500">(Required)</span>
+              </label>
+            </div>
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !termsAccepted}
               className="w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}

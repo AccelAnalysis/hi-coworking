@@ -40,13 +40,21 @@ function loadGraph(entry: string): string[] {
 }
 
 const ID = "events_processCampaignJobs";
+const UNSUBSCRIBE_ID = "marketing_unsubscribe";
 const SECRETS = ["HI_COWORKING_RESEND_API_KEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"];
 const DEPLOY =
   "npx firebase deploy --config firebase.campaign.json --project hi-coworking-plat --only functions:events_processCampaignJobs --non-interactive";
 
 type Stack = {
   params?: Array<{ name: string; type: string; default?: unknown }>;
-  endpoints?: Record<string, { secretEnvironmentVariables?: Array<{ key: string }>; scheduleTrigger?: { schedule?: string; timeZone?: string } }>;
+  endpoints?: Record<
+    string,
+    {
+      secretEnvironmentVariables?: Array<{ key: string }>;
+      scheduleTrigger?: { schedule?: string; timeZone?: string };
+      httpsTrigger?: { invoker?: string[] | null };
+    }
+  >;
 };
 
 function loadManifest(source: string): Stack {
@@ -96,10 +104,13 @@ describe("isolated campaign functions deploy", () => {
     expect(literal).toEqual(["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER"]);
   });
 
-  it("emits one scheduled function bound to the Twilio and Resend secrets only", () => {
+  it("emits the scheduled sender (Twilio and Resend secrets only) and the public unsubscribe endpoint", () => {
     expect(existsSync("firebase/campaign-functions/lib/firebase/campaign-functions/src/index.js")).toBe(true);
     const stack = loadManifest("firebase/campaign-functions");
-    expect(Object.keys(stack.endpoints ?? {})).toEqual([ID]);
+    expect(Object.keys(stack.endpoints ?? {}).sort()).toEqual([ID, UNSUBSCRIBE_ID].sort());
+    const unsubscribe = stack.endpoints![UNSUBSCRIBE_ID];
+    expect(unsubscribe.httpsTrigger?.invoker).toEqual(["public"]);
+    expect(unsubscribe.secretEnvironmentVariables ?? []).toEqual([]);
     const endpoint = stack.endpoints![ID];
     expect(endpoint.scheduleTrigger?.schedule).toBe("*/5 * * * *");
     expect(endpoint.scheduleTrigger?.timeZone).toBe("America/New_York");
@@ -122,12 +133,18 @@ describe("isolated campaign functions deploy", () => {
 
   it("documents the --only deploy and never --force", () => {
     expect(docs).toContain(DEPLOY);
+    expect(docs).toContain(
+      "--only functions:events_processCampaignJobs,functions:marketing_unsubscribe --non-interactive",
+    );
     expect(docs).not.toMatch(/firebase deploy[^\n]*--force/);
   });
 
   it("keeps the main source exporting the processor", () => {
     expect(readFileSync("apps/functions/src/eventMarketing.ts", "utf8")).toContain(
       'export { events_processCampaignJobs } from "./campaignJobs";',
+    );
+    expect(readFileSync("apps/functions/src/main.ts", "utf8")).toContain(
+      'export { marketing_unsubscribe } from "./marketingUnsubscribe";',
     );
     const root = JSON.parse(readFileSync("package.json", "utf8"));
     expect(JSON.stringify(root.scripts)).not.toContain("campaign-functions");

@@ -10,6 +10,10 @@
 // the non-secret HI_COWORKING_SMS_ENABLED switch from .env.hi-coworking-plat
 // (false: no texts until the A2P 10DLC campaign is approved). Do not import
 // eventMarketing.ts, main.ts or index.ts here.
+//
+// marketing_unsubscribe is the one-click unsubscribe endpoint linked from
+// every campaign email (List-Unsubscribe + footer). It has no secrets.
 import "./bootstrap";
 
 export { events_processCampaignJobs } from "../../../apps/functions/src/campaignJobs";
+export { marketing_unsubscribe } from "../../../apps/functions/src/marketingUnsubscribe";

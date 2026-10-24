@@ -85,16 +85,50 @@ npm ci
 npx firebase deploy --config firebase.campaign.json --project hi-coworking-plat --only functions:events_processCampaignJobs --non-interactive
 ```
 
+The bundle also holds `marketing_unsubscribe`, the one-click unsubscribe
+endpoint every campaign email links to. Deploy both together so the links in
+new mail always work:
+
+```bash
+npx firebase deploy --config firebase.campaign.json --project hi-coworking-plat --only functions:events_processCampaignJobs,functions:marketing_unsubscribe --non-interactive
+```
+
 `firebase.campaign.json` builds the bundle in its predeploy step. Always pass
 the `--only` filter: the bundle deploys into the default codebase, so a deploy
 without it would offer to delete every other default function. Never pass
 `--force`.
+
+## Marketing email opt-out
+
+Campaign email is marketing mail and stays opt-out:
+
+- Recipients with `users/{uid}.marketingOptOut` or `doNotContact`, or whose
+  address is in `nurtureSuppressions/{sha256(email)}`, are skipped.
+- Every message carries a per-address unsubscribe link in the footer plus
+  `List-Unsubscribe: <https://...>` and
+  `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058).
+- The link points to `marketing_unsubscribe?t=<token>`. Tokens are random
+  (192-bit) and stored in `marketingUnsubscribeTokens/{emailHash}`. GET shows
+  a confirmation page and changes nothing; POST (the button, or a mail
+  client's one-click request) writes the `nurtureSuppressions` record, marks
+  nurture enrollments for that address `SUPPRESSED`, and sets
+  `users/{uid}.marketingOptOut = true` for members. One unsubscribe stops
+  both nurture follow-ups and event campaigns, and the existing
+  /preferences page can turn follow-ups back on.
+- No `mailto:` unsubscribe is listed because no mailbox processes those
+  requests automatically.
+- `HI_COWORKING_UNSUBSCRIBE_URL` (https only) overrides the link base, for
+  example a Hosting rewrite. By default it is the function's
+  `cloudfunctions.net` URL.
 
 ## Rollback
 
 ```bash
 npx firebase functions:delete events_processCampaignJobs --region us-central1 --project hi-coworking-plat
 ```
+
+Keep `marketing_unsubscribe` deployed after a rollback: mail already sent
+still links to it.
 
 Deleting the function removes its Scheduler job. Queued `campaignJobs` stay in
 Firestore untouched.
