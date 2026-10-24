@@ -111,7 +111,7 @@ describe("membership welcome email copy", () => {
   it("states Virtual Office pricing exactly and never claims included desk hours", () => {
     const tier = getTierById("virtual")!;
     const copy = renderMembershipWelcomeEmail({ planId: "virtual", origin: ORIGIN })!;
-    expect(copy.text).toContain("Coworking desks whenever you need one, at $17.50/hr");
+    expect(copy.text).toContain("A coworking desk whenever you need one, at $17.50/hr");
     expect(copy.text).not.toMatch(/hours included/i);
     expect(copy.text).not.toMatch(/included hours/i);
     expect(copy.text).toContain("Hi there,");
