@@ -40,7 +40,47 @@ under the same name would break those confirmations.
 2. Name it, for example, `hi-coworking-plat functions`.
 3. Permission: **Sending access**. Domain: **hi-coworking.com**.
 4. Copy the key once, run the `secrets:set` command above, and paste it at the prompt.
-5. Redeploy the three functions above so they bind the new secret version.
+5. Redeploy the mail workers so they bind the new secret version (see **Deploy** below).
+
+## Deploy
+
+Deploy the mail workers from the isolated source in `firebase/mail-functions`,
+not from `apps/functions`. The main source also loads `eventMarketing.ts`,
+which declares `TWILIO_*`, `LINKEDIN_*` and `X_*` secrets. The Firebase CLI
+asks for every secret declared in the source it analyzes, even with `--only`,
+so a deploy from `apps/functions` fails with "no value for the secret:
+TWILIO_ACCOUNT_SID" until Twilio is set up. The isolated source declares only
+`HI_COWORKING_RESEND_API_KEY`.
+
+From a clean checkout of `main`:
+
+```bash
+npm ci
+npx firebase deploy --config firebase.mail.json --project hi-coworking-plat \
+  --only functions:nurture_process,functions:events_v2ProcessNotificationJobs --non-interactive
+```
+
+`firebase.mail.json` builds the bundle in its predeploy step. Always pass the
+`--only` filter: the bundle deploys into the default codebase, so a deploy
+without it would offer to delete every other default function (the CLI refuses
+that in non-interactive mode without `--force`; never pass `--force`).
+
+The manual GitHub workflow **Hi Coworking Firebase mail functions** runs the
+same deploy from `main` after you type `deploy mail functions`. It never runs on
+push or merge.
+
+`events_processCampaignJobs` is not in this bundle. It binds the Twilio
+secrets, and it only sends jobs created by `events_enqueueCampaignJobs`, which
+is not deployed either. Deploy both from the main source when Twilio launches.
+
+### Stale event notifications
+
+`events_v2ProcessNotificationJobs` expires, instead of sending, any reminder
+whose event has already started and any registration confirmation or waitlist
+notice whose event has already ended (status `expired`). Jobs queue up while
+the worker is not deployed, so the first run after a deploy would otherwise
+send reminders for past events. Follow-ups, cancellations and refund notices
+still send late.
 
 ## Errors and logging
 

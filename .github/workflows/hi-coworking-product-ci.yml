@@ -15,11 +15,14 @@ on:
       - "firebase/payment-status-guard-functions/**"
       - "firebase/expo-lead-functions/**"
       - "firebase/admin-event-functions/**"
+      - "firebase/mail-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-calendar.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
       - "firebase.expo-lead.json"
+      - "firebase.mail.json"
+      - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-expo-lead-function.yml"
       - "tests/functions/**"
       - "tests/rules/**"
@@ -90,6 +93,9 @@ jobs:
       - name: Build isolated admin event deploy bundle
         run: npm run build:admin-event-deploy
 
+      - name: Build isolated mail deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/mail-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -116,6 +122,8 @@ jobs:
           tests/functions/power-now-interest.test.ts
           tests/functions/power-now-pitch-fields.test.ts
           tests/functions/expo-lead-deploy-workflow.test.ts
+          tests/functions/mail-functions-deploy.test.ts
+          tests/functions/resend-email-provider.test.ts
           tests/web/public-rfx-quarantine.test.ts
 
       - name: Run active transaction integration tests

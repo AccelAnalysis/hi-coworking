@@ -174,6 +174,24 @@ function notificationCopy(type: string, event: EventDocV2, job: Record<string, u
   }
 }
 
+// Jobs that only make sense before an event. If the worker was down (or not
+// yet deployed) when they came due, sending them late would tell people about
+// an event that already started or ended, so they are expired instead.
+const BEFORE_START_TYPES = new Set(["EVENT_REMINDER_24H", "EVENT_REMINDER_1H"]);
+const BEFORE_END_TYPES = new Set(["REGISTRATION_CONFIRMED", "WAITLIST_JOINED", "WAITLIST_OFFER"]);
+
+export function isStaleNotification(
+  type: string,
+  event: Pick<EventDocV2, "startTime" | "endTime">,
+  now: number = Date.now(),
+): boolean {
+  const startTime = Number(event.startTime);
+  const endTime = Number(event.endTime) || startTime;
+  if (BEFORE_START_TYPES.has(type)) return Number.isFinite(startTime) && now >= startTime;
+  if (BEFORE_END_TYPES.has(type)) return Number.isFinite(endTime) && now >= endTime;
+  return false;
+}
+
 export const events_v2ProcessNotificationJobs = onSchedule(
   {
     schedule: "*/5 * * * *",
@@ -200,6 +218,10 @@ export const events_v2ProcessNotificationJobs = onSchedule(
         if (!eventSnap.exists) throw new Error("event-not-found");
         const event = eventSnap.data() as EventDocV2;
         const type = String(job.type || "");
+        if (isStaleNotification(type, event)) {
+          await doc.ref.set({ status: "expired", processedAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+          continue;
+        }
         if ((type.startsWith("EVENT_REMINDER") || type === "EVENT_FOLLOW_UP") && event.status === "cancelled") {
           await doc.ref.set({ status: "cancelled", processedAt: Date.now() }, { merge: true });
           continue;
