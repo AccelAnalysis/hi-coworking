@@ -111,6 +111,21 @@ describe("subscriptionUpdatedUpdates", () => {
       .toEqual({ apply: false, reason: "no_change", unknownPrice: false });
   });
 
+  it("advances the watermark on a newer no-op event so a delayed older event can't restore stale state", () => {
+    // Member scheduled a cancellation (t1) then resumed (t2); t2 arrives first.
+    const t1 = (CREATED + 10) * 1000;
+    const t2 = (CREATED + 20) * 1000;
+    const user = { ...member, lastSubscriptionEventAt: CREATED * 1000 };
+    const resumeFirst = subscriptionUpdatedUpdates(user, info({ eventCreatedMs: t2 }), now);
+    expect(resumeFirst).toEqual({ apply: true, unknownPrice: false, updates: { lastSubscriptionEventAt: t2, updatedAt: now } });
+    const delayedCancel = subscriptionUpdatedUpdates(
+      { ...user, lastSubscriptionEventAt: t2 },
+      info({ eventCreatedMs: t1, cancelAtPeriodEnd: true, cancelAtMs: PERIOD_END * 1000 }),
+      now,
+    );
+    expect(delayedCancel).toEqual({ apply: false, reason: "stale_event" });
+  });
+
   it("never revives or touches a cancelled, expired or non-member", () => {
     for (const membershipStatus of ["cancelled", "expired", "none", undefined]) {
       expect(subscriptionUpdatedUpdates({ ...member, membershipStatus }, info({ priceId: PLUS }), now))

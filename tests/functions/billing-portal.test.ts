@@ -18,10 +18,21 @@ function deps(overrides: Partial<BillingLookupDeps> = {}): BillingLookupDeps {
 }
 
 describe("resolveBillingCustomerId", () => {
-  it("prefers the customer recorded on the user doc", async () => {
-    const d = deps({ getUser: vi.fn().mockResolvedValue({ stripeCustomerId: "cus_user", features: { stripeSubscriptionId: "sub_1" } }) });
+  it("prefers the current subscription's customer over a cached one", async () => {
+    const d = deps({
+      getUser: vi.fn().mockResolvedValue({ stripeCustomerId: "cus_old", features: { stripeSubscriptionId: "sub_new" } }),
+      retrieveSubscription: vi.fn().mockResolvedValue({ customer: "cus_new", metadata: { uid: "u1" } }),
+      listMembershipPaymentRefs: vi.fn().mockResolvedValue([{ stripeCustomerId: "cus_older" }]),
+    });
+    expect(await resolveBillingCustomerId("u1", d)).toBe("cus_new");
+    expect(d.retrieveSubscription).toHaveBeenCalledWith("sub_new");
+  });
+
+  it("uses the cached customer only when no subscription or payment names one", async () => {
+    const d = deps({ getUser: vi.fn().mockResolvedValue({ stripeCustomerId: "cus_user" }) });
     expect(await resolveBillingCustomerId("u1", d)).toBe("cus_user");
-    expect(d.retrieveSubscription).not.toHaveBeenCalled();
+    const f = deps({ getUser: vi.fn().mockResolvedValue({ features: { stripeCustomerId: "cus_feat" } }) });
+    expect(await resolveBillingCustomerId("u1", f)).toBe("cus_feat");
   });
 
   it("falls back to the stored subscription's customer when it belongs to this member", async () => {
@@ -40,8 +51,9 @@ describe("resolveBillingCustomerId", () => {
     expect(await resolveBillingCustomerId("u1", d)).toBe("");
   });
 
-  it("then uses the newest membership payment's customer", async () => {
+  it("then uses the newest membership payment's customer, ahead of a cached one", async () => {
     const d = deps({
+      getUser: vi.fn().mockResolvedValue({ stripeCustomerId: "cus_old" }),
       listMembershipPaymentRefs: vi.fn().mockResolvedValue([{ stripeCustomerId: "" }, { stripeCustomerId: "cus_payment" }]),
     });
     expect(await resolveBillingCustomerId("u1", d)).toBe("cus_payment");

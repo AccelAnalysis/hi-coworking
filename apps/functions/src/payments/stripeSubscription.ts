@@ -109,7 +109,8 @@ export function storedSubscriptionId(user: MemberSubscriptionState): string {
  * change anything: the member isn't current (cancelled, expired, none), the
  * event is for a different subscription than the one on file, the
  * subscription is already ending/ended (deleted handles that), the event is
- * older than one already applied, or nothing changed.
+ * older than one already applied, or nothing changed (a newer event with no
+ * billing change still records its timestamp).
  */
 export function subscriptionUpdatedUpdates(
   user: MemberSubscriptionState,
@@ -148,7 +149,12 @@ export function subscriptionUpdatedUpdates(
   }
 
   if (Object.keys(updates).length === 0) {
-    return { apply: false, reason: "no_change", unknownPrice };
+    // Nothing billing-related changed, but a newer event still moves the
+    // watermark so an older, delayed event can't later restore stale state
+    // (e.g. a resume arriving before the cancellation it undoes).
+    if (!info.eventCreatedMs || info.eventCreatedMs <= (user.lastSubscriptionEventAt || 0)) {
+      return { apply: false, reason: "no_change", unknownPrice };
+    }
   }
   if (info.eventCreatedMs) updates.lastSubscriptionEventAt = info.eventCreatedMs;
   updates.updatedAt = now;

@@ -64,14 +64,11 @@ function customerIdOf(value: unknown): string {
 export async function resolveBillingCustomerId(uid: string, deps: BillingLookupDeps): Promise<string> {
   const user = await deps.getUser(uid);
   if (!user) return "";
-
-  const direct = str(user.stripeCustomerId);
-  if (direct.startsWith("cus_")) return direct;
-
   const features = (user.features || {}) as Record<string, unknown>;
-  const fromFeatures = str(features.stripeCustomerId);
-  if (fromFeatures.startsWith("cus_")) return fromFeatures;
 
+  // 1. The customer on the member's current subscription. A returning member
+  //    can get a new Stripe customer at Checkout (customer_email only), so the
+  //    subscription on file is the source of truth, ahead of any cached ID.
   const subscriptionIds = [str(features.stripeSubscriptionId), str(user.stripeSubscriptionId)]
     .filter((id, i, all) => id.startsWith("sub_") && all.indexOf(id) === i);
   for (const subscriptionId of subscriptionIds) {
@@ -89,9 +86,15 @@ export async function resolveBillingCustomerId(uid: string, deps: BillingLookupD
     }
   }
 
+  // 2. The newest membership payment (written at Checkout).
   for (const refs of await deps.listMembershipPaymentRefs(uid)) {
     const customerId = str(refs.stripeCustomerId);
     if (customerId.startsWith("cus_")) return customerId;
+  }
+
+  // 3. Cached customer IDs on the user doc (webhook or admin tools).
+  for (const cached of [str(user.stripeCustomerId), str(features.stripeCustomerId)]) {
+    if (cached.startsWith("cus_")) return cached;
   }
   return "";
 }

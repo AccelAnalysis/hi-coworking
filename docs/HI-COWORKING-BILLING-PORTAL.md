@@ -31,12 +31,14 @@ npx firebase deploy --config firebase.core.json --project hi-coworking-plat --on
 ## How the callable finds the customer
 
 Only server-written fields are used (members can't write them under
-`firestore.rules`), in order: `users/{uid}.stripeCustomerId`,
-`users/{uid}.features.stripeCustomerId`, the customer on the stored
-subscription (`features.stripeSubscriptionId` / `stripeSubscriptionId`) when its
-`metadata.uid` is empty or matches the caller, then
-`payments.providerRefs.stripeCustomerId` on the member's newest membership
-payment. It never looks customers up by email. With no customer it returns
+`firestore.rules`), in order: the customer on the member's current
+subscription (`features.stripeSubscriptionId` / `stripeSubscriptionId`, used
+only when its `metadata.uid` is empty or matches the caller), then
+`payments.providerRefs.stripeCustomerId` on the newest membership payment, then
+the cached `users/{uid}.stripeCustomerId` / `features.stripeCustomerId`. The
+subscription comes first because a returning member can get a new Stripe
+customer at Checkout (it passes `customer_email` only), so a cached ID may be stale.
+It never looks customers up by email. With no customer it returns
 `failed-precondition` and the message "We couldn't find billing details for
 your account. Email hicoworking@accelanalysis.com and we'll help."
 
@@ -55,7 +57,9 @@ ends only on `customer.subscription.deleted`, and payment state stays with the
 invoice events. It skips members who are not active/trial/pastDue (a cancelled
 membership is never revived), subscriptions that are canceled or incomplete,
 events for a different subscription than the one on file, events older than
-the last one applied (`lastSubscriptionEventAt`), and no-op updates.
+the last one applied (`lastSubscriptionEventAt`), and no-op updates. A newer
+event that changes nothing still advances `lastSubscriptionEventAt`, so a
+delayed older event can't restore a cancellation or plan the member undid.
 
 ## Stripe setup (run once, after approval)
 
