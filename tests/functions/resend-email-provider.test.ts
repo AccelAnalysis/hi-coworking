@@ -213,7 +213,7 @@ describe("Hi Coworking mail wiring", () => {
 
     const nurture = read("apps/functions/src/nurture.ts");
     const notifications = read("apps/functions/src/eventsV2/notifications.ts");
-    const marketing = read("apps/functions/src/eventMarketing.ts");
+    const marketing = read("apps/functions/src/campaignJobs.ts");
     for (const source of [nurture, notifications, marketing]) {
       expect(source).toMatch(/import \{ resendApiKey \} from "\.\.?\/providers\/emailSecret"/);
       expect(source).toContain("new ResendEmailProvider(");
@@ -225,7 +225,7 @@ describe("Hi Coworking mail wiring", () => {
 
     const users = walk("apps/functions/src").filter((file) => read(file).includes("providers/emailSecret"));
     expect(users.map((file) => file.replace(/\\/g, "/")).sort()).toEqual([
-      "apps/functions/src/eventMarketing.ts",
+      "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
       "apps/functions/src/nurture.ts",
     ]);

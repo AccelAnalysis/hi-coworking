@@ -4,73 +4,19 @@ import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
-import { ResendEmailProvider } from "./providers/emailProvider";
-import { resendApiKey } from "./providers/emailSecret";
-import { TwilioSmsProvider } from "./providers/smsProvider";
-import { FcmPushProvider } from "./providers/pushProvider";
 import { getSocialProvider } from "./providers/socialProvider";
-import { resolveRecipients } from "./providers/recipientResolver";
-import { smsEligibleRecipients } from "./providers/smsCompliance";
-import { recordSmsOptOuts } from "./providers/smsOptOut";
-import {
-  renderEmailSubject,
-  renderEmailHtml,
-  renderSmsBody,
-  renderPushTitle,
-  renderPushBody,
-  type CampaignContext,
-} from "./providers/campaignRenderer";
+import type { CampaignJobDoc, EventCampaignDoc } from "./campaignJobs";
 
-// Secrets for campaign delivery providers
-const twilioAccountSid = defineSecret("TWILIO_ACCOUNT_SID");
-const twilioAuthToken = defineSecret("TWILIO_AUTH_TOKEN");
-const twilioFromNumber = defineSecret("TWILIO_FROM_NUMBER");
+// events_processCampaignJobs lives in campaignJobs.ts so the isolated
+// campaign bundle (firebase/campaign-functions) can deploy it without the
+// LinkedIn and X secrets declared below. Re-exported for the main source.
+export { events_processCampaignJobs } from "./campaignJobs";
 
 // Secrets for social providers
 const linkedinClientId = defineSecret("LINKEDIN_CLIENT_ID");
 const linkedinClientSecret = defineSecret("LINKEDIN_CLIENT_SECRET");
 const xClientId = defineSecret("X_CLIENT_ID");
 const xClientSecret = defineSecret("X_CLIENT_SECRET");
-
-type CampaignStatus = "draft" | "scheduled" | "active" | "paused" | "completed";
-type CampaignJobStatus = "pending" | "processing" | "sent" | "failed";
-
-interface EventCampaignDoc {
-  id: string;
-  eventId?: string;
-  seriesId?: string;
-  status: CampaignStatus;
-  channels: Array<"email" | "sms" | "push" | "in_app" | "social">;
-  audienceRules?: {
-    membershipTiers?: string[];
-    tags?: string[];
-    interests?: string[];
-  };
-  schedule?: {
-    announceAt?: number;
-    reminderOffsetsHours?: number[];
-    followUpAt?: number;
-  };
-  copyVariants?: Record<string, string>;
-  stats?: {
-    impressions?: number;
-    clicks?: number;
-    registrations?: number;
-    conversionRate?: number;
-  };
-}
-
-interface CampaignJobDoc {
-  id: string;
-  campaignId: string;
-  type: "announce" | "reminder" | "starting_soon" | "follow_up";
-  scheduledFor: number;
-  status: CampaignJobStatus;
-  recipientCount: number;
-  createdAt: number;
-  processedAt?: number;
-  error?: string;
-}
 
 interface EventShareKitDoc {
   id: string;
@@ -115,42 +61,6 @@ function toJobId(campaignId: string, type: string, scheduledFor: number) {
 function clampScheduleTime(value: number | undefined): number | null {
   if (!value || !Number.isFinite(value) || value <= 0) return null;
   return Math.floor(value);
-}
-
-async function buildCampaignContext(
-  campaign: EventCampaignDoc
-): Promise<CampaignContext> {
-  const db = getDb();
-  let eventTitle: string | undefined;
-  let eventDate: string | undefined;
-  let eventLocation: string | undefined;
-  let eventUrl: string | undefined;
-
-  if (campaign.eventId) {
-    const eventSnap = await db.collection("events").doc(campaign.eventId).get();
-    const eventData = eventSnap.data();
-    if (eventData) {
-      eventTitle = eventData.title;
-      eventDate = new Date(eventData.startTime).toLocaleDateString("en-US", {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
-      eventLocation = eventData.location;
-      eventUrl = `https://hi-coworking.com/events/detail?id=${campaign.eventId}`;
-    }
-  }
-
-  return {
-    eventTitle,
-    eventDate,
-    eventLocation,
-    eventUrl,
-    copyVariants: campaign.copyVariants,
-  };
 }
 
 // --- Enqueue ---
@@ -225,201 +135,6 @@ export const events_enqueueCampaignJobs = onCall(async (request) => {
 
   return { success: true, enqueued: candidateJobs.length };
 });
-
-// --- Campaign Job Processor ---
-
-async function claimPendingCampaignJob(jobRef: FirebaseFirestore.DocumentReference): Promise<CampaignJobDoc | null> {
-  const db = getDb();
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(jobRef);
-    if (!snap.exists) return null;
-    const job = snap.data() as CampaignJobDoc;
-    if (job.status !== "pending" || job.scheduledFor > Date.now()) {
-      return null;
-    }
-    tx.set(jobRef, { status: "processing" as CampaignJobStatus, processedAt: Date.now() }, { merge: true });
-    return job;
-  });
-}
-
-export const events_processCampaignJobs = onSchedule(
-  {
-    schedule: "*/5 * * * *",
-    timeZone: "America/New_York",
-    memory: "512MiB",
-    secrets: [resendApiKey, twilioAccountSid, twilioAuthToken, twilioFromNumber],
-  },
-  async () => {
-    const db = getDb();
-    const now = Date.now();
-    const pendingSnap = await db
-      .collection("campaignJobs")
-      .where("status", "==", "pending")
-      .where("scheduledFor", "<=", now)
-      .orderBy("scheduledFor", "asc")
-      .limit(25)
-      .get();
-
-    // Initialize providers (only if secrets are available)
-    const emailProvider = resendApiKey.value()
-      ? new ResendEmailProvider(resendApiKey.value())
-      : null;
-    const smsProvider =
-      twilioAccountSid.value() && twilioAuthToken.value() && twilioFromNumber.value()
-        ? new TwilioSmsProvider(twilioAccountSid.value(), twilioAuthToken.value(), twilioFromNumber.value())
-        : null;
-    const pushProvider = new FcmPushProvider();
-
-    for (const jobDoc of pendingSnap.docs) {
-      const claimed = await claimPendingCampaignJob(jobDoc.ref);
-      if (!claimed) continue;
-
-      try {
-        const campaignSnap = await db.collection("eventCampaigns").doc(claimed.campaignId).get();
-        if (!campaignSnap.exists) {
-          throw new Error("campaign-not-found");
-        }
-
-        const campaign = campaignSnap.data() as EventCampaignDoc;
-        const ctx = await buildCampaignContext(campaign);
-
-        // Resolve recipients
-        const recipients = await resolveRecipients(
-          campaign.id,
-          claimed.type,
-          campaign.eventId,
-          campaign.audienceRules
-        );
-
-        let totalSent = 0;
-        let totalFailed = 0;
-
-        // --- Email delivery via Resend ---
-        if (campaign.channels.includes("email") && emailProvider) {
-          const emailRecipients = recipients.filter((r) => r.email);
-          if (emailRecipients.length > 0) {
-            const messages = emailRecipients.map((r) => ({
-              to: r.email!,
-              subject: renderEmailSubject(claimed.type, { ...ctx, recipientName: r.displayName }),
-              html: renderEmailHtml(claimed.type, { ...ctx, recipientName: r.displayName }),
-            }));
-            const result = await emailProvider.sendBatch(messages);
-            totalSent += result.sent;
-            totalFailed += result.failed;
-            logger.info("Email batch sent", { sent: result.sent, failed: result.failed });
-          }
-        }
-
-        // --- SMS delivery via Twilio ---
-        // Only recipients with a recorded SMS opt-in (users/{uid}.smsConsent),
-        // for announcements, reminders and follow-ups alike. A profile phone
-        // number alone is never enough.
-        if (campaign.channels.includes("sms") && smsProvider) {
-          const smsRecipients = smsEligibleRecipients(recipients);
-          if (smsRecipients.length > 0) {
-            const messages = smsRecipients.map((r) => ({
-              to: r.phone,
-              body: renderSmsBody(claimed.type, ctx),
-            }));
-            const result = await smsProvider.sendBatch(messages);
-            totalSent += result.sent;
-            totalFailed += result.failed;
-            await recordSmsOptOuts(db, smsRecipients, result.optedOut);
-            logger.info("SMS batch sent", {
-              sent: result.sent,
-              failed: result.failed,
-              optedOut: result.optedOut.length,
-              skippedWithoutConsent: recipients.length - smsRecipients.length,
-            });
-          }
-        }
-
-        // --- Push notifications via FCM ---
-        if (campaign.channels.includes("push")) {
-          const pushRecipients = recipients.filter((r) => r.fcmToken);
-          if (pushRecipients.length > 0) {
-            const messages = pushRecipients.map((r) => ({
-              token: r.fcmToken!,
-              title: renderPushTitle(claimed.type, ctx),
-              body: renderPushBody(claimed.type, ctx),
-              link: ctx.eventUrl,
-              data: {
-                campaignId: campaign.id,
-                jobType: claimed.type,
-                ...(campaign.eventId ? { eventId: campaign.eventId } : {}),
-              },
-            }));
-            const result = await pushProvider.sendBatch(messages);
-            totalSent += result.sent;
-            totalFailed += result.failed;
-            logger.info("Push batch sent", { sent: result.sent, failed: result.failed });
-          }
-        }
-
-        // --- In-app notifications ---
-        if (campaign.channels.includes("in_app")) {
-          const batch = db.batch();
-          for (const r of recipients) {
-            const notifRef = db
-              .collection("users")
-              .doc(r.uid)
-              .collection("notifications")
-              .doc(`campaign_${claimed.id}`);
-            batch.set(notifRef, {
-              id: `campaign_${claimed.id}`,
-              type: "event_campaign",
-              title: renderPushTitle(claimed.type, ctx),
-              body: renderPushBody(claimed.type, ctx),
-              link: ctx.eventUrl || "/events",
-              read: false,
-              createdAt: Date.now(),
-            }, { merge: true });
-          }
-          await batch.commit();
-          totalSent += recipients.length;
-        }
-
-        // Update job status
-        await jobDoc.ref.set(
-          {
-            status: "sent",
-            recipientCount: totalSent,
-            processedAt: Date.now(),
-            error: FieldValue.delete(),
-          },
-          { merge: true }
-        );
-
-        // Update campaign stats
-        await campaignSnap.ref.set(
-          {
-            status: "active",
-            updatedAt: Date.now(),
-            "stats.impressions": FieldValue.increment(totalSent),
-          },
-          { merge: true }
-        );
-
-        logger.info("Campaign job processed", {
-          campaignId: claimed.campaignId,
-          jobId: claimed.id,
-          sent: totalSent,
-          failed: totalFailed,
-        });
-      } catch (err) {
-        logger.error("Campaign job failed", { jobId: claimed.id, err });
-        await jobDoc.ref.set(
-          {
-            status: "failed",
-            processedAt: Date.now(),
-            error: err instanceof Error ? err.message : "unknown-error",
-          },
-          { merge: true }
-        );
-      }
-    }
-  }
-);
 
 // --- Share Kit Generator ---
 

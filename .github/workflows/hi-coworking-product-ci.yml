@@ -17,12 +17,14 @@ on:
       - "firebase/admin-event-functions/**"
       - "firebase/mail-functions/**"
       - "firebase/core-functions/**"
+      - "firebase/campaign-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-calendar.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
       - "firebase.expo-lead.json"
       - "firebase.mail.json"
+      - "firebase.campaign.json"
       - "firebase.core.json"
       - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-core-functions.yml"
@@ -102,6 +104,9 @@ jobs:
       - name: Build isolated core deploy bundle
         run: npm run build --workspace functions -- --project ../../firebase/core-functions/tsconfig.json
 
+      - name: Build isolated campaign deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/campaign-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -130,6 +135,7 @@ jobs:
           tests/functions/expo-lead-deploy-workflow.test.ts
           tests/functions/mail-functions-deploy.test.ts
           tests/functions/core-functions-deploy.test.ts
+          tests/functions/campaign-functions-deploy.test.ts
           tests/functions/resend-email-provider.test.ts
           tests/functions/sms-compliance.test.ts
           tests/web/public-rfx-quarantine.test.ts
