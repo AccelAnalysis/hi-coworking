@@ -206,7 +206,7 @@ describe("ResendEmailProvider", () => {
 describe("Hi Coworking mail wiring", () => {
   const read = (path: string) => readFileSync(path, "utf8");
 
-  it("binds the dedicated Resend secret only on the three mail workers", () => {
+  it("binds the dedicated Resend secret only on the three mail workers and stripe_webhook", () => {
     expect(RESEND_API_KEY_SECRET_NAME).toBe("HI_COWORKING_RESEND_API_KEY");
     const secretModule = read("apps/functions/src/providers/emailSecret.ts");
     expect(secretModule).toContain("defineSecret(RESEND_API_KEY_SECRET_NAME)");
@@ -227,8 +227,13 @@ describe("Hi Coworking mail wiring", () => {
     expect(users.map((file) => file.replace(/\\/g, "/")).sort()).toEqual([
       "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
+      "apps/functions/src/index.ts",
       "apps/functions/src/nurture.ts",
     ]);
+    // stripe_webhook (core bundle) binds it for the membership welcome email.
+    const index = read("apps/functions/src/index.ts");
+    expect(index).toContain('import { resendApiKey } from "./providers/emailSecret";');
+    expect(index).toContain("secrets: [stripeSecretKey, stripeWebhookSecret, intuitClientId, intuitClientSecret, resendApiKey]");
   });
 
   it("leaves no SendGrid code, config or docs behind", () => {

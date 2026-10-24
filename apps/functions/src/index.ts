@@ -7,6 +7,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { provisionAuthUser } from "./authProvisioning";
+import { resendApiKey } from "./providers/emailSecret";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
 
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
@@ -770,7 +771,7 @@ export const stripe_createCheckoutSession = onCall(
  * URL: https://<region>-<project>.cloudfunctions.net/stripe_webhook
  */
 export const stripe_webhook = onRequest(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, intuitClientId, intuitClientSecret], cors: false },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, intuitClientId, intuitClientSecret, resendApiKey], cors: false },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).json({ error: "Method not allowed" });
@@ -783,7 +784,8 @@ export const stripe_webhook = onRequest(
       stripeSecretKey.value(),
       stripeWebhookSecret.value(),
       intuitClientId.value(),
-      intuitClientSecret.value()
+      intuitClientSecret.value(),
+      resendApiKey.value()
     );
 
     res.status(result.status).json(result.body);

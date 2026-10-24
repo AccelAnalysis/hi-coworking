@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
           missing=()
-          for name in RECAPTCHA_SECRET_KEY STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET INTUIT_CLIENT_ID INTUIT_CLIENT_SECRET SAM_GOV_API_KEY SEAM_API_KEY SEAM_WEBHOOK_SECRET; do
+          for name in HI_COWORKING_RESEND_API_KEY RECAPTCHA_SECRET_KEY STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET INTUIT_CLIENT_ID INTUIT_CLIENT_SECRET SAM_GOV_API_KEY SEAM_API_KEY SEAM_WEBHOOK_SECRET; do
             enabled="$(gcloud secrets versions list "${name}" --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1 || true)"
             if [[ -z "${enabled}" ]]; then missing+=("${name}"); fi
           done
