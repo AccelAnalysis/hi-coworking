@@ -71,3 +71,30 @@ export const WELCOME_NEXT_STEPS: NextStep[] = [
     detail: "We're happy to help you get set up.",
   },
 ];
+
+export const BILLING_HELP_EMAIL = "hicoworking@accelanalysis.com";
+
+/** Shown when the billing portal can't be opened. Never echoes server detail. */
+export const BILLING_PORTAL_ERROR = `We couldn't open billing right now. Please try again in a moment, or email ${BILLING_HELP_EMAIL} and we'll help.`;
+
+/**
+ * "Ends on {date}" for a membership set to cancel at the end of the period.
+ * The webhook records cancelAtPeriodEnd and cancelAt (ms) from Stripe's
+ * customer.subscription.updated event. Returns null when nothing is scheduled.
+ */
+export function membershipEndsLabel(
+  input: { cancelAtPeriodEnd?: unknown; cancelAt?: unknown },
+  timeZone = "America/New_York",
+): string | null {
+  const cancelAt = typeof input.cancelAt === "number" && Number.isFinite(input.cancelAt) && input.cancelAt > 0
+    ? input.cancelAt
+    : null;
+  if (!cancelAt) return null;
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(cancelAt));
+  return `Ends on ${date}`;
+}

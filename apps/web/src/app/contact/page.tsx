@@ -109,10 +109,10 @@ export default function ContactPage() {
           {/* Contact Info */}
           <div className="space-y-6">
             {[
-              { icon: MapPin, title: "Location", text: "Carrollton, VA" },
+              { icon: MapPin, title: "Location", text: "15373 Carrollton Blvd, Carrollton, VA 23314" },
               { icon: Mail, title: "Email", text: "hicoworking@accelanalysis.com" },
               { icon: Phone, title: "Phone", text: "757-236-0651" },
-              { icon: Clock, title: "Hours", text: "Mon–Fri, 8am – 6pm" },
+              { icon: Clock, title: "Hours", text: "Mon–Fri, 8 AM – 5 PM" },
             ].map((item, i) => (
               <div key={i} className="bg-white/70 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-xl shadow-slate-200/50 flex items-start gap-4">
                 <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">

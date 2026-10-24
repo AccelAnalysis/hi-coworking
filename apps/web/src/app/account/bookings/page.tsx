@@ -13,13 +13,14 @@ import {
   ReceiptText,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { BillingPortalButton } from "@/components/BillingPortalButton";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
 import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
 import { getUserBookingsFromFirestore } from "@/lib/firestore";
-import { membershipSummary, welcomeBannerCopy } from "@/lib/membershipCopy";
+import { membershipEndsLabel, membershipSummary, welcomeBannerCopy } from "@/lib/membershipCopy";
 import { MEMBERSHIP_TIERS, type Booking } from "@hi/shared";
 
 const FACILITY_TIME_ZONE = "America/New_York";
@@ -196,6 +197,12 @@ function AccountBookingsContent() {
     userDoc?.membershipStatus === "active"
     || userDoc?.membershipStatus === "trial"
   );
+  // Past-due members still have a Stripe subscription and need the portal
+  // to fix their payment method.
+  const hasBillingAccount = membershipActive || userDoc?.membershipStatus === "pastDue";
+  const membershipEnds = membershipActive
+    ? membershipEndsLabel(userDoc as { cancelAtPeriodEnd?: unknown; cancelAt?: unknown })
+    : null;
   const accountCreditCents = Math.max(
     0,
     Number(userWithCredit?.accountCreditCents || 0),
@@ -396,11 +403,23 @@ function AccountBookingsContent() {
               <p className="mt-4 text-xl font-bold">
                 {membershipActive
                   ? membershipTier?.name ?? "Active membership"
-                  : "No active membership"}
+                  : userDoc?.membershipStatus === "pastDue"
+                    ? "Payment needed"
+                    : "No active membership"}
               </p>
+              {membershipEnds ? (
+                <p className="mt-1 text-sm font-semibold text-amber-200">
+                  {membershipEnds}
+                </p>
+              ) : null}
               {membershipActive && membershipTier ? (
                 <p className="mt-2 text-sm leading-6 text-slate-200">
                   {membershipSummary(membershipTier)}
+                </p>
+              ) : userDoc?.membershipStatus === "pastDue" ? (
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  Your last membership payment didn&apos;t go through. Update
+                  your payment method to keep your membership.
                 </p>
               ) : (
                 <p className="mt-2 text-sm leading-6 text-slate-200">
@@ -408,6 +427,7 @@ function AccountBookingsContent() {
                   often you work here.
                 </p>
               )}
+              {hasBillingAccount ? <BillingPortalButton /> : null}
               <Link
                 href="/pricing"
                 className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-white underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
