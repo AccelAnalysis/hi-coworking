@@ -15,6 +15,12 @@ import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
 import { maybeFinalizeEventV2Checkout } from "../eventWebhookBridge";
+import {
+  failedPaymentUpdates,
+  isFirstSubscriptionInvoice,
+  renewalUpdates,
+  type MemberBillingState,
+} from "./stripeInvoice";
 
 function getDb() { return admin.firestore(); }
 
@@ -92,6 +98,10 @@ async function processWebhookResult(
       break;
     case "payment_failed":
       await handlePaymentFailed(result);
+      break;
+    case "subscription_invoice_paid":
+    case "subscription_invoice_failed":
+      await handleSubscriptionInvoice(result);
       break;
     case "refund":
       if (result.paymentId) {
@@ -362,6 +372,79 @@ async function handlePaymentFailed(result: WebhookResult): Promise<void> {
     await getDb().collection("users").doc(uid).update(updates);
     logger.info("Membership status downgraded", { uid, reason, updates });
   }
+}
+
+/**
+ * Find the member for a subscription: uid from the subscription metadata
+ * first, then a users doc that stored this subscription ID.
+ */
+async function resolveSubscriptionMember(
+  uid: string | undefined,
+  subscriptionId: string,
+): Promise<string> {
+  if (uid) return uid;
+  const users = getDb().collection("users");
+  for (const field of ["features.stripeSubscriptionId", "stripeSubscriptionId"]) {
+    const snap = await users.where(field, "==", subscriptionId).limit(1).get();
+    if (!snap.empty) return snap.docs[0].id;
+  }
+  return "";
+}
+
+/**
+ * Renewal (invoice.payment_succeeded) and failed payment (invoice.payment_failed)
+ * for a membership subscription. Idempotent per event (webhookEvents) and per
+ * invoice (lastPaidInvoiceId / lastFailedInvoiceId on the user doc).
+ */
+async function handleSubscriptionInvoice(result: WebhookResult): Promise<void> {
+  const meta = result.metadata || {};
+  const subscriptionId = meta.subscriptionId || "";
+  const invoiceId = meta.invoiceId || "";
+  const paid = result.action === "subscription_invoice_paid";
+
+  // The first invoice is paid inside Checkout, and checkout.session.completed
+  // provisions the membership. Ignoring it here avoids racing that event.
+  if (isFirstSubscriptionInvoice(meta.billingReason)) {
+    logger.info("First subscription invoice handled by checkout, skipping", {
+      subscriptionId,
+      invoiceId,
+      paid,
+    });
+    return;
+  }
+
+  const uid = await resolveSubscriptionMember(meta.uid, subscriptionId);
+  if (!uid) {
+    logger.warn("No member found for subscription invoice", { subscriptionId, invoiceId, paid });
+    return;
+  }
+
+  const userRef = getDb().collection("users").doc(uid);
+  const applied = await getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists) return null;
+    const user = (snap.data() || {}) as MemberBillingState;
+    const now = Date.now();
+    const updates = paid
+      ? renewalUpdates(user, {
+        invoiceId,
+        subscriptionId,
+        plan: meta.plan || "",
+        periodEndMs: Number(meta.periodEndMs) || 0,
+      }, now)
+      : failedPaymentUpdates(user, { invoiceId, periodEndMs: Number(meta.periodEndMs) || 0 }, now);
+    if (!updates) return null;
+    tx.update(userRef, updates);
+    return updates;
+  });
+
+  logger.info(paid ? "Membership renewed from invoice" : "Membership flagged past due from invoice (access kept during Stripe retries)", {
+    uid,
+    subscriptionId,
+    invoiceId,
+    applied: Boolean(applied),
+    expiresAt: applied?.expiresAt,
+  });
 }
 
 /**

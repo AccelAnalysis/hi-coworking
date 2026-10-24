@@ -45,7 +45,13 @@ export interface CheckoutSessionResult {
 
 export interface WebhookResult {
   eventId: string;
-  action: "payment_succeeded" | "payment_failed" | "refund" | "unknown";
+  action:
+    | "payment_succeeded"
+    | "payment_failed"
+    | "subscription_invoice_paid"
+    | "subscription_invoice_failed"
+    | "refund"
+    | "unknown";
   paymentId?: string;
   status?: PaymentStatus;
   metadata?: Record<string, string>;
