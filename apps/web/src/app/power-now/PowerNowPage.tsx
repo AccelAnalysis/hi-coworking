@@ -1038,6 +1038,13 @@ function ConsentFields({
             <input type="checkbox" checked={values[key]} onChange={(event) => onChange(key, event.target.checked)} />
             <span>
               <strong>{item.label}:</strong> {item.wording}
+              {key === "sms" ? (
+                <>
+                  {" "}See{" "}
+                  <a href="/sms-terms" target="_blank" rel="noopener">SMS Terms</a> and{" "}
+                  <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.
+                </>
+              ) : null}
             </span>
           </label>
         );

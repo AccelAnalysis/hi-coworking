@@ -21,6 +21,7 @@ export const PUBLIC_HI_PAGES = [
   "/book",
   "/privacy",
   "/terms",
+  "/sms-terms",
 ] as const;
 
 export function publicPageUrl(path: (typeof PUBLIC_HI_PAGES)[number]): string {

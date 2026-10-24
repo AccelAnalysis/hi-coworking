@@ -5,12 +5,13 @@ import { useState, type ReactNode } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
 import { beginEventRegistration, submitEventInterest, type EventPublic } from "@/lib/eventsV2";
+import { SmsConsentCheckbox } from "@/components/sms/SmsConsentCheckbox";
 
 type ActionKind = "attend" | "pitch" | "prize";
 
-const SMS_CONSENT_TEXT = "I agree to receive SMS text messages from Hi Coworking at the phone number I provided about this event. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help.";
 
-const ADVERTISING_CONSENT_TEXT = "I agree that Hi Coworking may share my contact information with participating businesses so they can contact me about their products, services, or offerings.";
+// Separate from the optional SMS box. Never covers the mobile number or SMS consent.
+const ADVERTISING_CONSENT_TEXT = "I agree that Hi Coworking may share my name, email address, business name and website with participating businesses so they can contact me about their products, services, or offerings. My mobile number and text message consent are never shared.";
 
 const ACTIONS: Array<{ kind: ActionKind; label: string; detail: string }> = [
   {
@@ -61,17 +62,16 @@ function ConsentFields({
   return (
     <div className="space-y-3 text-sm leading-6 text-slate-600">
       <label className="flex items-start gap-3">
-        <input type="checkbox" checked={smsConsent} onChange={(event) => onSms(event.target.checked)} className="mt-1" required />
-        <span>{SMS_CONSENT_TEXT}</span>
-      </label>
-      <label className="flex items-start gap-3">
-        <input type="checkbox" checked={advertisingConsent} onChange={(event) => onAdvertising(event.target.checked)} className="mt-1" required />
+        <input type="checkbox" checked={advertisingConsent} onChange={(event) => onAdvertising(event.target.checked)} className="mt-1 h-5 w-5 shrink-0" required />
         <span>{ADVERTISING_CONSENT_TEXT}</span>
       </label>
+      <SmsConsentCheckbox checked={smsConsent} onChange={onSms} />
       <p>
         <Link href="/privacy" target="_blank" className="font-semibold text-sky-800">Privacy Policy</Link>
         {" · "}
         <Link href="/terms" target="_blank" className="font-semibold text-sky-800">Terms of Service</Link>
+        {" · "}
+        <Link href="/sms-terms" target="_blank" className="font-semibold text-sky-800">SMS Terms</Link>
       </p>
     </div>
   );
@@ -97,7 +97,8 @@ export function PitchEventActions({ event }: { event: EventPublic }) {
 
   const selected = ACTIONS.find((action) => action.kind === kind) || ACTIONS[0];
   const needsGuest = kind !== "attend" || !user;
-  const consentsChecked = smsConsent && advertisingConsent;
+  // Text messages are optional. Only the sharing consent gates submission.
+  const consentsChecked = advertisingConsent;
   const pitchReady = Boolean(firstName.trim() && lastName.trim() && businessName.trim() && businessDescription.trim() && website.trim() && email.trim() && phone.trim() && consentsChecked);
   const prizeReady = Boolean(name.trim() && email.trim() && phone.trim() && businessName.trim() && website.trim() && offer.trim() && consentsChecked);
   const attendReady = !needsGuest || Boolean(name.trim() && email.trim());
@@ -139,7 +140,7 @@ export function PitchEventActions({ event }: { event: EventPublic }) {
         businessName: businessName.trim(),
         businessDescription: businessDescription.trim(),
         website: website.trim(),
-        smsConsent: true,
+        smsConsent,
         advertisingConsent: true,
       } : {
         eventId: event.id,
@@ -150,7 +151,7 @@ export function PitchEventActions({ event }: { event: EventPublic }) {
         businessName: businessName.trim(),
         website: website.trim(),
         offer: offer.trim(),
-        smsConsent: true,
+        smsConsent,
         advertisingConsent: true,
       });
       setDone(kind);

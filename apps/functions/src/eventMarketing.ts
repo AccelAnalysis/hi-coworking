@@ -10,6 +10,8 @@ import { TwilioSmsProvider } from "./providers/smsProvider";
 import { FcmPushProvider } from "./providers/pushProvider";
 import { getSocialProvider } from "./providers/socialProvider";
 import { resolveRecipients } from "./providers/recipientResolver";
+import { smsEligibleRecipients } from "./providers/smsCompliance";
+import { recordSmsOptOuts } from "./providers/smsOptOut";
 import {
   renderEmailSubject,
   renderEmailHtml,
@@ -309,17 +311,26 @@ export const events_processCampaignJobs = onSchedule(
         }
 
         // --- SMS delivery via Twilio ---
+        // Only recipients with a recorded SMS opt-in (users/{uid}.smsConsent),
+        // for announcements, reminders and follow-ups alike. A profile phone
+        // number alone is never enough.
         if (campaign.channels.includes("sms") && smsProvider) {
-          const smsRecipients = recipients.filter((r) => r.phone);
+          const smsRecipients = smsEligibleRecipients(recipients);
           if (smsRecipients.length > 0) {
             const messages = smsRecipients.map((r) => ({
-              to: r.phone!,
+              to: r.phone,
               body: renderSmsBody(claimed.type, ctx),
             }));
             const result = await smsProvider.sendBatch(messages);
             totalSent += result.sent;
             totalFailed += result.failed;
-            logger.info("SMS batch sent", { sent: result.sent, failed: result.failed });
+            await recordSmsOptOuts(db, smsRecipients, result.optedOut);
+            logger.info("SMS batch sent", {
+              sent: result.sent,
+              failed: result.failed,
+              optedOut: result.optedOut.length,
+              skippedWithoutConsent: recipients.length - smsRecipients.length,
+            });
           }
         }
 

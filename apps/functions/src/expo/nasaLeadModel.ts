@@ -54,10 +54,10 @@ export const EXPO_CONSENT_CATALOG = {
       "I agree to receive email from Accel Analysis at the email address I provided about my inquiry and the information I requested. I can unsubscribe at any time.",
   },
   sms: {
-    version: "intake-consent-v1-sms",
+    version: "intake-consent-v2-sms",
     label: "Text (SMS)",
     wording:
-      "I agree to receive text messages from Accel Analysis at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.",
+      "I agree to receive text messages from Hi Coworking (Accel Analysis LLC) at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.",
   },
   phone: {
     version: "intake-consent-v1-phone",

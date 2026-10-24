@@ -110,11 +110,11 @@ Email
 
 I agree to receive email from Accel Analysis at the email address I provided about my inquiry and the information I requested. I can unsubscribe at any time.
 
-### `intake-consent-v1-sms`
+### `intake-consent-v2-sms`
 
 Text (SMS)
 
-I agree to receive text messages from Accel Analysis at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.
+I agree to receive text messages from Hi Coworking (Accel Analysis LLC) at the mobile number I provided about my inquiry and related follow-up. Message frequency varies. Msg & data rates may apply. Reply STOP to opt out and HELP for help. Consent is not a condition of any purchase.
 
 ### `intake-consent-v1-phone`
 

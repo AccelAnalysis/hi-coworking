@@ -7,6 +7,8 @@ export interface Recipient {
   phone?: string;
   displayName?: string;
   fcmToken?: string;
+  /** users/{uid}.smsConsent. SMS goes only to recipients with optIn true. */
+  smsConsent?: unknown;
 }
 
 /**
@@ -65,6 +67,7 @@ export async function resolveRecipients(
           email: data.email,
           displayName: data.displayName || data.name,
           phone: data.phone,
+          smsConsent: data.smsConsent,
         });
       }
     }
@@ -83,6 +86,7 @@ export async function resolveRecipients(
           phone: recipient.phone || userData.phone,
           displayName: recipient.displayName || userData.displayName || userData.name,
           fcmToken: userData.fcmToken,
+          smsConsent: userData.smsConsent,
         });
       } else {
         enriched.push(recipient);

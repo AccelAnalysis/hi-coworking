@@ -6,23 +6,47 @@ import { useRouter } from "next/navigation";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Loader2 } from "lucide-react";
+import { SmsConsentCheckbox } from "@/components/sms/SmsConsentCheckbox";
+import { HI_SMS_CONSENT_VERSION, normalizeUsMobile, setMemberSmsConsent } from "@/lib/smsConsent";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    const smsPhone = smsConsent ? normalizeUsMobile(phone) : null;
+    if (smsConsent && !smsPhone) {
+      setError("To get texts, enter a 10-digit US mobile number, or leave the text box unchecked.");
+      return;
+    }
     setLoading(true);
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(userCredential.user, { displayName: name });
+      if (smsPhone) {
+        try {
+          await setMemberSmsConsent({
+            optIn: true,
+            phone: smsPhone,
+            source: "member-signup",
+            textVersion: HI_SMS_CONSENT_VERSION,
+          });
+        } catch (smsError) {
+          // The account exists. Text messages are optional and can be turned on later.
+          console.error(smsError);
+          router.push("/preferences?sms=retry");
+          return;
+        }
+      }
       router.push("/my-hi");
     } catch (err: unknown) {
       console.error(err);
@@ -104,6 +128,28 @@ export default function RegisterPage() {
                 placeholder="••••••••"
               />
             </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-slate-700" htmlFor="phone">
+                Mobile number (optional)
+              </label>
+              <input
+                id="phone"
+                type="tel"
+                inputMode="tel"
+                autoComplete="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                aria-describedby="phone-hint"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
+                placeholder="(555) 555-5555"
+              />
+              <p id="phone-hint" className="text-xs text-slate-500">
+                Only needed if you want event texts.
+              </p>
+            </div>
+
+            <SmsConsentCheckbox checked={smsConsent} onChange={setSmsConsent} />
 
             <button
               type="submit"

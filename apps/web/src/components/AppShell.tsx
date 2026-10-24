@@ -442,6 +442,7 @@ export function AppShell({
               <ul className="space-y-2 text-sm">
                 <li><Link href="/terms" className="text-slate-500 hover:text-slate-900">Terms of Service</Link></li>
                 <li><Link href="/privacy" className="text-slate-500 hover:text-slate-900">Privacy Policy</Link></li>
+                <li><Link href="/sms-terms" className="text-slate-500 hover:text-slate-900">SMS Terms</Link></li>
               </ul>
             </div>
           </div>

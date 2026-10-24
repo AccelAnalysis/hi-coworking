@@ -131,6 +131,7 @@ jobs:
           tests/functions/mail-functions-deploy.test.ts
           tests/functions/core-functions-deploy.test.ts
           tests/functions/resend-email-provider.test.ts
+          tests/functions/sms-compliance.test.ts
           tests/web/public-rfx-quarantine.test.ts
 
       - name: Run active transaction integration tests
@@ -142,6 +143,7 @@ jobs:
           tests/functions/booking-journey.test.ts
           tests/functions/bookstore-commerce.test.ts
           tests/functions/events-v2.test.ts
+          tests/functions/event-interest-sms-optional.test.ts
           tests/functions/admin-member-credit.test.ts"
 
       - name: Run Events v2 Firestore rules tests
