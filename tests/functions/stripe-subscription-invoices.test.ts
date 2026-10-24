@@ -142,9 +142,12 @@ describe("renewal updates", () => {
 describe("failed payment updates", () => {
   const now = 1_800_000_000_000;
 
-  it("sets pastDue true with a timestamp", () => {
-    expect(failedPaymentUpdates({ membershipStatus: "active" }, { invoiceId: "in_2" }, now)).toEqual({
-      membershipStatus: "pastDue",
+  it("sets pastDue true with a timestamp and leaves membershipStatus (access kept during Stripe retries)", () => {
+    const updates = failedPaymentUpdates({ membershipStatus: "active" }, { invoiceId: "in_2" }, now);
+    expect(updates).not.toHaveProperty("membershipStatus");
+    expect(updates).not.toHaveProperty("plan");
+    expect(updates).not.toHaveProperty("expiresAt");
+    expect(updates).toEqual({
       pastDue: true,
       pastDueAt: now,
       lastFailedInvoiceId: "in_2",
@@ -226,5 +229,11 @@ describe("stripe_webhook wiring", () => {
     expect(webhook).toContain("isFirstSubscriptionInvoice(meta.billingReason)");
     expect(webhook).toContain('where(field, "==", subscriptionId)');
     expect(webhook).toContain("runTransaction");
+  });
+
+  it("ends access only when Stripe deletes the subscription after its retries", () => {
+    expect(provider).toContain('case "customer.subscription.deleted":');
+    expect(provider).toContain('reason: "subscription_cancelled"');
+    expect(webhook).toContain('updates.membershipStatus = "cancelled";');
   });
 });

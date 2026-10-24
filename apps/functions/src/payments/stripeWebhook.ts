@@ -438,7 +438,7 @@ async function handleSubscriptionInvoice(result: WebhookResult): Promise<void> {
     return updates;
   });
 
-  logger.info(paid ? "Membership renewed from invoice" : "Membership marked past due from invoice", {
+  logger.info(paid ? "Membership renewed from invoice" : "Membership flagged past due from invoice (access kept during Stripe retries)", {
     uid,
     subscriptionId,
     invoiceId,

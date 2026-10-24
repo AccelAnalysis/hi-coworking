@@ -149,6 +149,9 @@ export function renewalUpdates(
  * Updates for a failed renewal invoice, or null when there is nothing to do:
  * the same failure was already recorded, or that invoice has since been paid.
  * Keeps the first pastDueAt so the timestamp marks when payment first failed.
+ * membershipStatus is left unchanged: the member keeps access while Stripe
+ * retries the payment. Access ends only via customer.subscription.deleted,
+ * which Stripe sends once its retries are exhausted.
  */
 export function failedPaymentUpdates(
   user: MemberBillingState,
@@ -159,7 +162,6 @@ export function failedPaymentUpdates(
   if (info.invoiceId && user.lastFailedInvoiceId === info.invoiceId && user.pastDue) return null;
 
   const updates: Record<string, unknown> = {
-    membershipStatus: "pastDue",
     pastDue: true,
     pastDueAt: user.pastDue && user.pastDueAt ? user.pastDueAt : now,
     updatedAt: now,
