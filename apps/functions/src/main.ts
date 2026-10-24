@@ -1,5 +1,9 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as legacy from "./index";
+// Imported after ./index so admin.initializeApp() has already run, as before.
+// Kept out of ./index so firebase/core-functions never declares the Twilio,
+// LinkedIn or X secrets.
+import * as eventMarketing from "./eventMarketing";
 
 export const allocateMonthlyCredits = legacy.allocateMonthlyCredits;
 export const rfx_refreshSuggestions_scheduled = legacy.rfx_refreshSuggestions_scheduled;
@@ -71,10 +75,10 @@ export const events_createSponsorshipCheckout = legacy.events_createSponsorshipC
 export const events_upsertSeries = legacy.events_upsertSeries;
 export const events_extendHorizon = legacy.events_extendHorizon;
 export const events_setSeriesOccurrenceOverride = legacy.events_setSeriesOccurrenceOverride;
-export const events_enqueueCampaignJobs = legacy.events_enqueueCampaignJobs;
-export const events_processCampaignJobs = legacy.events_processCampaignJobs;
-export const events_generateShareKits = legacy.events_generateShareKits;
-export const events_processSocialPosts = legacy.events_processSocialPosts;
+export const events_enqueueCampaignJobs = eventMarketing.events_enqueueCampaignJobs;
+export const events_processCampaignJobs = eventMarketing.events_processCampaignJobs;
+export const events_generateShareKits = eventMarketing.events_generateShareKits;
+export const events_processSocialPosts = eventMarketing.events_processSocialPosts;
 export const events_onMediaUploaded = legacy.events_onMediaUploaded;
 
 export const territory_create = legacy.territory_create;
@@ -123,19 +127,7 @@ export const notify_referralUpdate = legacy.notify_referralUpdate;
 export const notify_eventRegistration = legacy.notify_eventRegistration;
 export const notify_paymentCreated = legacy.notify_paymentCreated;
 
-export const createBookingQuote = onCall(async () => {
-  throw new HttpsError(
-    "failed-precondition",
-    "This quote endpoint has been retired. Start from Spaces and use the current booking checkout.",
-  );
-});
-
-export const createBooking = onCall(async () => {
-  throw new HttpsError(
-    "failed-precondition",
-    "This booking endpoint has been retired. Start from Spaces and use the current booking checkout.",
-  );
-});
+export { createBookingQuote, createBooking } from "./retiredBookingEndpoints";
 
 export {
   booking_getAvailability,

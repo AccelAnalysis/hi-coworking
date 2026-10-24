@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "firebase/core-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "rm -rf firebase/core-functions/lib",
+      "npm run build --workspace functions -- --project ../../firebase/core-functions/tsconfig.json"
+    ]
+  }
+}
