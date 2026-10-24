@@ -38,7 +38,7 @@ export default function SmsTermsPage() {
 
           <h2 className="text-lg font-bold text-slate-900">Opt out and help</h2>
           <p>
-            Reply <strong>STOP</strong> to any message to opt out. You&apos;ll get one message
+            Reply <strong>STOP</strong>{" "}to any message to opt out. You&apos;ll get one message
             confirming you&apos;re opted out, and no more texts after that. You can also turn texts
             off on your <Link href="/preferences" className="font-semibold text-sky-800 underline underline-offset-2">preferences page</Link>.
           </p>

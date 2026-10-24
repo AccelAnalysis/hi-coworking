@@ -237,7 +237,7 @@ describe("optional SMS checkboxes on public forms", () => {
 
   it("publishes SMS terms and the privacy SMS section", () => {
     const smsTerms = readFileSync("apps/web/src/app/sms-terms/page.tsx", "utf8");
-    for (const text of ["Hi Coworking event texts", "Message frequency varies", "Msg &amp; data rates may apply", "<strong>STOP</strong>", "<strong>HELP</strong>", "hello@hi-coworking.com", "Carriers are not liable for delayed or undelivered messages.", 'href="/privacy#sms"', 'href="/terms"']) {
+    for (const text of ["Hi Coworking event texts", "Message frequency varies", "Msg &amp; data rates may apply", '<strong>STOP</strong>{" "}to any message', "<strong>HELP</strong>", "hello@hi-coworking.com", "Carriers are not liable for delayed or undelivered messages.", 'href="/privacy#sms"', 'href="/terms"']) {
       expect(smsTerms).toContain(text);
     }
     const privacy = readFileSync("apps/web/src/app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
