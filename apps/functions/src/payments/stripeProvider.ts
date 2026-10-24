@@ -39,8 +39,13 @@ export class StripeProvider implements PaymentProvider {
     input: CheckoutSessionInput,
   ): Promise<CheckoutSessionResult> {
     const isSubscription = input.mode !== "payment";
+    // Drop unset metadata values (e.g. no email) so nothing undefined is
+    // sent to Stripe or echoed back into Firestore writes.
+    const definedMetadata = Object.fromEntries(
+      Object.entries(input.metadata || {}).filter(([, v]) => v !== undefined && v !== null)
+    );
     const checkoutMetadata = {
-      ...(input.metadata || {}),
+      ...definedMetadata,
       uid: input.uid,
       paymentId: input.metadata?.paymentId || "",
       purpose: input.purpose,
