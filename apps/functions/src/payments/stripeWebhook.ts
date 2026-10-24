@@ -216,7 +216,7 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
   const uid = result.metadata?.uid;
   if (!eventId || !uid) return;
 
-  const ticketTypeId = result.metadata?.ticketTypeId || undefined;
+  const ticketTypeId = result.metadata?.ticketTypeId || "";
   const quantity = Math.max(1, parseInt(result.metadata?.quantity || "1", 10) || 1);
 
   const db = getDb();
@@ -237,14 +237,16 @@ async function finalizeTicketPurchase(result: WebhookResult): Promise<void> {
       throw new Error(`Seat cap exceeded during webhook finalization for event ${eventId}`);
     }
 
+    // Only include optional fields that have a value: Firestore rejects
+    // `undefined` in this bundle (no ignoreUndefinedProperties).
     const registration = {
       uid,
       eventId,
-      displayName: result.metadata?.displayName || undefined,
-      email: result.metadata?.email || undefined,
+      ...(result.metadata?.displayName ? { displayName: result.metadata.displayName } : {}),
+      ...(result.metadata?.email ? { email: result.metadata.email } : {}),
       registeredAt: Date.now(),
-      paymentId: result.paymentId || undefined,
-      ticketTypeId,
+      ...(result.paymentId ? { paymentId: result.paymentId } : {}),
+      ...(ticketTypeId ? { ticketTypeId } : {}),
       quantity,
       status: "active",
     };

@@ -32,6 +32,38 @@ export interface CreatePaymentInput {
 }
 
 /**
+ * Build the payments/{id} document for a new payment.
+ *
+ * Firestore rejects `undefined` values unless ignoreUndefinedProperties is
+ * set, and the isolated deploy bundles don't set it. Only include optional
+ * fields when they have a value (e.g. members without an orgId).
+ */
+export function buildPaymentDoc(
+  id: string,
+  input: CreatePaymentInput,
+  now: number
+): PaymentDocData {
+  const providerRefs = input.providerRefs
+    ? Object.fromEntries(
+        Object.entries(input.providerRefs).filter(([, v]) => v !== undefined)
+      )
+    : undefined;
+  return {
+    id,
+    uid: input.uid,
+    ...(input.orgId !== undefined ? { orgId: input.orgId } : {}),
+    provider: input.provider,
+    amount: input.amount,
+    currency: input.currency || "USD",
+    purpose: input.purpose,
+    ...(input.purposeRefId !== undefined ? { purposeRefId: input.purposeRefId } : {}),
+    status: input.status || "pending",
+    ...(providerRefs !== undefined ? { providerRefs } : {}),
+    createdAt: now,
+  };
+}
+
+/**
  * Create a new payment document. Returns the generated ID and full doc.
  */
 export async function createPayment(
@@ -40,19 +72,7 @@ export async function createPayment(
   const ref = getDb().collection("payments").doc();
   const now = Date.now();
 
-  const doc: PaymentDocData = {
-    id: ref.id,
-    uid: input.uid,
-    orgId: input.orgId,
-    provider: input.provider,
-    amount: input.amount,
-    currency: input.currency || "USD",
-    purpose: input.purpose,
-    purposeRefId: input.purposeRefId,
-    status: input.status || "pending",
-    providerRefs: input.providerRefs,
-    createdAt: now,
-  };
+  const doc = buildPaymentDoc(ref.id, input, now);
 
   await ref.set(doc);
   logger.info("Payment created", { id: doc.id, provider: doc.provider, amount: doc.amount });
@@ -79,6 +99,7 @@ export async function updatePaymentStatus(
   if (extra?.providerRefs) {
     // Merge rather than overwrite
     for (const [k, v] of Object.entries(extra.providerRefs)) {
+      if (v === undefined) continue;
       data[`providerRefs.${k}`] = v;
     }
   }
