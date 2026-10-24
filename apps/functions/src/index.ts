@@ -1,11 +1,12 @@
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { beforeUserCreated } from "firebase-functions/v2/identity";
+import * as functionsV1 from "firebase-functions/v1";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
+import { provisionAuthUser } from "./authProvisioning";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
 
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
@@ -438,30 +439,24 @@ export const createBooking = onCall(async (request) => {
 
 // --- Auth Triggers (PR-02) ---
 
-export const authBeforeCreate = beforeUserCreated(async (event) => {
-  const user = event.data;
-  if (!user) {
-    logger.error("Auth before-create event did not contain a user record");
-    throw new HttpsError("internal", "Account provisioning could not be verified");
-  }
-  logger.info(`Creating user doc for ${user.uid} (${user.email})`);
-
-  const now = Date.now();
-  const userDoc = {
-    uid: user.uid,
-    email: user.email || "",
-    displayName: user.displayName || "",
-    role: "member" as UserRole,
-    membershipStatus: "none",
-    createdAt: now,
-  };
-
-  await db.collection("users").doc(user.uid).set(userDoc);
-
-  // Set initial custom claims — role only (entitlements stay in Firestore)
-  return {
-    customClaims: { role: "member" },
-  };
+// Non-blocking: runs after the Auth user exists, so it can never block sign-up.
+// Idempotent and safe alongside account_initialize (see authProvisioning.ts).
+// A client that signed in before this ran needs getIdToken(true) to see the role claim.
+export const authProvisionOnCreate = functionsV1.region("us-central1").auth.user().onCreate(async (user) => {
+  const auth = admin.auth();
+  const result = await provisionAuthUser(
+    { uid: user.uid, email: user.email, displayName: user.displayName },
+    {
+      userRef: (uid) => db.collection("users").doc(uid),
+      runTransaction: (fn) => db.runTransaction((transaction) => fn({
+        get: (ref) => transaction.get(ref as admin.firestore.DocumentReference),
+        set: (ref, data, options) => transaction.set(ref as admin.firestore.DocumentReference, data, options),
+      })),
+      getCustomClaims: async (uid) => (await auth.getUser(uid)).customClaims,
+      setCustomClaims: (uid, claims) => auth.setCustomUserClaims(uid, claims),
+    },
+  );
+  logger.info("Provisioned new auth user", { uid: user.uid, ...result });
 });
 
 // --- Admin: Set User Role (PR-02) ---
