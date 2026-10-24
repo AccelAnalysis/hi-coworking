@@ -46,7 +46,7 @@ If Hi cancels an event, all paid active registrations are queued for full refund
 
 ## Communications
 
-Transactional email jobs live in `eventNotificationJobs` and are processed by `events_v2ProcessNotificationJobs` through the existing SendGrid provider.
+Transactional email jobs live in `eventNotificationJobs` and are processed by `events_v2ProcessNotificationJobs` through the Resend email provider (`apps/functions/src/providers/emailProvider.ts`). Setup, secrets and testing are in [HI-COWORKING-EMAIL.md](./HI-COWORKING-EMAIL.md).
 
 Supported jobs include:
 

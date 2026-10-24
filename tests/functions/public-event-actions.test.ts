@@ -52,12 +52,14 @@ describe("public Power NOW event actions", () => {
     expect(projected.description).toBe("Meet at the hub.");
   });
 
-  it("deploys registration and interest actions without the SendGrid mail worker", () => {
+  it("deploys registration and interest actions without the Resend mail worker", () => {
     const registration = readFileSync("apps/functions/src/eventsV2/publicRegistration.ts", "utf8");
     expect(registration).toContain("export const events_v2BeginRegistration");
     expect(registration).toContain("export const events_v2SubmitEventInterest");
     expect(registration).toContain('kind !== "pitch" && kind !== "prize"');
     expect(registration).not.toContain("SENDGRID_API_KEY");
+    expect(registration).not.toContain("HI_COWORKING_RESEND_API_KEY");
+    expect(registration).not.toContain("providers/emailSecret");
     expect(registration).not.toContain('from "./notifications"');
     expect(registration).not.toMatch(/startTime\s*:/);
     expect(registration).not.toContain("pre-screen date");
@@ -92,6 +94,8 @@ describe("public Power NOW event actions", () => {
     expect(notify).toContain("adminReviewUrl");
     expect(notify).toContain('"/admin/events/submissions"');
     expect(notify).not.toContain("SENDGRID_API_KEY");
+    expect(notify).not.toContain("HI_COWORKING_RESEND_API_KEY");
+    expect(notify).not.toContain("providers/emailSecret");
     expect(notify).not.toContain("defineSecret");
 
     const submissions = readFileSync("apps/functions/src/eventsV2/adminEventSubmissions.ts", "utf8");
@@ -102,6 +106,8 @@ describe("public Power NOW event actions", () => {
     expect(submissions).toContain('"offer_prize"');
     expect(submissions).not.toContain("manageSecret");
     expect(submissions).not.toContain("SENDGRID_API_KEY");
+    expect(submissions).not.toContain("HI_COWORKING_RESEND_API_KEY");
+    expect(submissions).not.toContain("providers/emailSecret");
 
     const adminPage = readFileSync("apps/web/src/app/admin/events/page.tsx", "utf8");
     const reviewPage = readFileSync("apps/web/src/app/admin/events/submissions/page.tsx", "utf8");

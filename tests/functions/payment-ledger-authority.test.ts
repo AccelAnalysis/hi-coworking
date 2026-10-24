@@ -87,6 +87,7 @@ describe("provider-authoritative Payment Ledger", () => {
     );
     expect(isolatedIndex).not.toContain("TWILIO");
     expect(isolatedIndex).not.toContain("SENDGRID");
+    expect(isolatedIndex).not.toContain("RESEND_API_KEY");
     expect(isolatedPackage).not.toContain("twilio");
     expect(rootPackage.scripts["build:payment-status-guard-deploy"]).toBeTruthy();
     expect(rootPackage.scripts["deploy:payment-status-guard"]).toContain(

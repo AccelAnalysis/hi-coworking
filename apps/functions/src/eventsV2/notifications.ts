@@ -1,16 +1,13 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
-import { SendGridProvider } from "../providers/emailProvider";
+import { ResendEmailProvider } from "../providers/emailProvider";
+import { resendApiKey } from "../providers/emailSecret";
 import { db } from "./core";
 import {
-  FROM_EMAIL,
   PUBLIC_SITE_URL,
   type EventDocV2,
   type RegistrationDocV2,
 } from "./types";
-
-const sendgridApiKey = defineSecret("SENDGRID_API_KEY");
 
 export async function enqueueNotification(input: {
   id: string;
@@ -181,7 +178,7 @@ export const events_v2ProcessNotificationJobs = onSchedule(
   {
     schedule: "*/5 * * * *",
     timeZone: "America/New_York",
-    secrets: [sendgridApiKey],
+    secrets: [resendApiKey],
   },
   async () => {
     const snap = await db().collection("eventNotificationJobs")
@@ -190,12 +187,12 @@ export const events_v2ProcessNotificationJobs = onSchedule(
       .orderBy("scheduledFor", "asc")
       .limit(50)
       .get();
-    const apiKey = sendgridApiKey.value();
+    const apiKey = resendApiKey.value();
     if (!apiKey) {
-      logger.error("Event notifications are pending but SENDGRID_API_KEY is unavailable", { count: snap.size });
+      logger.error("Event notifications are pending but HI_COWORKING_RESEND_API_KEY is unavailable", { count: snap.size });
       return;
     }
-    const provider = new SendGridProvider(apiKey);
+    const provider = new ResendEmailProvider(apiKey);
     for (const doc of snap.docs) {
       const job = doc.data() as Record<string, unknown>;
       try {
@@ -217,10 +214,10 @@ export const events_v2ProcessNotificationJobs = onSchedule(
         const copy = notificationCopy(type, event, job);
         await provider.send({
           to: String(job.email || ""),
-          from: FROM_EMAIL,
           subject: copy.subject,
           html: copy.html,
           categories: ["event-transactional"],
+          idempotencyKey: `event-notification/${doc.id}`,
         });
         await doc.ref.set({ status: "sent", processedAt: Date.now(), updatedAt: Date.now() }, { merge: true });
       } catch (error) {

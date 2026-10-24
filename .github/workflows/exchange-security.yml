@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if grep -R -E "SENDGRID_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SEAM_API_KEY|SEAM_WEBHOOK_SECRET" firebase/booking-public-functions/lib; then
+          if grep -R -E "HI_COWORKING_RESEND_API_KEY|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SEAM_API_KEY|SEAM_WEBHOOK_SECRET" firebase/booking-public-functions/lib; then
             echo "Public booking deploy bundle unexpectedly contains an external API secret identifier." >&2
             exit 1
           fi

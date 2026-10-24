@@ -25,7 +25,7 @@ Auth/RBAC: Firebase Auth + Custom Claims (roles) + org membership records
 Database: Firestore (multi-tenant, multi-location)
 Backend: Firebase Cloud Functions (TypeScript) + Cloud Tasks (for sync jobs)
 Payments: Stripe (subscriptions + payment intents)
-Email: SendGrid (or Mailgun)
+Email: Resend
 SMS: Twilio
 Calendar: Google Calendar API + Microsoft Graph (Outlook)
 E-sign: MVP “lightweight” (typed signature + timestamp + IP) + optional provider later
@@ -295,7 +295,7 @@ Typed e-sign capture + audit logging
 COI upload signed URLs (Storage) + validation
 Booking confirmation gating on docs
 Sprint 5 — Notifications (email + SMS) + automations
-SendGrid templates + sending service
+Resend templates + sending service
 Twilio SMS + consent capture
 Rule-based automation triggers (podcast intake, event checklist)
 Reminder scheduler (Cloud Scheduler/Tasks)

@@ -33,94 +33,170 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SendGridProvider = void 0;
+exports.ResendEmailProvider = exports.EmailSendError = exports.RESEND_BATCH_LIMIT = exports.RESEND_API_BASE_URL = exports.DEFAULT_EMAIL_FROM = exports.RESEND_API_KEY_SECRET_NAME = void 0;
+exports.emailFrom = emailFrom;
+exports.emailReplyTo = emailReplyTo;
+exports.categoryTags = categoryTags;
+const node_crypto_1 = require("node:crypto");
 const logger = __importStar(require("firebase-functions/logger"));
 /**
- * SendGrid email provider.
- * Requires SENDGRID_API_KEY secret set via `firebase functions:secrets:set SENDGRID_API_KEY`.
+ * Outbound email for the Hi Coworking app. Resend is the only provider.
+ *
+ * The API key comes from the Secret Manager secret named by
+ * RESEND_API_KEY_SECRET_NAME (see ./emailSecret.ts). It is never read from
+ * git, an .env file, or logs. The sender defaults to hello@hi-coworking.com
+ * and can be overridden with the HI_COWORKING_EMAIL_FROM env var.
+ *
+ * The Power NOW confirmation mail for expo_submitNasaLead has its own Resend
+ * client in ../expo/powerNowConfirmation.ts and does not use this module.
  */
-class SendGridProvider {
-    constructor(apiKey) {
-        this.baseUrl = "https://api.sendgrid.com/v3";
+exports.RESEND_API_KEY_SECRET_NAME = "HI_COWORKING_RESEND_API_KEY";
+exports.DEFAULT_EMAIL_FROM = "Hi Coworking <hello@hi-coworking.com>";
+exports.RESEND_API_BASE_URL = "https://api.resend.com";
+exports.RESEND_BATCH_LIMIT = 100;
+const DEFAULT_TIMEOUT_MS = 10000;
+class EmailSendError extends Error {
+    constructor(status, code) {
+        super(`Resend send failed: ${status ?? "network"} ${code}`.trim());
+        this.name = "EmailSendError";
+        this.status = status;
+        this.code = code;
+        this.retryable = status === null || status === 429 || status >= 500;
+    }
+}
+exports.EmailSendError = EmailSendError;
+/** Sender for app mail. HI_COWORKING_EMAIL_FROM may be a bare address or "Name <address>". */
+function emailFrom(env = process.env) {
+    const raw = env.HI_COWORKING_EMAIL_FROM?.trim();
+    if (!raw)
+        return exports.DEFAULT_EMAIL_FROM;
+    if (raw.includes("<") && raw.includes(">"))
+        return raw;
+    return `Hi Coworking <${raw}>`;
+}
+/** Optional Reply-To for app mail. Unset by default, matching the previous provider. */
+function emailReplyTo(env = process.env) {
+    return env.HI_COWORKING_EMAIL_REPLY_TO?.trim() || undefined;
+}
+/** Resend tag names and values allow only ASCII letters, digits, "_" and "-". */
+function categoryTags(categories) {
+    const seen = new Set();
+    const tags = [];
+    for (const category of categories || []) {
+        const name = category.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 256);
+        if (!name || seen.has(name))
+            continue;
+        seen.add(name);
+        tags.push({ name, value: "true" });
+    }
+    return tags;
+}
+/**
+ * Resend REST client. Uses fetch so there is no SDK dependency, and so tests
+ * can pass a mocked fetch. Logs never include the API key, recipient
+ * addresses, or Resend's error message text (which can echo addresses).
+ */
+class ResendEmailProvider {
+    constructor(apiKey, options = {}) {
         this.apiKey = apiKey;
+        this.fetchImpl = options.fetchImpl ?? fetch;
+        this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+        this.env = options.env ?? process.env;
+        this.baseUrl = options.baseUrl ?? exports.RESEND_API_BASE_URL;
+    }
+    payload(message) {
+        const replyTo = message.replyTo || emailReplyTo(this.env);
+        const tags = categoryTags(message.categories);
+        return {
+            from: message.from || emailFrom(this.env),
+            to: [message.to],
+            subject: message.subject,
+            html: message.html,
+            ...(message.text ? { text: message.text } : {}),
+            ...(replyTo ? { reply_to: replyTo } : {}),
+            ...(tags.length ? { tags } : {}),
+        };
+    }
+    async post(path, body, idempotencyKey) {
+        const headers = {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+        };
+        if (idempotencyKey)
+            headers["Idempotency-Key"] = idempotencyKey;
+        let response;
+        try {
+            response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(this.timeoutMs),
+            });
+        }
+        catch (error) {
+            const code = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")
+                ? "timeout"
+                : "network_error";
+            throw new EmailSendError(null, code);
+        }
+        const parsed = await response.json().catch(() => null);
+        if (!response.ok) {
+            const code = typeof parsed?.name === "string" && /^[a-z_]{1,64}$/.test(parsed.name) ? parsed.name : "error";
+            throw new EmailSendError(response.status, code);
+        }
+        return parsed;
     }
     async send(message) {
-        const payload = {
-            personalizations: [{ to: [{ email: message.to }] }],
-            from: { email: message.from },
-            subject: message.subject,
-            content: [
-                ...(message.text ? [{ type: "text/plain", value: message.text }] : []),
-                { type: "text/html", value: message.html },
-            ],
-            ...(message.replyTo ? { reply_to: { email: message.replyTo } } : {}),
-            ...(message.categories?.length ? { categories: message.categories } : {}),
-        };
-        const response = await fetch(`${this.baseUrl}/mail/send`, {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${this.apiKey}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-            const errorBody = await response.text().catch(() => "unknown");
-            logger.error("SendGrid send failed", { status: response.status, body: errorBody });
-            throw new Error(`SendGrid send failed: ${response.status}`);
+        if (!this.apiKey)
+            throw new EmailSendError(null, "missing_api_key");
+        const payload = this.payload(message);
+        const idempotencyKey = message.idempotencyKey ? idempotencyKeyFor(message.idempotencyKey, payload) : undefined;
+        try {
+            const body = await this.post("/emails", payload, idempotencyKey);
+            const messageId = typeof body?.id === "string" && body.id.trim() ? body.id.trim() : `resend_${Date.now()}`;
+            logger.info("Resend email sent", { messageId, tags: payload.tags?.map((tag) => tag.name) });
+            return { messageId };
         }
-        const messageId = response.headers.get("x-message-id") || `sg_${Date.now()}`;
-        logger.info("SendGrid email sent", { to: message.to, messageId });
-        return { messageId };
+        catch (error) {
+            logSendError("Resend send failed", error);
+            throw error;
+        }
     }
     async sendBatch(messages) {
         let sent = 0;
         let failed = 0;
-        // SendGrid supports up to 1000 personalizations per request, but we batch in groups of 100
-        const batchSize = 100;
-        for (let i = 0; i < messages.length; i += batchSize) {
-            const batch = messages.slice(i, i + batchSize);
+        if (!this.apiKey)
+            return { sent: 0, failed: messages.length };
+        // Resend's batch endpoint takes up to 100 messages, each with its own
+        // subject and body, so every recipient gets their own rendered copy.
+        for (let i = 0; i < messages.length; i += exports.RESEND_BATCH_LIMIT) {
+            const batch = messages.slice(i, i + exports.RESEND_BATCH_LIMIT);
             if (batch.length === 0)
                 continue;
-            // All messages in a batch must share from/subject for personalizations batching
-            const first = batch[0];
-            const personalizations = batch.map((msg) => ({
-                to: [{ email: msg.to }],
-                subject: msg.subject,
-            }));
-            const payload = {
-                personalizations,
-                from: { email: first.from },
-                content: [
-                    ...(first.text ? [{ type: "text/plain", value: first.text }] : []),
-                    { type: "text/html", value: first.html },
-                ],
-                ...(first.categories?.length ? { categories: first.categories } : {}),
-            };
             try {
-                const response = await fetch(`${this.baseUrl}/mail/send`, {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${this.apiKey}`,
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(payload),
-                });
-                if (response.ok) {
-                    sent += batch.length;
-                }
-                else {
-                    const errorBody = await response.text().catch(() => "unknown");
-                    logger.error("SendGrid batch send failed", { status: response.status, body: errorBody });
-                    failed += batch.length;
-                }
+                const body = await this.post("/emails/batch", batch.map((message) => this.payload(message)));
+                const ids = Array.isArray(body?.data) ? body.data.length : batch.length;
+                sent += Math.min(ids, batch.length);
+                failed += batch.length - Math.min(ids, batch.length);
             }
-            catch (err) {
-                logger.error("SendGrid batch send error", { err });
+            catch (error) {
+                logSendError("Resend batch send failed", error, { batchSize: batch.length });
                 failed += batch.length;
             }
         }
         return { sent, failed };
     }
 }
-exports.SendGridProvider = SendGridProvider;
+exports.ResendEmailProvider = ResendEmailProvider;
+function idempotencyKeyFor(prefix, payload) {
+    const digest = (0, node_crypto_1.createHash)("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 24);
+    return `${prefix.slice(0, 200)}/${digest}`;
+}
+function logSendError(label, error, extra = {}) {
+    if (error instanceof EmailSendError) {
+        logger.error(label, { status: error.status, code: error.code, retryable: error.retryable, ...extra });
+    }
+    else {
+        logger.error(label, { code: "unexpected", ...extra });
+    }
+}

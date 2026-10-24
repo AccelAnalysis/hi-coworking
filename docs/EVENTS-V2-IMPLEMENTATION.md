@@ -90,4 +90,4 @@ The migration is additive: legacy event registration/waitlist subcollections are
 
 ## Required production checks
 
-Before enabling paid events broadly, verify Stripe secret/webhook configuration and exercise webhook replay/idempotency. SendGrid-driven transactional confirmations/reminders should be validated before treating email delivery as part of the registration SLA; registration itself must remain successful when a communication provider is unavailable.
+Before enabling paid events broadly, verify Stripe secret/webhook configuration and exercise webhook replay/idempotency. Resend-driven transactional confirmations/reminders should be validated before treating email delivery as part of the registration SLA; registration itself must remain successful when a communication provider is unavailable.
