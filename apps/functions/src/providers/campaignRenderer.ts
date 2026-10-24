@@ -4,6 +4,8 @@
  * this module provides sensible defaults for all job types.
  */
 
+import { enforceSmsCompliance } from "./smsCompliance";
+
 export interface CampaignContext {
   eventTitle?: string;
   eventDate?: string;
@@ -60,7 +62,15 @@ export function renderEmailHtml(jobType: string, ctx: CampaignContext): string {
   return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:600px;margin:0 auto;">${header}<div style="padding:24px 32px;">${body}</div>${footer}</div>`;
 }
 
+/**
+ * SMS copy, including admin overrides, always names Hi Coworking and ends with
+ * the opt-out footer. The Twilio provider applies the same rule again at send.
+ */
 export function renderSmsBody(jobType: string, ctx: CampaignContext): string {
+  return enforceSmsCompliance(renderSmsCopy(jobType, ctx));
+}
+
+function renderSmsCopy(jobType: string, ctx: CampaignContext): string {
   const title = ctx.eventTitle || "our event";
   const url = ctx.eventUrl || "https://hi-coworking.com/events";
 

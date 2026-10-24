@@ -16,3 +16,5 @@ export {
 } from "../../../apps/functions/src/eventsV2/publicRegistration";
 
 export { events_v2AdminListEventSubmissions } from "../../../apps/functions/src/eventsV2/adminEventSubmissions";
+
+export { members_setSmsConsent } from "../../../apps/functions/src/eventsV2/memberSmsConsent";

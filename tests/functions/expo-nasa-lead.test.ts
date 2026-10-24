@@ -706,7 +706,7 @@ describe("NASA expo lead capture", () => {
     expect(form).toContain("I'd like to hear about Hi Coworking early access.");
     expect(form).toContain("email: false");
     expect(EXPO_CONSENT_CATALOG.email.version).toBe("intake-consent-v1-email");
-    expect(EXPO_CONSENT_CATALOG.sms.version).toBe("intake-consent-v1-sms");
+    expect(EXPO_CONSENT_CATALOG.sms.version).toBe("intake-consent-v2-sms");
     expect(EXPO_CONSENT_CATALOG.phone.version).toBe("intake-consent-v1-phone");
     expect(firebase).toContain('"/api/expo/nasa-lead"');
     expect(firebase).toContain('"functionId": "expo_submitNasaLead"');

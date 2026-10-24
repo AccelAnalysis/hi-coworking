@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 
 export default function TermsPage() {
@@ -45,14 +46,22 @@ export default function TermsPage() {
             Use of the space is at your own risk.
           </p>
 
-          <h2 className="text-lg font-bold text-slate-900">6. Changes to Terms</h2>
+          <h2 id="sms" className="text-lg font-bold text-slate-900">6. Text Messages</h2>
+          <p>
+            If you opt in, Hi Coworking sends event invitations, reminders and updates by text.
+            Texts are optional. Reply STOP to opt out or HELP for help. Our{" "}
+            <Link href="/sms-terms" className="font-semibold text-sky-800 underline underline-offset-2">SMS Terms</Link>{" "}
+            are part of these terms.
+          </p>
+
+          <h2 className="text-lg font-bold text-slate-900">7. Changes to Terms</h2>
           <p>
             We may update these terms from time to time. Continued use of the platform after changes
             constitutes acceptance of the updated terms.
           </p>
 
           <p className="text-xs text-slate-400 pt-4 border-t border-slate-200">
-            Last updated: February 2026. Questions? Contact us at hicoworking@accelanalysis.com.
+            Last updated: October 2026. Questions? Contact us at hicoworking@accelanalysis.com.
           </p>
         </div>
       </div>

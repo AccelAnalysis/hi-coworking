@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import {
   ACCEL_DISPLAY_NAME,
   ACCEL_EMAIL,
@@ -539,6 +539,14 @@ export function IntakeForm({ presetEvent = "" }: { presetEvent?: string }) {
                     onChange={(checked) => updateConsent(key, checked)}
                     label={item.label}
                     detail={item.wording}
+                    links={key === "sms" ? (
+                      <>
+                        See{" "}
+                        <a href="/sms-terms" target="_blank" rel="noopener" className="font-semibold text-[#0163FD] underline underline-offset-2">SMS Terms</a>{" "}
+                        and{" "}
+                        <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-[#0163FD] underline underline-offset-2">Privacy Policy</a>.
+                      </>
+                    ) : undefined}
                   />
                 );
               })}
@@ -650,11 +658,13 @@ function CheckRow({
   onChange,
   label,
   detail,
+  links,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   detail?: string;
+  links?: ReactNode;
 }) {
   return (
     <label className={`flex min-h-16 items-start gap-4 rounded-2xl border-2 bg-white p-4 ${checked ? "border-[#0163FD]" : "border-[#5E5E5E]/35"}`}>
@@ -667,6 +677,7 @@ function CheckRow({
       <span>
         <span className="block text-xl font-semibold">{label}</span>
         {detail ? <span className="mt-1 block text-lg leading-snug text-[#1B1B1B]">{detail}</span> : null}
+        {links ? <span className="mt-1 block text-lg leading-snug text-[#1B1B1B]">{links}</span> : null}
       </span>
     </label>
   );

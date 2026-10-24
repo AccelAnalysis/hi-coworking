@@ -26,9 +26,9 @@ export const POWER_NOW_PATHS = ["pitch", "watch", "contribute"] as const;
 export type PowerNowPath = (typeof POWER_NOW_PATHS)[number];
 
 export const POWER_NOW_CONSENT_VERSION = {
-  pitch: "PN-CONSENT-PITCH-v0.2",
-  watch: "PN-CONSENT-WATCH-v0.2",
-  contribute: "PN-CONSENT-CONTRIB-v0.2",
+  pitch: "PN-CONSENT-PITCH-v0.3",
+  watch: "PN-CONSENT-WATCH-v0.3",
+  contribute: "PN-CONSENT-CONTRIB-v0.3",
 } as const;
 
 /** Existing Companies list. System attributes only. Do not add list fields. */
@@ -66,11 +66,11 @@ export const POWER_NOW_PHONE_ERROR = "Please add a phone number, or uncheck text
 export const POWER_NOW_WATCH_PHONE_ERROR = "Please add a phone number, or uncheck text.";
 
 const PITCH_SMS =
-  "Text me about my Power NOW pitch interest, including scheduling my conversation and, if I pitch, my pitch night. By checking this box, I agree that Accel Analysis may send text messages to the mobile number above for these purposes. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to join.";
+  "Text me about my Power NOW pitch interest, including scheduling my conversation and, if I pitch, my pitch night. By checking this box, I agree that Hi Coworking (Accel Analysis LLC) may send text messages to the mobile number above for these purposes. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to join.";
 const WATCH_SMS =
-  "Text me about upcoming Power NOW pitch nights. By checking this box, I agree that Accel Analysis may send text messages to the mobile number above about upcoming Power NOW pitch nights. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to join.";
+  "Text me about upcoming Power NOW pitch nights. By checking this box, I agree that Hi Coworking (Accel Analysis LLC) may send text messages to the mobile number above about upcoming Power NOW pitch nights. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to join.";
 const CONTRIB_SMS =
-  "Text me about my Power NOW prize offer. By checking this box, I agree that Accel Analysis may send text messages to the mobile number above about my offer. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to submit.";
+  "Text me about my Power NOW prize offer. By checking this box, I agree that Hi Coworking (Accel Analysis LLC) may send text messages to the mobile number above about my offer. Msg frequency varies. Msg & data rates may apply. Reply STOP to opt out or HELP for help. Consent isn’t required to submit.";
 
 export const POWER_NOW_CONSENT_CATALOG = {
   pitch: {

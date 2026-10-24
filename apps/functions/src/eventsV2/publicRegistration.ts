@@ -19,6 +19,11 @@ import {
   type EventDocV2,
   type RegistrationDocV2,
 } from "./types";
+import {
+  HI_SMS_CONSENT_TEXT,
+  HI_SMS_CONSENT_VERSION,
+  normalizeUsMobile,
+} from "../providers/smsCompliance";
 
 async function enqueueNotification(input: {
   id: string;
@@ -172,9 +177,13 @@ export const events_v2BeginRegistration = onCall(adminEventCallableOptions, asyn
   return { kind: "confirmed" as const, registrationId: registration.registration.id };
 });
 
-export const SMS_CONSENT_TEXT = "I agree to receive SMS text messages from Hi Coworking at the phone number I provided about this event. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help.";
+/** Optional and unchecked by default. Never a condition of applying. */
+export const SMS_CONSENT_TEXT = HI_SMS_CONSENT_TEXT;
+export const SMS_CONSENT_VERSION = HI_SMS_CONSENT_VERSION;
 
-export const ADVERTISING_CONSENT_TEXT = "I agree that Hi Coworking may share my contact information with participating businesses so they can contact me about their products, services, or offerings.";
+/** Separate from SMS consent. Mobile numbers and SMS consent are never shared. */
+export const ADVERTISING_CONSENT_TEXT = "I agree that Hi Coworking may share my name, email address, business name and website with participating businesses so they can contact me about their products, services, or offerings. My mobile number and text message consent are never shared.";
+export const ADVERTISING_CONSENT_VERSION = "HC-EVENT-SHARING-v2";
 
 function requiredText(value: unknown, label: string, max = 500) {
   const text = String(value || "").trim();
@@ -222,12 +231,19 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
   if (kind !== "pitch" && kind !== "prize") {
     throw new HttpsError("invalid-argument", "Choose pitch or prize.");
   }
-  if (input.smsConsent !== true || input.advertisingConsent !== true) {
-    throw new HttpsError("invalid-argument", "SMS consent and third-party advertising consent are required.");
+  // Text messages are optional. Only the separate sharing consent is required,
+  // and it never covers the mobile number or SMS consent.
+  if (input.advertisingConsent !== true) {
+    throw new HttpsError("invalid-argument", "Please agree to share your business contact details with participating businesses.");
   }
+  const smsOptIn = input.smsConsent === true;
   const email = normalizeEmail(input.email);
   if (!email.includes("@")) throw new HttpsError("invalid-argument", "A valid email is required.");
   const phone = requiredPhone(input.phone);
+  const smsPhone = smsOptIn ? normalizeUsMobile(phone) : null;
+  if (smsOptIn && !smsPhone) {
+    throw new HttpsError("invalid-argument", "To get texts, enter a US mobile number, or leave the text box unchecked.");
+  }
   const businessName = requiredText(input.businessName, "Business name");
   const website = requiredWebsite(input.website);
 
@@ -250,6 +266,7 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
   requirePublished(event);
 
   const ref = db().collection("eventInterests").doc();
+  const now = Date.now();
   await ref.set({
     id: ref.id,
     eventId: event.id,
@@ -260,12 +277,21 @@ export const events_v2SubmitEventInterest = onCall(adminEventCallableOptions, as
     phone,
     businessName,
     website,
-    smsConsent: true,
-    smsConsentText: SMS_CONSENT_TEXT,
+    smsConsent: {
+      optIn: smsOptIn,
+      phone: smsPhone,
+      source: kind === "pitch" ? "event-pitch-form" : "event-prize-form",
+      textVersion: SMS_CONSENT_VERSION,
+      consentText: SMS_CONSENT_TEXT,
+      ...(smsOptIn ? { consentedAt: now } : {}),
+      updatedAt: now,
+    },
     advertisingConsent: true,
     advertisingConsentText: ADVERTISING_CONSENT_TEXT,
+    advertisingConsentVersion: ADVERTISING_CONSENT_VERSION,
+    advertisingConsentExcludes: ["phone", "smsConsent"],
     ...record,
-    createdAt: Date.now(),
+    createdAt: now,
   });
   await notifyEventSubmission({
     eventName: event.title || event.id,

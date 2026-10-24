@@ -71,7 +71,8 @@ describe("public Power NOW event actions", () => {
     expect(detail).toContain("publicEventDescription");
 
     const interest = registration.slice(registration.indexOf("export const events_v2SubmitEventInterest"));
-    expect(interest).toContain("SMS consent and third-party advertising consent are required.");
+    expect(interest).not.toContain("SMS consent and third-party advertising consent are required.");
+    expect(interest).toContain("const smsOptIn = input.smsConsent === true;");
     expect(interest).not.toContain("enqueue");
     expect(interest).toContain("notifyEventSubmission");
     expect(registration).toContain('action: "attend"');
@@ -130,7 +131,7 @@ describe("public Power NOW event actions", () => {
     expect(countUpdate).not.toContain("title");
     expect(countUpdate).not.toContain("format");
     expect(cleanup).not.toContain("SENDGRID");
-    expect(registration).toContain("Reply STOP to opt out");
+    expect(registration).toContain("export const SMS_CONSENT_TEXT = HI_SMS_CONSENT_TEXT;");
     expect(registration).toContain("participating businesses");
     expect(registration).not.toContain("pre-screen");
 
@@ -146,7 +147,9 @@ describe("public Power NOW event actions", () => {
     expect(actions).toContain('href="/privacy"');
     expect(actions).toContain('href="/terms"');
     expect(actions).toContain("disabled={!canSubmit}");
-    expect(actions).toContain("smsConsent && advertisingConsent");
+    expect(actions).not.toContain("smsConsent && advertisingConsent");
+    expect(actions).toContain("const consentsChecked = advertisingConsent;");
+    expect(actions).toContain('href="/sms-terms"');
     expect(actions).not.toContain("pre-screen");
     expect(actions).not.toContain("bookings.cloud.microsoft");
     expect(actions).not.toMatch(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/);
