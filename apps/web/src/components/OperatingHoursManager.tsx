@@ -112,9 +112,19 @@ function minutesToTime(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
+// Bookings run Monday to Friday, 8 AM to 5 PM; the server enforces the same limit.
+const BOOKING_HOURS_MESSAGE = "Hi Coworking is open Monday to Friday, 8 AM to 5 PM.";
+const WEEKEND_DAYS: DayKey[] = ["sat", "sun"];
+
+function isWeekendDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T12:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
 function timeOptions(includeClose = true) {
   const options: string[] = [];
-  const final = includeClose ? 20 * 60 : 20 * 60 - 30;
+  const final = includeClose ? 17 * 60 : 17 * 60 - 30;
   for (let minutes = 8 * 60; minutes <= final; minutes += 30) {
     options.push(minutesToTime(minutes));
   }
@@ -319,6 +329,7 @@ export function OperatingHoursManager() {
             <h2 className="mt-1 text-2xl font-semibold text-slate-950">Weekly booking hours</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
               These hours control which times customers can select. Dated closures and special openings below override the regular schedule.
+              Booking hours stay within Monday to Friday, 8 AM to 5 PM.
             </p>
           </div>
           {!canManageWeekly && (
@@ -330,27 +341,29 @@ export function OperatingHoursManager() {
           {DAYS.map(({ key, label }) => {
             const day = weekly[key];
             const endChoices = timeOptions(true).filter((value) => value > day.openTime);
+            const weekend = WEEKEND_DAYS.includes(key);
             return (
               <div key={key} className="grid gap-3 py-4 sm:grid-cols-[140px_120px_1fr_auto] sm:items-center">
                 <p className="font-medium text-slate-950">{label}</p>
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={day.isOpen}
-                    disabled={!canManageWeekly}
+                    checked={day.isOpen && !weekend}
+                    disabled={!canManageWeekly || weekend}
+                    aria-describedby={weekend ? "weekend-closed-note" : undefined}
                     onChange={(event) => updateDay(key, { isOpen: event.target.checked })}
                     className="h-4 w-4 rounded border-slate-300"
                   />
-                  {day.isOpen ? "Open" : "Closed"}
+                  {weekend ? "Closed" : day.isOpen ? "Open" : "Closed"}
                 </label>
                 <div className="flex items-center gap-2">
                   <select
                     value={day.openTime}
-                    disabled={!canManageWeekly || !day.isOpen}
+                    disabled={!canManageWeekly || !day.isOpen || weekend}
                     onChange={(event) => {
                       const nextOpen = event.target.value;
                       const nextClose = day.closeTime <= nextOpen
-                        ? timeOptions(true).find((value) => value > nextOpen) || "20:00"
+                        ? timeOptions(true).find((value) => value > nextOpen) || "17:00"
                         : day.closeTime;
                       updateDay(key, { openTime: nextOpen, closeTime: nextClose });
                     }}
@@ -361,14 +374,14 @@ export function OperatingHoursManager() {
                   <span className="text-slate-400">to</span>
                   <select
                     value={day.closeTime}
-                    disabled={!canManageWeekly || !day.isOpen}
+                    disabled={!canManageWeekly || !day.isOpen || weekend}
                     onChange={(event) => updateDay(key, { closeTime: event.target.value })}
                     className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-base disabled:bg-slate-100 disabled:text-slate-400"
                   >
                     {endChoices.map((value) => <option key={value} value={value}>{formatClock(value)}</option>)}
                   </select>
                 </div>
-                {canManageWeekly && (
+                {canManageWeekly && !weekend && (
                   <button
                     type="button"
                     onClick={() => saveDay(key)}
@@ -383,13 +396,16 @@ export function OperatingHoursManager() {
             );
           })}
         </div>
+        <p id="weekend-closed-note" className="mt-3 text-sm text-slate-600">
+          Saturday and Sunday are always closed for bookings. {BOOKING_HOURS_MESSAGE}
+        </p>
       </section>
 
       <section className="border-t border-slate-200 pt-8">
         <p className="text-sm font-medium text-slate-500">Date exceptions</p>
         <h2 className="mt-1 text-2xl font-semibold text-slate-950">Closures & special openings</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-          Use a closure for holidays, weather, maintenance, or an unexpected event. Admins can also create a one-off special opening, such as Saturday hours for a reservation.
+          Use a closure for holidays, weather, maintenance, or an unexpected event. Admins can also add a one-off special opening on a weekday, within 8 AM to 5 PM. Weekends stay closed.
         </p>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[170px_180px_1fr]">
@@ -416,8 +432,13 @@ export function OperatingHoursManager() {
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base"
             >
               <option value="CLOSED">Close booking hours</option>
-              {canManageWeekly && <option value="OPEN">Special opening</option>}
+              {canManageWeekly && <option value="OPEN" disabled={isWeekendDate(exceptionDate)}>Special opening</option>}
             </select>
+            {exceptionKind === "OPEN" && isWeekendDate(exceptionDate) ? (
+              <span role="alert" className="mt-2 block text-sm font-normal text-red-700">
+                Special openings can&apos;t be added on a weekend. {BOOKING_HOURS_MESSAGE}
+              </span>
+            ) : null}
           </label>
 
           <label className="text-sm font-medium text-slate-800">

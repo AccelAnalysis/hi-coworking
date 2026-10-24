@@ -297,6 +297,20 @@ function selectionKey(selection: Selection | null) {
     : `change:${selection.plan.planId}`;
 }
 
+const BOOKING_HOURS_MESSAGE = "Hi Coworking is open Monday to Friday, 8 AM to 5 PM.";
+
+function isWeekendDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const day = new Date(`${value}T12:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function closedDayMessage(dateValue: string, schedule: DaySchedule | null) {
+  if (isWeekendDate(dateValue)) return `Hi Coworking is closed on weekends. ${BOOKING_HOURS_MESSAGE}`;
+  if (schedule?.isOpen) return "There are no remaining booking times on this date.";
+  return `Hi Coworking is closed for bookings on this date. ${BOOKING_HOURS_MESSAGE}`;
+}
+
 function errorMessage(caught: unknown, fallback: string) {
   const raw = caught as { message?: string };
   if (!raw?.message) return fallback;
@@ -341,6 +355,11 @@ export default function BookingExperienceWithDeskChange() {
 
     if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && requestedDate >= todayAtFacility) {
       setDateValue(requestedDate);
+    } else if (isWeekendDate(todayAtFacility)) {
+      // Closed on weekends: start on the next weekday instead.
+      let next = addDaysToDateKey(todayAtFacility, 1);
+      while (isWeekendDate(next)) next = addDaysToDateKey(next, 1);
+      setDateValue(next);
     }
     if (requestedTime && /^\d{2}:\d{2}$/.test(requestedTime)) {
       requestedStartRef.current = requestedTime;
@@ -670,8 +689,8 @@ export default function BookingExperienceWithDeskChange() {
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-slate-950">2. When do you need it?</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Times come from the current operating calendar, including closures and special hours.
+                <p id="booking-hours-note" className="mt-1 text-sm text-slate-600">
+                  {BOOKING_HOURS_MESSAGE} Times come from the current operating calendar, including closures.
                 </p>
               </div>
               {schedule ? <p className="text-sm font-medium text-slate-700">{scheduleSummary(schedule)}</p> : null}
@@ -684,6 +703,8 @@ export default function BookingExperienceWithDeskChange() {
                   type="date"
                   min={todayAtFacility}
                   value={dateValue}
+                  aria-describedby="booking-hours-note booking-day-status"
+                  aria-invalid={isWeekendDate(dateValue) || undefined}
                   onChange={(event) => setDateValue(event.target.value)}
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-base text-slate-950"
                 />
@@ -720,8 +741,8 @@ export default function BookingExperienceWithDeskChange() {
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading available hours…</p>
             ) : startOptions.length === 0 ? (
               <div className="mt-4 flex flex-col gap-3 border-l-2 border-slate-300 pl-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-slate-600">
-                  {schedule?.isOpen ? "There are no remaining booking times on this date." : "Hi Coworking is closed for bookings on this date."}
+                <p id="booking-day-status" role="status" className="text-sm text-slate-600">
+                  {closedDayMessage(dateValue, schedule)}
                 </p>
                 <button
                   type="button"

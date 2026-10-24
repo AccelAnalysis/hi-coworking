@@ -18,6 +18,7 @@ import {
   getTierByPriceId,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
+import { bookingHoursViolation } from "./bookingOperatingCalendar";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -26,8 +27,6 @@ const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 const HOLD_MS = 15 * 60 * 1000;
 const INCREMENT_MS = 30 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const OPEN_HOUR = 8;
-const CLOSE_HOUR = 20;
 const LOCATION_TIME_ZONE = "America/New_York";
 const MAX_CREDIT_ADJUSTMENT_CENTS = 1_000_000;
 
@@ -541,11 +540,9 @@ function validateWindow(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new HttpsError("invalid-argument", "Choose a valid start and end time.");
   if (start % INCREMENT_MS !== 0 || end % INCREMENT_MS !== 0) throw new HttpsError("invalid-argument", "Bookings must use 30-minute increments.");
   if (localDayKey(start) !== localDayKey(end - 1)) throw new HttpsError("invalid-argument", "Bookings must start and end on the same day.");
-  const startClock = localClock(start);
-  const endClock = localClock(end);
-  const startMinutes = startClock.hour * 60 + startClock.minute;
-  const endMinutes = endClock.hour * 60 + endClock.minute;
-  if (startMinutes < OPEN_HOUR * 60 || endMinutes > CLOSE_HOUR * 60) throw new HttpsError("failed-precondition", "That time is outside current operating hours.");
+  // Monday to Friday, 8 AM to 5 PM facility time.
+  const hoursViolation = bookingHoursViolation(start, end);
+  if (hoursViolation) throw new HttpsError("failed-precondition", hoursViolation);
   if (start < Date.now() - 60_000) throw new HttpsError("failed-precondition", "That time has already passed.");
 }
 
