@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
 
 const FACILITY_TIME_ZONE = "America/New_York";
 
@@ -164,6 +165,7 @@ function errorMessage(caught: unknown, fallback: string) {
 }
 
 export function OperatingHoursManager() {
+  const { confirm, sheet } = useConfirmSheet();
   const { role } = useAuth();
   const canManageWeekly = role === "admin" || role === "master";
   const today = useMemo(() => facilityDateValue(), []);
@@ -265,6 +267,17 @@ export function OperatingHoursManager() {
   }
 
   async function removeException(exception: ScheduleException) {
+    const reopening = exception.kind !== "OPEN";
+    const confirmed = await confirm({
+      title: `Remove the ${exception.date} ${reopening ? "closure" : "special opening"}?`,
+      body: reopening
+        ? `${formatException(exception)}. Once it's removed, customers can book this time again under the regular weekly hours.`
+        : `${formatException(exception)}. Once it's removed, nobody can make new bookings outside regular hours on this date. Existing bookings aren't cancelled; check them on the bookings page.`,
+      confirmLabel: reopening ? "Remove closure" : "Remove opening",
+      cancelLabel: "Keep it",
+      destructive: !reopening,
+    });
+    if (!confirmed) return;
     setDeletingException(exception.id);
     setNotice(null);
     setError(null);
@@ -294,11 +307,12 @@ export function OperatingHoursManager() {
 
   return (
     <div className="space-y-10">
+      {sheet}
       {notice && (
-        <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950">{notice}</div>
+        <div role="status" className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950">{notice}</div>
       )}
       {error && (
-        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">{error}</div>
+        <div role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">{error}</div>
       )}
 
       {affectedBookings.length > 0 && (
@@ -358,6 +372,7 @@ export function OperatingHoursManager() {
                 </label>
                 <div className="flex items-center gap-2">
                   <select
+                    aria-label={`${label} opening time`}
                     value={day.openTime}
                     disabled={!canManageWeekly || !day.isOpen || weekend}
                     onChange={(event) => {
@@ -373,6 +388,7 @@ export function OperatingHoursManager() {
                   </select>
                   <span className="text-slate-400">to</span>
                   <select
+                    aria-label={`${label} closing time`}
                     value={day.closeTime}
                     disabled={!canManageWeekly || !day.isOpen || weekend}
                     onChange={(event) => updateDay(key, { closeTime: event.target.value })}

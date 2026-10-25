@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FloorplanCanvas } from "@/components/floorplan/FloorplanCanvas";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
+import { TextInputSheet } from "@/components/admin/ConfirmSheet";
 import {
   LAYOUT_ELEMENT_TYPES,
   SHELL_ELEMENT_TYPES,
@@ -687,9 +688,10 @@ function BuilderContent() {
     await loadFloorContext(locationId);
   };
 
-  const createNewLocation = async () => {
-    const name = window.prompt("Location name", "New Location");
-    if (!name) return;
+  const [newLocationOpen, setNewLocationOpen] = useState(false);
+  const [creatingLocation, setCreatingLocation] = useState(false);
+
+  const createNewLocation = async (name: string) => {
     const location: LocationDoc = {
       id: uid("location"),
       name,
@@ -697,10 +699,16 @@ function BuilderContent() {
       createdAt: Date.now(),
       timezone: "America/New_York",
     };
-    await saveLocation(location);
-    const nextLocations = [...locations, location].sort((a, b) => a.name.localeCompare(b.name));
-    setLocations(nextLocations);
-    await handleLocationChange(location.id);
+    setCreatingLocation(true);
+    try {
+      await saveLocation(location);
+      const nextLocations = [...locations, location].sort((a, b) => a.name.localeCompare(b.name));
+      setLocations(nextLocations);
+      setNewLocationOpen(false);
+      await handleLocationChange(location.id);
+    } finally {
+      setCreatingLocation(false);
+    }
   };
 
   const elementOptions = activeTab === "SHELL" ? SHELL_ELEMENT_TYPES : LAYOUT_ELEMENT_TYPES;
@@ -753,6 +761,17 @@ function BuilderContent() {
 
   return (
     <AppShell fullWidth>
+      <h1 className="sr-only">Floor plan builder</h1>
+      <TextInputSheet
+        open={newLocationOpen}
+        title="Add a location"
+        label="Location name"
+        initialValue="New Location"
+        confirmLabel="Add location"
+        busy={creatingLocation}
+        onSubmit={createNewLocation}
+        onClose={() => setNewLocationOpen(false)}
+      />
       <div className="flex flex-col h-[calc(100dvh-4rem)]">
         {/* ── Top Toolbar ── */}
         <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-200 shrink-0">
@@ -760,6 +779,7 @@ function BuilderContent() {
           <div className="flex items-center gap-2 border-r border-slate-200 pr-3 mr-1">
             <MapPin className="h-3.5 w-3.5 text-slate-400" />
             <select
+              aria-label="Location"
               value={selectedLocationId}
               onChange={(e) => void handleLocationChange(e.target.value)}
               className="rounded-md border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-900"
@@ -769,17 +789,21 @@ function BuilderContent() {
               ))}
             </select>
             <button
-              onClick={createNewLocation}
+              type="button"
+              onClick={() => setNewLocationOpen(true)}
               className="rounded-md p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               title="Add location"
+              aria-label="Add location"
             >
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
 
           {/* Layer toggle (Shell / Layout) */}
           <div className="inline-flex rounded-md bg-slate-100 p-0.5 border-r border-slate-200 pr-3 mr-1">
             <button
+              type="button"
+              aria-pressed={activeTab === "SHELL"}
               onClick={() => { setActiveTab("SHELL"); resetSelection(); }}
               className={`rounded px-2.5 py-1 text-[11px] font-semibold transition ${
                 activeTab === "SHELL" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -788,6 +812,8 @@ function BuilderContent() {
               Shell
             </button>
             <button
+              type="button"
+              aria-pressed={activeTab === "LAYOUT"}
               onClick={() => { setActiveTab("LAYOUT"); resetSelection(); }}
               className={`rounded px-2.5 py-1 text-[11px] font-semibold transition ${
                 activeTab === "LAYOUT" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"

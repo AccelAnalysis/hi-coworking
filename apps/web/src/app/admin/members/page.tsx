@@ -23,6 +23,8 @@ import {
 } from "lucide-react";
 import { AdminBookingActions } from "@/components/AdminBookingActions";
 import { AppShell } from "@/components/AppShell";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { tablistKeyHandler } from "@/lib/tablistKeys";
 import { RequireAuth } from "@/components/RequireAuth";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -176,6 +178,7 @@ export default function AdminMembersPage() {
 }
 
 function AdminMembersContent() {
+  const { confirm, sheet } = useConfirmSheet();
   const [members, setMembers] = useState<AdminMemberRecord[]>([]);
   const [bookings, setBookings] = useState<AdminBookingRecord[]>([]);
   const [payments, setPayments] = useState<AdminPaymentRecord[]>([]);
@@ -263,6 +266,13 @@ function AdminMembersContent() {
       setError("This legacy account does not have an email address available for password reset.");
       return;
     }
+    const confirmed = await confirm({
+      title: "Send a password reset email?",
+      body: `A reset link goes to ${member.email}. Their current password keeps working until they choose a new one.`,
+      confirmLabel: "Send reset email",
+      cancelLabel: "Don't send",
+    });
+    if (!confirmed) return;
     setResetLoading(true);
     setActionMessage(null);
     setError(null);
@@ -332,6 +342,7 @@ function AdminMembersContent() {
     ];
 
     return (
+      <>
       <AppShell>
         <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
           <button
@@ -402,25 +413,36 @@ function AdminMembersContent() {
             </div>
           )}
 
-          <nav className="mt-7 flex gap-6 overflow-x-auto border-b border-slate-200" aria-label="Member details">
+          <div
+            role="tablist"
+            aria-label="Member details"
+            className="mt-7 flex gap-6 overflow-x-auto border-b border-slate-200"
+            onKeyDown={tablistKeyHandler(tabs.map((tab) => tab.id), activeTab, setActiveTab, "member-tab-")}
+          >
             {tabs.map((tab) => (
               <button
                 key={tab.id}
+                id={`member-tab-${tab.id}`}
                 type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                aria-controls="member-tabpanel"
+                tabIndex={activeTab === tab.id ? 0 : -1}
                 onClick={() => setActiveTab(tab.id)}
                 className={`whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-semibold ${activeTab === tab.id ? "border-slate-950 text-slate-950" : "border-transparent text-slate-500 hover:text-slate-800"}`}
               >
                 {tab.label}
               </button>
             ))}
-          </nav>
+          </div>
 
           {detailLoading ? (
-            <div className="flex items-center justify-center py-24">
-              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+            <div className="flex items-center justify-center py-24" role="status">
+              <Loader2 className="h-8 w-8 animate-spin text-slate-400" aria-hidden="true" />
+              <span className="sr-only">Loading member details</span>
             </div>
           ) : (
-            <div className="py-8">
+            <div className="py-8" role="tabpanel" id="member-tabpanel" aria-labelledby={`member-tab-${activeTab}`} tabIndex={0}>
               {activeTab === "overview" && (
                 <div className="grid gap-8 lg:grid-cols-[1.35fr_0.65fr]">
                   <section>
@@ -569,6 +591,8 @@ function AdminMembersContent() {
           )}
         </main>
       </AppShell>
+        {sheet}
+      </>
     );
   }
 
@@ -588,15 +612,16 @@ function AdminMembersContent() {
           </div>
         </div>
 
-        {error && <div className="mt-5 flex items-start gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
+        {error && <div role="alert" className="mt-5 flex items-start gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
 
         <div className="relative mt-7 max-w-2xl">
-          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by member, email, plan or status" className="w-full rounded-full border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" />
+          <label htmlFor="member-search" className="sr-only">Search members</label>
+          <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+          <input id="member-search" type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by member, email, plan or status" className="w-full rounded-full border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:ring-4 focus:ring-sky-100" />
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>
+          <div className="flex items-center justify-center py-24" role="status"><Loader2 className="h-8 w-8 animate-spin text-slate-400" aria-hidden="true" /><span className="sr-only">Loading members</span></div>
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center"><Users className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-4 text-sm text-slate-500">{searchTerm ? "No matching members found." : "No member accounts are available yet."}</p></div>
         ) : (

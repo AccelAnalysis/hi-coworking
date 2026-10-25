@@ -18,6 +18,7 @@ import {
 } from "@/lib/functions";
 import { callableErrorMessage } from "@/lib/callableError";
 import { ADMIN_CAPABILITIES } from "@/lib/adminCapabilities";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
 import type { DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 import {
   DoorOpen,
@@ -113,6 +114,7 @@ export default function AdminAccessPage() {
 }
 
 function AdminAccessContent() {
+  const { confirm, sheet } = useConfirmSheet();
   const [doors, setDoors] = useState<DoorDoc[]>([]);
   const [doorStatuses, setDoorStatuses] = useState<Record<string, DoorStatusLive>>({});
   const [grants, setGrants] = useState<GrantWithCode[]>([]);
@@ -197,7 +199,7 @@ function AdminAccessContent() {
   }, []);
 
   const handleRemoteUnlock = useCallback(async (doorId: string, doorName: string) => {
-    if (!confirm(`Remote unlock "${doorName}"? This will physically unlock the door.`)) return;
+    if (!(await confirm({ title: `Unlock ${doorName}?`, body: "This physically unlocks the door right now.", confirmLabel: "Unlock door", destructive: true }))) return;
     setActionLoading(`unlock-${doorId}`);
     setError(null);
     try {
@@ -210,10 +212,10 @@ function AdminAccessContent() {
     } finally {
       setActionLoading(null);
     }
-  }, []);
+  }, [confirm]);
 
   const handleRevoke = useCallback(async (grantId: string) => {
-    if (!confirm(`Revoke access for this grant? The PIN will be deleted immediately.`)) return;
+    if (!(await confirm({ title: "Revoke access?", body: "The PIN is deleted immediately and stops working at the door.", confirmLabel: "Revoke access", destructive: true }))) return;
     setActionLoading(`revoke-${grantId}`);
     setError(null);
     try {
@@ -226,7 +228,7 @@ function AdminAccessContent() {
     } finally {
       setActionLoading(null);
     }
-  }, []);
+  }, [confirm]);
 
   const handleResendPin = useCallback(async (grantId: string) => {
     setActionLoading(`resend-${grantId}`);
@@ -254,6 +256,7 @@ function AdminAccessContent() {
   const programmingCodes = grants.filter((g) => g.code?.status === "programming");
 
   return (
+    <>
     <AppShell>
       <div className="max-w-5xl mx-auto space-y-8">
 
@@ -573,5 +576,7 @@ function AdminAccessContent() {
 
       </div>
     </AppShell>
+      {sheet}
+    </>
   );
 }
