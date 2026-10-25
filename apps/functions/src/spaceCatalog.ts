@@ -63,9 +63,49 @@ function publishedLayoutSummary(doc: FirebaseFirestore.QueryDocumentSnapshot) {
   };
 }
 
+/**
+ * Walk locations → floors → layouts with collection-scoped queries. A
+ * collectionGroup("layouts") query needs a collection-group index that this
+ * project does not have (and indexes are never deployed from a file here).
+ */
 async function publishedLayouts() {
-  const snap = await db.collectionGroup("layouts").where("status", "==", "PUBLISHED").get();
-  return snap.docs.map(publishedLayoutSummary);
+  const locations = await db.collection("locations").get();
+  const floorSnaps = await Promise.all(locations.docs.map((location) => location.ref.collection("floors").get()));
+  const layoutSnaps = await Promise.all(
+    floorSnaps.flatMap((floors) => floors.docs.map((floor) =>
+      floor.ref.collection("layouts").where("status", "==", "PUBLISHED").get())),
+  );
+  return layoutSnaps.flatMap((snap) => snap.docs.map(publishedLayoutSummary));
+}
+
+/** What customers may see about a setup: no admin uids or audit fields. */
+export function publicSetup(id: string, data: Record<string, unknown>) {
+  return {
+    id,
+    name: String(data.name || ""),
+    serviceType: data.serviceType === "DESK" ? "DESK" : "CONFERENCE",
+    resourceId: String(data.resourceId || ""),
+    layoutPath: String(data.layoutPath || ""),
+    capacity: Number(data.capacity || 1),
+    description: String(data.description || ""),
+    arrangement: String(data.arrangement || ""),
+    addOnIds: Array.isArray(data.addOnIds) ? data.addOnIds.map(String) : [],
+  };
+}
+
+export function publicAddOn(id: string, data: Record<string, unknown>) {
+  return {
+    id,
+    name: String(data.name || ""),
+    description: String(data.description || ""),
+    priceCents: Math.max(0, Math.round(Number(data.priceCents || 0))),
+    serviceTypes: Array.isArray(data.serviceTypes) ? data.serviceTypes.map(String) : [],
+  };
+}
+
+/** Stripe Price ids are optional; when set they must look like one. */
+export function validStripePriceId(value: string) {
+  return value === "" || /^price_[A-Za-z0-9]{6,}$/.test(value);
 }
 
 export const space_getPublishedCatalog = onCall(async () => {
@@ -73,9 +113,16 @@ export const space_getPublishedCatalog = onCall(async () => {
     db.collection(SETUPS).where("published", "==", true).get(),
     db.collection(ADDONS).where("published", "==", true).get(),
   ]);
+  const setups = await Promise.all(setupSnap.docs.map(async (doc) => {
+    const setup = publicSetup(doc.id, doc.data());
+    // Hide a setup whose layout has since been unpublished or replaced.
+    if (!setup.layoutPath.startsWith("locations/")) return null;
+    const layout = await db.doc(setup.layoutPath).get();
+    return layout.exists && layout.data()?.status === "PUBLISHED" ? setup : null;
+  }));
   return {
-    setups: setupSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
-    addOns: addOnSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+    setups: setups.filter((setup): setup is ReturnType<typeof publicSetup> => setup !== null),
+    addOns: addOnSnap.docs.map((doc) => publicAddOn(doc.id, doc.data())),
   };
 });
 
@@ -111,6 +158,10 @@ export const space_adminUpsertSetup = onCall(async (request) => {
   if (!layoutSnap.exists || layoutSnap.data()?.status !== "PUBLISHED") {
     throw new HttpsError("failed-precondition", "Only a currently published layout can be offered to customers.");
   }
+  const layoutResources = publishedLayoutSummary(layoutSnap as FirebaseFirestore.QueryDocumentSnapshot).resourceIds;
+  if (!layoutResources.includes(resourceId)) {
+    throw new HttpsError("invalid-argument", "Choose a resource that is placed on this layout.");
+  }
   const parts = layoutPath.split("/");
   const id = cleanId(String(input.id || `${parts[1]}-${parts[3]}-${layoutSnap.id}-${resourceId}`));
   const now = Date.now();
@@ -132,7 +183,10 @@ export const space_adminUpsertSetup = onCall(async (request) => {
     updatedAt: now,
     updatedBy: uid,
   };
-  await db.collection(SETUPS).doc(id).set({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  const ref = db.collection(SETUPS).doc(id);
+  const existing = await ref.get();
+  // createdAt is set once, as epoch ms like updatedAt.
+  await ref.set(existing.exists ? payload : { ...payload, createdAt: now }, { merge: true });
   return payload;
 });
 
@@ -143,6 +197,10 @@ export const space_adminUpsertAddOn = onCall(async (request) => {
   if (!name) throw new HttpsError("invalid-argument", "Add-on name is required.");
   const id = cleanId(String(input.id || name));
   const priceCents = Math.max(0, Math.round(Number(input.priceCents || 0)));
+  const stripePriceId = String(input.stripePriceId || "").trim();
+  if (!validStripePriceId(stripePriceId)) {
+    throw new HttpsError("invalid-argument", "A Stripe price ID starts with price_. Leave it blank if this add-on isn't sold online.");
+  }
   const serviceTypes = Array.from(new Set((input.serviceTypes || []).filter((value): value is ServiceType => value === "DESK" || value === "CONFERENCE")));
   if (serviceTypes.length === 0) serviceTypes.push("CONFERENCE");
   const payload = {
@@ -150,7 +208,7 @@ export const space_adminUpsertAddOn = onCall(async (request) => {
     name,
     description: String(input.description || "").trim().slice(0, 1000),
     priceCents,
-    stripePriceId: String(input.stripePriceId || "").trim(),
+    stripePriceId,
     serviceTypes,
     published: input.published !== false,
     updatedAt: Date.now(),

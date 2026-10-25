@@ -1,0 +1,98 @@
+name: Hi Coworking Firebase Published setups (space catalog)
+
+# Deploys the Published setups callables from the isolated firebase/space-catalog-functions bundle
+# (codebase "space-catalog") on merge to main. No Twilio, LinkedIn or X secrets.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/functions/src/spaceCatalog.ts"
+      - "firebase/space-catalog-functions/**"
+      - "firebase.space-catalog.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".firebaserc"
+      - ".github/workflows/firebase-live-space-catalog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-space-catalog
+  cancel-in-progress: false
+
+jobs:
+  deploy-space-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard the Firebase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const rc = JSON.parse(fs.readFileSync('.firebaserc', 'utf8'));
+          const project = rc.projects && rc.projects.default;
+          if (project !== 'hi-coworking-plat') {
+            throw new Error(`Refusing to deploy: .firebaserc default project is ${project || '(missing)'}, expected hi-coworking-plat.`);
+          }
+          NODE
+
+      # firebase.space-catalog.json's predeploy builds the isolated bundle first.
+      # --only keeps every other codebase in place. Never add the force flag.
+      - name: Deploy the space-catalog codebase only
+        run: npx firebase deploy --config firebase.space-catalog.json --project hi-coworking-plat --only functions:space-catalog --non-interactive
+
+      - name: Verify space_getPublishedCatalog is reachable
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/space_getPublishedCatalog"
+          response_file="${RUNNER_TEMP}/space-catalog-preflight.txt"
+          status="$({ curl --silent --show-error --location \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request OPTIONS \
+            --header 'Origin: https://hi-coworking-plat.web.app' \
+            --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: content-type' \
+            "${endpoint}"; } || true)"
+          if [[ "${status}" != "200" && "${status}" != "204" ]]; then
+            echo "space_getPublishedCatalog is not reachable after deployment (HTTP ${status})." >&2
+            cat "${response_file}" >&2 || true
+            exit 1
+          fi

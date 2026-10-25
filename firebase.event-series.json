@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/event-series-functions",
+      "codebase": "event-series",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/event-series-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/event-series-functions/tsconfig.json"
+      ]
+    }
+  ]
+}

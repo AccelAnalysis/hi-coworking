@@ -10,6 +10,8 @@ import {
   getSeriesOccurrences,
 } from "@/lib/firestore";
 import { setSeriesOccurrenceOverrideFn } from "@/lib/functions";
+import { callableErrorMessage } from "@/lib/callableError";
+import { EventSeriesForm } from "@/components/admin/EventSeriesForm";
 import type { EventDoc, EventSeriesDoc } from "@hi/shared";
 import {
   Loader2,
@@ -49,6 +51,9 @@ function SeriesEditorContent() {
   const [occurrences, setOccurrences] = useState<EventDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [formMode, setFormMode] = useState<"closed" | "create" | "edit">("closed");
 
   // Override editor state
   const [editingOccurrence, setEditingOccurrence] = useState<string | null>(null);
@@ -67,6 +72,7 @@ function SeriesEditorContent() {
       }
     } catch (err) {
       console.error("Failed to load series list:", err);
+      setError("Series couldn't be loaded. Refresh the page to try again.");
     }
   }, [selectedSeriesId]);
 
@@ -82,6 +88,7 @@ function SeriesEditorContent() {
       setOccurrences(occs);
     } catch (err) {
       console.error("Failed to load series data:", err);
+      setError("This series couldn't be loaded. Refresh the page to try again.");
     } finally {
       setLoading(false);
     }
@@ -132,6 +139,7 @@ function SeriesEditorContent() {
   const saveOverride = async (occ: EventDoc) => {
     if (!series || !occ.occurrenceDate) return;
     setSaving(true);
+    setError(null);
     try {
       const override: Record<string, unknown> = {};
 
@@ -163,6 +171,7 @@ function SeriesEditorContent() {
       await loadSeriesData(series.id);
     } catch (err) {
       console.error("Failed to save override:", err);
+      setError(callableErrorMessage(err, "That change couldn't be saved. Try again in a moment."));
     } finally {
       setSaving(false);
     }
@@ -171,6 +180,7 @@ function SeriesEditorContent() {
   const removeOverride = async (occ: EventDoc) => {
     if (!series || !occ.occurrenceDate) return;
     setSaving(true);
+    setError(null);
     try {
       await setSeriesOccurrenceOverrideFn({
         seriesId: series.id,
@@ -180,6 +190,7 @@ function SeriesEditorContent() {
       await loadSeriesData(series.id);
     } catch (err) {
       console.error("Failed to remove override:", err);
+      setError(callableErrorMessage(err, "The change couldn't be reverted. Try again in a moment."));
     } finally {
       setSaving(false);
     }
@@ -188,6 +199,7 @@ function SeriesEditorContent() {
   const cancelOccurrence = async (occ: EventDoc) => {
     if (!series || !occ.occurrenceDate) return;
     setSaving(true);
+    setError(null);
     try {
       await setSeriesOccurrenceOverrideFn({
         seriesId: series.id,
@@ -197,6 +209,7 @@ function SeriesEditorContent() {
       await loadSeriesData(series.id);
     } catch (err) {
       console.error("Failed to cancel occurrence:", err);
+      setError(callableErrorMessage(err, "That date couldn't be cancelled. Try again in a moment."));
     } finally {
       setSaving(false);
     }
@@ -223,6 +236,52 @@ function SeriesEditorContent() {
           <CalendarDays className="h-7 w-7 text-slate-400" />
           Series Occurrence Editor
         </h1>
+
+        {error ? (
+          <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+            {notice}
+          </p>
+        ) : null}
+
+        <div className="mb-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => { setNotice(null); setFormMode("create"); }}
+            className="inline-flex min-h-11 items-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2"
+          >
+            New series
+          </button>
+          {series ? (
+            <button
+              type="button"
+              onClick={() => { setNotice(null); setFormMode("edit"); }}
+              className="inline-flex min-h-11 items-center rounded-full border border-slate-300 px-5 text-sm font-medium text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900"
+            >
+              Edit selected series
+            </button>
+          ) : null}
+        </div>
+
+        {formMode !== "closed" ? (
+          <EventSeriesForm
+            key={formMode === "edit" ? series?.id : "new"}
+            initial={formMode === "edit" ? series : null}
+            onCancel={() => setFormMode("closed")}
+            onSaved={(savedId, count) => {
+              setFormMode("closed");
+              setError(null);
+              setNotice(`Series saved. ${count} upcoming date${count === 1 ? "" : "s"} generated.`);
+              setSelectedSeriesId(savedId);
+              void loadSeriesList();
+              void loadSeriesData(savedId);
+            }}
+          />
+        ) : null}
 
         {/* Series Selector */}
         <div className="mb-6">
