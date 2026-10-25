@@ -27,6 +27,11 @@ import {
   subscriptionUpdatedUpdates,
   type MemberSubscriptionState,
 } from "./stripeSubscription";
+import { handleStripeRefund } from "./stripeRefundHandler";
+import {
+  sendCancellationScheduledEmail,
+  sendMembershipEndedEmail,
+} from "./memberNoticeEmails";
 
 function getDb() { return admin.firestore(); }
 
@@ -106,16 +111,29 @@ async function processWebhookResult(
       break;
     case "payment_failed":
       await handlePaymentFailed(result);
+      if (result.metadata?.reason === "subscription_cancelled") {
+        // customer.subscription.deleted. Sends only when the handler above
+        // actually ended the membership (never for comp members). Never throws.
+        await sendMembershipEndedEmail({
+          uid: result.metadata.uid || "",
+          subscriptionId: result.metadata.subscriptionId || "",
+          endedAtMs: Number(result.metadata.endedAtMs) || 0,
+          planId: result.metadata.plan || "",
+          eventId: result.eventId,
+        }, { apiKey: resendApiKey });
+      }
       break;
     case "subscription_invoice_paid":
     case "subscription_invoice_failed":
       await handleSubscriptionInvoice(result);
       break;
     case "subscription_updated":
-      await handleSubscriptionUpdated(result);
+      await handleSubscriptionUpdated(result, resendApiKey);
       break;
     case "refund":
-      if (result.paymentId) {
+      if (result.refund) {
+        await handleStripeRefund(result, resendApiKey);
+      } else if (result.paymentId) {
         await updatePaymentStatus(result.paymentId, "refunded");
       }
       break;
@@ -513,7 +531,7 @@ async function provisionMembership(
  * (webhookEvents) and ordered per member (lastSubscriptionEventAt), and never
  * changes membershipStatus: see subscriptionUpdatedUpdates.
  */
-async function handleSubscriptionUpdated(result: WebhookResult): Promise<void> {
+async function handleSubscriptionUpdated(result: WebhookResult, resendApiKey?: string): Promise<void> {
   const meta = result.metadata || {};
   const subscriptionId = meta.subscriptionId || "";
   if (!subscriptionId) return;
@@ -560,4 +578,17 @@ async function handleSubscriptionUpdated(result: WebhookResult): Promise<void> {
     plan: decision.apply ? decision.updates.plan : undefined,
     cancelAtPeriodEnd: info.cancelAtPeriodEnd,
   });
+
+  // The member scheduled a cancellation (or its date moved): confirm it once
+  // per subscription and end date. Not sent when the update was skipped
+  // (comp membership, other subscription, stale). Never throws.
+  const scheduledEnd = decision.apply ? decision.updates.cancelAt : undefined;
+  if (typeof scheduledEnd === "number" && scheduledEnd > 0) {
+    await sendCancellationScheduledEmail({
+      uid,
+      subscriptionId,
+      activeUntilMs: scheduledEnd,
+      eventId: result.eventId,
+    }, { apiKey: resendApiKey });
+  }
 }

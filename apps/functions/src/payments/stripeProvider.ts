@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { parseSubscriptionInvoice, type InvoiceLike } from "./stripeInvoice";
 import { parseSubscriptionUpdate, type SubscriptionLike } from "./stripeSubscription";
+import { buildRefundSnapshot, idOf, type ChargeLike } from "./stripeRefund";
 
 function safeMetadataValue(value?: string) {
   return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -351,7 +352,35 @@ export class StripeProvider implements PaymentProvider {
             subscriptionId: subscription.id,
             uid: subscription.metadata?.uid || "",
             reason: "subscription_cancelled",
+            // For the "membership has ended" email.
+            plan: subscription.metadata?.plan || "",
+            endedAtMs: String((subscription.ended_at || event.created) * 1000),
           },
+        };
+      }
+      case "charge.refunded":
+      case "refund.updated":
+      case "refund.failed": {
+        const object = event.data.object as Stripe.Charge | Stripe.Refund;
+        const isCharge = event.type === "charge.refunded";
+        const chargeId = isCharge ? object.id : idOf((object as Stripe.Refund).charge);
+        if (!chargeId) {
+          logger.info("Stripe refund event without a charge, ignoring", { type: event.type });
+          return { eventId: event.id, action: "unknown" };
+        }
+        // Throws on a Stripe API error, so the webhook answers 400 before the
+        // event is marked processed and Stripe retries it.
+        const refund = await this.refundSnapshot(chargeId, isCharge ? "" : object.id);
+        return {
+          eventId: event.id,
+          action: "refund",
+          ...(refund.paymentId ? { paymentId: refund.paymentId } : {}),
+          metadata: {
+            eventType: event.type,
+            refundId: refund.refundId,
+            chargeId: refund.chargeId,
+          },
+          refund,
         };
       }
       default:
@@ -361,6 +390,57 @@ export class StripeProvider implements PaymentProvider {
           action: "unknown",
         };
     }
+  }
+
+  /**
+   * The charge's current refund state: the charge, all its refunds, the
+   * PaymentIntent metadata (ledger paymentId for one-time Checkout) and, for
+   * a subscription charge, the invoice it paid (subscription, uid, plan).
+   */
+  async refundSnapshot(chargeId: string, refundId: string) {
+    const charge = await this.stripe.charges.retrieve(chargeId);
+    const refunds = await this.stripe.refunds.list({ charge: chargeId, limit: 100 });
+    const paymentIntentId = idOf(charge.payment_intent);
+    let paymentMetadata: Record<string, string> | null = null;
+    let invoice: Parameters<typeof buildRefundSnapshot>[0]["invoice"] = null;
+    if (paymentIntentId) {
+      if (!charge.metadata?.paymentId) {
+        try {
+          const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+          paymentMetadata = intent.metadata || null;
+        } catch (error) {
+          logger.warn("Could not retrieve PaymentIntent for refund", { chargeId, error });
+        }
+      }
+      try {
+        const payments = await this.stripe.invoicePayments.list({
+          payment: { type: "payment_intent", payment_intent: paymentIntentId },
+          limit: 1,
+          expand: ["data.invoice"],
+        });
+        const paidInvoice = payments.data[0]?.invoice;
+        if (paidInvoice && typeof paidInvoice !== "string") {
+          const info = parseSubscriptionInvoice(paidInvoice as unknown as InvoiceLike);
+          invoice = {
+            invoiceId: info.invoiceId,
+            billingReason: info.billingReason,
+            subscriptionId: info.subscriptionId,
+            uid: info.uid,
+            plan: info.plan,
+          };
+        }
+      } catch (error) {
+        // Non-fatal: one-time payments have no invoice.
+        logger.warn("Could not look up the invoice for a refunded charge", { chargeId, error });
+      }
+    }
+    return buildRefundSnapshot({
+      refundId,
+      charge: charge as unknown as ChargeLike,
+      refunds: refunds.data,
+      paymentMetadata,
+      invoice,
+    });
   }
 
   async reconcileStatus(
