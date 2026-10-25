@@ -16,6 +16,8 @@ import {
   UserCog,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { callableErrorMessage } from "@/lib/callableError";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import { db, functions } from "@/lib/firebase";
@@ -66,6 +68,7 @@ function AdminRolesContent() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ account: UserDoc; nextRole: UserRole } | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -100,21 +103,32 @@ function AdminRolesContent() {
     ));
   }, [searchTerm, users]);
 
-  async function changeRole(account: UserDoc, nextRole: UserRole) {
+  function requestRoleChange(account: UserDoc, nextRole: UserRole) {
     if (account.uid === user?.uid) {
       setError("For safety, your own Admin/Master role must be changed by another authorized account.");
       return;
     }
-    if (!window.confirm(`Change ${account.displayName || account.email} from ${roleLabel(account.role)} to ${roleLabel(nextRole)}?`)) return;
+    if (account.role === "master" && currentRole !== "master") {
+      setError("Only a Master account can change another Master's role.");
+      return;
+    }
+    if (nextRole === account.role) return;
+    setPending({ account, nextRole });
+  }
+
+  async function confirmRoleChange() {
+    if (!pending) return;
+    const { account, nextRole } = pending;
     setActionLoading(account.uid);
     setError(null);
     try {
       await setUserRoleFn({ targetUid: account.uid, role: nextRole });
+      setPending(null);
       await fetchUsers();
     } catch (caught) {
       console.error("Role change failed:", caught);
-      const message = caught instanceof Error ? caught.message : "Unknown error";
-      setError(`The role change could not be completed. ${message}`);
+      setPending(null);
+      setError(callableErrorMessage(caught, "The role change could not be completed. Refresh and try again."));
     } finally {
       setActionLoading(null);
     }
@@ -141,26 +155,39 @@ function AdminRolesContent() {
           <div className="border-l-2 border-amber-500 pl-4"><p className="font-semibold text-slate-950">Master</p><p className="mt-1 text-sm leading-5 text-slate-500">Highest authority; assign only from another Master account.</p></div>
         </div>
 
-        {error && <div className="mt-6 flex items-start gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
+        {error && <div role="alert" className="mt-6 flex items-start gap-3 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}
 
-        <div className="relative mt-7 max-w-xl"><Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by name, email or role" className="w-full rounded-full border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100" /></div>
+        <div className="relative mt-7 max-w-xl"><Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="search" aria-label="Search staff and roles" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by name, email or role" className="w-full rounded-full border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100" /></div>
 
         {loading ? <div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div> : (
           <div className="mt-7 divide-y divide-slate-200 border-y border-slate-200">
             {filtered.map((account) => {
               const isCurrentUser = account.uid === user?.uid;
               const isLegacyRole = !roleOptions.includes(account.role);
+              const lockedMaster = account.role === "master" && currentRole !== "master";
               return (
                 <div key={account.uid} className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:px-3">
                   <div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100">{roleIcon(account.role)}</div><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold text-slate-950">{account.displayName || account.email}</p><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${roleClasses(account.role)}`}>{roleLabel(account.role)}</span>{isCurrentUser && <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-800">You</span>}</div><p className="mt-1 truncate text-sm text-slate-500">{account.email}</p><p className="mt-1 text-xs text-slate-400">{roleDescription(account.role)}</p></div></div>
-                  <div className="relative shrink-0"><select value={account.role || "member"} disabled={actionLoading === account.uid || isCurrentUser} onChange={(event) => void changeRole(account, event.target.value as UserRole)} className="appearance-none rounded-full border border-slate-200 bg-white py-2.5 pl-4 pr-9 text-sm font-semibold text-slate-700 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">{isLegacyRole && <option value={account.role}>{roleLabel(account.role)} (legacy)</option>}{roleOptions.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select>{actionLoading === account.uid ? <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" /> : <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />}</div>
+                  <div className="relative shrink-0"><select aria-label={`Role for ${account.displayName || account.email || "account"}`} title={lockedMaster ? "Only a Master can change this account" : undefined} value={account.role || "member"} disabled={actionLoading === account.uid || isCurrentUser || lockedMaster} onChange={(event) => requestRoleChange(account, event.target.value as UserRole)} className="appearance-none rounded-full border border-slate-200 bg-white py-2.5 pl-4 pr-9 text-sm font-semibold text-slate-700 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">{isLegacyRole && <option value={account.role}>{roleLabel(account.role)} (legacy)</option>}{roleOptions.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}</select>{actionLoading === account.uid ? <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" /> : <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />}</div>
                 </div>
               );
             })}
           </div>
         )}
 
-        <p className="mt-6 text-xs leading-5 text-slate-500">Role changes update the authoritative Firebase Authentication custom claim and the mirrored user record. Membership plan/status is intentionally not changed here.</p>
+        <p className="mt-6 text-xs leading-5 text-slate-500">Role changes update the authoritative Firebase Authentication custom claim and the mirrored user record, and are recorded in the role audit log. The person may need to sign out and back in before new access applies. Membership plan/status is intentionally not changed here.</p>
+
+        <ConfirmSheet
+          open={pending !== null}
+          title="Change role?"
+          confirmLabel={pending ? `Make ${roleLabel(pending.nextRole)}` : "Change role"}
+          destructive={pending ? ["admin", "master"].includes(pending.account.role) : false}
+          busy={pending !== null && actionLoading === pending.account.uid}
+          onConfirm={confirmRoleChange}
+          onClose={() => setPending(null)}
+        >
+          {pending && <p>{pending.account.displayName || pending.account.email} will change from {roleLabel(pending.account.role)} to {roleLabel(pending.nextRole)}.</p>}
+        </ConfirmSheet>
       </main>
     </AppShell>
   );
