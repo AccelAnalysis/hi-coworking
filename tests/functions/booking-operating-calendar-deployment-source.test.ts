@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const bookingWorkflow = readFileSync(
@@ -36,5 +36,18 @@ describe("booking operating calendar deployment contract", () => {
     expect(adminDeployIndex).toContain("booking_adminDeleteException");
     expect(adminWorkflow).toContain("Verify Admin operating-calendar endpoint");
     expect(adminWorkflow).toContain("booking_adminGetOperatingCalendar");
+  });
+  it("has exactly one deploy codebase exporting the Admin calendar functions", () => {
+    // Two codebases exporting the same function names make each deploy steal
+    // ownership from the other. admin-member-ops is the sole owner.
+    expect(existsSync("firebase.admin-calendar.json")).toBe(false);
+    expect(existsSync(".github/workflows/firebase-live-admin-operating-calendar.yml")).toBe(false);
+    const owners = readdirSync("firebase", { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(`firebase/${d.name}/src/index.ts`))
+      .filter((d) =>
+        readFileSync(`firebase/${d.name}/src/index.ts`, "utf8").includes("booking_adminSetWeeklyHours"),
+      )
+      .map((d) => d.name);
+    expect(owners).toEqual(["admin-member-functions"]);
   });
 });
