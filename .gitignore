@@ -24,6 +24,7 @@ firebase/mail-functions/lib/
 firebase/core-functions/lib/
 firebase/campaign-functions/lib/
 firebase/space-catalog-functions/lib/
+firebase/member-record-functions/lib/
 firebase/bookstore-functions/lib/
 firebase/event-series-functions/lib/
 firebase/nurture-lifecycle-functions/lib/

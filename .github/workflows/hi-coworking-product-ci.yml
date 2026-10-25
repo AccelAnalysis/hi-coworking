@@ -21,6 +21,7 @@ on:
       - "firebase/event-series-functions/**"
       - "firebase/bookstore-functions/**"
       - "firebase/space-catalog-functions/**"
+      - "firebase/member-record-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
@@ -32,6 +33,7 @@ on:
       - "firebase.event-series.json"
       - "firebase.bookstore.json"
       - "firebase.space-catalog.json"
+      - "firebase.member-record.json"
       - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-core-functions.yml"
       - ".github/workflows/firebase-live-expo-lead-function.yml"
@@ -39,6 +41,7 @@ on:
       - ".github/workflows/firebase-live-event-series.yml"
       - ".github/workflows/firebase-live-bookstore.yml"
       - ".github/workflows/firebase-live-space-catalog.yml"
+      - ".github/workflows/firebase-live-member-record.yml"
       - "tests/functions/**"
       - "tests/rules/**"
       - "firestore.rules"
@@ -125,6 +128,9 @@ jobs:
       - name: Build isolated space catalog deploy bundle
         run: npm run build --workspace functions -- --project ../../firebase/space-catalog-functions/tsconfig.json
 
+      - name: Build isolated member record deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/member-record-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -176,6 +182,7 @@ jobs:
           tests/functions/admin-tools-deploy.test.ts
           tests/functions/admin-tools-source-contract.test.ts
           tests/functions/space-catalog-writes.test.ts
+          tests/functions/admin-member-record.test.ts
           tests/functions/event-series-admin.test.ts
           tests/functions/bookstore-return-url.test.ts
           tests/web/event-series-form.test.ts

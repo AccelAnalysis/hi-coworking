@@ -117,6 +117,16 @@ const BUNDLES: Bundle[] = [
     auto: true,
     probe: "space_getPublishedCatalog",
   },
+  {
+    codebase: "member-record",
+    ids: ["admin_consentList", "admin_memberRecordGet"],
+    params: [],
+    bound: {},
+    secretFiles: [],
+    auto: false,
+    confirm: "deploy member record",
+    probe: "admin_consentList",
+  },
 ];
 
 function manifest(source: string) {
