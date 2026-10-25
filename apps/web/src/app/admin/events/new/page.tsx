@@ -8,6 +8,7 @@ import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { getEvent, uploadEventMediaImage } from "@/lib/firestore";
+import { callableErrorMessage } from "@/lib/callableError";
 import { adminPublishEventV2, adminSaveEventV2, type EventPublic } from "@/lib/eventsV2";
 import type { EventMediaImage, EventTicketType } from "@hi/shared";
 
@@ -102,6 +103,9 @@ function EventEditorContent() {
     && new Date(end).getTime() > new Date(start).getTime()
     && (!paid || advancedTickets || cents(publicPrice) > 0)
   ), [title, description, start, end, paid, advancedTickets, publicPrice]);
+  // Paid registration isn't switched on in production yet (audit P1-2), so the
+  // server refuses to publish events with a price. Mirror that here.
+  const hasPaidTickets = paid && (advancedTickets ? ticketTypes.some((ticket) => ticket.priceCents > 0) : cents(publicPrice) > 0);
 
   function addTicket() {
     setTicketTypes((current) => [...current, {
@@ -166,7 +170,7 @@ function EventEditorContent() {
       }
       router.push("/admin/events");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save this event.");
+      setMessage(callableErrorMessage(error, "Couldn't save this event. Try again."));
     } finally {
       setSaving(false);
     }
@@ -237,6 +241,12 @@ function EventEditorContent() {
                 <button type="button" onClick={() => setPaid(true)} className={`rounded-full px-4 py-2 text-sm font-semibold ${paid ? "bg-slate-950 text-white" : "bg-white text-slate-600 ring-1 ring-slate-200"}`}>Paid</button>
               </div>
 
+              {paid && (
+                <p className="mt-4 rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
+                  Paid tickets can&apos;t be published yet because paid registration isn&apos;t switched on. You can save this event as a draft and publish once every ticket is free or paid registration goes live.
+                </p>
+              )}
+
               {paid && !advancedTickets && (
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <label className="text-sm font-medium text-slate-700">Public price<input inputMode="decimal" value={publicPrice} onChange={(event) => setPublicPrice(event.target.value)} placeholder="25.00" className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5" /></label>
@@ -284,8 +294,8 @@ function EventEditorContent() {
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Publish</p>
               <p className="mt-3 text-sm leading-6 text-slate-600">Save a draft while you work, or publish when the public event page is ready.</p>
               <button type="button" onClick={() => void save(false)} disabled={!valid || saving} className="mt-5 w-full rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 disabled:opacity-50">{saving ? "Saving…" : "Save draft"}</button>
-              {existingStatus !== "published" && <button type="button" onClick={() => void save(true)} disabled={!valid || saving} className="mt-2 w-full rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Save & publish</button>}
-              {existingStatus === "published" && <button type="button" onClick={() => void save(false)} disabled={!valid || saving} className="mt-2 w-full rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Save changes</button>}
+              {existingStatus !== "published" && <button type="button" onClick={() => void save(true)} disabled={!valid || saving || hasPaidTickets} className="mt-2 w-full rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Save & publish</button>}
+              {existingStatus === "published" && <button type="button" onClick={() => void save(false)} disabled={!valid || saving || hasPaidTickets} className="mt-2 w-full rounded-full bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Save changes</button>}
               {savedSlug && <Link href={`/events/detail?event=${encodeURIComponent(savedSlug)}`} className="mt-4 block text-center text-sm font-semibold text-sky-800">View public event →</Link>}
             </div>
           </aside>

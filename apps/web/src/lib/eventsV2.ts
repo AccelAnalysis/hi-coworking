@@ -243,13 +243,17 @@ export const adminPublishEventV2 = httpsCallable<{ eventId: string }, { success:
   "events_v2AdminPublishEvent",
 );
 
-export const adminCancelEventV2 = httpsCallable<{ eventId: string }, {
+/** Cancels an event. Sends no emails and issues no refunds; paid seats go to admin review. */
+export const adminCancelEventV2 = httpsCallable<{ eventId: string; reason?: string }, {
   success: boolean;
   eventId: string;
   affectedRegistrations: number;
+  cancelledRegistrations: number;
+  refundReviewRegistrations: number;
+  emailsSent: number;
 }>(functions, "events_v2AdminCancelEvent");
 
-export const adminCompleteEventV2 = httpsCallable<{ eventId: string }, { success: boolean; eventId: string }>(
+export const adminCompleteEventV2 = httpsCallable<{ eventId: string }, { success: boolean; eventId: string; noShows: number }>(
   functions,
   "events_v2AdminCompleteEvent",
 );
@@ -292,7 +296,7 @@ export const staffAddEventWalkIn = httpsCallable<{
   email?: string;
   ticketTypeId?: string;
   quantity?: number;
-}, { success: boolean; registrationId: string }>(functions, "events_v2StaffWalkIn");
+}, { success: boolean; registrationId: string; emailSent: boolean }>(functions, "events_v2StaffWalkIn");
 
 export const listMyEventRegistrations = httpsCallable<Record<string, never>, {
   registrations: EventRegistrationV2[];

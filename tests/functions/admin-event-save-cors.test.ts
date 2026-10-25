@@ -200,7 +200,16 @@ describe("admin event save CORS", () => {
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicEventRead"');
     expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/publicRegistration"');
     expect(deployIndex).not.toContain("eventsV2/management");
-    expect(deployIndex).not.toContain("events_v2AdminCancelEvent");
+    for (const name of [
+      "events_v2AdminCancelEvent",
+      "events_v2AdminCompleteEvent",
+      "events_v2StaffGetRoster",
+      "events_v2StaffCheckIn",
+      "events_v2StaffWalkIn",
+    ]) {
+      expect(deployIndex).toContain(name);
+    }
+    expect(deployIndex).toContain('from "../../../apps/functions/src/eventsV2/adminEventOps"');
     expect(packageJson.scripts["build:admin-event-deploy"]).toContain("firebase/admin-event-functions/tsconfig.json");
     expect(packageJson.scripts["deploy:admin-event"]).toContain("firebase.admin-events.json");
     expect(packageJson.scripts["deploy:admin-event"]).toContain("functions:admin-event-save");

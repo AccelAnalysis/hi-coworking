@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CalendarDays, CheckCircle2, Loader2, Pencil, Plus, Users, XCircle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { callableErrorMessage } from "@/lib/callableError";
 import { RequireAuth } from "@/components/RequireAuth";
 import { getAllEvents } from "@/lib/firestore";
 import {
@@ -18,6 +20,9 @@ function AdminEventsContent() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ kind: "cancel" | "complete"; event: EventPublic } | null>(null);
+  const [reason, setReason] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,7 +31,7 @@ function AdminEventsContent() {
       setEvents((rows as EventPublic[]).sort((a, b) => b.startTime - a.startTime));
     } catch (error) {
       console.error(error);
-      setMessage("Could not load events.");
+      setMessage("Couldn't load events. Check your connection and refresh.");
     } finally {
       setLoading(false);
     }
@@ -37,39 +42,48 @@ function AdminEventsContent() {
   async function publish(eventId: string) {
     setBusyId(eventId);
     setMessage(null);
+    setNotice(null);
     try {
       await adminPublishEventV2({ eventId });
+      setNotice("Event published.");
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not publish this event.");
+      setMessage(callableErrorMessage(error, "Couldn't publish this event. Try again."));
     } finally {
       setBusyId(null);
     }
   }
 
-  async function cancel(event: EventPublic) {
-    if (!window.confirm(`Cancel “${event.title}”? Confirmed paid registrations will be queued for full refunds.`)) return;
-    setBusyId(event.id);
-    setMessage(null);
-    try {
-      await adminCancelEventV2({ eventId: event.id });
-      await load();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not cancel this event.");
-    } finally {
-      setBusyId(null);
-    }
+  function closeSheet() {
+    setPending(null);
+    setReason("");
   }
 
-  async function complete(event: EventPublic) {
-    if (!window.confirm(`Complete “${event.title}” and mark unchecked registrations as no-shows?`)) return;
+  async function confirmPending() {
+    if (!pending) return;
+    const { kind, event } = pending;
     setBusyId(event.id);
     setMessage(null);
+    setNotice(null);
     try {
-      await adminCompleteEventV2({ eventId: event.id });
+      if (kind === "cancel") {
+        const result = await adminCancelEventV2({ eventId: event.id, reason: reason.trim() || undefined });
+        const { cancelledRegistrations, refundReviewRegistrations } = result.data;
+        setNotice(
+          `“${event.title}” is cancelled. ${cancelledRegistrations} registration${cancelledRegistrations === 1 ? "" : "s"} cancelled` +
+          (refundReviewRegistrations ? `, ${refundReviewRegistrations} paid registration${refundReviewRegistrations === 1 ? "" : "s"} waiting for refund review` : "") +
+          ". No one was emailed.",
+        );
+      } else {
+        const result = await adminCompleteEventV2({ eventId: event.id });
+        const { noShows } = result.data;
+        setNotice(`“${event.title}” is complete. ${noShows} registration${noShows === 1 ? "" : "s"} marked as no-show.`);
+      }
+      closeSheet();
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not complete this event.");
+      closeSheet();
+      setMessage(callableErrorMessage(error, kind === "cancel" ? "Couldn't cancel this event. Try again." : "Couldn't complete this event. Try again."));
     } finally {
       setBusyId(null);
     }
@@ -98,7 +112,10 @@ function AdminEventsContent() {
           </div>
         </div>
 
-        {message && <p className="mt-6 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{message}</p>}
+        <div aria-live="polite">
+          {message && <p role="alert" className="mt-6 rounded-2xl bg-rose-50 p-4 text-sm text-rose-800">{message}</p>}
+          {notice && <p className="mt-6 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</p>}
+        </div>
 
         {loading ? (
           <div className="flex min-h-72 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div>
@@ -130,18 +147,19 @@ function AdminEventsContent() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link href={`/events/detail?event=${encodeURIComponent(event.slug || event.id)}`} className="rounded-full bg-white px-3.5 py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">View</Link>
-                    <Link href={`/admin/events/new?edit=${event.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-white px-3.5 py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200"><Pencil className="h-3.5 w-3.5" /> Edit</Link>
+                    <Link href={`/events/detail?event=${encodeURIComponent(event.slug || event.id)}`} className="inline-flex min-h-11 items-center rounded-full bg-white px-3.5 py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200">View</Link>
+                    <Link href={`/staff/events?event=${encodeURIComponent(event.id)}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-white px-3.5 py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200"><Users className="h-3.5 w-3.5" aria-hidden="true" /> Roster</Link>
+                    <Link href={`/admin/events/new?edit=${event.id}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-white px-3.5 py-2 text-sm font-medium text-slate-600 ring-1 ring-slate-200"><Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit</Link>
                     {event.status === "draft" && (
-                      <button type="button" onClick={() => void publish(event.id)} disabled={busyId === event.id} className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 disabled:opacity-50">
+                      <button type="button" onClick={() => void publish(event.id)} disabled={busyId === event.id} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 disabled:opacity-50">
                         {busyId === event.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} Publish
                       </button>
                     )}
                     {event.status === "published" && !past && (
-                      <button type="button" onClick={() => void cancel(event)} disabled={busyId === event.id} className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"><XCircle className="h-3.5 w-3.5" /> Cancel</button>
+                      <button type="button" onClick={() => setPending({ kind: "cancel", event })} disabled={busyId === event.id} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50"><XCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cancel event</button>
                     )}
                     {event.status === "published" && past && (
-                      <button type="button" onClick={() => void complete(event)} disabled={busyId === event.id} className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-2 text-sm font-semibold text-sky-700 disabled:opacity-50"><CheckCircle2 className="h-3.5 w-3.5" /> Complete</button>
+                      <button type="button" onClick={() => setPending({ kind: "complete", event })} disabled={busyId === event.id} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-sky-50 px-3.5 py-2 text-sm font-semibold text-sky-700 disabled:opacity-50"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Complete</button>
                     )}
                   </div>
                 </div>
@@ -149,6 +167,34 @@ function AdminEventsContent() {
             })}
           </div>
         )}
+        <ConfirmSheet
+          open={pending !== null}
+          title={pending?.kind === "cancel" ? `Cancel “${pending.event.title}”?` : `Complete “${pending?.event.title ?? ""}”?`}
+          confirmLabel={pending?.kind === "cancel" ? "Cancel event" : "Complete event"}
+          destructive={pending?.kind === "cancel"}
+          busy={pending !== null && busyId === pending.event.id}
+          onConfirm={confirmPending}
+          onClose={closeSheet}
+        >
+          {pending?.kind === "cancel" ? (
+            <>
+              <p>The event comes off the public calendar and every registration is cancelled.</p>
+              <p>No one is emailed and no refunds are issued automatically. Paid registrations are held for an admin to review the refund. Let registrants know yourself.</p>
+              <label className="block">
+                <span className="font-semibold text-slate-900">Reason (optional, internal)</span>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  maxLength={500}
+                  rows={3}
+                  className="mt-1 w-full rounded-2xl border border-slate-300 p-3 text-sm"
+                />
+              </label>
+            </>
+          ) : (
+            <p>Anyone who wasn&apos;t checked in is marked as a no-show. You can&apos;t reopen a completed event.</p>
+          )}
+        </ConfirmSheet>
       </main>
     </AppShell>
   );
