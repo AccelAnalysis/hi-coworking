@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { AlertTriangle, ArrowLeft, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { callableErrorMessage } from "@/lib/callableError";
@@ -178,12 +178,9 @@ function MemberRecordContent() {
 
   return (
     <AppShell>
-      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-        <Link href="/admin/members" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950">
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to members
-        </Link>
+      <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
 
-        <div className="mt-4 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Member record</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
@@ -394,7 +391,7 @@ function MemberRecordContent() {
             </section>
           </div>
         )}
-      </main>
+      </div>
     </AppShell>
   );
 }

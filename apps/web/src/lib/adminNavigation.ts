@@ -12,6 +12,8 @@ type AdminRoute = { label: string; parent?: string };
 export const ADMIN_ROUTES: Record<string, AdminRoute> = {
   "/admin/members": { label: "Members" },
   "/admin/members/actions": { label: "Booking operations", parent: "/admin/members" },
+  "/admin/members/consent": { label: "Consent", parent: "/admin/members" },
+  "/admin/members/record": { label: "Member record", parent: "/admin/members" },
   "/admin/spaces": { label: "Hours & closures" },
   "/admin/spaces/catalog": { label: "Published setups" },
   "/admin/builder": { label: "Visual designer" },

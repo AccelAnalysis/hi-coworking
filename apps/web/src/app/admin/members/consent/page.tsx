@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { AlertTriangle, ArrowLeft, Loader2, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Search } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { callableErrorMessage } from "@/lib/callableError";
@@ -91,11 +91,8 @@ function ConsentListContent() {
 
   return (
     <AppShell>
-      <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-        <Link href="/admin/members" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950">
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to members
-        </Link>
-        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Admin</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Consent and suppressions</h1>
@@ -130,6 +127,7 @@ function ConsentListContent() {
             <span className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden="true" />
               <input
+                id="consent-search"
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -206,7 +204,7 @@ function ConsentListContent() {
             </>
           )
         )}
-      </main>
+      </div>
     </AppShell>
   );
 }
