@@ -13,3 +13,4 @@ export * from "./intuitOAuth";
 export * from "./quickbooksInvoice";
 export * from "./quickbooksPaymentsProvider";
 export * from "./qboAccountingSync";
+export { handleQuickBooksPaymentsWebhook } from "./quickbooksWebhook";
