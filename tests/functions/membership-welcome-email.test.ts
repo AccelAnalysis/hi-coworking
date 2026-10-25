@@ -271,7 +271,7 @@ describe("stripe_webhook wiring", () => {
   const index = readFileSync("apps/functions/src/index.ts", "utf8");
 
   it("sends after provisioning a membership, only for purpose=membership", () => {
-    const provision = webhook.indexOf("await provisionMembership(uid, plan, subscriptionId);");
+    const provision = webhook.indexOf("await provisionMembership(uid, plan, subscriptionId, result.eventId);");
     const send = webhook.indexOf("await sendMembershipWelcomeEmail(result, { apiKey: resendApiKey });");
     expect(provision).toBeGreaterThan(0);
     expect(send).toBeGreaterThan(provision);
