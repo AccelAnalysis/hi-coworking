@@ -11,6 +11,7 @@ import { defineString } from "firebase-functions/params";
 import { formatIsoEastern, splitPersonName } from "./nasaLeadModel";
 import { loadOptionalPowerNowSecrets, readPowerNowSecret } from "./powerNowConfirmationSecrets";
 import type { NormalizedPowerNow, PowerNowPath } from "./powerNowModel";
+import { RECAPTCHA_ENTERPRISE_PUBLIC_SITE_KEY } from "../recaptchaEnterpriseSiteKey";
 
 export const POWER_NOW_DEFAULT_FROM = "Accel Analysis <hello@accelanalysis.com>";
 export const POWER_NOW_DEFAULT_REPLY_TO = "hello@accelanalysis.com";
@@ -22,7 +23,7 @@ export const POWER_NOW_RECAPTCHA_MIN_SCORE_DEFAULT = 0.5;
 export const POWER_NOW_RECAPTCHA_ACTION = "power_now_submit";
 export const POWER_NOW_RECAPTCHA_PROJECT = "hi-coworking-plat";
 /** Public site key. Not a secret. The console key must allow both hosts below. */
-export const POWER_NOW_RECAPTCHA_SITE_KEY = "6LcAvvMtAAAAAOAmm8Z-yA83L0B_EmU7kIaq6rDX";
+export const POWER_NOW_RECAPTCHA_SITE_KEY = RECAPTCHA_ENTERPRISE_PUBLIC_SITE_KEY;
 export const POWER_NOW_RECAPTCHA_HOSTS = [
   "forms.accelanalysis.com",
   "hi-coworking.com",

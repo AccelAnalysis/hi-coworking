@@ -27,6 +27,15 @@ export function preloadPowerNowRecaptcha(): void {
 }
 
 export async function powerNowRecaptchaToken(): Promise<string> {
+  return enterpriseRecaptchaToken(POWER_NOW_RECAPTCHA_ACTION);
+}
+
+/**
+ * Returns a reCAPTCHA Enterprise token for `action`, or "" when the public site
+ * key is unset, the script cannot load, or Google does not answer within 4 s.
+ * The site key is the public NEXT_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY value.
+ */
+export async function enterpriseRecaptchaToken(action: string): Promise<string> {
   const siteKey = powerNowRecaptchaSiteKey();
   if (!siteKey || typeof window === "undefined") return "";
   preloadPowerNowRecaptcha();
@@ -37,7 +46,7 @@ export async function powerNowRecaptchaToken(): Promise<string> {
     try {
       enterprise.ready(() => {
         enterprise
-          .execute(siteKey, { action: POWER_NOW_RECAPTCHA_ACTION })
+          .execute(siteKey, { action })
           .then((token) => {
             window.clearTimeout(timer);
             resolve(token || "");

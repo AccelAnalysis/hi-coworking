@@ -2,8 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import Script from "next/script";
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ComponentType, FormEvent } from "react";
 import {
   ArrowRight,
@@ -25,6 +24,13 @@ import {
   Wifi,
   X,
 } from "lucide-react";
+import {
+  LEAD_ERROR_MESSAGES,
+  leadsSubmitUrl,
+  submitLeadRequest,
+  type LeadSubmitOutcome,
+} from "@/lib/earlyAccessLead";
+import { enterpriseRecaptchaToken, preloadPowerNowRecaptcha } from "@/lib/powerNowRecaptcha";
 
 const MapComponent = dynamic(
   () => import("@/components/MapComponent").then((m) => m.MapComponent),
@@ -111,14 +117,27 @@ const SURVEY_QUESTIONS: SurveyQuestion[] = [
 
 type FormStatus = "idle" | "submitting" | "success" | "error";
 
-const LEADS_SUBMIT_URL =
-  process.env.NEXT_PUBLIC_LEADS_SUBMIT_URL ||
-  "https://us-central1-hi-coworking-ops.cloudfunctions.net/leads_submitLead";
-const RECAPTCHA_SITE_KEY = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || "";
+// Next.js inlines only literal process.env.NEXT_PUBLIC_* reads, so pass each one explicitly.
+const LEADS_SUBMIT_URL = leadsSubmitUrl({
+  NEXT_PUBLIC_LEADS_SUBMIT_URL: process.env.NEXT_PUBLIC_LEADS_SUBMIT_URL,
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+});
 
 export function ComingSoonExperience() {
   const [surveyOpen, setSurveyOpen] = useState(false);
   const [formStatus, setFormStatus] = useState<FormStatus>("idle");
+  const [formError, setFormError] = useState("");
+  const errorRef = useRef<HTMLDivElement>(null);
+  const successRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    preloadPowerNowRecaptcha();
+  }, []);
+
+  useEffect(() => {
+    if (formStatus === "error") errorRef.current?.focus();
+    if (formStatus === "success") successRef.current?.focus();
+  }, [formStatus]);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -150,22 +169,25 @@ export function ComingSoonExperience() {
   const handleEarlyAccessSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormStatus("submitting");
-    const ok = await submitLead({
+    setFormError("");
+    const outcome = await submitLead({
       type: "early_access",
       ...formData,
       source: "web-coming-soon",
       submission_version: "3.0",
       timestamp: new Date().toISOString(),
     });
-    setFormStatus(ok ? "success" : "error");
+    if (outcome.ok) {
+      setFormStatus("success");
+      return;
+    }
+    // Keep every typed value so the visitor can retry without re-entering anything.
+    setFormError(LEAD_ERROR_MESSAGES[outcome.reason]);
+    setFormStatus("error");
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 relative overflow-hidden">
-      {RECAPTCHA_SITE_KEY && (
-        <Script src={`https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`} strategy="afterInteractive" />
-      )}
-
       <div className="fixed top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-emerald-200/20 blur-[120px] pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-slate-300/20 blur-[120px] pointer-events-none" />
 
@@ -454,24 +476,36 @@ export function ComingSoonExperience() {
           </div>
 
           {formStatus === "success" ? (
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-8 text-center">
+            <div role="status" className="bg-emerald-50 border border-emerald-100 rounded-2xl p-8 text-center">
               <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto mb-4">
                 <Check size={28} />
               </div>
-              <h3 className="text-xl font-bold text-emerald-950 mb-2">Thank you - you&apos;re on the list.</h3>
+              <h3 ref={successRef} tabIndex={-1} className="text-xl font-bold text-emerald-950 mb-2 outline-none">Thank you - you&apos;re on the list.</h3>
               <p className="text-emerald-800">We will share meaningful updates as launch milestones are finalized.</p>
             </div>
           ) : (
-            <form onSubmit={handleEarlyAccessSubmit} className="bg-white/80 border border-slate-200 rounded-2xl p-6 md:p-8 space-y-5 shadow-sm">
-              {formStatus === "error" && (
-                <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-3 py-2">
-                  Submission failed. Please try again.
+            <form
+              onSubmit={handleEarlyAccessSubmit}
+              aria-busy={formStatus === "submitting"}
+              aria-describedby={formStatus === "error" ? "early-access-error" : undefined}
+              className="bg-white/80 border border-slate-200 rounded-2xl p-6 md:p-8 space-y-5 shadow-sm"
+            >
+              {formStatus === "error" && formError && (
+                <div
+                  id="early-access-error"
+                  ref={errorRef}
+                  role="alert"
+                  tabIndex={-1}
+                  className="rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-3 py-2 outline-none focus-visible:ring-2 focus-visible:ring-red-700"
+                >
+                  <span className="font-semibold">Your request was not sent. </span>
+                  {formError}
                 </div>
               )}
 
               <div className="grid md:grid-cols-2 gap-4">
-                <Input label="Name" value={formData.name} onChange={(v) => setFormData((p) => ({ ...p, name: v }))} required />
-                <Input label="Email" type="email" value={formData.email} onChange={(v) => setFormData((p) => ({ ...p, email: v }))} required />
+                <Input label="Name" autoComplete="name" value={formData.name} onChange={(v) => setFormData((p) => ({ ...p, name: v }))} required />
+                <Input label="Email" type="email" autoComplete="email" value={formData.email} onChange={(v) => setFormData((p) => ({ ...p, email: v }))} required />
               </div>
 
               <fieldset>
@@ -495,8 +529,9 @@ export function ComingSoonExperience() {
               </fieldset>
 
               <div>
-                <label className="text-sm font-medium text-slate-700">Optional Message</label>
+                <label htmlFor="early-access-message" className="text-sm font-medium text-slate-700">Optional Message</label>
                 <textarea
+                  id="early-access-message"
                   rows={3}
                   value={formData.message}
                   onChange={(e) => setFormData((p) => ({ ...p, message: e.target.value }))}
@@ -531,7 +566,7 @@ export function ComingSoonExperience() {
                 disabled={formStatus === "submitting"}
                 className="w-full inline-flex justify-center items-center gap-2 px-5 py-3 rounded-full bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors disabled:opacity-60"
               >
-                {formStatus === "submitting" ? <><Loader2 className="h-4 w-4 animate-spin" /> Joining...</> : "Join Early Access"}
+                {formStatus === "submitting" ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Joining...</> : "Join Early Access"}
               </button>
             </form>
           )}
@@ -579,18 +614,23 @@ function Input({
   onChange,
   required,
   type = "text",
+  autoComplete,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
   type?: string;
+  autoComplete?: string;
 }) {
+  const id = useId();
   return (
     <div>
-      <label className="text-sm font-medium text-slate-700">{label}</label>
+      <label htmlFor={id} className="text-sm font-medium text-slate-700">{label}</label>
       <input
+        id={id}
         type={type}
+        autoComplete={autoComplete}
         required={required}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -605,6 +645,7 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
   const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [surveyError, setSurveyError] = useState("");
 
   const q = SURVEY_QUESTIONS[step];
   const progress = ((step + 1) / SURVEY_QUESTIONS.length) * 100;
@@ -634,7 +675,8 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
       return;
     }
     setIsSubmitting(true);
-    await submitLead({
+    setSurveyError("");
+    const outcome = await submitLead({
       type: "survey",
       name: "Survey Respondent",
       email: "anonymous@survey.local",
@@ -644,6 +686,11 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
       timestamp: new Date().toISOString(),
     });
     setIsSubmitting(false);
+    if (!outcome.ok) {
+      // Keep the answers so Finish can be pressed again.
+      setSurveyError(LEAD_ERROR_MESSAGES[outcome.reason]);
+      return;
+    }
     setCompleted(true);
   };
 
@@ -674,7 +721,7 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
               <div className="h-full bg-slate-900" style={{ width: `${progress}%` }} />
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700"><X size={22} /></button>
+          <button onClick={onClose} aria-label="Close survey" className="text-slate-500 hover:text-slate-700"><X size={22} aria-hidden="true" /></button>
         </div>
 
         <div className="flex-1 p-6 overflow-y-auto">
@@ -718,6 +765,12 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        {surveyError && (
+          <div role="alert" className="mx-6 mb-2 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm px-3 py-2">
+            <span className="font-semibold">Your answers were not sent. </span>
+            {surveyError}
+          </div>
+        )}
         <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
@@ -740,29 +793,10 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-async function submitLead(payload: Record<string, unknown>): Promise<boolean> {
-  try {
-    const recaptchaToken = await getRecaptchaToken(payload.type === "survey" ? "survey" : "early_access");
-    const resp = await fetch(LEADS_SUBMIT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, recaptchaToken }),
-    });
-    return resp.ok;
-  } catch (err) {
-    console.error("submitLead failed", err);
-    return false;
-  }
-}
-
-async function getRecaptchaToken(action: string): Promise<string | null> {
-  if (!RECAPTCHA_SITE_KEY) return null;
-  if (typeof window === "undefined") return null;
-  const grecaptcha = (window as Window & { grecaptcha?: { execute: (key: string, opts: { action: string }) => Promise<string> } }).grecaptcha;
-  if (!grecaptcha) return null;
-  try {
-    return await grecaptcha.execute(RECAPTCHA_SITE_KEY, { action });
-  } catch {
-    return null;
-  }
+function submitLead(payload: Record<string, unknown>): Promise<LeadSubmitOutcome> {
+  return submitLeadRequest(payload, {
+    url: LEADS_SUBMIT_URL,
+    fetchImpl: (input, init) => fetch(input, init),
+    getToken: enterpriseRecaptchaToken,
+  });
 }
