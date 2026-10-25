@@ -203,12 +203,12 @@ describe("My Hi refund summary and notification", () => {
     expect(memberRefundSummary(newer, snapshot())).toBeNull();
   });
 
-  it("builds an in-app payment notification linking to My Hi", () => {
+  it("builds an bell-feed refund notification linking to My Hi", () => {
     const snap = snapshot();
     const note = refundNotification("member-1", snap, snap.refunds[0], 5);
-    expect(note).toMatchObject({ id: "refund_re_test_1", type: "payment", linkTo: "/my-hi", read: false });
+    expect(note).toMatchObject({ id: "membership_refund_re_test_1", type: "membership_refund", linkTo: "/my-hi", read: false });
     expect(note.body).toBe(
-      "We refunded $49.00 to your original payment method. It usually takes 5–10 business days to appear on your statement.",
+      "We've refunded $49.00 to your original payment method. Refunds usually take 5–10 business days to appear on your statement.",
     );
   });
 });
@@ -232,7 +232,7 @@ describe("member notice email copy", () => {
   it("states the date a scheduled cancellation stays active until", () => {
     expect(all[1].subject).toBe("Your Hi Coworking membership is active until November 24, 2026");
     expect(all[1].text).toContain("Your membership stays active until November 24, 2026");
-    expect(all[1].text).toContain("Coworking Member");
+    expect(all[1].text).toContain("cancel your Coworking membership.");
   });
 
   it("confirms the membership ended", () => {

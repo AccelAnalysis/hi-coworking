@@ -1601,6 +1601,10 @@ export const notificationTypeSchema = z.enum([
   "system",
   "access_pin_issued",
   "access_pin_revoked",
+  "membership_refund",
+  "membership_refund_failed",
+  "membership_cancellation",
+  "membership_ended",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 

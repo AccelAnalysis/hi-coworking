@@ -7,8 +7,9 @@
  *    paid when every refund failed; amountRefunded; refundedAt). Derived from
  *    the charge's current state, so replays converge on the same result.
  * 2. Membership refunds only (a membership payment or a subscription
- *    invoice): users/{uid}.lastRefund for My Hi, an in-app notification and
- *    a refund confirmation email, each once per refund. Event, booking and
+ *    invoice): users/{uid}.lastRefund for My Hi, a Notifications (bell) entry
+ *    and a refund confirmation email, each once per refund; a failed refund
+ *    gets a "didn't go through" notification. Event, booking and
  *    bookstore refunds keep the notices their own refund flows send.
  *
  * Membership status is never changed here (see stripeRefund.ts).
@@ -19,10 +20,13 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { sendRefundEmail } from "./memberNoticeEmails";
 import {
-  formatMoney,
+  refundFailedNotification,
+  refundIssuedNotification,
+  writeMemberNotification,
+} from "./memberNotifications";
+import {
   isNotifiableRefund,
   memberRefundSummary,
-  refundDestination,
   refundLedgerUpdates,
   type MemberRefundSummary,
 } from "./stripeRefund";
@@ -84,23 +88,14 @@ async function resolveMember(
   return "";
 }
 
+/** The bell-feed notice for an issued refund (kept for callers and tests). */
 export function refundNotification(
   uid: string,
   snapshot: StripeRefundSnapshot,
   refund: StripeRefundLine,
   now: number,
 ) {
-  const id = `refund_${refund.id}`;
-  return {
-    id,
-    uid,
-    type: "payment" as const,
-    title: "Refund issued",
-    body: `We refunded ${formatMoney(refund.amountCents, snapshot.currency)} to ${refundDestination(snapshot)}. It usually takes 5–10 business days to appear on your statement.`,
-    linkTo: "/my-hi",
-    read: false,
-    createdAt: now,
-  };
+  return refundIssuedNotification(uid, snapshot, refund, now);
 }
 
 export async function handleStripeRefund(
@@ -177,20 +172,16 @@ export async function handleStripeRefund(
   }
 
   const now = Date.now();
-  const notifiable = snapshot.refunds.filter(
-    (refund) => isNotifiableRefund(refund) && now - refund.createdMs <= REFUND_NOTICE_MAX_AGE_MS,
+  const recent = snapshot.refunds.filter(
+    (refund) => Boolean(refund.id) && refund.amountCents > 0 && now - refund.createdMs <= REFUND_NOTICE_MAX_AGE_MS,
   );
-  for (const refund of notifiable) {
-    const notification = refundNotification(uid, snapshot, refund, now);
-    try {
-      // create() fails if it exists, so a replay never resets "read".
-      await db.collection("notifications").doc(notification.id).create(notification);
-    } catch (error) {
-      const code = (error as { code?: unknown })?.code;
-      if (code !== 6 && code !== "already-exists") {
-        logger.error("Refund notification failed (non-fatal)", { ...logContext, uid, error: String(error) });
-      }
+  for (const refund of recent) {
+    if (isNotifiableRefund(refund)) {
+      // Deterministic ID + create(): a replay never duplicates or resets "read".
+      await writeMemberNotification(refundIssuedNotification(uid, snapshot, refund, now));
+      await sendRefundEmail(uid, snapshot, refund, { apiKey: resendApiKey });
+    } else if (refund.status === "failed") {
+      await writeMemberNotification(refundFailedNotification(uid, snapshot, refund, now));
     }
-    await sendRefundEmail(uid, snapshot, refund, { apiKey: resendApiKey });
   }
 }

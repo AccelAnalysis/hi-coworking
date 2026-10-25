@@ -32,6 +32,7 @@ import {
   sendCancellationScheduledEmail,
   sendMembershipEndedEmail,
 } from "./memberNoticeEmails";
+import { notifyCancellationScheduled, notifyMembershipEnded } from "./memberNotifications";
 
 function getDb() { return admin.firestore(); }
 
@@ -114,6 +115,12 @@ async function processWebhookResult(
       if (result.metadata?.reason === "subscription_cancelled") {
         // customer.subscription.deleted. Sends only when the handler above
         // actually ended the membership (never for comp members). Never throws.
+        await notifyMembershipEnded({
+          uid: result.metadata.uid || "",
+          subscriptionId: result.metadata.subscriptionId || "",
+          endedAtMs: Number(result.metadata.endedAtMs) || 0,
+          planId: result.metadata.plan || "",
+        });
         await sendMembershipEndedEmail({
           uid: result.metadata.uid || "",
           subscriptionId: result.metadata.subscriptionId || "",
@@ -584,6 +591,7 @@ async function handleSubscriptionUpdated(result: WebhookResult, resendApiKey?: s
   // (comp membership, other subscription, stale). Never throws.
   const scheduledEnd = decision.apply ? decision.updates.cancelAt : undefined;
   if (typeof scheduledEnd === "number" && scheduledEnd > 0) {
+    await notifyCancellationScheduled({ uid, subscriptionId, activeUntilMs: scheduledEnd });
     await sendCancellationScheduledEmail({
       uid,
       subscriptionId,

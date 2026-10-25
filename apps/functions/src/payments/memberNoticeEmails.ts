@@ -57,9 +57,12 @@ export function formatNoticeDate(ms: number): string {
   }).format(new Date(ms));
 }
 
-function planLabel(planId?: string | null): string {
+export function planLabel(planId?: string | null): string {
   const tier = planId ? getTierById(planId) : undefined;
-  return tier ? `${tier.name} membership` : "Hi Coworking membership";
+  if (!tier) return "Hi Coworking membership";
+  // "Coworking Member" reads as "Coworking membership", not "Coworking Member membership".
+  const name = tier.name.replace(/\s+Member$/i, "");
+  return `${name} membership`;
 }
 
 function greetingFor(firstName?: string): string {
