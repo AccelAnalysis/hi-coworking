@@ -115,7 +115,7 @@ function EventDetailContent() {
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
                 {completed ? "Past event" : "At Hi Coworking"}
               </p>
-              <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">{event.title}</h1>
+              <h1 className="font-display mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">{event.title}</h1>
 
               <div className="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm text-slate-600">
                 <span className="inline-flex items-center gap-2"><CalendarDays className="h-4 w-4" /> {dateLabel(event)}</span>
@@ -146,7 +146,7 @@ function EventDetailContent() {
 
             {event.gallery?.length > 0 && (
               <section className="border-t border-slate-200 py-10">
-                <h2 className="text-2xl font-semibold text-slate-950">From the event</h2>
+                <h2 className="font-display text-2xl font-semibold text-slate-950">From the event</h2>
                 <div className="mt-6 grid gap-4 sm:grid-cols-2">
                   {event.gallery.filter((image) => image.downloadUrl).map((image, index) => (
                     <div key={`${image.storagePath}-${index}`} className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-slate-100">

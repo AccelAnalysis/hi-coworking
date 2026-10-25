@@ -37,7 +37,7 @@ function CoreWorkspaceDark() {
         <div className="relative z-10">
           <div className="md:flex justify-between items-end mb-12 border-b border-slate-800 pb-8">
             <div className="max-w-xl">
-              <h2 className="text-3xl font-bold mb-4 tracking-tight">What We&apos;re Building (Together)</h2>
+              <h2 className="font-display text-3xl font-semibold mb-4 tracking-tight">What We&apos;re Building (Together)</h2>
               <p className="text-slate-400">
                 Hi Coworking will open in phases. Some services launch immediately. Others will be added based on real interest and local demand.
               </p>
@@ -107,7 +107,7 @@ function CoreWorkspaceLight() {
             <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600">
               <Check size={20} strokeWidth={3} />
             </div>
-            <h2 className="text-2xl font-bold">Core Workspace (Day One)</h2>
+            <h2 className="font-display text-2xl font-semibold">Core Workspace (Day One)</h2>
           </div>
           <p className="text-slate-600 mb-6">Everything you need to sit down and get to work. No frills, no friction.</p>
           <ul className="space-y-4">
@@ -125,7 +125,7 @@ function CoreWorkspaceLight() {
             <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-600">
               <Users size={20} />
             </div>
-            <h2 className="text-2xl font-bold">Possible Add-Ons</h2>
+            <h2 className="font-display text-2xl font-semibold">Possible Add-Ons</h2>
           </div>
           <p className="text-slate-600 mb-6">These features will be added based on real interest and local demand.</p>
           <div className="grid grid-cols-2 gap-3">

@@ -14,7 +14,7 @@ export function WhyHiExistsSection() {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-800 text-xs font-semibold tracking-wide uppercase border border-blue-100 mb-6">
             <TrendingUp size={12} /> Why This Matters Locally
           </div>
-          <h2 className="text-3xl md:text-4xl font-bold mb-6 tracking-tight">Why Hi Coworking Exists</h2>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold mb-6 tracking-tight">Why Hi Coworking Exists</h2>
         </div>
         <div className="grid md:grid-cols-3 gap-8">
           {REASONS.map((item, i) => (

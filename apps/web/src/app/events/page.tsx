@@ -109,7 +109,7 @@ export default function EventsPage() {
       <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="max-w-2xl">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">At Hi Coworking</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Come work, learn, and meet people here.</h1>
+          <h1 className="font-display mt-3 text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">Come work, learn, and meet people here.</h1>
           <p className="mt-4 text-base leading-7 text-slate-600">
             Community mornings, practical workshops, and local gatherings in Carrollton.
           </p>
@@ -166,7 +166,7 @@ export default function EventsPage() {
             <div className="flex flex-col justify-between p-7 sm:p-9">
               <div>
                 <p className="text-sm font-medium text-sky-200">Next up · {dateLabel(featured.startTime)}</p>
-                <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{featured.title}</h2>
+                <h2 className="font-display mt-4 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{featured.title}</h2>
                 <p className="mt-4 line-clamp-3 break-words text-sm leading-6 text-slate-300">{featured.description}</p>
               </div>
               <div className="mt-8 space-y-2 text-sm text-slate-300">
@@ -184,7 +184,7 @@ export default function EventsPage() {
         {!loading && !error && gridEvents.length > 0 && (
           <section className="mt-12" aria-labelledby="event-list-heading">
             <div className="flex items-end justify-between border-b border-slate-200 pb-4">
-              <h2 id="event-list-heading" className="text-2xl font-semibold text-slate-950">
+              <h2 id="event-list-heading" className="font-display text-2xl font-semibold text-slate-950">
                 {view === "past" ? "Past events" : view === "month" ? "This month" : "More upcoming"}
               </h2>
             </div>

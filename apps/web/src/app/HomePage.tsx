@@ -34,7 +34,7 @@ export function HomePage() {
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/50 backdrop-blur-sm text-emerald-800 text-xs font-semibold tracking-wide uppercase border border-emerald-100 shadow-sm">
               <MapPin size={12} /> Carrollton, VA
             </div>
-            <h1 className="text-5xl md:text-8xl font-bold tracking-tight text-slate-900 leading-[1.1] drop-shadow-sm">
+            <h1 className="font-display text-5xl md:text-8xl font-semibold tracking-tight text-slate-900 leading-[1.1] drop-shadow-sm">
               Big ideas.<br />
               <span className="text-slate-400">Intimate space.</span>
             </h1>
@@ -64,7 +64,7 @@ export function HomePage() {
         {/* Who It's For */}
         <section className="py-20 md:py-32 px-6 md:px-12 max-w-7xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold mb-4 tracking-tight">Who Hi Coworking Is For</h2>
+            <h2 className="font-display text-3xl font-semibold mb-4 tracking-tight">Who Hi Coworking Is For</h2>
             <p className="text-slate-600">If any of this sounds familiar, you&apos;re in the right place.</p>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -90,7 +90,7 @@ export function HomePage() {
         {/* CTA */}
         <section className="py-20 md:py-32 px-6 md:px-12 max-w-7xl mx-auto">
           <div className="bg-emerald-50/50 backdrop-blur-md rounded-2xl p-8 md:p-12 text-center max-w-4xl mx-auto border border-emerald-100 shadow-xl shadow-emerald-100/50">
-            <h2 className="text-2xl md:text-3xl font-bold text-emerald-950 mb-4">Ready to find your workspace?</h2>
+            <h2 className="font-display text-2xl md:text-3xl font-semibold text-emerald-950 mb-4">Ready to find your workspace?</h2>
             <p className="text-emerald-800 mb-8 max-w-2xl mx-auto">
               Hi Coworking is an intimate workspace—built intentionally for the way work actually happens. Join today or explore our spaces.
             </p>

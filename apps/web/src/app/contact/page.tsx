@@ -45,7 +45,7 @@ export default function ContactPage() {
 
       <section className="py-20 md:py-32 px-6 md:px-12 max-w-5xl mx-auto relative z-10">
         <div className="text-center mb-16">
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-slate-900 mb-6">Get in Touch</h1>
+          <h1 className="font-display text-4xl md:text-6xl font-semibold tracking-tight text-slate-900 mb-6">Get in Touch</h1>
           <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-light">
             Have a question or want to learn more? We&apos;d love to hear from you.
           </p>

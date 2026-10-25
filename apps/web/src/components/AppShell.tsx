@@ -110,7 +110,7 @@ export function AppShell({
       <nav className="sticky top-0 z-50 bg-slate-900 text-white shadow-lg">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4">
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex shrink-0 items-center gap-2">
+            <Link href="/" className="font-logo flex shrink-0 items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-2xl rounded-bl-none bg-white text-sm font-bold text-slate-900 shadow-lg shadow-white/10">
                 Hi
               </div>
@@ -282,7 +282,7 @@ export function AppShell({
             <div className="flex items-center justify-between border-b border-slate-100 p-4">
               <Link
                 href="/"
-                className="flex items-center gap-2"
+                className="font-logo flex items-center gap-2"
                 onClick={() => setDrawerOpen(false)}
               >
                 <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
@@ -396,7 +396,7 @@ export function AppShell({
         <div className="mx-auto max-w-7xl px-6 py-12">
           <div className="mb-8 grid grid-cols-2 gap-8 md:grid-cols-4">
             <div className="col-span-2 md:col-span-1">
-              <Link href="/" className="mb-3 flex items-center gap-2">
+              <Link href="/" className="font-logo mb-3 flex items-center gap-2">
                 <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
                   Hi
                 </div>

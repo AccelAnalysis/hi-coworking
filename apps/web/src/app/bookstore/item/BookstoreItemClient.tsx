@@ -213,7 +213,7 @@ export default function BookstoreItemPage() {
 
           <div className="flex flex-col justify-center">
             {book.seriesTitle && <p className="text-sm font-semibold text-slate-500">{book.seriesTitle}{book.seriesOrder ? ` · Book ${book.seriesOrder}` : ""}</p>}
-            <h1 className="mt-2 text-4xl font-semibold tracking-[-0.03em] text-slate-950 md:text-5xl">{book.title}</h1>
+            <h1 className="font-display mt-2 text-4xl font-semibold tracking-[-0.03em] text-slate-950 md:text-5xl">{book.title}</h1>
             <p className="mt-2 text-base text-slate-500">by {book.author}</p>
             {book.description && <p className="mt-6 max-w-2xl whitespace-pre-line text-base leading-7 text-slate-650">{book.description}</p>}
 

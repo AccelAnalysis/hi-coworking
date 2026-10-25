@@ -69,7 +69,7 @@ export default function PricingPage() {
       <AppShell>
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-slate-900 mb-4">
+            <h1 className="font-display text-4xl md:text-5xl font-semibold tracking-tight text-slate-900 mb-4">
               Simple pricing for how you use the space
             </h1>
             <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
