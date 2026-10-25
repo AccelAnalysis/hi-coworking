@@ -6,6 +6,12 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { ResendEmailProvider } from "./providers/emailProvider";
 import { resendApiKey } from "./providers/emailSecret";
+import {
+  COMP_MEMBERSHIP_SOURCE,
+  compEndUpdates,
+  compMembershipEnded,
+  isCompMembership,
+} from "./payments/compMembership";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -410,9 +416,46 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
   }
 }
 
+/**
+ * End complimentary memberships whose end date has passed. Comp memberships
+ * have no Stripe subscription, so no webhook ever ends them; this sweep runs
+ * with the existing 15-minute nurture schedule instead of adding a new
+ * scheduled function. Single-field query, so no composite index is needed.
+ */
+export async function expireEndedCompMemberships(now: number): Promise<number> {
+  const snap = await db
+    .collection("users")
+    .where("membershipSource", "==", COMP_MEMBERSHIP_SOURCE)
+    .limit(500)
+    .get();
+  let expired = 0;
+  for (const doc of snap.docs) {
+    const user = doc.data();
+    if (user.membershipStatus !== "active" || !compMembershipEnded(user, now)) continue;
+    await doc.ref.set(compEndUpdates("expired", "system", now), { merge: true });
+    const auditRef = db.collection("memberOperationAudit").doc();
+    await auditRef.set({
+      id: auditRef.id,
+      action: "membership_comp_expired",
+      memberUid: doc.id,
+      adminUid: "system",
+      details: { plan: user.plan || null, endsAt: user.compEndsAt || null, stripeCharge: false },
+      createdAt: now,
+    });
+    expired += 1;
+  }
+  if (expired > 0) logger.info("Ended complimentary memberships past their end date", { expired });
+  return expired;
+}
+
 export const nurture_process = onSchedule(
   { schedule: "every 15 minutes", secrets: [resendApiKey] },
   async () => {
+    try {
+      await expireEndedCompMemberships(Date.now());
+    } catch (error) {
+      logger.error("Complimentary membership expiry sweep failed", { error });
+    }
     await ensureDefaultCampaigns();
     const apiKey = resendApiKey.value();
     if (!apiKey) {
@@ -442,7 +485,8 @@ export const nurture_scanLifecycle = onSchedule("every day 09:00", async () => {
       displayName: String(data.displayName || ""),
     };
     const expiresAt = Number(data.expiresAt || 0);
-    if (expiresAt > now && expiresAt <= renewalHorizon) {
+    // Complimentary memberships are not billed, so they never "renew".
+    if (!isCompMembership(data) && expiresAt > now && expiresAt <= renewalHorizon) {
       await enrollContact("RENEWAL_DUE", contact, `renewal:${new Date(expiresAt).toISOString().slice(0, 10)}`);
     }
     const lastBookingAt = Number(data.lastBookingAt || 0);

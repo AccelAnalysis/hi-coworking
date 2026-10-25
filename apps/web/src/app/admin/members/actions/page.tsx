@@ -20,6 +20,7 @@ import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { db, functions } from "@/lib/firebase";
 import { normalizeMember, type AdminMemberRecord } from "@/lib/adminMemberData";
+import { callableErrorMessage } from "@/lib/callableError";
 import { MEMBERSHIP_TIERS } from "@hi/shared";
 
 type MemberRecord = AdminMemberRecord;
@@ -31,6 +32,14 @@ type MembershipState = {
   currentPeriodEnd: number | null;
   planId: string | null;
   membershipStatus: string;
+  membershipSource?: string | null;
+  comp?: {
+    active: boolean;
+    ended: boolean;
+    endsAt: number | null;
+    reason: string | null;
+    grantedAt: number | null;
+  } | null;
 };
 type SpaceOption = { resourceId: string; name: string; type: "SEAT" | "MODE"; available: boolean };
 type BookingQuote = {
@@ -58,6 +67,14 @@ const reactivateMembership = httpsCallable<
   { uid: string; tierId?: string; returnOrigin: string },
   { success: boolean; kind: "reactivated" | "checkout"; checkoutUrl?: string }
 >(functions, "admin_membershipReactivate");
+const grantCompMembership = httpsCallable<
+  { uid: string; tierId: string; endsAt: number | null; reason: string },
+  { success: boolean; planId: string; endsAt: number | null }
+>(functions, "admin_membershipGrantComp");
+const endCompMembership = httpsCallable<{ uid: string; note?: string }, { success: boolean }>(
+  functions,
+  "admin_membershipEndComp",
+);
 const getAvailability = httpsCallable<
   { uid: string; start: number; end: number },
   { options: SpaceOption[] }
@@ -145,6 +162,11 @@ function AdminMemberActionsContent() {
   const [resourceId, setResourceId] = useState("");
   const [quote, setQuote] = useState<BookingQuote | null>(null);
 
+  const [compTierId, setCompTierId] = useState<string>(MEMBERSHIP_TIERS[0]?.id || "");
+  const [compEndDate, setCompEndDate] = useState("");
+  const [compReason, setCompReason] = useState("");
+  const [compFormError, setCompFormError] = useState<string | null>(null);
+
   const [creditDirection, setCreditDirection] = useState<"add" | "deduct">("add");
   const [creditAmount, setCreditAmount] = useState("");
   const [creditReason, setCreditReason] = useState("service_adjustment");
@@ -206,15 +228,23 @@ function AdminMemberActionsContent() {
   async function doChangePlan(tierId: string) {
     if (!member) return;
     const tier = MEMBERSHIP_TIERS.find((item) => item.id === tierId);
-    if (!tier || !window.confirm(`Change ${memberName(member)} to ${tier.name}? Stripe will apply the plan change and proration before Hi Coworking updates the entitlement.`)) return;
+    if (!tier) return;
+    const comp = membership?.comp?.active === true;
+    const prompt = comp
+      ? `Change ${memberName(member)}'s complimentary membership to ${tier.name}? No Stripe charge is made.`
+      : `Change ${memberName(member)} to ${tier.name}? Stripe applies the plan change and proration first, then Hi Coworking updates the membership.`;
+    if (!window.confirm(prompt)) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await changeMembershipPlan({ uid: member.uid, tierId });
-      setSuccess(`Membership changed to ${tier.name}.`);
+      setSuccess(comp ? `Complimentary membership changed to ${tier.name}. No charge was made.` : `Membership changed to ${tier.name}.`);
       await refreshSelected();
     } catch (caught) {
       console.error(caught);
-      setError("The plan change was not completed. Stripe and the Hi Coworking membership record were left unchanged if payment could not be completed.");
+      setError(callableErrorMessage(
+        caught,
+        "The plan change was not completed, and the membership was left unchanged. Refresh and try again.",
+      ));
     } finally { setActionLoading(false); }
   }
 
@@ -225,7 +255,10 @@ function AdminMemberActionsContent() {
       await cancelMembership({ uid: member.uid });
       setSuccess("Cancellation scheduled for the end of the current billing period.");
       await refreshSelected();
-    } catch (caught) { console.error(caught); setError("The membership cancellation could not be scheduled."); }
+    } catch (caught) {
+      console.error(caught);
+      setError(callableErrorMessage(caught, "The membership cancellation could not be scheduled."));
+    }
     finally { setActionLoading(false); }
   }
 
@@ -236,13 +269,53 @@ function AdminMemberActionsContent() {
       const result = await reactivateMembership({ uid: member.uid, tierId, returnOrigin: window.location.origin });
       if (result.data.kind === "checkout" && result.data.checkoutUrl) {
         setCheckoutUrl(result.data.checkoutUrl);
-        setSuccess("A Stripe reactivation checkout link is ready. Send or open it for the member; the membership is reactivated only after Stripe confirms payment.");
+        setSuccess("A Stripe checkout link is ready. Send or open it for the member. The paid membership starts only after Stripe confirms payment.");
       } else {
         setSuccess("Pending cancellation removed. The existing membership remains active.");
         await refreshSelected();
       }
-    } catch (caught) { console.error(caught); setError("The membership could not be reactivated."); }
+    } catch (caught) {
+      console.error(caught);
+      setError(callableErrorMessage(caught, "The membership could not be reactivated."));
+    }
     finally { setActionLoading(false); }
+  }
+
+  async function doGrantComp() {
+    if (!member) return;
+    const tier = MEMBERSHIP_TIERS.find((item) => item.id === compTierId);
+    const reason = compReason.trim();
+    if (!tier) { setCompFormError("Choose a plan."); return; }
+    if (reason.length < 3) { setCompFormError("Add a short reason (at least 3 characters)."); return; }
+    const endsAt = compEndDate ? easternEpoch(compEndDate, "23:59") : null;
+    if (endsAt !== null && endsAt <= Date.now()) { setCompFormError("The end date must be in the future."); return; }
+    setCompFormError(null);
+    const until = compEndDate ? ` through ${new Date(`${compEndDate}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}` : " with no end date";
+    if (!window.confirm(`Give ${memberName(member)} a complimentary ${tier.name} membership${until}? No Stripe charge is made, and this is recorded in the audit log.`)) return;
+    setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
+    try {
+      await grantCompMembership({ uid: member.uid, tierId: tier.id, endsAt, reason });
+      setSuccess(`Complimentary ${tier.name} membership granted${until}. No charge was made.`);
+      setCompReason(""); setCompEndDate("");
+      await refreshSelected();
+    } catch (caught) {
+      console.error(caught);
+      setCompFormError(callableErrorMessage(caught, "The complimentary membership could not be granted. Nothing was changed."));
+    } finally { setActionLoading(false); }
+  }
+
+  async function doEndComp() {
+    if (!member) return;
+    if (!window.confirm(`End ${memberName(member)}'s complimentary membership now? Their plan benefits stop immediately. No Stripe charge or refund is involved.`)) return;
+    setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
+    try {
+      await endCompMembership({ uid: member.uid });
+      setSuccess("Complimentary membership ended.");
+      await refreshSelected();
+    } catch (caught) {
+      console.error(caught);
+      setError(callableErrorMessage(caught, "The complimentary membership could not be ended."));
+    } finally { setActionLoading(false); }
   }
 
   async function checkAvailability() {
@@ -346,21 +419,83 @@ function AdminMemberActionsContent() {
 
         {member && <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500"><span className="inline-flex items-center gap-2 font-semibold text-slate-900"><UserRound className="h-4 w-4 text-slate-400" /> {memberName(member)}</span><span>{planName(membership?.planId || member.plan)}</span><span>Credit {money(member.accountCreditCents || 0)}</span></div>}
 
-        {(error || success) && <div className={`mt-6 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>{error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}<span>{error || success}</span></div>}
+        {(error || success) && <div role={error ? "alert" : "status"} aria-live={error ? "assertive" : "polite"} className={`mt-6 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>{error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}<span>{error || success}</span></div>}
 
         {checkoutUrl && <div className="mt-4 rounded-2xl bg-sky-50 p-4 text-sm text-sky-950"><p className="font-semibold">Stripe payment link ready</p><p className="mt-1 break-all text-xs text-sky-800">{checkoutUrl}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void copyCheckout()} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-semibold ring-1 ring-sky-200"><Copy className="h-4 w-4" /> Copy link</button><a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 font-semibold text-white">Open checkout</a></div></div>}
 
         <nav className="mt-8 flex gap-6 overflow-x-auto border-b border-slate-200">{tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => { setTab(id); setError(null); setSuccess(null); setCheckoutUrl(null); }} className={`inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-semibold ${tab === id ? "border-slate-950 text-slate-950" : "border-transparent text-slate-500"}`}><Icon className="h-4 w-4" /> {label}</button>)}</nav>
 
         {loading || actionLoading && !member ? <div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div> : member && <div className="py-8">
-          {tab === "membership" && <section>
+          {tab === "membership" && (() => {
+            const compActive = membership?.comp?.active === true;
+            const hasSubscription = membership?.hasSubscription === true;
+            const canChangePlan = compActive || hasSubscription;
+            const currentPlanId = membership?.planId || member.plan || null;
+            const compEndsAt = membership?.comp?.endsAt ?? null;
+            return <section aria-labelledby="membership-heading">
             <div className="grid gap-6 md:grid-cols-[1fr_1.4fr]">
-              <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Stripe membership</p><h2 className="mt-2 text-2xl font-semibold text-slate-950">{planName(membership?.planId || member.plan)}</h2><p className="mt-2 text-sm text-slate-500">Hi status: {member.membershipStatus} · Stripe: {membership?.stripeStatus || "not linked"}</p>{membership?.currentPeriodEnd && <p className="mt-1 text-sm text-slate-500">Current period ends {new Date(membership.currentPeriodEnd).toLocaleDateString()}</p>}{membership?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">Cancellation is scheduled at period end.</p>}</div>
-              <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Change plan</p><div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{MEMBERSHIP_TIERS.map((tier) => <div key={tier.id} className="flex items-center justify-between gap-4 py-4"><div><p className="font-semibold text-slate-950">{tier.name}</p><p className="mt-1 text-sm text-slate-500">{money(tier.amountCents)}/mo · {tier.includedHoursPerMonth} included desk hours</p></div><button type="button" disabled={actionLoading || membership?.planId === tier.id || membership?.cancelAtPeriodEnd} onClick={() => void doChangePlan(tier.id)} className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 disabled:opacity-40">{membership?.planId === tier.id ? "Current" : "Change"}</button></div>)}</div></div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{compActive ? "Complimentary membership" : "Stripe membership"}</p>
+                <h2 id="membership-heading" className="mt-2 text-2xl font-semibold text-slate-950">{planName(currentPlanId)}</h2>
+                <p className="mt-2 text-sm text-slate-600">Hi status: {member.membershipStatus} · {compActive ? "Billing: none (complimentary)" : `Stripe: ${membership?.stripeStatus || "not linked"}`}</p>
+                {compActive && <p className="mt-1 text-sm text-slate-600">{compEndsAt ? `Complimentary through ${new Date(compEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}` : "No end date"}{membership?.comp?.reason ? ` · Reason: ${membership.comp.reason}` : ""}</p>}
+                {!compActive && membership?.currentPeriodEnd && <p className="mt-1 text-sm text-slate-600">Current period ends {new Date(membership.currentPeriodEnd).toLocaleDateString()}</p>}
+                {membership?.cancelAtPeriodEnd && <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">Cancellation is scheduled at period end.</p>}
+              </div>
+              <div>
+                <p id="change-plan-heading" className="text-xs font-semibold uppercase tracking-wide text-slate-500">Change plan</p>
+                {!canChangePlan && <p id="change-plan-hint" className="mt-2 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">This member has no active paid Stripe subscription, so there is nothing to change in Stripe. Start a paid membership with a checkout link, or grant a complimentary membership below.</p>}
+                <ul aria-labelledby="change-plan-heading" className="mt-3 divide-y divide-slate-200 border-y border-slate-200">{MEMBERSHIP_TIERS.map((tier) => {
+                  const isCurrent = canChangePlan && currentPlanId === tier.id;
+                  return <li key={tier.id} className="flex items-center justify-between gap-4 py-4"><div><p className="font-semibold text-slate-950">{tier.name}</p><p className="mt-1 text-sm text-slate-600">{money(tier.amountCents)}/mo · {tier.includedHoursPerMonth} included desk hours</p></div><button type="button" aria-describedby={!canChangePlan ? "change-plan-hint" : undefined} aria-label={isCurrent ? `${tier.name} is the current plan` : `Change to ${tier.name}`} disabled={actionLoading || !canChangePlan || isCurrent || membership?.cancelAtPeriodEnd} onClick={() => void doChangePlan(tier.id)} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-50">{isCurrent ? "Current" : "Change"}</button></li>;
+                })}</ul>
+              </div>
             </div>
-            <div className="mt-8 flex flex-wrap gap-3 border-t border-slate-200 pt-6">{membership?.cancelAtPeriodEnd ? <button type="button" disabled={actionLoading} onClick={() => void doReactivateMembership()} className="rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white">Reactivate membership</button> : membership?.hasSubscription ? <button type="button" disabled={actionLoading} onClick={() => void doCancelMembership()} className="rounded-full border border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-700">Cancel at period end</button> : <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-slate-500">No active Stripe subscription. Restart with:</span>{MEMBERSHIP_TIERS.map((tier) => <button key={tier.id} type="button" disabled={actionLoading} onClick={() => void doReactivateMembership(tier.id)} className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-800">{tier.name}</button>)}</div>}</div>
-            <p className="mt-5 text-xs leading-5 text-slate-500">Plan changes are applied in Stripe with immediate proration and must complete successfully before the Hi Coworking entitlement changes. Cancellation is scheduled at period end; no automatic mid-period membership refund is invented.</p>
-          </section>}
+
+            <div className="mt-8 flex flex-wrap gap-3 border-t border-slate-200 pt-6">
+              {compActive ? (
+                <button type="button" disabled={actionLoading} onClick={() => void doEndComp()} className="inline-flex min-h-11 items-center rounded-full border border-red-300 bg-white px-5 text-sm font-semibold text-red-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-200 disabled:opacity-50">End complimentary membership</button>
+              ) : membership?.cancelAtPeriodEnd ? (
+                <button type="button" disabled={actionLoading} onClick={() => void doReactivateMembership()} className="inline-flex min-h-11 items-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300 disabled:opacity-50">Reactivate membership</button>
+              ) : hasSubscription ? (
+                <button type="button" disabled={actionLoading} onClick={() => void doCancelMembership()} className="inline-flex min-h-11 items-center rounded-full border border-red-300 bg-white px-5 text-sm font-semibold text-red-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-red-200 disabled:opacity-50">Cancel at period end</button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3"><span id="start-paid-label" className="text-sm text-slate-600">Start paid membership (sends a Stripe checkout link):</span>{MEMBERSHIP_TIERS.map((tier) => <button key={tier.id} type="button" aria-describedby="start-paid-label" disabled={actionLoading} onClick={() => void doReactivateMembership(tier.id)} className="inline-flex min-h-11 items-center rounded-full border border-slate-300 px-4 text-sm font-semibold text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300 disabled:opacity-50">{tier.name}</button>)}</div>
+              )}
+            </div>
+
+            {!hasSubscription && <form
+              className="mt-8 rounded-2xl border border-slate-200 bg-white p-5"
+              aria-labelledby="comp-heading"
+              noValidate
+              onSubmit={(event) => { event.preventDefault(); void doGrantComp(); }}
+            >
+              <h3 id="comp-heading" className="text-lg font-semibold text-slate-950">{compActive ? "Update complimentary membership" : "Grant complimentary membership"}</h3>
+              <p id="comp-help" className="mt-1 text-sm text-slate-600">Gives this member a plan with no Stripe subscription and no charge. Every grant is recorded in the audit log with your name and reason.</p>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="comp-plan" className="mb-2 block text-sm font-semibold text-slate-800">Plan</label>
+                  <select id="comp-plan" value={compTierId} onChange={(event) => setCompTierId(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300">
+                    {MEMBERSHIP_TIERS.map((tier) => <option key={tier.id} value={tier.id}>{tier.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="comp-end" className="mb-2 block text-sm font-semibold text-slate-800">End date <span className="font-normal text-slate-600">(optional)</span></label>
+                  <input id="comp-end" type="date" min={todayEastern()} value={compEndDate} aria-describedby="comp-end-help" onChange={(event) => setCompEndDate(event.target.value)} className="min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300" />
+                  <p id="comp-end-help" className="mt-1 text-xs text-slate-600">Ends at 11:59 PM Eastern on this date. Leave blank for no end date.</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="comp-reason" className="mb-2 block text-sm font-semibold text-slate-800">Reason <span className="font-normal text-slate-600">(required)</span></label>
+                  <input id="comp-reason" type="text" required maxLength={500} value={compReason} aria-invalid={compFormError ? true : undefined} aria-describedby={compFormError ? "comp-help comp-error" : "comp-help"} onChange={(event) => setCompReason(event.target.value)} placeholder="For example: founding partner, staff, event sponsor" className="min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300" />
+                </div>
+              </div>
+              <p id="comp-error" role="alert" aria-live="assertive" className={compFormError ? "mt-3 text-sm font-semibold text-red-700" : "sr-only"}>{compFormError || ""}</p>
+              <button type="submit" disabled={actionLoading} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300 disabled:opacity-50">{actionLoading && <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />}{compActive ? "Update complimentary membership" : "Grant complimentary membership"}</button>
+            </form>}
+
+            <p className="mt-5 text-xs leading-5 text-slate-600">Paid plan changes are applied in Stripe with immediate proration and must succeed before the Hi Coworking membership changes. Complimentary memberships never create a Stripe charge. Cancellation is scheduled at period end; no automatic mid-period refund is made.</p>
+          </section>;
+          })()}
 
           {tab === "booking" && <section>
             <h2 className="text-xl font-semibold text-slate-950">Book for {memberName(member)}</h2><p className="mt-1 text-sm text-slate-500">The member&apos;s plan, included hours, account credit, availability and booking window are applied on the server.</p>

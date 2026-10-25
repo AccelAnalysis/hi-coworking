@@ -133,6 +133,7 @@ jobs:
           tests/functions/expo-nasa-lead.test.ts
           tests/functions/intake-lead-store.test.ts
           tests/functions/stripe-subscription-updated.test.ts
+          tests/functions/comp-membership.test.ts
           tests/functions/billing-portal.test.ts
           tests/functions/power-now-confirmation.test.ts
           tests/functions/power-now-interest.test.ts
@@ -148,6 +149,7 @@ jobs:
           tests/functions/campaign-unsubscribe.test.ts
           tests/web/public-rfx-quarantine.test.ts
           tests/web/membership-welcome-banner.test.ts
+          tests/web/comp-membership-copy.test.ts
 
       - name: Run active transaction integration tests
         run: >-

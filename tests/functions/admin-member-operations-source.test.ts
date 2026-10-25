@@ -143,4 +143,31 @@ describe("Admin member operations source contract", () => {
       "firebase.admin.json",
     );
   });
+
+  it("handles members without a live Stripe subscription and complimentary memberships", () => {
+    const actionsPage = readFileSync("apps/web/src/app/admin/members/actions/page.tsx", "utf8");
+    // Plan change explains a missing subscription instead of implying a payment failure.
+    expect(membershipAuthoritySource).toContain('"This member has no active paid Stripe subscription, so there is no "');
+    expect(membershipAuthoritySource).toContain("throw new HttpsError(\"failed-precondition\", NO_LIVE_SUBSCRIPTION_MESSAGE)");
+    expect(membershipAuthoritySource).toContain("Admin plan change refused: no active paid Stripe subscription");
+    // Comp members change plan in Firestore only, audited, with no Stripe charge.
+    expect(membershipAuthoritySource).toContain('action: "membership_comp_plan_changed"');
+    expect(membershipAuthoritySource).toContain("export const admin_membershipGrantComp");
+    expect(membershipAuthoritySource).toContain("export const admin_membershipEndComp");
+    expect(membershipAuthoritySource).toContain('action: "membership_comp_granted"');
+    expect(membershipAuthoritySource).toContain('action: "membership_comp_ended"');
+    expect(membershipAuthoritySource).toContain("stripeCharge: false");
+    expect(membershipAuthoritySource).toContain('"This member already has an active paid Stripe subscription. Change "');
+    expect(membershipAuthoritySource).toContain("Use End complimentary membership instead.");
+    for (const name of ["admin_membershipGrantComp", "admin_membershipEndComp"]) {
+      expect(mainSource).toContain(name);
+      expect(deployIndex).toContain(name);
+      expect(actionsPage).toContain(`"${name}"`);
+    }
+    // The admin page shows the server's explanation, not a generic payment message.
+    expect(actionsPage).toContain("callableErrorMessage(");
+    expect(actionsPage).not.toContain("left unchanged if payment could not be completed");
+    expect(actionsPage).toContain("Grant complimentary membership");
+    expect(actionsPage).toContain("End complimentary membership");
+  });
 });

@@ -98,3 +98,62 @@ export function membershipEndsLabel(
   }).format(new Date(cancelAt));
   return `Ends on ${date}`;
 }
+
+/**
+ * Complimentary memberships are granted by an admin with no Stripe
+ * subscription. Mirrors apps/functions/src/payments/compMembership.ts.
+ */
+export type MembershipAccessInput = {
+  membershipStatus?: unknown;
+  membershipSource?: unknown;
+  plan?: unknown;
+  compEndsAt?: unknown;
+};
+
+export function isCompMembership(input: MembershipAccessInput | null | undefined): boolean {
+  return input?.membershipSource === "comp";
+}
+
+/** True when a comp membership had an end date that has now passed. */
+export function compMembershipEnded(
+  input: MembershipAccessInput | null | undefined,
+  now: number,
+): boolean {
+  if (!isCompMembership(input)) return false;
+  const endsAt = typeof input?.compEndsAt === "number" ? input.compEndsAt : 0;
+  return endsAt > 0 && endsAt <= now;
+}
+
+/**
+ * Whether the Stripe billing portal button should show on /my-hi. Comp
+ * members have no Stripe billing to manage, so the button is hidden even if
+ * an old Stripe customer ID is still on file.
+ */
+export function showBillingPortal(
+  input: MembershipAccessInput | null | undefined,
+): boolean {
+  if (!input || isCompMembership(input)) return false;
+  return (
+    input.membershipStatus === "active"
+    || input.membershipStatus === "trial"
+    || input.membershipStatus === "pastDue"
+  );
+}
+
+/** "Complimentary membership" or "Complimentary through {date}". */
+export function compMembershipLabel(
+  input: { compEndsAt?: unknown },
+  timeZone = "America/New_York",
+): string {
+  const endsAt = typeof input.compEndsAt === "number" && input.compEndsAt > 0
+    ? input.compEndsAt
+    : null;
+  if (!endsAt) return "Complimentary membership";
+  const date = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(endsAt));
+  return `Complimentary through ${date}`;
+}

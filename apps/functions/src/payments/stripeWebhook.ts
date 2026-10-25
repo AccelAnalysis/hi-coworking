@@ -16,6 +16,7 @@ import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
 import { maybeFinalizeEventV2Checkout } from "../eventWebhookBridge";
 import { sendMembershipWelcomeEmail } from "./membershipWelcomeEmail";
+import { STRIPE_MEMBERSHIP_SOURCE, shouldIgnoreStripeMembershipEvent } from "./compMembership";
 import {
   failedPaymentUpdates,
   isFirstSubscriptionInvoice,
@@ -376,6 +377,18 @@ async function handlePaymentFailed(result: WebhookResult): Promise<void> {
   const reason = result.metadata?.reason;
 
   if (uid) {
+    const userRef = getDb().collection("users").doc(uid);
+    const current = (await userRef.get()).data();
+    // A complimentary membership has no paid subscription: a failed payment
+    // or a deleted (old) subscription must not end or downgrade it.
+    if (shouldIgnoreStripeMembershipEvent(current)) {
+      logger.info("Complimentary membership left unchanged by Stripe payment failure", {
+        uid,
+        reason,
+      });
+      return;
+    }
+
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
 
     if (reason === "subscription_cancelled") {
@@ -386,7 +399,7 @@ async function handlePaymentFailed(result: WebhookResult): Promise<void> {
       updates.membershipStatus = "pastDue";
     }
 
-    await getDb().collection("users").doc(uid).update(updates);
+    await userRef.update(updates);
     logger.info("Membership status downgraded", { uid, reason, updates });
   }
 }
@@ -477,6 +490,9 @@ async function provisionMembership(
 
   const updates: Record<string, unknown> = {
     membershipStatus: "active",
+    // A paid Checkout replaces any complimentary membership.
+    membershipSource: STRIPE_MEMBERSHIP_SOURCE,
+    compEndsAt: null,
     plan,
     expiresAt,
     updatedAt: now,

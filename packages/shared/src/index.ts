@@ -365,6 +365,11 @@ export const userDocSchema = z.object({
   plan: z.string().optional(),           // e.g. "dayPass", "dedicated", "team"
   expiresAt: z.number().optional(),      // Timestamp
   features: z.record(z.string(), z.boolean()).optional(), // Feature flags
+  // "comp" = admin-granted complimentary membership with no Stripe
+  // subscription; "stripe" = paid via Stripe Checkout. Absent on older docs.
+  membershipSource: z.enum(["stripe", "comp"]).nullable().optional(),
+  compEndsAt: z.number().nullable().optional(), // Comp end (ms); null = no end date
+  compReason: z.string().nullable().optional(),
 
   // Membership track (PR-08: personalization)
   membershipTrack: membershipTrackSchema.optional(),

@@ -10,6 +10,15 @@ import {
   getTierById,
   getTierByPriceId,
 } from "./payments/stripeConfig";
+import {
+  compEndUpdates,
+  compGrantUpdates,
+  compMembershipEnded,
+  compPlanChangeUpdates,
+  isActiveCompMembership,
+  isCompMembership,
+  validateCompGrant,
+} from "./payments/compMembership";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -113,6 +122,23 @@ function safeReturnOrigin(raw: string) {
   }
 
   return url.origin;
+}
+
+const NO_LIVE_SUBSCRIPTION_MESSAGE =
+  "This member has no active paid Stripe subscription, so there is no "
+  + "subscription to change. Use Start paid membership to send them a "
+  + "checkout link, or Grant complimentary membership to give them a plan "
+  + "with no charge.";
+
+function compState(user: FirebaseFirestore.DocumentData, now: number) {
+  if (!isCompMembership(user)) return null;
+  return {
+    active: isActiveCompMembership(user, now),
+    ended: compMembershipEnded(user, now) || user.membershipStatus !== "active",
+    endsAt: typeof user.compEndsAt === "number" ? user.compEndsAt : null,
+    reason: typeof user.compReason === "string" ? user.compReason : "",
+    grantedAt: typeof user.compGrantedAt === "number" ? user.compGrantedAt : null,
+  };
 }
 
 function stripeClient() {
@@ -360,6 +386,10 @@ export const admin_membershipGetState = onCall(
         typeof user.plan === "string" ? user.plan : undefined,
       ),
       membershipStatus: user.membershipStatus || "none",
+      membershipSource: typeof user.membershipSource === "string"
+        ? user.membershipSource
+        : null,
+      comp: compState(user, Date.now()),
       plans: MEMBERSHIP_TIERS.map((tier) => ({
         id: tier.id,
         name: tier.name,
@@ -393,10 +423,42 @@ export const admin_membershipChangePlan = onCall(
       !subscription
       || !ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
     ) {
-      throw new HttpsError(
-        "failed-precondition",
-        "This member does not have an active Stripe subscription to change.",
-      );
+      // A complimentary membership has no Stripe subscription: change its
+      // plan in Hi Coworking only. Nothing is sent to Stripe and nothing is
+      // charged.
+      const now = Date.now();
+      if (isActiveCompMembership(user, now)) {
+        if (user.plan === tier.id) {
+          return { success: true, unchanged: true, planId: tier.id, comp: true };
+        }
+        await db().collection("users").doc(uid).set(
+          compPlanChangeUpdates(tier.id, now),
+          { merge: true },
+        );
+        const auditId = await writeAudit({
+          action: "membership_comp_plan_changed",
+          memberUid: uid,
+          adminUid,
+          details: {
+            fromPlan: user.plan || null,
+            toPlan: tier.id,
+            membershipSource: "comp",
+            stripeCharge: false,
+          },
+        });
+        return {
+          success: true,
+          auditId,
+          planId: tier.id,
+          comp: true,
+        };
+      }
+      logger.info("Admin plan change refused: no active paid Stripe subscription", {
+        uid,
+        tierId,
+        stripeStatus: subscription?.status || null,
+      });
+      throw new HttpsError("failed-precondition", NO_LIVE_SUBSCRIPTION_MESSAGE);
     }
     if (subscription.cancel_at_period_end) {
       throw new HttpsError(
@@ -524,9 +586,16 @@ export const admin_membershipCancel = onCall(
       !subscription
       || !ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
     ) {
+      if (isActiveCompMembership(user, Date.now())) {
+        throw new HttpsError(
+          "failed-precondition",
+          "This is a complimentary membership with no Stripe subscription. "
+          + "Use End complimentary membership instead.",
+        );
+      }
       throw new HttpsError(
         "failed-precondition",
-        "This member does not have an active Stripe subscription to cancel.",
+        "This member has no active paid Stripe subscription to cancel.",
       );
     }
 
@@ -724,5 +793,110 @@ export const admin_membershipReactivate = onCall(
       checkoutUrl: session.url,
       planId: tier.id,
     };
+  },
+);
+
+/**
+ * Grant (or re-grant) a complimentary membership: a plan with no Stripe
+ * subscription and no charge. Refused when the member already pays through
+ * an active Stripe subscription, so a member is never both comp and billed.
+ * Never calls a Stripe write API.
+ */
+export const admin_membershipGrantComp = onCall(
+  { secrets: [stripeSecretKey] },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const { uid, tierId, endsAt, reason } = request.data as {
+      uid: string;
+      tierId: string;
+      endsAt?: number | null;
+      reason: string;
+    };
+    const now = Date.now();
+    const valid = validateCompGrant(
+      { tierId, endsAt, reason },
+      MEMBERSHIP_TIERS.map((tier) => tier.id),
+      now,
+    );
+    if (!valid.ok) {
+      throw new HttpsError("invalid-argument", valid.error);
+    }
+
+    // Read-only Stripe lookup: refuse if the member already has a paid
+    // subscription, so granting comp can never sit alongside billing.
+    const stripe = stripeClient();
+    const { user, subscription } = await membershipSubscription(uid, stripe);
+    if (
+      subscription
+      && ACTIVE_SUBSCRIPTION_STATUSES.has(subscription.status)
+    ) {
+      throw new HttpsError(
+        "failed-precondition",
+        "This member already has an active paid Stripe subscription. Change "
+        + "their plan instead, or cancel that subscription before granting a "
+        + "complimentary membership.",
+      );
+    }
+
+    await db().collection("users").doc(uid).set(
+      compGrantUpdates(
+        { tierId, reason: valid.reason, endsAt: valid.endsAt },
+        adminUid,
+        now,
+      ),
+      { merge: true },
+    );
+
+    const auditId = await writeAudit({
+      action: "membership_comp_granted",
+      memberUid: uid,
+      adminUid,
+      details: {
+        fromPlan: user.plan || null,
+        fromStatus: user.membershipStatus || "none",
+        fromSource: user.membershipSource || null,
+        toPlan: tierId,
+        endsAt: valid.endsAt,
+        reason: valid.reason,
+        stripeCharge: false,
+      },
+    });
+
+    return {
+      success: true,
+      auditId,
+      planId: tierId,
+      endsAt: valid.endsAt,
+    };
+  },
+);
+
+/** End an active complimentary membership now. Never touches Stripe. */
+export const admin_membershipEndComp = onCall(
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const { uid, note } = request.data as { uid: string; note?: string };
+    const { ref, data: user } = await requireMember(uid);
+    if (!isCompMembership(user) || user.membershipStatus !== "active") {
+      throw new HttpsError(
+        "failed-precondition",
+        "This member does not have an active complimentary membership.",
+      );
+    }
+    const now = Date.now();
+    await ref.set(compEndUpdates("cancelled", adminUid, now), { merge: true });
+
+    const auditId = await writeAudit({
+      action: "membership_comp_ended",
+      memberUid: uid,
+      adminUid,
+      details: {
+        plan: user.plan || null,
+        note: String(note || "").trim().slice(0, 500) || null,
+        stripeCharge: false,
+      },
+    });
+
+    return { success: true, auditId };
   },
 );
