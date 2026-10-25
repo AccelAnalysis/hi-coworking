@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/member-record-functions",
+      "codebase": "member-record",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/member-record-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/member-record-functions/tsconfig.json"
+      ]
+    }
+  ]
+}
