@@ -17,6 +17,7 @@ import {
   Mail,
   RefreshCw,
   Search,
+  ShieldCheck,
   UserCog,
   Users,
   WalletCards,
@@ -380,6 +381,12 @@ function AdminMembersContent() {
               >
                 <WalletCards className="h-4 w-4" /> Member actions
               </Link>
+              <Link
+                href={`/admin/members/record?uid=${encodeURIComponent(selected.uid)}`}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <ShieldCheck className="h-4 w-4" /> Full record & consent
+              </Link>
               <button
                 type="button"
                 onClick={() => void copyEmail(selected)}
@@ -607,6 +614,7 @@ function AdminMembersContent() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/members/actions" className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"><WalletCards className="h-4 w-4" /> Member actions</Link>
+            <Link href="/admin/members/consent" className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ShieldCheck className="h-4 w-4" /> Consent</Link>
             <Link href="/admin/roles" className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"><UserCog className="h-4 w-4" /> Staff & roles</Link>
             <button type="button" onClick={() => void fetchDirectory()} disabled={loading} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh</button>
           </div>
