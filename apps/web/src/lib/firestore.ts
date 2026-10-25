@@ -18,6 +18,7 @@ import {
   limit,
   startAfter,
   onSnapshot,
+  runTransaction,
   type Unsubscribe,
   type QueryDocumentSnapshot,
   type DocumentData,
@@ -25,6 +26,7 @@ import {
 import { isLegacyPlatformInviteRecord } from "./referralDomains";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "./firebase";
+import { DEFAULT_LOCATION_ID, defaultLocationDoc, stripUndefined } from "./floorplanBuilder";
 import {
   downloadPrivateExchangeObject,
   prepareRfxResponseDownloadFn,
@@ -52,7 +54,7 @@ export async function getLocation(locationId: string): Promise<LocationDoc | nul
 }
 
 export async function saveLocation(location: LocationDoc): Promise<void> {
-  await setDoc(doc(db, "locations", location.id), location, { merge: true });
+  await setDoc(doc(db, "locations", location.id), stripUndefined(location), { merge: true });
 }
 
 export async function deleteLocation(locationId: string): Promise<void> {
@@ -71,7 +73,7 @@ export async function getFloor(locationId: string, floorId: string): Promise<Flo
 }
 
 export async function saveFloor(locationId: string, floor: FloorDoc): Promise<void> {
-  await setDoc(doc(db, "locations", locationId, "floors", floor.id), floor, { merge: true });
+  await setDoc(doc(db, "locations", locationId, "floors", floor.id), stripUndefined(floor));
 }
 
 export async function deleteFloor(locationId: string, floorId: string): Promise<void> {
@@ -84,7 +86,7 @@ export async function getShell(locationId: string, floorId: string): Promise<She
 }
 
 export async function saveShell(locationId: string, floorId: string, shell: ShellDoc): Promise<void> {
-  await setDoc(doc(db, "locations", locationId, "floors", floorId, "shell", "main"), shell);
+  await setDoc(doc(db, "locations", locationId, "floors", floorId, "shell", "main"), stripUndefined(shell));
 }
 
 export async function getLayouts(locationId: string, floorId: string): Promise<LayoutVariant[]> {
@@ -107,7 +109,7 @@ export async function saveLayout(
   floorId: string,
   layout: LayoutVariant
 ): Promise<void> {
-  await setDoc(doc(db, "locations", locationId, "floors", floorId, "layouts", layout.id), layout);
+  await setDoc(doc(db, "locations", locationId, "floors", floorId, "layouts", layout.id), stripUndefined(layout));
 }
 
 export async function deleteLayout(locationId: string, floorId: string, layoutId: string): Promise<void> {
@@ -119,6 +121,71 @@ export async function publishLayout(locationId: string, floorId: string, layoutI
     status: "PUBLISHED",
     updatedAt: Date.now(),
   });
+}
+
+/**
+ * Creates the default location only if it does not exist yet. The id is
+ * fixed and the write is a transaction, so two overlapping page loads can
+ * no longer create two "Hi Coworking Carrollton" documents.
+ */
+export async function ensureDefaultLocation(): Promise<LocationDoc> {
+  const ref = doc(db, "locations", DEFAULT_LOCATION_ID);
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (snap.exists()) return snap.data() as LocationDoc;
+    const created = defaultLocationDoc();
+    tx.set(ref, created);
+    return created;
+  });
+}
+
+/** Deletes a floor and everything under it (shell, layouts, background image). */
+export async function deleteFloorCascade(locationId: string, floor: FloorDoc): Promise<void> {
+  const layoutsSnap = await getDocs(collection(db, "locations", locationId, "floors", floor.id, "layouts"));
+  await Promise.all(layoutsSnap.docs.map((d) => deleteDoc(d.ref)));
+  const shellSnap = await getDocs(collection(db, "locations", locationId, "floors", floor.id, "shell"));
+  await Promise.all(shellSnap.docs.map((d) => deleteDoc(d.ref)));
+  if (floor.background?.storagePath) {
+    try {
+      await deleteObject(ref(storage, floor.background.storagePath));
+    } catch (err) {
+      console.warn("Floor background was already removed:", err);
+    }
+  }
+  await deleteDoc(doc(db, "locations", locationId, "floors", floor.id));
+}
+
+/** Deletes a location with all of its floors, shells and layouts. */
+export async function deleteLocationCascade(locationId: string): Promise<void> {
+  const floors = await getFloors(locationId);
+  for (const floor of floors) {
+    await deleteFloorCascade(locationId, floor);
+  }
+  await deleteDoc(doc(db, "locations", locationId));
+}
+
+/**
+ * Counts confirmed or pending bookings that have not ended yet for any of
+ * the given resource ids. Used to block deleting a floor or location that
+ * still has customers booked on it.
+ */
+export async function countUpcomingBookingsForResources(resourceIds: string[]): Promise<number> {
+  const ids = Array.from(new Set(resourceIds.filter(Boolean)));
+  if (!ids.length) return 0;
+  const nowMs = Date.now();
+  let count = 0;
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const snap = await getDocs(query(collection(db, "bookings"), where("resourceId", "in", chunk)));
+    snap.docs.forEach((d) => {
+      const data = d.data() as { end?: number; status?: string };
+      const status = String(data.status ?? "").toLowerCase();
+      if (status.includes("cancel") || status.includes("refund") || status === "expired") return;
+      if (typeof data.end === "number" && data.end < nowMs) return;
+      count += 1;
+    });
+  }
+  return count;
 }
 
 export async function getPublishedLayouts(locationId: string, floorId: string): Promise<LayoutVariant[]> {
