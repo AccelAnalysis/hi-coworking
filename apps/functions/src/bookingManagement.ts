@@ -1,6 +1,7 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import {
   evaluateCustomerCancellation,
@@ -32,6 +33,7 @@ type BookingData = {
   subtotalCents?: number;
   paymentId?: string;
   paymentMethod?: string;
+  accountCreditAppliedCents?: number;
   includedHoursApplied?: number;
   cancellationState?: string;
   cancellationDecision?: CancellationPolicyDecision;
@@ -131,19 +133,27 @@ function validateWindow(start: number, end: number) {
   }
 }
 
-async function getOwnedBooking(uid: string, bookingId: string) {
+/**
+ * `ownerUid` is the signed-in member for self-service changes. Admin changes
+ * pass `null`: the caller has already verified the Admin role, so ownership
+ * is not required.
+ */
+async function getOwnedBooking(ownerUid: string | null, bookingId: string) {
+  if (typeof bookingId !== "string" || !bookingId.trim()) {
+    throw new HttpsError("invalid-argument", "Booking is required.");
+  }
   const ref = db().collection("bookings").doc(bookingId);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError("not-found", "Booking not found.");
-  const booking = snap.data() as BookingData;
-  if (booking.userId !== uid) {
+  const booking = { ...(snap.data() as BookingData), id: snap.id };
+  if (ownerUid !== null && booking.userId !== ownerUid) {
     throw new HttpsError("permission-denied", "This booking does not belong to you.");
   }
   return { ref, booking };
 }
 
-async function requireConfirmedBooking(uid: string, bookingId: string) {
-  const owned = await getOwnedBooking(uid, bookingId);
+async function requireConfirmedBooking(ownerUid: string | null, bookingId: string) {
+  const owned = await getOwnedBooking(ownerUid, bookingId);
   if (owned.booking.status !== "CONFIRMED") {
     throw new HttpsError("failed-precondition", "Only confirmed bookings can be changed.");
   }
@@ -176,7 +186,10 @@ async function revokeGrantIds(
   }
 }
 
-async function revokeBookingAccess(bookingId: string) {
+async function revokeBookingAccess(
+  bookingId: string,
+  actor = "booking-management",
+) {
   const grants = await bookingGrantDocs(bookingId);
   const activeIds = grants
     .filter((grant) => {
@@ -184,7 +197,7 @@ async function revokeBookingAccess(bookingId: string) {
       return status === "pending" || status === "active";
     })
     .map((grant) => grant.id);
-  await revokeGrantIds(activeIds, "cancellation", "booking-management");
+  await revokeGrantIds(activeIds, "cancellation", actor);
 }
 
 async function restoreIncludedHours(
@@ -230,6 +243,7 @@ async function restoreIncludedHours(
 async function issueAccountCredit(
   booking: BookingData,
   amountCents: number,
+  reason = "late_booking_cancellation",
 ) {
   if (amountCents <= 0) return 0;
   const roundedAmount = Math.max(0, Math.round(amountCents));
@@ -248,12 +262,12 @@ async function issueAccountCredit(
       amountCents: roundedAmount,
       remainingCents: roundedAmount,
       currency: "usd",
-      reason: "late_booking_cancellation",
+      reason,
       status: "available",
       createdAt: Date.now(),
     });
     tx.set(userRef, {
-      accountCreditCents: admin.firestore.FieldValue.increment(roundedAmount),
+      accountCreditCents: FieldValue.increment(roundedAmount),
       updatedAt: Date.now(),
     }, { merge: true });
   });
@@ -282,16 +296,89 @@ function storedCancellationResult(booking: BookingData) {
   };
 }
 
+export type CancellationAmounts = {
+  decision: CancellationPolicyDecision;
+  refundCents: number;
+  accountCreditCents: number;
+};
+
+export type AdminCancellationChoice = "policy" | "refund" | "credit";
+
+/** The approved customer policy, evaluated at the moment of cancellation. */
+export function customerCancellationAmounts(
+  booking: Pick<BookingData, "resourceId" | "start" | "totalCents">,
+  now: number,
+): CancellationAmounts {
+  const decision = evaluateCustomerCancellation(
+    resourceType(booking.resourceId),
+    booking.start,
+    now,
+  );
+  const paidCents = Math.max(0, Number(booking.totalCents || 0));
+  return {
+    decision,
+    refundCents: Math.round(paidCents * decision.refundPercent / 100),
+    accountCreditCents: Math.round(
+      paidCents * decision.accountCreditPercent / 100,
+    ),
+  };
+}
+
+/**
+ * Hi Coworking-initiated cancellation (approved policy: operator
+ * cancellation or facility closure). The member gets a 100% original-method
+ * refund OR 100% account credit, all included hours are restored, and any
+ * account credit that paid for the booking is always returned as credit.
+ */
+export function operatorCancellationAmounts(
+  booking: Pick<BookingData, "totalCents" | "accountCreditAppliedCents">,
+  choice: "refund" | "credit",
+): CancellationAmounts {
+  const paidCents = Math.max(0, Number(booking.totalCents || 0));
+  const creditApplied = Math.max(
+    0,
+    Math.round(Number(booking.accountCreditAppliedCents || 0)),
+  );
+  const refund = choice === "refund";
+  return {
+    decision: {
+      outcome: refund ? "FULL_REFUND" : "ACCOUNT_CREDIT_100",
+      refundPercent: refund ? 100 : 0,
+      accountCreditPercent: refund ? 0 : 100,
+      restoreIncludedHoursPercent: 100,
+      reason: refund
+        ? "Hi Coworking cancelled this booking: full refund to the original payment method and all included hours restored."
+        : "Hi Coworking cancelled this booking: full value returned as account credit and all included hours restored.",
+    },
+    refundCents: refund ? paidCents : 0,
+    accountCreditCents: (refund ? 0 : paidCents) + creditApplied,
+  };
+}
+
+/** Choose the amounts for an Admin cancellation. */
+export function adminCancellationAmounts(
+  booking: Pick<
+    BookingData,
+    "resourceId" | "start" | "totalCents" | "accountCreditAppliedCents"
+  >,
+  choice: AdminCancellationChoice,
+  now: number,
+): CancellationAmounts {
+  if (choice === "policy") return customerCancellationAmounts(booking, now);
+  return operatorCancellationAmounts(booking, choice);
+}
+
 async function snapshotCancellation(
-  uid: string,
+  ownerUid: string | null,
   bookingId: string,
+  decide: (booking: BookingData, now: number) => CancellationAmounts,
 ) {
   const ref = db().collection("bookings").doc(bookingId);
   await db().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new HttpsError("not-found", "Booking not found.");
-    const booking = snap.data() as BookingData;
-    if (booking.userId !== uid) {
+    const booking = { ...(snap.data() as BookingData), id: snap.id };
+    if (ownerUid !== null && booking.userId !== ownerUid) {
       throw new HttpsError("permission-denied", "This booking does not belong to you.");
     }
     if (booking.status === "CANCELLED" && booking.cancellationState === "COMPLETE") {
@@ -302,21 +389,18 @@ async function snapshotCancellation(
     }
     if (booking.cancellationDecision) return;
 
-    const decision = evaluateCustomerCancellation(
-      resourceType(booking.resourceId),
-      booking.start,
+    const { decision, refundCents, accountCreditCents } = decide(
+      booking,
       Date.now(),
     );
-    const paidCents = Math.max(0, Number(booking.totalCents || 0));
     tx.update(ref, {
       cancellationState: "REQUESTED",
       cancellationRequestedAt: Date.now(),
       cancellationDecision: decision,
-      cancellationRefundCents: Math.round(
-        paidCents * decision.refundPercent / 100,
-      ),
-      cancellationAccountCreditCents: Math.round(
-        paidCents * decision.accountCreditPercent / 100,
+      cancellationRefundCents: Math.max(0, Math.round(refundCents)),
+      cancellationAccountCreditCents: Math.max(
+        0,
+        Math.round(accountCreditCents),
       ),
       cancellationRestoreIncludedHoursPercent:
         decision.restoreIncludedHoursPercent,
@@ -324,12 +408,12 @@ async function snapshotCancellation(
     });
   });
 
-  return getOwnedBooking(uid, bookingId);
+  return getOwnedBooking(ownerUid, bookingId);
 }
 
 async function createRescheduleHold(
   booking: BookingData,
-  uid: string,
+  ownerUid: string | null,
   start: number,
   end: number,
 ) {
@@ -348,7 +432,10 @@ async function createRescheduleHold(
       throw new HttpsError("not-found", "Booking not found.");
     }
     const latest = latestBookingSnap.data() as BookingData;
-    if (latest.userId !== uid || latest.status !== "CONFIRMED") {
+    if (
+      (ownerUid !== null && latest.userId !== ownerUid)
+      || latest.status !== "CONFIRMED"
+    ) {
       throw new HttpsError(
         "failed-precondition",
         "This booking is no longer available to reschedule.",
@@ -410,7 +497,7 @@ async function createRescheduleHold(
           resourceName: booking.resourceName || booking.resourceId,
           start,
           end,
-          userId: uid,
+          userId: booking.userId,
           kind: "RESCHEDULE",
           status: "HELD",
           createdAt: Date.now(),
@@ -423,7 +510,7 @@ async function createRescheduleHold(
         resourceName: booking.resourceName || booking.resourceId,
         start,
         end,
-        userId: uid,
+        userId: booking.userId,
         kind: "RESCHEDULE",
         status: "HELD",
         createdAt: Date.now(),
@@ -541,6 +628,179 @@ export const booking_getCancellationPreview = onCall(async (request) => {
   };
 });
 
+export type CancelBookingInput = {
+  bookingId: string;
+  /** Member uid for self-service, or null for an Admin acting on any booking. */
+  ownerUid: string | null;
+  actorUid: string;
+  actorRole: "member" | "admin";
+  decide: (booking: BookingData, now: number) => CancellationAmounts;
+  refundReason: string;
+  creditReason: string;
+};
+
+/**
+ * Shared cancellation lifecycle for members and Admins. Each step is
+ * idempotent (recorded decision, Stripe idempotency key, deterministic credit
+ * and hour-adjustment IDs, grant revocation), so a retry resumes safely.
+ */
+export async function cancelBookingCore(input: CancelBookingInput) {
+  const { bookingId } = input;
+  const initial = await getOwnedBooking(input.ownerUid, bookingId);
+  if (
+    initial.booking.status === "CANCELLED"
+    && initial.booking.cancellationState === "COMPLETE"
+  ) {
+    return storedCancellationResult(initial.booking);
+  }
+
+  const { ref, booking } = await snapshotCancellation(
+    input.ownerUid,
+    bookingId,
+    input.decide,
+  );
+  if (
+    booking.status === "CANCELLED"
+    && booking.cancellationState === "COMPLETE"
+  ) {
+    return storedCancellationResult(booking);
+  }
+
+  const decision = booking.cancellationDecision;
+  if (!decision) {
+    throw new HttpsError(
+      "internal",
+      "The cancellation policy could not be recorded.",
+    );
+  }
+  const refundCents = Math.max(
+    0,
+    Number(booking.cancellationRefundCents || 0),
+  );
+  const accountCreditCents = Math.max(
+    0,
+    Number(booking.cancellationAccountCreditCents || 0),
+  );
+
+  let refundId = booking.stripeRefundId || null;
+  if (refundCents > 0 && booking.paymentId && !refundId) {
+    const payment = await getPayment(booking.paymentId);
+    if (!payment || payment.provider !== "stripe") {
+      throw new HttpsError(
+        "failed-precondition",
+        "The payment must be reconciled before this refund can be issued.",
+      );
+    }
+
+    if (
+      payment.status === "refunded"
+      && payment.providerRefs?.stripeRefundId
+    ) {
+      refundId = payment.providerRefs.stripeRefundId;
+    } else if (payment.status === "refunded") {
+      refundId = null;
+    } else if (payment.status === "paid") {
+      const provider = new StripeProvider(
+        stripeSecretKey.value(),
+        stripeWebhookSecret.value(),
+      );
+      try {
+        const refund = await provider.refundCheckoutPayment({
+          paymentIntentId:
+            payment.providerRefs?.stripePaymentIntentId,
+          checkoutSessionId:
+            payment.providerRefs?.stripeCheckoutSessionId,
+          ledgerPaymentId: payment.id,
+          holdId:
+            payment.providerRefs?.holdId
+            || payment.purposeRefId,
+          amountCents: refundCents,
+          idempotencyKey: `booking-cancel-${bookingId}`,
+          metadata: {
+            bookingId,
+            paymentId: payment.id,
+            reason: input.refundReason,
+          },
+        });
+        refundId = refund.refundId;
+        await updatePaymentStatus(payment.id, "refunded", {
+          providerRefs: {
+            stripeRefundId: refund.refundId,
+            stripePaymentIntentId: refund.paymentIntentId,
+            ...(refund.checkoutSessionId
+              ? { stripeCheckoutSessionId: refund.checkoutSessionId }
+              : {}),
+          },
+        });
+      } catch (error) {
+        logger.error("Booking refund failed", {
+          bookingId,
+          paymentId: payment.id,
+          error,
+        });
+        throw new HttpsError(
+          "internal",
+          "We could not complete the refund. The booking was not cancelled; please try again or contact Hi Coworking.",
+        );
+      }
+    } else {
+      throw new HttpsError(
+        "failed-precondition",
+        "The payment must be reconciled before this refund can be issued.",
+      );
+    }
+
+    await ref.update({
+      cancellationState: "REFUNDED",
+      stripeRefundId: refundId,
+      updatedAt: Date.now(),
+    });
+  }
+
+  const issuedCredit = await issueAccountCredit(
+    booking,
+    accountCreditCents,
+    input.creditReason,
+  );
+  const restoredHours = await restoreIncludedHours(
+    booking,
+    Number(booking.cancellationRestoreIncludedHoursPercent || 0),
+  );
+
+  await ref.update({
+    status: "CANCELLED",
+    cancellationState: "BOOKING_CANCELLED",
+    cancelledAt: Date.now(),
+    cancelledBy: input.actorUid,
+    cancelledByRole: input.actorRole,
+    cancellationOutcome: decision.outcome,
+    refundCents,
+    accountCreditCents: issuedCredit,
+    restoredIncludedHours: restoredHours,
+    stripeRefundId: refundId,
+    updatedAt: Date.now(),
+  });
+
+  await revokeBookingAccess(bookingId, input.actorRole === "admin"
+    ? "admin-booking-cancel"
+    : "booking-management");
+
+  await ref.update({
+    cancellationState: "COMPLETE",
+    cancellationCompletedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  return {
+    success: true,
+    bookingId,
+    decision,
+    refundCents,
+    accountCreditCents: issuedCredit,
+    restoredIncludedHours: restoredHours,
+  };
+}
+
 export const booking_cancel = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
   async (request) => {
@@ -548,156 +808,263 @@ export const booking_cancel = onCall(
       throw new HttpsError("unauthenticated", "Sign in to cancel this booking.");
     }
     const { bookingId } = request.data as { bookingId: string };
-    const initial = await getOwnedBooking(request.auth.uid, bookingId);
-    if (
-      initial.booking.status === "CANCELLED"
-      && initial.booking.cancellationState === "COMPLETE"
-    ) {
-      return storedCancellationResult(initial.booking);
-    }
-
-    const { ref, booking } = await snapshotCancellation(
-      request.auth.uid,
+    return cancelBookingCore({
       bookingId,
-    );
-    if (
-      booking.status === "CANCELLED"
-      && booking.cancellationState === "COMPLETE"
-    ) {
-      return storedCancellationResult(booking);
-    }
+      ownerUid: request.auth.uid,
+      actorUid: request.auth.uid,
+      actorRole: "member",
+      decide: customerCancellationAmounts,
+      refundReason: "customer_cancellation",
+      creditReason: "late_booking_cancellation",
+    });
+  },
+);
 
-    const decision = booking.cancellationDecision;
-    if (!decision) {
-      throw new HttpsError(
-        "internal",
-        "The cancellation policy could not be recorded.",
+export type RescheduleBookingInput = {
+  bookingId: string;
+  start: number;
+  end: number;
+  /** Member uid for self-service, or null for an Admin acting on any booking. */
+  ownerUid: string | null;
+  actorUid: string;
+  actorRole: "member" | "admin";
+};
+
+/**
+ * Shared move lifecycle: hold the new time, prepare access, move the booking
+ * in a transaction, then retire the old access. Members are limited to the
+ * free-change window and their booking horizon; Admins are not. Callers must
+ * check assertWindowWithinOperatingCalendar first.
+ */
+export async function rescheduleBookingCore(input: RescheduleBookingInput) {
+  const { bookingId, start, end } = input;
+  validateWindow(start, end);
+  const { ref, booking } = await requireConfirmedBooking(
+    input.ownerUid,
+    bookingId,
+  );
+
+  if (
+    booking.start === start
+    && booking.end === end
+    && (
+      booking.rescheduleState === "COMPLETE"
+      || booking.rescheduleState === "BOOKING_MOVED"
+      || booking.rescheduleState === "BOOKING_MOVED_ACCESS_CLEANUP_PENDING"
+    )
+  ) {
+    const oldGrantIds = booking.rescheduleOldGrantIds || [];
+    const newGrantIds = booking.rescheduleNewGrantIds || [];
+    try {
+      await revokeGrantIds(
+        oldGrantIds.filter((grantId) => !newGrantIds.includes(grantId)),
+        "admin",
+        "booking-reschedule",
       );
-    }
-    const refundCents = Math.max(
-      0,
-      Number(booking.cancellationRefundCents || 0),
-    );
-    const accountCreditCents = Math.max(
-      0,
-      Number(booking.cancellationAccountCreditCents || 0),
-    );
-
-    let refundId = booking.stripeRefundId || null;
-    if (refundCents > 0 && booking.paymentId && !refundId) {
-      const payment = await getPayment(booking.paymentId);
-      if (!payment || payment.provider !== "stripe") {
-        throw new HttpsError(
-          "failed-precondition",
-          "The payment must be reconciled before this refund can be issued.",
-        );
-      }
-
-      if (
-        payment.status === "refunded"
-        && payment.providerRefs?.stripeRefundId
-      ) {
-        refundId = payment.providerRefs.stripeRefundId;
-      } else if (payment.status === "refunded") {
-        refundId = null;
-      } else if (payment.status === "paid") {
-        const provider = new StripeProvider(
-          stripeSecretKey.value(),
-          stripeWebhookSecret.value(),
-        );
-        try {
-          const refund = await provider.refundCheckoutPayment({
-            paymentIntentId:
-              payment.providerRefs?.stripePaymentIntentId,
-            checkoutSessionId:
-              payment.providerRefs?.stripeCheckoutSessionId,
-            ledgerPaymentId: payment.id,
-            holdId:
-              payment.providerRefs?.holdId
-              || payment.purposeRefId,
-            amountCents: refundCents,
-            idempotencyKey: `booking-cancel-${bookingId}`,
-            metadata: {
-              bookingId,
-              paymentId: payment.id,
-              reason: "customer_cancellation",
-            },
-          });
-          refundId = refund.refundId;
-          await updatePaymentStatus(payment.id, "refunded", {
-            providerRefs: {
-              stripeRefundId: refund.refundId,
-              stripePaymentIntentId: refund.paymentIntentId,
-              ...(refund.checkoutSessionId
-                ? { stripeCheckoutSessionId: refund.checkoutSessionId }
-                : {}),
-            },
-          });
-        } catch (error) {
-          logger.error("Booking refund failed", {
-            bookingId,
-            paymentId: payment.id,
-            error,
-          });
-          throw new HttpsError(
-            "internal",
-            "We could not complete the refund. The booking was not cancelled; please try again or contact Hi Coworking.",
-          );
-        }
-      } else {
-        throw new HttpsError(
-          "failed-precondition",
-          "The payment must be reconciled before this refund can be issued.",
-        );
-      }
-
       await ref.update({
-        cancellationState: "REFUNDED",
-        stripeRefundId: refundId,
+        rescheduleState: "COMPLETE",
+        rescheduleCompletedAt: Date.now(),
         updatedAt: Date.now(),
       });
+      return {
+        success: true,
+        bookingId,
+        start,
+        end,
+        accessReady: true,
+        alreadyRescheduled: true,
+      };
+    } catch (error) {
+      logger.error("Reschedule access cleanup retry failed", {
+        bookingId,
+        error,
+      });
+      return {
+        success: true,
+        bookingId,
+        start,
+        end,
+        accessReady: true,
+        accessCleanupPending: true,
+        alreadyRescheduled: true,
+      };
     }
+  }
 
-    const issuedCredit = await issueAccountCredit(
-      booking,
-      accountCreditCents,
+  if (end - start !== booking.end - booking.start) {
+    throw new HttpsError(
+      "invalid-argument",
+      input.actorRole === "admin"
+        ? "Moving a booking keeps the same duration. Cancel and book again to change the length."
+        : "Self-service rescheduling keeps the same duration. Cancel and rebook to change duration.",
     );
-    const restoredHours = await restoreIncludedHours(
-      booking,
-      Number(booking.cancellationRestoreIncludedHoursPercent || 0),
+  }
+  if (
+    (booking.includedHoursApplied || 0) > 0
+    && monthKey(start) !== monthKey(booking.start)
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "A membership-hours booking cannot be moved into a different membership month. Cancel and rebook instead.",
     );
+  }
+  // Admins may move a booking inside the late window and beyond the member's
+  // booking horizon. Both callers check the operating calendar (closures and
+  // special hours) before calling this core.
+  if (input.actorRole !== "admin") {
+    const decision = evaluateCustomerCancellation(
+      resourceType(booking.resourceId),
+      booking.start,
+      Date.now(),
+    );
+    if (decision.outcome !== "FULL_REFUND") {
+      throw new HttpsError(
+        "failed-precondition",
+        "This booking is inside the late-cancellation window. Cancel under the displayed policy and make a new booking instead.",
+      );
+    }
+    const horizonDays = await bookingWindowDays(booking.userId);
+    if (start > Date.now() + horizonDays * DAY_MS) {
+      throw new HttpsError(
+        "failed-precondition",
+        `That date is outside your ${horizonDays}-day booking window.`,
+      );
+    }
+  }
 
+  const holdRef = await createRescheduleHold(
+    booking,
+    input.ownerUid,
+    start,
+    end,
+  );
+
+  let access: { oldGrantIds: string[]; newGrantIds: string[] };
+  try {
+    access = await prepareRescheduledAccess(booking, start, end);
+  } catch (error) {
+    await holdRef.set({
+      status: "EXPIRED",
+      expiredAt: Date.now(),
+    }, { merge: true });
     await ref.update({
-      status: "CANCELLED",
-      cancellationState: "BOOKING_CANCELLED",
-      cancelledAt: Date.now(),
-      cancelledBy: request.auth.uid,
-      cancellationOutcome: decision.outcome,
-      refundCents,
-      accountCreditCents: issuedCredit,
-      restoredIncludedHours: restoredHours,
-      stripeRefundId: refundId,
+      rescheduleState: "FAILED_ACCESS",
       updatedAt: Date.now(),
     });
+    throw error;
+  }
 
-    await revokeBookingAccess(bookingId);
+  try {
+    await db().runTransaction(async (tx) => {
+      const [latestBookingSnap, latestHoldSnap] = await Promise.all([
+        tx.get(ref),
+        tx.get(holdRef),
+      ]);
+      if (!latestBookingSnap.exists || !latestHoldSnap.exists) {
+        throw new HttpsError(
+          "aborted",
+          "The reschedule hold could not be finalized. Your original booking is unchanged.",
+        );
+      }
+      const latestBooking = latestBookingSnap.data() as BookingData;
+      const latestHold = latestHoldSnap.data() as HoldData;
+      if (
+        latestBooking.status !== "CONFIRMED"
+        || latestBooking.start !== booking.start
+        || latestBooking.end !== booking.end
+        || latestHold.status !== "HELD"
+        || Number(latestHold.expiresAt || 0) <= Date.now()
+      ) {
+        throw new HttpsError(
+          "aborted",
+          "The booking changed before rescheduling could finish. Your original booking is unchanged.",
+        );
+      }
 
+      tx.update(ref, {
+        start,
+        end,
+        rescheduledAt: Date.now(),
+        previousStart: booking.start,
+        previousEnd: booking.end,
+        rescheduledBy: input.actorUid,
+        rescheduledByRole: input.actorRole,
+        rescheduleState: "BOOKING_MOVED",
+        rescheduleOldGrantIds: access.oldGrantIds,
+        rescheduleNewGrantIds: access.newGrantIds,
+        updatedAt: Date.now(),
+      });
+      tx.update(holdRef, {
+        status: "CONSUMED",
+        consumedAt: Date.now(),
+      });
+    });
+  } catch (error) {
+    await Promise.all([
+      holdRef.set({
+        status: "EXPIRED",
+        expiredAt: Date.now(),
+      }, { merge: true }),
+      revokeGrantIds(
+        access.newGrantIds,
+        "admin",
+        "booking-reschedule-rollback",
+      ).catch((cleanupError) => {
+        logger.error("New access cleanup failed after reschedule abort", {
+          bookingId,
+          cleanupError,
+        });
+      }),
+    ]);
     await ref.update({
-      cancellationState: "COMPLETE",
-      cancellationCompletedAt: Date.now(),
+      rescheduleState: "FAILED_FINALIZATION",
       updatedAt: Date.now(),
     });
+    throw error;
+  }
 
+  try {
+    await revokeGrantIds(
+      access.oldGrantIds.filter(
+        (grantId) => !access.newGrantIds.includes(grantId),
+      ),
+      "admin",
+      "booking-reschedule",
+    );
+  } catch (error) {
+    logger.error("Old access cleanup failed after successful reschedule", {
+      bookingId,
+      oldGrantIds: access.oldGrantIds,
+      error,
+    });
+    await ref.update({
+      rescheduleState: "BOOKING_MOVED_ACCESS_CLEANUP_PENDING",
+      updatedAt: Date.now(),
+    });
     return {
       success: true,
       bookingId,
-      decision,
-      refundCents,
-      accountCreditCents: issuedCredit,
-      restoredIncludedHours: restoredHours,
+      start,
+      end,
+      accessReady: true,
+      accessCleanupPending: true,
     };
-  },
-);
+  }
+
+  await ref.update({
+    rescheduleState: "COMPLETE",
+    rescheduleCompletedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  return {
+    success: true,
+    bookingId,
+    start,
+    end,
+    accessReady: true,
+  };
+}
 
 export const booking_reschedule = onCall(
   { secrets: [seamApiKey] },
@@ -710,222 +1077,13 @@ export const booking_reschedule = onCall(
       start: number;
       end: number;
     };
-    validateWindow(start, end);
-    const { ref, booking } = await requireConfirmedBooking(
-      request.auth.uid,
+    return rescheduleBookingCore({
       bookingId,
-    );
-
-    if (
-      booking.start === start
-      && booking.end === end
-      && (
-        booking.rescheduleState === "COMPLETE"
-        || booking.rescheduleState === "BOOKING_MOVED"
-        || booking.rescheduleState === "BOOKING_MOVED_ACCESS_CLEANUP_PENDING"
-      )
-    ) {
-      const oldGrantIds = booking.rescheduleOldGrantIds || [];
-      const newGrantIds = booking.rescheduleNewGrantIds || [];
-      try {
-        await revokeGrantIds(
-          oldGrantIds.filter((grantId) => !newGrantIds.includes(grantId)),
-          "admin",
-          "booking-reschedule",
-        );
-        await ref.update({
-          rescheduleState: "COMPLETE",
-          rescheduleCompletedAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-        return {
-          success: true,
-          bookingId,
-          start,
-          end,
-          accessReady: true,
-          alreadyRescheduled: true,
-        };
-      } catch (error) {
-        logger.error("Reschedule access cleanup retry failed", {
-          bookingId,
-          error,
-        });
-        return {
-          success: true,
-          bookingId,
-          start,
-          end,
-          accessReady: true,
-          accessCleanupPending: true,
-          alreadyRescheduled: true,
-        };
-      }
-    }
-
-    const decision = evaluateCustomerCancellation(
-      resourceType(booking.resourceId),
-      booking.start,
-      Date.now(),
-    );
-    if (decision.outcome !== "FULL_REFUND") {
-      throw new HttpsError(
-        "failed-precondition",
-        "This booking is inside the late-cancellation window. Cancel under the displayed policy and make a new booking instead.",
-      );
-    }
-    if (end - start !== booking.end - booking.start) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Self-service rescheduling keeps the same duration. Cancel and rebook to change duration.",
-      );
-    }
-    if (
-      (booking.includedHoursApplied || 0) > 0
-      && monthKey(start) !== monthKey(booking.start)
-    ) {
-      throw new HttpsError(
-        "failed-precondition",
-        "A membership-hours booking cannot be moved into a different membership month. Cancel and rebook instead.",
-      );
-    }
-    const horizonDays = await bookingWindowDays(request.auth.uid);
-    if (start > Date.now() + horizonDays * DAY_MS) {
-      throw new HttpsError(
-        "failed-precondition",
-        `That date is outside your ${horizonDays}-day booking window.`,
-      );
-    }
-
-    const holdRef = await createRescheduleHold(
-      booking,
-      request.auth.uid,
       start,
       end,
-    );
-
-    let access: { oldGrantIds: string[]; newGrantIds: string[] };
-    try {
-      access = await prepareRescheduledAccess(booking, start, end);
-    } catch (error) {
-      await holdRef.set({
-        status: "EXPIRED",
-        expiredAt: Date.now(),
-      }, { merge: true });
-      await ref.update({
-        rescheduleState: "FAILED_ACCESS",
-        updatedAt: Date.now(),
-      });
-      throw error;
-    }
-
-    try {
-      await db().runTransaction(async (tx) => {
-        const [latestBookingSnap, latestHoldSnap] = await Promise.all([
-          tx.get(ref),
-          tx.get(holdRef),
-        ]);
-        if (!latestBookingSnap.exists || !latestHoldSnap.exists) {
-          throw new HttpsError(
-            "aborted",
-            "The reschedule hold could not be finalized. Your original booking is unchanged.",
-          );
-        }
-        const latestBooking = latestBookingSnap.data() as BookingData;
-        const latestHold = latestHoldSnap.data() as HoldData;
-        if (
-          latestBooking.status !== "CONFIRMED"
-          || latestBooking.start !== booking.start
-          || latestBooking.end !== booking.end
-          || latestHold.status !== "HELD"
-          || Number(latestHold.expiresAt || 0) <= Date.now()
-        ) {
-          throw new HttpsError(
-            "aborted",
-            "The booking changed before rescheduling could finish. Your original booking is unchanged.",
-          );
-        }
-
-        tx.update(ref, {
-          start,
-          end,
-          rescheduledAt: Date.now(),
-          previousStart: booking.start,
-          previousEnd: booking.end,
-          rescheduleState: "BOOKING_MOVED",
-          rescheduleOldGrantIds: access.oldGrantIds,
-          rescheduleNewGrantIds: access.newGrantIds,
-          updatedAt: Date.now(),
-        });
-        tx.update(holdRef, {
-          status: "CONSUMED",
-          consumedAt: Date.now(),
-        });
-      });
-    } catch (error) {
-      await Promise.all([
-        holdRef.set({
-          status: "EXPIRED",
-          expiredAt: Date.now(),
-        }, { merge: true }),
-        revokeGrantIds(
-          access.newGrantIds,
-          "admin",
-          "booking-reschedule-rollback",
-        ).catch((cleanupError) => {
-          logger.error("New access cleanup failed after reschedule abort", {
-            bookingId,
-            cleanupError,
-          });
-        }),
-      ]);
-      await ref.update({
-        rescheduleState: "FAILED_FINALIZATION",
-        updatedAt: Date.now(),
-      });
-      throw error;
-    }
-
-    try {
-      await revokeGrantIds(
-        access.oldGrantIds.filter(
-          (grantId) => !access.newGrantIds.includes(grantId),
-        ),
-        "admin",
-        "booking-reschedule",
-      );
-    } catch (error) {
-      logger.error("Old access cleanup failed after successful reschedule", {
-        bookingId,
-        oldGrantIds: access.oldGrantIds,
-        error,
-      });
-      await ref.update({
-        rescheduleState: "BOOKING_MOVED_ACCESS_CLEANUP_PENDING",
-        updatedAt: Date.now(),
-      });
-      return {
-        success: true,
-        bookingId,
-        start,
-        end,
-        accessReady: true,
-        accessCleanupPending: true,
-      };
-    }
-
-    await ref.update({
-      rescheduleState: "COMPLETE",
-      rescheduleCompletedAt: Date.now(),
-      updatedAt: Date.now(),
+      ownerUid: request.auth.uid,
+      actorUid: request.auth.uid,
+      actorRole: "member",
     });
-
-    return {
-      success: true,
-      bookingId,
-      start,
-      end,
-      accessReady: true,
-    };
   },
 );

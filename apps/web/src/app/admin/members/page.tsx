@@ -21,6 +21,7 @@ import {
   Users,
   WalletCards,
 } from "lucide-react";
+import { AdminBookingActions } from "@/components/AdminBookingActions";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { auth, db } from "@/lib/firebase";
@@ -33,6 +34,7 @@ import {
   type AdminPaymentRecord,
 } from "@/lib/adminMemberData";
 import { MEMBERSHIP_TIERS } from "@hi/shared";
+import { canManageBooking } from "@/lib/adminBookingActions";
 
 type DetailTab = "overview" | "membership" | "bookings" | "payments" | "activity";
 
@@ -394,7 +396,7 @@ function AdminMembersContent() {
           </div>
 
           {(error || actionMessage) && (
-            <div className={`mt-5 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>
+            <div role={error ? "alert" : "status"} className={`mt-5 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>
               {error ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" />}
               <span>{error || actionMessage}</span>
             </div>
@@ -512,11 +514,22 @@ function AdminMembersContent() {
                           <div><p className="font-semibold text-slate-950">{booking.resourceName || booking.resourceId || "Space"}</p><p className="mt-1 text-sm text-slate-500">{formatDateTime(booking.start)}{bookingDurationHours(booking) > 0 ? ` · ${bookingDurationHours(booking).toFixed(1)} hr` : ""}</p></div>
                           <div><p className="text-sm font-medium text-slate-700">{booking.status}</p><p className="mt-1 text-xs text-slate-500">{booking.paymentMethod ? booking.paymentMethod.replaceAll("_", " ") : "—"}</p></div>
                           <p className="text-sm font-semibold text-slate-950">{money(bookingAmountCents(booking))}</p>
+                          {canManageBooking(booking, Date.now()) && (
+                            <AdminBookingActions
+                              booking={booking}
+                              memberName={selected.displayName || selected.email || "this member"}
+                              onChanged={async (message) => {
+                                setError(null);
+                                setActionMessage(message);
+                                await fetchDirectory();
+                              }}
+                            />
+                          )}
                         </div>
                       ))}
                     </div>
                   )}
-                  <p className="mt-5 text-xs leading-5 text-slate-500">New bookings for a member use the same authoritative availability, included-hours, account-credit and payment lifecycle as customer bookings. Existing booking cancellation/reschedule continues through its established booking-management workflow.</p>
+                  <p className="mt-5 text-xs leading-5 text-slate-500">New bookings for a member use the same authoritative availability, included-hours, account-credit and payment lifecycle as customer bookings. Move or cancel an upcoming confirmed booking here. Moves keep the same space and length and only use open hours. Cancelling asks whether the member requested it (member policy applies) or Hi Coworking is cancelling (full refund or full account credit, all included hours restored). Every change is recorded in the audit log.</p>
                 </section>
               )}
 

@@ -160,6 +160,11 @@ export {
 } from "./adminMembershipAuthority";
 export { admin_accountCreditAdjust } from "./adminMemberOperationsAuthority";
 export {
+  admin_bookingCancelPreview,
+  admin_bookingCancel,
+  admin_bookingReschedule,
+} from "./adminBookingManagement";
+export {
   admin_bookingForMemberFinalize,
   admin_onMemberBookingPaymentUpdated,
 } from "./adminMemberBookingAuthority";
