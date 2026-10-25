@@ -6,6 +6,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { ResendEmailProvider } from "./providers/emailProvider";
 import { resendApiKey } from "./providers/emailSecret";
+import { NURTURE_POSTAL_ADDRESS, campaignHref as resolveCampaignHref } from "./nurtureLinks";
 import {
   COMP_MEMBERSHIP_SOURCE,
   compEndUpdates,
@@ -98,7 +99,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Thanks for reaching out to Hi Coworking",
         body: "Thanks for your interest in Hi Coworking. Take a look at the space, compare options, or plan a visit when it works for you.",
         ctaLabel: "Explore Hi Coworking",
-        ctaHref: "/visit",
+        ctaHref: "/contact",
       },
       {
         id: "book",
@@ -114,7 +115,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "A workspace should fit the way you work",
         body: "Hi Coworking is designed for focused work, useful meetings, and a comfortable local workday. We would be glad to welcome you in.",
         ctaLabel: "Plan a visit",
-        ctaHref: "/visit",
+        ctaHref: "/contact",
       },
     ],
   },
@@ -131,7 +132,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Your Hi Coworking visit is on the calendar",
         body: "Your booking is confirmed. Before you arrive, review your booking details and access information from your dashboard.",
         ctaLabel: "Open your dashboard",
-        ctaHref: "/dashboard",
+        ctaHref: "/my-hi",
       },
       {
         id: "next-visit",
@@ -139,7 +140,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Make your next Hi Coworking visit easier",
         body: "If Hi Coworking is becoming part of your routine, compare membership options and reserve your next workspace while your preferred time is open.",
         ctaLabel: "View memberships",
-        ctaHref: "/membership",
+        ctaHref: "/pricing",
       },
     ],
   },
@@ -156,7 +157,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "Welcome to Hi Coworking membership",
         body: "Your membership is active. Your dashboard keeps your bookings, membership details, and access information together.",
         ctaLabel: "Open member dashboard",
-        ctaHref: "/dashboard",
+        ctaHref: "/my-hi",
       },
       {
         id: "member-book",
@@ -181,7 +182,7 @@ const DEFAULT_CAMPAIGNS: Campaign[] = [
         subject: "A quick Hi Coworking membership check-in",
         body: "Your current membership period is approaching renewal. Review your plan and account so there are no surprises in your next work cycle.",
         ctaLabel: "Review membership",
-        ctaHref: "/dashboard/membership",
+        ctaHref: "/my-hi",
       },
     ],
   },
@@ -233,10 +234,6 @@ function escapeHtml(value: string) {
     .replace(/'/g, "&#039;");
 }
 
-function campaignHref(value?: string) {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return undefined;
-  return `${SITE_ORIGIN}${value}`;
-}
 
 function requireAdmin(request: { auth?: { uid: string; token: Record<string, unknown> } | null }) {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in is required.");
@@ -319,15 +316,15 @@ async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefI
 }
 
 function renderMessage(enrollment: Enrollment, step: CampaignStep) {
-  const href = campaignHref(step.ctaHref);
+  const href = resolveCampaignHref(SITE_ORIGIN, step.ctaHref);
   const unsubscribeHref = `${SITE_ORIGIN}/preferences?token=${encodeURIComponent(enrollment.unsubscribeToken)}`;
   const subject = step.subject.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const body = step.body.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const cta = href && step.ctaLabel
     ? `<p style="margin:28px 0"><a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#fff;text-decoration:none;font-weight:650">${escapeHtml(step.ctaLabel)}</a></p>`
     : "";
-  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"><div style="max-width:620px;margin:0 auto;padding:40px 24px"><div style="font-size:14px;font-weight:700;letter-spacing:.02em">Hi Coworking</div><h1 style="margin:24px 0 12px;font-size:28px;line-height:1.2">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#64748b">You are receiving this because you contacted, booked, or hold an account with Hi Coworking. <a href="${escapeHtml(unsubscribeHref)}" style="color:#475569">Manage follow-up preferences</a>.</p></div></body></html>`;
-  return { subject, html, text: `${body}\n\n${href || ""}\n\nManage follow-up preferences: ${unsubscribeHref}`.trim() };
+  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"><div style="max-width:620px;margin:0 auto;padding:40px 24px"><div style="font-size:14px;font-weight:700;letter-spacing:.02em">Hi Coworking</div><h1 style="margin:24px 0 12px;font-size:28px;line-height:1.2">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#64748b">You are receiving this because you contacted, booked, or hold an account with Hi Coworking. <a href="${escapeHtml(unsubscribeHref)}" style="color:#475569">Manage follow-up preferences</a>.<br>${escapeHtml(NURTURE_POSTAL_ADDRESS)}</p></div></body></html>`;
+  return { subject, html, text: `${body}\n\n${href || ""}\n\nManage follow-up preferences: ${unsubscribeHref}\n${NURTURE_POSTAL_ADDRESS}`.trim() };
 }
 
 async function advanceEnrollment(ref: FirebaseFirestore.DocumentReference, enrollment: Enrollment, campaign: Campaign, deliveredAt: number) {
@@ -468,7 +465,7 @@ export const nurture_process = onSchedule(
   },
 );
 
-export const nurture_scanLifecycle = onSchedule("every day 09:00", async () => {
+export const nurture_scanLifecycle = onSchedule({ schedule: "every day 09:00", timeZone: "America/New_York" }, async () => {
   const now = Date.now();
   const renewalHorizon = now + 14 * 24 * 60 * 60 * 1000;
   const inactiveCutoff = now - 45 * 24 * 60 * 60 * 1000;

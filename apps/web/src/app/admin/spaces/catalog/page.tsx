@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
+import { callableErrorMessage } from "@/lib/callableError";
 import { Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -80,7 +81,7 @@ function SpaceCatalogContent() {
       }
     } catch (caught) {
       console.error(caught);
-      setError("The published setup catalog could not be loaded.");
+      setError(callableErrorMessage(caught, "The published setup catalog could not be loaded."));
     } finally {
       setLoading(false);
     }
@@ -126,7 +127,7 @@ function SpaceCatalogContent() {
       await load();
     } catch (caught) {
       console.error(caught);
-      setError("The customer setup could not be published.");
+      setError(callableErrorMessage(caught, "The customer setup could not be published."));
     } finally {
       setSaving(false);
     }
@@ -149,7 +150,7 @@ function SpaceCatalogContent() {
       await load();
     } catch (caught) {
       console.error(caught);
-      setError("The add-on could not be saved.");
+      setError(callableErrorMessage(caught, "The add-on could not be saved."));
     } finally {
       setSaving(false);
     }
@@ -162,7 +163,7 @@ function SpaceCatalogContent() {
       await load();
     } catch (caught) {
       console.error(caught);
-      setError("The setup visibility could not be changed.");
+      setError(callableErrorMessage(caught, "The setup visibility could not be changed."));
     } finally {
       setSaving(false);
     }

@@ -13,6 +13,8 @@ import {
   Users,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { PublishedSetupDetails } from "@/components/booking/PublishedSetupDetails";
+import { bookingServiceType } from "@/lib/publishedSetups";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
 
@@ -919,6 +921,11 @@ export default function BookingExperienceWithDeskChange() {
                 >
                   Change booking
                 </button>
+
+                <PublishedSetupDetails
+                  resourceId={selection.kind === "single" ? selection.option.resourceId : undefined}
+                  serviceType={bookingServiceType(intent)}
+                />
 
                 {quote.bookingKind === "desk_change" && quote.segments ? (
                   <div className="mt-7 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">

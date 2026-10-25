@@ -288,7 +288,7 @@ interface JoinEventWaitlistInput {
 export const registerFreeEventFn = httpsCallable<RegisterFreeEventInput, { success: boolean }>(functions, "events_registerFree");
 export const cancelEventRegistrationFn = httpsCallable<{ eventId: string }, { success: boolean }>(functions, "events_cancelRegistration");
 export const joinEventWaitlistFn = httpsCallable<JoinEventWaitlistInput, { success: boolean }>(functions, "events_joinWaitlist");
-export const upsertEventSeriesFn = httpsCallable<{ series: Record<string, unknown> }, { success: boolean; seriesId: string }>(functions, "events_upsertSeries");
+export const upsertEventSeriesFn = httpsCallable<{ series: Record<string, unknown> }, { success: boolean; seriesId: string; occurrences?: number }>(functions, "events_upsertSeries");
 export const setSeriesOccurrenceOverrideFn = httpsCallable<{
   seriesId: string;
   occurrenceDate: number;
