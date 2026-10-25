@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, BookOpen, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { BookOpen, Loader2, Plus, Save, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
@@ -211,8 +211,7 @@ function BookEditorContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-3xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
-        <Link href="/admin/bookstore" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"><ArrowLeft className="h-4 w-4" /> Bookstore catalog</Link>
-        <div className="mt-5">
+        <div>
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Catalog</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{editId ? "Edit book" : "Add a book"}</h1>
         </div>

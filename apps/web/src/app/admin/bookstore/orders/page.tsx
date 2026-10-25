@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowLeft,
   Check,
   Loader2,
   PackageCheck,
@@ -132,11 +130,7 @@ function OrdersContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
-        <Link href="/admin/bookstore" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600">
-          <ArrowLeft className="h-4 w-4" /> Bookstore catalog
-        </Link>
-
-        <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Bookstore</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Pickup orders</h1>

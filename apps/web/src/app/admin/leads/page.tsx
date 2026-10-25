@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { RequireAuth } from "@/components/RequireAuth";
+import { AppShell } from "@/components/AppShell";
 import {
   collection,
   query,
@@ -51,7 +52,9 @@ interface Lead {
 export default function AdminLeadsPage() {
   return (
     <RequireAuth requiredRole="admin">
-      <LeadsContent />
+      <AppShell>
+        <LeadsContent />
+      </AppShell>
     </RequireAuth>
   );
 }
@@ -141,7 +144,7 @@ function LeadsContent() {
   };
 
   return (
-    <div className="py-12">
+    <div className="py-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Leads</h1>

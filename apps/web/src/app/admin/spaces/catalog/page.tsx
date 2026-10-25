@@ -1,9 +1,8 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
-import { ArrowLeft, Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Loader2, Plus, RefreshCw, Save, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { functions } from "@/lib/firebase";
@@ -172,8 +171,7 @@ function SpaceCatalogContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
-        <Link href="/admin/dashboard" className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950"><ArrowLeft className="h-4 w-4" /> Operations overview</Link>
-        <header className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div><p className="text-sm font-medium text-slate-500">Space publishing</p><h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Customer setups & add-ons</h1><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">Published visual layouts become reusable customer choices here. Attach a service, capacity, arrangement label, and optional upgrades without changing application code.</p></div>
           <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh</button>
         </header>

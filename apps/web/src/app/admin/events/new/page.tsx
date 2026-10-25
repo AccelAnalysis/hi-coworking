@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { getEvent, uploadEventMediaImage } from "@/lib/firestore";
@@ -179,9 +179,7 @@ function EventEditorContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6">
-        <Link href="/admin/events" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-950"><ArrowLeft className="h-4 w-4" /> Events</Link>
-
-        <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_18rem]">
+        <div className="grid gap-10 lg:grid-cols-[1fr_18rem]">
           <form className="space-y-10" onSubmit={(event) => { event.preventDefault(); void save(false); }}>
             <section>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Event</p>

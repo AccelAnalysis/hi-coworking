@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { adminListEventSubmissions, type EventSubmissionReview } from "@/lib/eventsV2";
@@ -37,10 +36,7 @@ function AdminEventSubmissionsContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
-        <Link href="/admin/events" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-950">
-          <ArrowLeft className="h-4 w-4" /> Events
-        </Link>
-        <div className="mt-4">
+        <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Admin</p>
           <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">Event submissions</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">

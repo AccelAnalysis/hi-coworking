@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { ArrowLeft, CheckCircle2, Loader2, Mail, Pause, Play, RefreshCw, TriangleAlert } from "lucide-react";
-import Link from "next/link";
+import { CheckCircle2, Loader2, Mail, Pause, Play, RefreshCw, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { functions } from "@/lib/firebase";
@@ -77,10 +76,7 @@ function NurtureAdminContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
-        <Link href="/admin/dashboard" className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-950">
-          <ArrowLeft className="h-4 w-4" /> Operations overview
-        </Link>
-        <header className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-slate-500">Customer lifecycle</p>
             <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">Nurture campaigns</h1>
