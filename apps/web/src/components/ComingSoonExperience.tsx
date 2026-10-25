@@ -12,7 +12,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Coffee,
+  Laptop,
   Loader2,
   Mail,
   MapPin,
@@ -105,7 +105,7 @@ const SURVEY_QUESTIONS: SurveyQuestion[] = [
     id: 10,
     question: "If you could design the perfect shared workspace for your area, what would it include?",
     type: "text",
-    placeholder: "e.g., specific coffee, standing desks...",
+    placeholder: "e.g., standing desks...",
   },
 ];
 
@@ -377,7 +377,7 @@ export function ComingSoonExperience() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   {[
-                    { icon: Coffee, label: "Private Focus Desks" },
+                    { icon: Laptop, label: "Private Focus Desks" },
                     { icon: Users, label: "Small Meeting Room" },
                     { icon: Mic, label: "Podcast Setup" },
                     { icon: Printer, label: "Printing & Scan" },
