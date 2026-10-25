@@ -127,6 +127,39 @@ describe("Run 1 Firestore authorization matrix", () => {
     );
   });
 
+  test("admins and staff cannot raw-write user docs or bookings (P1-7)", async () => {
+    await seed({
+      "users/alice": {
+        uid: "alice",
+        email: "alice@example.test",
+        role: "member",
+        membershipStatus: "active",
+        stripeCustomerId: "cus_seed",
+        updatedAt: "seed",
+      },
+      "bookings/b1": { id: "b1", userId: "alice", status: "confirmed" },
+    });
+
+    const admin = authenticated("admin", { role: "admin" }).firestore();
+    const master = authenticated("master", { role: "master" }).firestore();
+    const staff = authenticated("staff", { role: "staff" }).firestore();
+    const alice = authenticated("alice").firestore();
+
+    await assertSucceeds(getDoc(doc(admin, "users/alice")));
+    await assertFails(updateDoc(doc(admin, "users/alice"), { membershipStatus: "canceled" }));
+    await assertFails(updateDoc(doc(admin, "users/alice"), { stripeCustomerId: "cus_other" }));
+    await assertFails(updateDoc(doc(master, "users/alice"), { role: "admin" }));
+    await assertFails(updateDoc(doc(admin, "users/alice"), { displayName: "Renamed" }));
+
+    await assertSucceeds(getDoc(doc(staff, "bookings/b1")));
+    await assertSucceeds(getDoc(doc(alice, "bookings/b1")));
+    await assertFails(updateDoc(doc(staff, "bookings/b1"), { status: "cancelled" }));
+    await assertFails(updateDoc(doc(admin, "bookings/b1"), { status: "cancelled" }));
+    await assertFails(deleteDoc(doc(admin, "bookings/b1")));
+    await assertFails(updateDoc(doc(alice, "bookings/b1"), { status: "cancelled" }));
+    await assertFails(setDoc(doc(staff, "bookings/b2"), { id: "b2", userId: "alice" }));
+  });
+
   test("private profiles stay private and only published projections are discoverable", async () => {
     await seed({
       "profiles/alice": {

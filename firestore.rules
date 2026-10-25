@@ -210,12 +210,14 @@ service cloud.firestore {
     }
 
     // --- users/{uid} ---
-    // Owner can read/update their own doc; admins can read/write any user doc.
-    // User doc is created by the authBeforeCreate Cloud Function, not client-side.
+    // Owner can read and update a small allow-list on their own doc; staff+
+    // can read any user doc. Every other change (role, membership status,
+    // Stripe IDs, consent and terms records, credits) goes through the
+    // authority Cloud Functions, which audit it. Admins have no raw write.
+    // User doc is created by Cloud Functions, not client-side.
     match /users/{uid} {
       allow read: if isOwner(uid) || isStaff();
-      allow update: if isAdmin()
-                    || (isOwner(uid)
+      allow update: if (isOwner(uid)
                         && request.resource.data.uid == resource.data.uid
                         && request.resource.data.email == resource.data.email
                         && request.resource.data.diff(resource.data).affectedKeys()
@@ -496,13 +498,13 @@ service cloud.firestore {
     }
 
     // --- bookings/{bookingId} ---
-    // Owner can read their bookings; staff+ can read all; Cloud Functions create.
+    // Owner can read their bookings; staff+ can read all. Create, change,
+    // cancel and delete go through the booking Cloud Functions only (slot
+    // locking, refunds, credits and audit live there).
     match /bookings/{bookingId} {
       allow read: if isSignedIn()
                   && (resource.data.userId == request.auth.uid || isStaff());
-      allow create: if false; // Cloud Functions only (slot locking transaction)
-      allow update: if isStaff(); // Staff can update status (e.g. cancel)
-      allow delete: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // --- floorplans/{floorplanId} ---
