@@ -65,7 +65,7 @@ export const MEMBERSHIP_TIERS: MembershipTier[] = [
       "10 desk hours/month included",
       "20% off additional desk hours ($14/hr)",
       "Book up to 90 days ahead",
-      "Wi-Fi, coffee, and shared amenities",
+      "Wi-Fi and shared amenities",
     ],
   },
   {
@@ -82,7 +82,7 @@ export const MEMBERSHIP_TIERS: MembershipTier[] = [
       "15 desk hours/month included",
       "30% off additional desk hours ($12.25/hr)",
       "Book up to 90 days ahead",
-      "Wi-Fi, coffee, and shared amenities",
+      "Wi-Fi and shared amenities",
     ],
   },
 ];

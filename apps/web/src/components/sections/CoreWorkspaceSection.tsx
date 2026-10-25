@@ -1,4 +1,4 @@
-import { Check, Coffee, Users, Mic, Printer, Mail, Calendar } from "lucide-react";
+import { Check, Laptop, Users, Mic, Printer, Mail, Calendar } from "lucide-react";
 
 export const CORE_FEATURES = [
   "Flexible desk seating",
@@ -9,7 +9,7 @@ export const CORE_FEATURES = [
 ];
 
 export const ADD_ONS = [
-  { icon: Coffee, label: "Private Focus Desks" },
+  { icon: Laptop, label: "Private Focus Desks" },
   { icon: Users, label: "Small Meeting Room" },
   { icon: Mic, label: "Podcast Setup" },
   { icon: Printer, label: "Printing & Scan" },

@@ -1389,7 +1389,7 @@ export const eventDocSchema = z.object({
   sponsorships: z.array(eventSponsorshipTierSchema).default([]),
   allowVendorTables: z.boolean().default(false),
   vendorTablePriceCents: z.number().optional(),
-  upsellProducts: z.array(z.string()).default([]), // IDs of ProductDocs (coffee, kits)
+  upsellProducts: z.array(z.string()).default([]), // IDs of ProductDocs (kits)
 
   createdBy: z.string(),                         // uid (admin)
   createdAt: z.number(),
@@ -1940,7 +1940,7 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       "10 desk hours/month included",
       "20% off additional desk hours ($14/hr)",
       "Book up to 90 days ahead",
-      "Wi-Fi, coffee, and shared amenities"
+      "Wi-Fi and shared amenities"
     ],
   },
   {
@@ -1966,7 +1966,7 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       "15 desk hours/month included",
       "30% off additional desk hours ($12.25/hr)",
       "Book up to 90 days ahead",
-      "Wi-Fi, coffee, and shared amenities"
+      "Wi-Fi and shared amenities"
     ],
   },
 ];

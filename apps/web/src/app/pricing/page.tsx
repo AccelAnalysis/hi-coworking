@@ -229,7 +229,7 @@ export default function PricingPage() {
 
 
           <p className="text-center text-sm text-slate-500 mt-8">
-            Physical coworking bookings include Wi-Fi, coffee, and shared amenities. Memberships renew monthly. Cancel anytime.
+            Physical coworking bookings include Wi-Fi and shared amenities. Memberships renew monthly. Cancel anytime.
           </p>
         </div>
       </AppShell>

@@ -56,10 +56,10 @@ export function planHighlights(tier: MembershipTier): string[] {
   if (tier.includedHoursPerMonth > 0) {
     lines.push(`${tier.includedHoursPerMonth} coworking desk hours included every month`);
     lines.push(`Extra desk hours at the member rate of ${money(tier.extraHourlyRateCents)}/hr`);
-    lines.push("Wi-Fi, coffee, and shared amenities when you work from the space");
+    lines.push("Wi-Fi and shared amenities when you work from the space");
   } else {
     lines.push(`A coworking desk whenever you need one, at ${money(tier.extraHourlyRateCents)}/hr. You pay only for the time you book`);
-    lines.push("Wi-Fi, coffee, and shared amenities whenever you book a desk");
+    lines.push("Wi-Fi and shared amenities whenever you book a desk");
   }
   lines.push(`Book up to ${tier.bookingWindowDays} days ahead`);
   return lines;
