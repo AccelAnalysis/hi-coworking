@@ -183,6 +183,7 @@ jobs:
           tests/web/comp-membership-copy.test.ts
           tests/web/admin-back-navigation.test.ts
           tests/web/admin-booking-actions.test.ts
+          tests/web/admin-a11y-guards.test.ts
 
       - name: Run active transaction integration tests
         run: >-

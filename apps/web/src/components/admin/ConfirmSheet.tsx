@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -81,6 +81,153 @@ export function ConfirmSheet({
             </button>
           </div>
         </div>
+      )}
+    </dialog>
+  );
+}
+
+export type ConfirmRequest = {
+  title: string;
+  body?: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+};
+
+/**
+ * Promise-based confirmation, a drop-in replacement for window.confirm:
+ *
+ *   const { confirm, sheet } = useConfirmSheet();
+ *   if (!(await confirm({ title: "Revoke access?", confirmLabel: "Revoke", destructive: true }))) return;
+ *   ...
+ *   return <>{page}{sheet}</>;
+ */
+export function useConfirmSheet() {
+  const [request, setRequest] = useState<ConfirmRequest | null>(null);
+  const resolver = useRef<((value: boolean) => void) | null>(null);
+
+  const settle = useCallback((value: boolean) => {
+    resolver.current?.(value);
+    resolver.current = null;
+    setRequest(null);
+  }, []);
+
+  const confirm = useCallback((next: ConfirmRequest) => {
+    resolver.current?.(false);
+    setRequest(next);
+    return new Promise<boolean>((resolve) => {
+      resolver.current = resolve;
+    });
+  }, []);
+
+  useEffect(() => () => resolver.current?.(false), []);
+
+  const sheet = (
+    <ConfirmSheet
+      open={Boolean(request)}
+      title={request?.title ?? ""}
+      confirmLabel={request?.confirmLabel ?? "Confirm"}
+      cancelLabel={request?.cancelLabel}
+      destructive={request?.destructive}
+      onConfirm={() => settle(true)}
+      onClose={() => settle(false)}
+    >
+      {request?.body}
+    </ConfirmSheet>
+  );
+
+  return { confirm, sheet };
+}
+
+/**
+ * In-app text entry sheet, a replacement for window.prompt. The field has a
+ * visible label, the form submits on Enter, and Escape cancels.
+ */
+export function TextInputSheet({
+  open,
+  title,
+  label,
+  initialValue = "",
+  confirmLabel,
+  busy = false,
+  onSubmit,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  label: string;
+  initialValue?: string;
+  confirmLabel: string;
+  busy?: boolean;
+  onSubmit: (value: string) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const inputId = useId();
+  const [value, setValue] = useState(initialValue);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      setValue(initialValue);
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open, initialValue]);
+
+  const trimmed = value.trim();
+
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+      className="w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
+    >
+      {open && (
+        <form
+          className="p-6"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (trimmed && !busy) void onSubmit(trimmed);
+          }}
+        >
+          <h2 id={titleId} className="text-xl font-semibold tracking-tight">{title}</h2>
+          <label htmlFor={inputId} className="mt-4 block text-sm font-medium text-slate-700">{label}</label>
+          <input
+            id={inputId}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            autoFocus
+            required
+            className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-base"
+          />
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="min-h-11 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-300 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !trimmed}
+              className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              {confirmLabel}
+            </button>
+          </div>
+        </form>
       )}
     </dialog>
   );

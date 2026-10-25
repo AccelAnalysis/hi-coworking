@@ -24,6 +24,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   getPaymentsLedger,
@@ -47,6 +48,11 @@ const backfillQBO = httpsCallable<
   { limit?: number },
   { synced: number; skipped: number; failed: number }
 >(functions, "admin_backfillQBO");
+
+const checkQuickBooksConnection = httpsCallable<Record<string, never>, { connected: boolean }>(
+  functions,
+  "intuit_checkConnection",
+);
 
 const PAGE_SIZE = 20;
 
@@ -173,6 +179,8 @@ function AdminPaymentsContent() {
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | "">("");
   const [purposeFilter, setPurposeFilter] = useState<PaymentPurpose | "">("");
   const [backfillLoading, setBackfillLoading] = useState(false);
+  const [qboConnected, setQboConnected] = useState<boolean | null>(null);
+  const { confirm, sheet } = useConfirmSheet();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -226,7 +234,25 @@ function AdminPaymentsContent() {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    checkQuickBooksConnection({})
+      .then((result) => { if (!cancelled) setQboConnected(result.data.connected); })
+      .catch((caught) => {
+        console.error("QuickBooks connection check failed:", caught);
+        if (!cancelled) setQboConnected(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   async function handleBackfillQBO() {
+    const confirmed = await confirm({
+      title: "Sync payments to QuickBooks?",
+      body: "Up to 50 paid payments that aren't in QuickBooks yet get sales receipts there. Payments that are already synced are skipped.",
+      confirmLabel: "Sync to QuickBooks",
+      cancelLabel: "Not now",
+    });
+    if (!confirmed) return;
     setBackfillLoading(true);
     setMessage(null);
     setError(null);
@@ -262,6 +288,7 @@ function AdminPaymentsContent() {
   }), [payments]);
 
   return (
+    <>
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -288,7 +315,7 @@ function AdminPaymentsContent() {
             <button
               type="button"
               onClick={() => void handleBackfillQBO()}
-              disabled={backfillLoading}
+              disabled={backfillLoading || qboConnected === false}
               className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-50"
             >
               {backfillLoading
@@ -306,8 +333,17 @@ function AdminPaymentsContent() {
           </p>
         </div>
 
+        <p className="mt-4 text-sm text-slate-600" role="status">
+          QuickBooks:{" "}
+          {qboConnected === null
+            ? "connection status unavailable"
+            : qboConnected
+              ? <span className="font-semibold text-emerald-700">connected</span>
+              : <span className="font-semibold text-amber-700">not connected. Accounting sync is off until an admin reconnects QuickBooks.</span>}
+        </p>
+
         {(error || message) && (
-          <div className={`mt-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>
+          <div role={error ? "alert" : "status"} className={`mt-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${error ? "bg-red-50 text-red-800 ring-1 ring-red-100" : "bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100"}`}>
             {error
               ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
@@ -335,8 +371,10 @@ function AdminPaymentsContent() {
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <label htmlFor="payment-search" className="sr-only">Search payments</label>
+            <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
+              id="payment-search"
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -347,6 +385,7 @@ function AdminPaymentsContent() {
           <button
             type="button"
             onClick={() => setShowFilters((current) => !current)}
+            aria-expanded={showFilters}
             className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full border px-5 text-sm font-semibold ${showFilters || hasActiveFilters ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700"}`}
           >
             <Filter className="h-4 w-4" /> Filters
@@ -448,6 +487,8 @@ function AdminPaymentsContent() {
         )}
       </main>
     </AppShell>
+      {sheet}
+    </>
   );
 }
 

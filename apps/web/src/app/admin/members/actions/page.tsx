@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { AdminBookingActions } from "@/components/AdminBookingActions";
 import { AppShell } from "@/components/AppShell";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { tablistKeyHandler } from "@/lib/tablistKeys";
 import { RequireAuth } from "@/components/RequireAuth";
 import { db, functions } from "@/lib/firebase";
 import { normalizeBooking, normalizeMember, type AdminBookingRecord, type AdminMemberRecord } from "@/lib/adminMemberData";
@@ -148,6 +150,7 @@ export default function AdminMemberActionsPage() {
 }
 
 function AdminMemberActionsContent() {
+  const { confirm, sheet } = useConfirmSheet();
   const [members, setMembers] = useState<MemberRecord[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [memberBookings, setMemberBookings] = useState<AdminBookingRecord[]>([]);
@@ -288,7 +291,7 @@ function AdminMemberActionsContent() {
     const prompt = comp
       ? `Change ${memberName(member)}'s complimentary membership to ${tier.name}? No Stripe charge is made.`
       : `Change ${memberName(member)} to ${tier.name}? Stripe applies the plan change and proration first, then Hi Coworking updates the membership.`;
-    if (!window.confirm(prompt)) return;
+    if (!(await confirm({ title: `Change plan to ${tier.name}?`, body: prompt, confirmLabel: `Change to ${tier.name}`, cancelLabel: "Keep current plan" }))) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await changeMembershipPlan({ uid: member.uid, tierId });
@@ -304,7 +307,14 @@ function AdminMemberActionsContent() {
   }
 
   async function doCancelMembership() {
-    if (!member || !window.confirm(`Cancel ${memberName(member)}'s membership at the end of the current Stripe billing period? Access and entitlements remain active through that date.`)) return;
+    if (!member) return;
+    if (!(await confirm({
+      title: `Cancel ${memberName(member)}'s membership?`,
+      body: "It ends at the end of the current Stripe billing period. Access and plan benefits stay active until then.",
+      confirmLabel: "Cancel membership",
+      cancelLabel: "Keep membership",
+      destructive: true,
+    }))) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await cancelMembership({ uid: member.uid });
@@ -346,7 +356,11 @@ function AdminMemberActionsContent() {
     if (endsAt !== null && endsAt <= Date.now()) { setCompFormError("The end date must be in the future."); return; }
     setCompFormError(null);
     const until = compEndDate ? ` through ${new Date(`${compEndDate}T12:00:00`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}` : " with no end date";
-    if (!window.confirm(`Give ${memberName(member)} a complimentary ${tier.name} membership${until}? No Stripe charge is made, and this is recorded in the audit log.`)) return;
+    if (!(await confirm({
+      title: `Give a complimentary ${tier.name} membership?`,
+      body: `${memberName(member)} gets ${tier.name}${until}. No Stripe charge is made, and this is recorded in the audit log.`,
+      confirmLabel: "Grant membership",
+    }))) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await grantCompMembership({ uid: member.uid, tierId: tier.id, endsAt, reason });
@@ -361,7 +375,13 @@ function AdminMemberActionsContent() {
 
   async function doEndComp() {
     if (!member) return;
-    if (!window.confirm(`End ${memberName(member)}'s complimentary membership now? Their plan benefits stop immediately. No Stripe charge or refund is involved.`)) return;
+    if (!(await confirm({
+      title: `End ${memberName(member)}'s complimentary membership?`,
+      body: "Their plan benefits stop immediately. No Stripe charge or refund is involved.",
+      confirmLabel: "End membership",
+      cancelLabel: "Keep membership",
+      destructive: true,
+    }))) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       await endCompMembership({ uid: member.uid });
@@ -399,7 +419,11 @@ function AdminMemberActionsContent() {
 
   async function createBooking() {
     if (!member || !resourceId || !quote) return;
-    if (!window.confirm(`Create this ${quote.resourceName} booking for ${memberName(member)}? The server will reserve included hours/account credit and require Stripe payment for any remaining balance.`)) return;
+    if (!(await confirm({
+      title: `Book ${quote.resourceName} for ${memberName(member)}?`,
+      body: "Included hours and account credit are used first. Any remaining balance needs a Stripe payment from the member.",
+      confirmLabel: "Create booking",
+    }))) return;
     setActionLoading(true); setError(null); setSuccess(null); setCheckoutUrl(null);
     try {
       const result = await beginBooking({
@@ -423,7 +447,12 @@ function AdminMemberActionsContent() {
     const amount = Math.round(Number(creditAmount) * 100);
     if (!Number.isFinite(amount) || amount <= 0) { setError("Enter a positive dollar amount."); return; }
     const deltaCents = creditDirection === "add" ? amount : -amount;
-    if (!window.confirm(`${creditDirection === "add" ? "Add" : "Deduct"} ${money(amount)} ${creditDirection === "add" ? "to" : "from"} ${memberName(member)}'s Hi Coworking account credit? This creates a permanent audit record.`)) return;
+    if (!(await confirm({
+      title: `${creditDirection === "add" ? "Add" : "Deduct"} ${money(amount)} ${creditDirection === "add" ? "to" : "from"} account credit?`,
+      body: `This changes ${memberName(member)}'s Hi Coworking account credit and creates a permanent audit record.`,
+      confirmLabel: creditDirection === "add" ? `Add ${money(amount)}` : `Deduct ${money(amount)}`,
+      destructive: creditDirection !== "add",
+    }))) return;
     setActionLoading(true); setError(null); setSuccess(null);
     try {
       const requestId = `credit_${Date.now()}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -441,6 +470,7 @@ function AdminMemberActionsContent() {
     catch { setError("The payment link could not be copied automatically."); }
   }
 
+  const selectTab = (id: ActionTab) => { setTab(id); setError(null); setSuccess(null); setCheckoutUrl(null); };
   const tabs: Array<{ id: ActionTab; label: string; icon: React.ElementType }> = [
     { id: "membership", label: "Membership", icon: CreditCard },
     { id: "booking", label: "Book for member", icon: CalendarClock },
@@ -448,6 +478,7 @@ function AdminMemberActionsContent() {
   ];
 
   return (
+    <>
     <AppShell>
       <main className="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -490,9 +521,9 @@ function AdminMemberActionsContent() {
 
         {checkoutUrl && <div className="mt-4 rounded-2xl bg-sky-50 p-4 text-sm text-sky-950"><p className="font-semibold">Stripe payment link ready</p><p className="mt-1 break-all text-xs text-sky-800">{checkoutUrl}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void copyCheckout()} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 font-semibold ring-1 ring-sky-200"><Copy className="h-4 w-4" /> Copy link</button><a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-full bg-slate-900 px-4 py-2 font-semibold text-white">Open checkout</a></div></div>}
 
-        <nav className="mt-8 flex gap-6 overflow-x-auto border-b border-slate-200">{tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => { setTab(id); setError(null); setSuccess(null); setCheckoutUrl(null); }} className={`inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-semibold ${tab === id ? "border-slate-950 text-slate-950" : "border-transparent text-slate-500"}`}><Icon className="h-4 w-4" /> {label}</button>)}</nav>
+        <div role="tablist" aria-label="Member actions" onKeyDown={tablistKeyHandler(tabs.map((item) => item.id), tab, selectTab, "action-tab-")} className="mt-8 flex gap-6 overflow-x-auto border-b border-slate-200">{tabs.map(({ id, label, icon: Icon }) => <button key={id} id={`action-tab-${id}`} type="button" role="tab" aria-selected={tab === id} aria-controls="action-tabpanel" tabIndex={tab === id ? 0 : -1} onClick={() => selectTab(id)} className={`inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-semibold ${tab === id ? "border-slate-950 text-slate-950" : "border-transparent text-slate-500"}`}><Icon className="h-4 w-4" aria-hidden="true" /> {label}</button>)}</div>
 
-        {loading || actionLoading && !member ? <div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div> : member && <div className="py-8">
+        {loading || actionLoading && !member ? <div className="flex items-center justify-center py-24" role="status"><Loader2 className="h-8 w-8 animate-spin text-slate-400" aria-hidden="true" /><span className="sr-only">Loading member</span></div> : member && <div role="tabpanel" id="action-tabpanel" aria-labelledby={`action-tab-${tab}`} className="py-8">
           {tab === "membership" && (() => {
             const compActive = membership?.comp?.active === true;
             const hasSubscription = membership?.hasSubscription === true;
@@ -600,9 +631,11 @@ function AdminMemberActionsContent() {
             </div>
           </section>}
 
-          {tab === "credit" && <section className="max-w-2xl"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Available balance</p><h2 className="mt-2 text-3xl font-semibold text-slate-950">{money(member.accountCreditCents || 0)}</h2></div></div><div className="mt-7 grid gap-4 sm:grid-cols-2"><div><label className="mb-2 block text-sm font-semibold text-slate-700">Adjustment</label><select value={creditDirection} onChange={(event) => setCreditDirection(event.target.value as "add" | "deduct")} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="add">Add credit</option><option value="deduct">Deduct credit</option></select></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Amount</label><input type="number" min="0.01" step="0.01" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} placeholder="0.00" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Reason</label><select value={creditReason} onChange={(event) => setCreditReason(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="service_adjustment">Service adjustment</option><option value="booking_correction">Booking correction</option><option value="billing_correction">Billing correction</option><option value="promotional_credit">Promotional credit</option><option value="other">Other</option></select></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Note</label><input type="text" value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="Why is this adjustment needed?" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div></div><button type="button" disabled={actionLoading} onClick={() => void doCreditAdjustment()} className="mt-5 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Apply audited adjustment</button><p className="mt-5 text-xs leading-5 text-slate-500">Every adjustment is idempotent and permanently audited with before/after balances, reason and Admin identity. Deductions cannot consume credit already reserved by an active booking checkout.</p></section>}
+          {tab === "credit" && <section className="max-w-2xl"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Available balance</p><h2 className="mt-2 text-3xl font-semibold text-slate-950">{money(member.accountCreditCents || 0)}</h2></div></div><div className="mt-7 grid gap-4 sm:grid-cols-2"><div><label htmlFor="credit-direction" className="mb-2 block text-sm font-semibold text-slate-700">Adjustment</label><select id="credit-direction" value={creditDirection} onChange={(event) => setCreditDirection(event.target.value as "add" | "deduct")} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="add">Add credit</option><option value="deduct">Deduct credit</option></select></div><div><label htmlFor="credit-amount" className="mb-2 block text-sm font-semibold text-slate-700">Amount</label><input id="credit-amount" type="number" min="0.01" step="0.01" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} placeholder="0.00" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div><div><label htmlFor="credit-reason" className="mb-2 block text-sm font-semibold text-slate-700">Reason</label><select id="credit-reason" value={creditReason} onChange={(event) => setCreditReason(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="service_adjustment">Service adjustment</option><option value="booking_correction">Booking correction</option><option value="billing_correction">Billing correction</option><option value="promotional_credit">Promotional credit</option><option value="other">Other</option></select></div><div><label htmlFor="credit-note" className="mb-2 block text-sm font-semibold text-slate-700">Note</label><input id="credit-note" type="text" value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="Why is this adjustment needed?" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div></div><button type="button" disabled={actionLoading} onClick={() => void doCreditAdjustment()} className="mt-5 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Apply audited adjustment</button><p className="mt-5 text-xs leading-5 text-slate-500">Every adjustment is idempotent and permanently audited with before/after balances, reason and Admin identity. Deductions cannot consume credit already reserved by an active booking checkout.</p></section>}
         </div>}
       </main>
     </AppShell>
+      {sheet}
+    </>
   );
 }

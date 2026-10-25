@@ -131,7 +131,7 @@ function InventoryContent() {
                 </div>
               </div>
             )}
-            {error && <p className="mt-4 text-sm font-medium text-red-700">{error}</p>}
+            {error && <p role="alert" className="mt-4 text-sm font-medium text-red-700">{error}</p>}
           </section>
 
           <section>

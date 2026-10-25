@@ -62,6 +62,7 @@ export default function AdminLeadsPage() {
 function LeadsContent() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<LeadType>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
@@ -96,8 +97,10 @@ function LeadsContent() {
       setLeads(pageDocs.map((d) => d.data() as Lead));
       setLastDoc(pageDocs[pageDocs.length - 1] ?? null);
       setHasMore(hasNext);
+      setLoadError(null);
     } catch (err) {
       console.error("Failed to fetch leads:", err);
+      setLoadError("Leads couldn't be loaded. Check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -159,10 +162,12 @@ function LeadsContent() {
         <div className="flex flex-col sm:flex-row gap-4">
           {/* Search */}
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <label htmlFor="lead-search" className="sr-only">Search leads</label>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" aria-hidden="true" />
             <input
-              type="text"
-              placeholder="Search by name or email..."
+              id="lead-search"
+              type="search"
+              placeholder="Search by name or email"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 bg-white/50 focus:bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none transition-all text-sm"
@@ -171,8 +176,9 @@ function LeadsContent() {
 
           {/* Type filter */}
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-slate-400" />
+            <Filter className="h-4 w-4 text-slate-400" aria-hidden="true" />
             <select
+              aria-label="Lead type"
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value as LeadType)}
               className="rounded-lg border border-slate-200 px-3 py-2.5 text-sm bg-white focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
@@ -185,11 +191,16 @@ function LeadsContent() {
         </div>
       </div>
 
+      {loadError && (
+        <div role="alert" className="mb-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800 ring-1 ring-red-100">{loadError}</div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+          <div className="flex items-center justify-center py-20" role="status">
+            <Loader2 className="h-6 w-6 animate-spin text-slate-400" aria-hidden="true" />
+            <span className="sr-only">Loading leads</span>
           </div>
         ) : filteredLeads.length === 0 ? (
           <div className="text-center py-20 text-slate-500">

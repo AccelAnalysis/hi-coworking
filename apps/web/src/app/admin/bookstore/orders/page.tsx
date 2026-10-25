@@ -10,6 +10,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   cancelBookstoreOrderFn,
@@ -47,6 +48,7 @@ function statusClass(order: BookstoreOrder) {
 }
 
 function OrdersContent() {
+  const { confirm, sheet } = useConfirmSheet();
   const [orders, setOrders] = useState<BookstoreOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
@@ -98,10 +100,17 @@ function OrdersContent() {
     const isPaid = order.status === "paid";
     const wording = isPaid
       ? order.fulfillmentStatus === "inventory_exception"
-        ? "Refund this paid order? No inventory will be added because no physical sale was committed."
-        : "Refund this order and return the unpicked-up physical copy to stock?"
-      : "Cancel this pending checkout and release its inventory reservation?";
-    if (!window.confirm(wording)) return;
+        ? "The customer is refunded. No inventory is added back, because no physical sale was committed."
+        : "The customer is refunded and the copy they never picked up goes back into stock."
+      : "The pending checkout is cancelled and its reserved copy is released.";
+    const confirmed = await confirm({
+      title: isPaid ? "Refund this order?" : "Cancel this checkout?",
+      body: wording,
+      confirmLabel: isPaid ? "Refund order" : "Cancel checkout",
+      cancelLabel: "Keep order",
+      destructive: true,
+    });
+    if (!confirmed) return;
     setWorking(order.id);
     setError("");
     try {
@@ -128,6 +137,7 @@ function OrdersContent() {
   }
 
   return (
+    <>
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -151,7 +161,7 @@ function OrdersContent() {
           </label>
         </div>
 
-        {error && <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</p>}
+        {error && <p role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">{error}</p>}
 
         {loading ? (
           <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div>
@@ -214,6 +224,8 @@ function OrdersContent() {
         )}
       </main>
     </AppShell>
+      {sheet}
+    </>
   );
 }
 
