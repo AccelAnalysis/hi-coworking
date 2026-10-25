@@ -201,7 +201,7 @@ export default function BookingCompletePage() {
             )}
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
               <Link
-                href="/account/bookings"
+                href="/my-hi#bookings"
                 className="inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 py-3 font-medium text-white hover:bg-slate-800"
               >
                 View booking

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bell,
-  Calendar,
   ChevronDown,
+  House,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/authContext";
 import { subscribeToUnreadCount } from "@/lib/firestore";
+import { isMyHiPath, MY_HI_HREF, MY_HI_LABEL } from "@/lib/myHiNav";
 
 const publicLinks = [
   { href: "/spaces", label: "Spaces" },
@@ -74,6 +75,7 @@ export function AppShell({
 
   const isAdmin = role === "admin" || role === "master";
   const isStaff = role === "staff" || isAdmin;
+  const onMyHi = isMyHiPath(pathname);
 
   function PublicNavLink({
     href,
@@ -133,6 +135,19 @@ export function AppShell({
               user ? (
                 <>
                   <Link
+                    href={MY_HI_HREF}
+                    aria-current={onMyHi ? "page" : undefined}
+                    className={cn(
+                      "hidden min-h-11 items-center gap-2 rounded-full px-3 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white lg:inline-flex",
+                      onMyHi
+                        ? "bg-slate-800 text-indigo-300"
+                        : "text-slate-300 hover:text-white",
+                    )}
+                  >
+                    <House aria-hidden="true" className="h-4 w-4" />
+                    {MY_HI_LABEL}
+                  </Link>
+                  <Link
                     href="/notifications"
                     className="relative p-1.5 text-slate-400 transition hover:text-white"
                     title="Notifications"
@@ -179,15 +194,24 @@ export function AppShell({
                         </div>
 
                         <Link
-                          href="/account/bookings"
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50"
+                          href={MY_HI_HREF}
+                          aria-current={onMyHi ? "page" : undefined}
+                          className={cn(
+                            "flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-slate-900",
+                            onMyHi
+                              ? "bg-indigo-50 font-semibold text-indigo-700"
+                              : "hover:bg-slate-50",
+                          )}
                         >
-                          <Calendar className="h-4 w-4 text-slate-400" />
-                          Bookings
+                          <House
+                            aria-hidden="true"
+                            className={cn("h-4 w-4", onMyHi ? "text-indigo-600" : "text-slate-400")}
+                          />
+                          {MY_HI_LABEL}
                         </Link>
                         <Link
                           href="/notifications"
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50"
+                          className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-slate-50"
                         >
                           <Bell className="h-4 w-4 text-slate-400" />
                           Notifications
@@ -201,7 +225,7 @@ export function AppShell({
                         {isStaff && (
                           <Link
                             href="/staff"
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-emerald-700 transition-colors hover:bg-emerald-50"
+                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-emerald-700 transition-colors hover:bg-emerald-50"
                           >
                             <User className="h-4 w-4 text-emerald-500" />
                             Staff
@@ -210,7 +234,7 @@ export function AppShell({
                         {isAdmin && (
                           <Link
                             href="/admin/dashboard"
-                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-amber-700 transition-colors hover:bg-amber-50"
+                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-amber-700 transition-colors hover:bg-amber-50"
                           >
                             <LayoutDashboard className="h-4 w-4 text-amber-500" />
                             Admin
@@ -221,7 +245,7 @@ export function AppShell({
                         <button
                           type="button"
                           onClick={handleSignOut}
-                          className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50"
+                          className="flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50"
                         >
                           <LogOut className="h-4 w-4" />
                           Sign out
@@ -321,15 +345,24 @@ export function AppShell({
                     Account
                   </p>
                   <Link
-                    href="/account/bookings"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
+                    href={MY_HI_HREF}
+                    aria-current={onMyHi ? "page" : undefined}
+                    className={cn(
+                      "flex min-h-11 items-center gap-3 rounded-lg py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600",
+                      onMyHi
+                        ? "font-semibold text-indigo-600"
+                        : "text-slate-700 hover:text-indigo-600",
+                    )}
                   >
-                    <Calendar className="h-4 w-4 text-slate-400" />
-                    Bookings
+                    <House
+                      aria-hidden="true"
+                      className={cn("h-4 w-4", onMyHi ? "text-indigo-600" : "text-slate-400")}
+                    />
+                    {MY_HI_LABEL}
                   </Link>
                   <Link
                     href="/notifications"
-                    className="flex items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
+                    className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-slate-700 hover:text-indigo-600"
                   >
                     <Bell className="h-4 w-4 text-slate-400" />
                     Notifications
@@ -337,7 +370,7 @@ export function AppShell({
                   {isStaff && (
                     <Link
                       href="/staff"
-                      className="flex items-center gap-3 py-2 text-sm font-medium text-emerald-700"
+                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-emerald-700"
                     >
                       <User className="h-4 w-4 text-emerald-500" />
                       Staff
@@ -346,7 +379,7 @@ export function AppShell({
                   {isAdmin && (
                     <Link
                       href="/admin/dashboard"
-                      className="flex items-center gap-3 py-2 text-sm font-medium text-amber-700"
+                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-amber-700"
                     >
                       <LayoutDashboard className="h-4 w-4 text-amber-500" />
                       Admin
@@ -355,7 +388,7 @@ export function AppShell({
                   <button
                     type="button"
                     onClick={handleSignOut}
-                    className="flex w-full items-center gap-3 py-2 text-sm font-medium text-red-600 hover:text-red-700"
+                    className="flex min-h-11 w-full items-center gap-3 py-2 text-sm font-medium text-red-600 hover:text-red-700"
                   >
                     <LogOut className="h-4 w-4" />
                     Sign out

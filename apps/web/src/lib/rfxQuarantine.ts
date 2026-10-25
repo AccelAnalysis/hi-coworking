@@ -6,7 +6,7 @@
  */
 
 export const PUBLIC_HI_HOME = "/";
-export const MEMBER_HI_HOME = "/account/bookings";
+export const MEMBER_HI_HOME = "/my-hi";
 export const ADMIN_HI_HOME = "/admin/dashboard";
 
 export const PUBLIC_RFX_QUARANTINE_PREFIXES = [

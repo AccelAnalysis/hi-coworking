@@ -147,6 +147,7 @@ jobs:
           tests/functions/sms-compliance.test.ts
           tests/functions/terms-acceptance.test.ts
           tests/functions/campaign-unsubscribe.test.ts
+          tests/web/my-hi-nav.test.ts
           tests/web/public-rfx-quarantine.test.ts
           tests/web/membership-welcome-banner.test.ts
           tests/web/comp-membership-copy.test.ts

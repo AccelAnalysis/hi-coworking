@@ -13,6 +13,7 @@ import {
   ReceiptText,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { MY_HI_BOOKINGS_ID } from "@/lib/myHiNav";
 import { BillingPortalButton } from "@/components/BillingPortalButton";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
 import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
@@ -264,12 +265,20 @@ function AccountBookingsContent() {
               visits, and find the access details for each one.
             </p>
           </div>
-          <Link
-            href="/book"
-            className={`inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
-          >
-            Book a space
-          </Link>
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={`#${MY_HI_BOOKINGS_ID}`}
+              className={`inline-flex min-h-11 items-center justify-center rounded-full px-5 py-3 text-sm font-semibold text-slate-900 ring-1 ring-slate-300 transition hover:bg-slate-100 ${FOCUS_RING}`}
+            >
+              Your bookings
+            </a>
+            <Link
+              href="/book"
+              className={`inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
+            >
+              Book a space
+            </Link>
+          </div>
         </div>
 
         {showWelcome && (
@@ -277,11 +286,18 @@ function AccountBookingsContent() {
         )}
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-          <section className="space-y-5">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Calendar className="h-4 w-4" />
-              Upcoming
-            </div>
+          <section
+            id={MY_HI_BOOKINGS_ID}
+            aria-labelledby="my-hi-bookings-heading"
+            className="scroll-mt-24 space-y-5"
+          >
+            <h2
+              id="my-hi-bookings-heading"
+              className="flex items-center gap-2 text-sm font-semibold text-slate-900"
+            >
+              <Calendar aria-hidden="true" className="h-4 w-4" />
+              Your upcoming bookings
+            </h2>
 
             {loading ? (
               <div className="flex min-h-40 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
