@@ -49,7 +49,7 @@ export default function PricingPage() {
     try {
       const result = await createCheckout({
         tierId,
-        successUrl: `${window.location.origin}/my-hi?payment=success`,
+        successUrl: `${window.location.origin}/my-hi?payment=success&plan=${encodeURIComponent(tierId)}`,
         cancelUrl: `${window.location.origin}/pricing?payment=cancelled`,
       });
 

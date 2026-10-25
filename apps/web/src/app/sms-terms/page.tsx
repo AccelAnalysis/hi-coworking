@@ -44,7 +44,7 @@ export default function SmsTermsPage() {
           </p>
           <p>
             Reply <strong>HELP</strong> for help, or email{" "}
-            <a href="mailto:hello@hi-coworking.com" className="font-semibold text-sky-800 underline underline-offset-2">hello@hi-coworking.com</a>.
+            <a href="mailto:hicoworking@accelanalysis.com" className="font-semibold text-sky-800 underline underline-offset-2">hicoworking@accelanalysis.com</a>.
           </p>
 
           <h2 className="text-lg font-bold text-slate-900">Carriers</h2>
@@ -61,7 +61,7 @@ export default function SmsTermsPage() {
           </p>
 
           <p className="text-xs text-slate-400 pt-4 border-t border-slate-200">
-            Last updated: October 2026. Questions? Contact us at hello@hi-coworking.com.
+            Last updated: October 2026. Questions? Contact us at hicoworking@accelanalysis.com.
           </p>
         </div>
       </div>

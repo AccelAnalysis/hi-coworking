@@ -451,7 +451,7 @@ export function AppShell({
             <p className="text-xs text-slate-400">
               &copy; {new Date().getFullYear()} Hi Coworking. All rights reserved.
             </p>
-            <p className="text-xs text-slate-400">Carrollton, VA</p>
+            <p className="text-xs text-slate-400">15373 Carrollton Blvd, Carrollton, VA 23314</p>
           </div>
         </div>
       </footer>

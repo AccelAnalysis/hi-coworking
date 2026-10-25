@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { httpsCallable } from "firebase/functions";
 import {
   Calendar,
@@ -13,14 +13,32 @@ import {
   ReceiptText,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { BillingPortalButton } from "@/components/BillingPortalButton";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
+import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
 import { getUserBookingsFromFirestore } from "@/lib/firestore";
+import { membershipEndsLabel, membershipSummary, welcomeBannerCopy } from "@/lib/membershipCopy";
 import { MEMBERSHIP_TIERS, type Booking } from "@hi/shared";
 
 const FACILITY_TIME_ZONE = "America/New_York";
+
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900";
+
+/** The query string, read without a hydration mismatch in the static export. */
+function useLocationSearch() {
+  return useSyncExternalStore(
+    (onChange) => {
+      window.addEventListener("popstate", onChange);
+      return () => window.removeEventListener("popstate", onChange);
+    },
+    () => window.location.search,
+    () => "",
+  );
+}
 
 type ManagedBooking = Omit<Booking, "paymentMethod"> & {
   totalCents?: number;
@@ -97,6 +115,8 @@ export default function AccountBookingsPage() {
 
 function AccountBookingsContent() {
   const { user, userDoc } = useAuth();
+  const search = useLocationSearch();
+  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
   const [bookings, setBookings] = useState<ManagedBooking[]>([]);
   const [accessGrants, setAccessGrants] = useState<AccessGrantSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -177,34 +197,61 @@ function AccountBookingsContent() {
     userDoc?.membershipStatus === "active"
     || userDoc?.membershipStatus === "trial"
   );
+  // Past-due members still have a Stripe subscription and need the portal
+  // to fix their payment method.
+  const hasBillingAccount = membershipActive || userDoc?.membershipStatus === "pastDue";
+  const membershipEnds = membershipActive
+    ? membershipEndsLabel(userDoc as { cancelAtPeriodEnd?: unknown; cancelAt?: unknown })
+    : null;
+  // Invoice failures flag pastDue on an active membership (access continues
+  // while Stripe retries), so prompt the member to fix their card.
+  const paymentRetrying = membershipActive
+    && (userDoc as { pastDue?: unknown } | null | undefined)?.pastDue === true;
   const accountCreditCents = Math.max(
     0,
     Number(userWithCredit?.accountCreditCents || 0),
   );
+
+  const returnParams = useMemo(() => new URLSearchParams(search), [search]);
+  const showWelcome = returnParams.get("payment") === "success" && !welcomeDismissed;
+  const welcomeCopy = welcomeBannerCopy({
+    membershipActive,
+    activeTier: membershipTier,
+    returnedTier: MEMBERSHIP_TIERS.find((tier) => tier.id === returnParams.get("plan")),
+  });
+  const dismissWelcome = useCallback(() => {
+    setWelcomeDismissed(true);
+    // Drop the Checkout return parameters so a refresh doesn't show it again.
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
 
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-slate-500">
-              Account · Bookings
+            <p className="text-sm font-medium text-slate-600">
+              My Hi
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-              Your bookings
+              Your space at Hi Coworking
             </h1>
             <p className="mt-2 max-w-2xl text-slate-600">
-              View access, add reservations to your calendar, and see the exact
-              consequences before cancelling or rescheduling.
+              Book a coworking desk or the meeting room, see your upcoming
+              visits, and find the access details for each one.
             </p>
           </div>
           <Link
-            href="/spaces"
-            className="inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            href="/book"
+            className={`inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
           >
-            Find a space
+            Book a space
           </Link>
         </div>
+
+        {showWelcome && (
+          <MembershipWelcomeBanner copy={welcomeCopy} onDismiss={dismissWelcome} />
+        )}
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
           <section className="space-y-5">
@@ -215,7 +262,8 @@ function AccountBookingsContent() {
 
             {loading ? (
               <div className="flex min-h-40 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                <Loader2 aria-hidden="true" className="h-6 w-6 text-slate-400 motion-safe:animate-spin" />
+                <span className="sr-only">Loading your bookings…</span>
               </div>
             ) : upcomingBookings.length ? (
               upcomingBookings.map((booking, index) => {
@@ -288,17 +336,26 @@ function AccountBookingsContent() {
             ) : (
               <div className="rounded-2xl bg-white py-12 text-center shadow-sm ring-1 ring-slate-200">
                 <p className="font-medium text-slate-900">
-                  Nothing booked yet.
+                  No visits booked yet.
                 </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  Start from Spaces to see the place, then check live availability.
+                <p className="mx-auto mt-1 max-w-md px-4 text-sm text-slate-600">
+                  Pick a date to see the open hours for a coworking desk or the
+                  meeting room, with live availability.
                 </p>
-                <Link
-                  href="/spaces"
-                  className="mt-5 inline-flex text-sm font-semibold text-slate-900 underline underline-offset-4"
-                >
-                  Explore Spaces
-                </Link>
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+                  <Link
+                    href="/book"
+                    className={`inline-flex min-h-11 items-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
+                  >
+                    Book a desk
+                  </Link>
+                  <Link
+                    href="/spaces"
+                    className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold text-slate-900 underline underline-offset-4 ${FOCUS_RING}`}
+                  >
+                    See the space
+                  </Link>
+                </div>
               </div>
             )}
 
@@ -350,37 +407,43 @@ function AccountBookingsContent() {
               <p className="mt-4 text-xl font-bold">
                 {membershipActive
                   ? membershipTier?.name ?? "Active membership"
-                  : "No active membership"}
+                  : userDoc?.membershipStatus === "pastDue"
+                    ? "Payment needed"
+                    : "No active membership"}
               </p>
+              {membershipEnds ? (
+                <p className="mt-1 text-sm font-semibold text-amber-200">
+                  {membershipEnds}
+                </p>
+              ) : null}
+              {paymentRetrying ? (
+                <p className="mt-1 text-sm font-semibold text-amber-200">
+                  Your last payment didn&apos;t go through. Update your payment
+                  method to keep your membership.
+                </p>
+              ) : null}
               {membershipActive && membershipTier ? (
-                <p className="mt-2 text-sm text-slate-300">
-                  {membershipTier.includedHoursPerMonth} desk hours are included
-                  each month. Eligible cancellations restore hours automatically.
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  {membershipSummary(membershipTier)}
+                </p>
+              ) : userDoc?.membershipStatus === "pastDue" ? (
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  Your last membership payment didn&apos;t go through. Update
+                  your payment method to keep your membership.
                 </p>
               ) : (
-                <p className="mt-2 text-sm text-slate-300">
-                  Book as a guest or choose a membership that fits your routine.
+                <p className="mt-2 text-sm leading-6 text-slate-200">
+                  Book as a guest anytime, or choose a membership that fits how
+                  often you work here.
                 </p>
               )}
+              {hasBillingAccount ? <BillingPortalButton /> : null}
               <Link
                 href="/pricing"
-                className="mt-5 inline-flex text-sm font-semibold text-white underline underline-offset-4"
+                className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-white underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
-                View pricing
+                Compare plans
               </Link>
-            </div>
-
-            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-              <p className="text-sm font-medium text-slate-500">
-                Account credit
-              </p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">
-                {money(accountCreditCents)}
-              </p>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                Late-cancellation credit is applied automatically to the next
-                eligible booking before Stripe payment.
-              </p>
             </div>
 
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -388,15 +451,31 @@ function AccountBookingsContent() {
                 Need help?
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Contact Hi Coworking if access has not arrived, a payment needs
-                reconciliation, or a booking change cannot be completed.
+                We&apos;re here for anything about access, payments, bookings,
+                or your membership.
               </p>
               <Link
                 href="/contact"
-                className="mt-4 inline-flex text-sm font-semibold text-slate-900 underline underline-offset-4"
+                className={`mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-slate-900 underline underline-offset-4 ${FOCUS_RING}`}
               >
                 Contact us
               </Link>
+            </div>
+
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h2 className="text-sm font-medium text-slate-600">
+                Account credit
+              </h2>
+              <p className="mt-1 text-2xl font-bold text-slate-900">
+                {money(accountCreditCents)}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Credit from a late cancellation is applied automatically to
+                your next eligible booking, before card payment.
+                {membershipActive && membershipTier && membershipTier.includedHoursPerMonth > 0
+                  ? " Eligible cancellations also restore included hours automatically."
+                  : ""}
+              </p>
             </div>
           </aside>
         </div>
