@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { MY_HI_HREF } from "@/lib/myHiNav";
 import { useAuth } from "@/lib/authContext";
 import { Loader2 } from "lucide-react";
 import type { UserRole, MembershipStatus } from "@hi/shared";
@@ -42,14 +43,14 @@ export function RequireAuth({ children, requiredRole, requiredMembershipStatus }
     }
 
     if (requiredRole && !hasMinimumRole(role, requiredRole)) {
-      router.push("/account/bookings");
+      router.push(MY_HI_HREF);
       return;
     }
 
     if (requiredMembershipStatus && requiredMembershipStatus.length > 0) {
       const status = userDoc?.membershipStatus ?? "none";
       if (!requiredMembershipStatus.includes(status)) {
-        router.push("/account/bookings");
+        router.push(MY_HI_HREF);
         return;
       }
     }

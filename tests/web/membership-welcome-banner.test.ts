@@ -50,11 +50,11 @@ describe("membership copy on /my-hi", () => {
 });
 
 describe("Checkout return wiring", () => {
-  it("keeps the query string when /my-hi forwards to the account page", () => {
+  it("renders My Hi in place at /my-hi so the Checkout query string survives", () => {
     const myHi = readFileSync("apps/web/src/app/my-hi/page.tsx", "utf8");
-    expect(myHi).toContain('"use client"');
-    expect(myHi).not.toContain('redirect("/account/bookings")');
-    expect(myHi).toContain("router.replace(`/account/bookings${window.location.search}${window.location.hash}`)");
+    expect(myHi).toContain('export { default } from "../account/bookings/page";');
+    expect(myHi).not.toContain("redirect(");
+    expect(myHi).not.toContain("router.replace(");
   });
 
   it("returns from Checkout with the plan id", () => {
