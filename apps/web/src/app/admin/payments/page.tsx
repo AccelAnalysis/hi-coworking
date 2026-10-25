@@ -36,6 +36,7 @@ import type {
   PaymentPurpose,
   PaymentStatus,
 } from "@hi/shared";
+import { callableErrorMessage } from "@/lib/callableError";
 
 const syncToQBO = httpsCallable<
   { paymentId: string },
@@ -237,7 +238,7 @@ function AdminPaymentsContent() {
       await fetchPayments();
     } catch (caught) {
       console.error("QBO backfill failed:", caught);
-      setError("QuickBooks accounting sync could not be completed.");
+      setError(callableErrorMessage(caught, "QuickBooks accounting sync could not be completed."));
     } finally {
       setBackfillLoading(false);
     }
@@ -477,7 +478,7 @@ function PaymentRow({
       await onSynced();
     } catch (caught) {
       console.error("QBO sync failed:", caught);
-      onError("This payment could not be synced to QuickBooks accounting.");
+      onError(callableErrorMessage(caught, "This payment could not be synced to QuickBooks accounting."));
     } finally {
       setSyncLoading(false);
     }

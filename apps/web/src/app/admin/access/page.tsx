@@ -16,6 +16,8 @@ import {
   accessAdminResendPinFn,
   accessAdminGetDoorStatusFn,
 } from "@/lib/functions";
+import { callableErrorMessage } from "@/lib/callableError";
+import { ADMIN_CAPABILITIES } from "@/lib/adminCapabilities";
 import type { DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 import {
   DoorOpen,
@@ -204,8 +206,7 @@ function AdminAccessContent() {
       const recentEvents = await getAccessEvents({ doorId, limitCount: 50 });
       setEvents(recentEvents);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Unlock failed";
-      setError(msg);
+      setError(callableErrorMessage(err, "The door couldn't be unlocked."));
     } finally {
       setActionLoading(null);
     }
@@ -221,8 +222,7 @@ function AdminAccessContent() {
       const recentEvents = await getAccessEvents({ grantId, limitCount: 50 });
       setEvents((prev) => [...recentEvents, ...prev].slice(0, 100));
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Revoke failed";
-      setError(msg);
+      setError(callableErrorMessage(err, "Access couldn't be revoked."));
     } finally {
       setActionLoading(null);
     }
@@ -234,8 +234,7 @@ function AdminAccessContent() {
     try {
       await accessAdminResendPinFn({ grantId });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Resend failed";
-      setError(msg);
+      setError(callableErrorMessage(err, "The PIN couldn't be resent."));
     } finally {
       setActionLoading(null);
     }
@@ -275,12 +274,19 @@ function AdminAccessContent() {
           </button>
         </div>
 
+        {!ADMIN_CAPABILITIES.doorAccess.live && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>{ADMIN_CAPABILITIES.doorAccess.note}</p>
+          </div>
+        )}
+
         {/* Error banner */}
         {error && (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm" role="alert">
             <AlertTriangle className="h-4 w-4 shrink-0" />
             {error}
-            <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
+            <button type="button" onClick={() => setError(null)} aria-label="Dismiss error" className="ml-auto inline-flex h-11 w-11 items-center justify-center text-red-400 hover:text-red-600">✕</button>
           </div>
         )}
 

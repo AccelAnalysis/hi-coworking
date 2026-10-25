@@ -54,3 +54,21 @@ describe("callableErrorMessage", () => {
     expect(callableErrorMessage({ code: "functions/failed-precondition", message: "x".repeat(401) }, "Generic")).toBe("Generic");
   });
 });
+
+describe("callableErrorMessage transport failures", () => {
+  it("explains a failed fetch or undeployed callable instead of showing 'internal'", () => {
+    const text = callableErrorMessage({ code: "functions/internal", message: "internal" }, "Nurture couldn't load.");
+    expect(text).toContain("Nurture couldn't load.");
+    expect(text).toContain("may not be switched on yet");
+    expect(text).not.toMatch(/^internal$/);
+    expect(callableErrorMessage({ code: "functions/not-found", message: "not-found" }, "Couldn't save")).toContain("Couldn't save. This tool");
+  });
+  it("keeps server not-found copy when the server sent one", () => {
+    expect(callableErrorMessage({ code: "functions/not-found", message: "Member not found." }, "Generic")).toBe("Member not found.");
+  });
+  it("adds plain hints for sign-in, rate limit and timeouts", () => {
+    expect(callableErrorMessage({ code: "functions/unauthenticated", message: "x" }, "Generic")).toContain("Sign in again");
+    expect(callableErrorMessage({ code: "functions/resource-exhausted", message: "x" }, "Generic")).toContain("Wait a minute");
+    expect(callableErrorMessage({ code: "functions/deadline-exceeded", message: "x" }, "Generic")).toContain("went through");
+  });
+});
