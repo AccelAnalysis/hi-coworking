@@ -151,9 +151,25 @@ export interface PaymentDocData {
 
 // --- WebhookEventDoc shape (mirrors @hi/shared) ---
 
+export type WebhookEventStatus = "processing" | "success" | "failed";
+
 export interface WebhookEventDocData {
   eventId: string;
   provider: string;
+  /** First time this event was claimed (kept for older readers). */
   processedAt: number;
+  /** "success" or "error: ..."; written when an attempt finishes. */
   result?: string;
+  /** Lease-based status (stripe_webhook). Older docs have no status. */
+  status?: WebhookEventStatus;
+  /** Number of processing attempts started. */
+  attempts?: number;
+  /** While status is "processing": when another delivery may take over. */
+  leaseExpiresAt?: number | null;
+  /** Random token of the attempt that holds the lease. */
+  leaseToken?: string | null;
+  startedAt?: number;
+  completedAt?: number;
+  failedAt?: number;
+  lastError?: string;
 }

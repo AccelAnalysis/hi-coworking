@@ -1,7 +1,9 @@
 /**
  * Stripe Webhook Handler + Entitlement Updater (PR-10)
  *
- * Receives Stripe webhook events, de-duplicates via ensureIdempotent(),
+ * Receives Stripe webhook events, de-duplicates via runIdempotentWebhook()
+ * (processing lease; success recorded only after all side effects; failures
+ * are retried on Stripe's next delivery),
  * updates the unified payment ledger, and provisions/revokes membership
  * entitlements on the users/{uid} doc.
  */
@@ -10,7 +12,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { StripeProvider } from "./stripeProvider";
-import { ensureIdempotent, markWebhookResult } from "./idempotency";
+import { runIdempotentWebhook } from "./idempotency";
 import { updatePaymentStatus } from "./ledger";
 import { syncPaymentToQBO } from "./qboAccountingSync";
 import type { WebhookResult } from "./types";
@@ -35,6 +37,23 @@ import {
 import { notifyCancellationScheduled, notifyMembershipEnded } from "./memberNotifications";
 
 function getDb() { return admin.firestore(); }
+
+/**
+ * Create a doc with a deterministic ID once. A retried webhook that already
+ * created it leaves the first write (and its timestamps) untouched.
+ */
+async function createOnce(
+  ref: FirebaseFirestore.DocumentReference,
+  data: Record<string, unknown>,
+): Promise<boolean> {
+  try {
+    await ref.create(data);
+    return true;
+  } catch (err) {
+    if ((err as { code?: unknown })?.code === 6) return false; // ALREADY_EXISTS
+    throw err;
+  }
+}
 
 interface EventDocLite {
   id: string;
@@ -79,18 +98,26 @@ export async function handleStripeWebhook(
     return { status: 400, body: { error: "Invalid webhook" } };
   }
 
-  // Idempotency check
-  const isNew = await ensureIdempotent(result.eventId, "stripe");
-  if (!isNew) {
+  // Idempotency: a lease while processing, "success" only after every side
+  // effect below has completed, and "failed" (retryable) on any error, so a
+  // Stripe retry of a failed event is processed again instead of skipped.
+  const run = await runIdempotentWebhook(result.eventId, "stripe", () =>
+    processWebhookResult(result, intuitClientId, intuitClientSecret, resendApiKey),
+  );
+
+  if (run.outcome === "duplicate") {
     return { status: 200, body: { received: true, skipped: true } };
   }
-
-  try {
-    await processWebhookResult(result, intuitClientId, intuitClientSecret, resendApiKey);
-    await markWebhookResult(result.eventId, "success");
-  } catch (err) {
-    logger.error("Stripe webhook processing error", { eventId: result.eventId, err });
-    await markWebhookResult(result.eventId, `error: ${err}`);
+  if (run.outcome === "in_progress") {
+    // Non-2xx so Stripe delivers again later, after the current attempt ends.
+    return { status: 409, body: { error: "Event is already being processed" } };
+  }
+  if (run.outcome === "failed") {
+    logger.error("Stripe webhook processing error", {
+      eventId: result.eventId,
+      attempt: run.attempt,
+      err: run.error,
+    });
     return { status: 500, body: { error: "Processing failed" } };
   }
 
@@ -189,7 +216,7 @@ async function handlePaymentSucceeded(
 
   // Provision membership entitlements
   if (uid && plan) {
-    await provisionMembership(uid, plan, subscriptionId);
+    await provisionMembership(uid, plan, subscriptionId, result.eventId);
 
     // Welcome email, once per Checkout session. Never throws, so a send
     // failure cannot fail the webhook or undo the activation above.
@@ -215,7 +242,7 @@ async function handlePaymentSucceeded(
   if (result.metadata?.bookId) {
     const bookId = result.metadata.bookId;
     const purchaseId = `purchase_${result.eventId}_${bookId}`;
-    await getDb().collection("bookPurchases").doc(purchaseId).set({
+    await createOnce(getDb().collection("bookPurchases").doc(purchaseId), {
       id: purchaseId,
       bookId: bookId,
       userId: uid || null,
@@ -375,10 +402,7 @@ async function finalizeVendorTablePurchase(result: WebhookResult): Promise<void>
 
   const db = getDb();
   const vendorTableRef = db.collection("events").doc(eventId).collection("vendorTables").doc(paymentId);
-  const vendorTableSnap = await vendorTableRef.get();
-  if (vendorTableSnap.exists) return;
-
-  await vendorTableRef.set({
+  await createOnce(vendorTableRef, {
     id: paymentId,
     paymentId,
     eventId,
@@ -504,31 +528,53 @@ async function handleSubscriptionInvoice(result: WebhookResult): Promise<void> {
 
 /**
  * Set membership entitlements on the user doc after a successful subscription.
+ * Once per Stripe event: a retried delivery of the same checkout event (after
+ * a later step failed) does not re-activate a membership that changed since.
  */
 async function provisionMembership(
   uid: string,
   plan: string,
-  subscriptionId?: string
+  subscriptionId: string | undefined,
+  eventId: string,
 ): Promise<void> {
-  const now = Date.now();
-  const expiresAt = now + 35 * 24 * 60 * 60 * 1000;
+  const userRef = getDb().collection("users").doc(uid);
+  const applied = await getDb().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (alreadyProvisionedByEvent(snap.data(), eventId)) return null;
 
-  const updates: Record<string, unknown> = {
-    membershipStatus: "active",
-    // A paid Checkout replaces any complimentary membership.
-    membershipSource: STRIPE_MEMBERSHIP_SOURCE,
-    compEndsAt: null,
-    plan,
-    expiresAt,
-    updatedAt: now,
-  };
+    const now = Date.now();
+    const updates: Record<string, unknown> = {
+      membershipStatus: "active",
+      // A paid Checkout replaces any complimentary membership.
+      membershipSource: STRIPE_MEMBERSHIP_SOURCE,
+      compEndsAt: null,
+      plan,
+      expiresAt: now + 35 * 24 * 60 * 60 * 1000,
+      membershipProvisionEventId: eventId,
+      updatedAt: now,
+    };
+    if (subscriptionId) {
+      updates["features.stripeSubscriptionId"] = subscriptionId;
+    }
+    // update() (not set) keeps the old behaviour: a missing users doc fails
+    // the event, which is now retried instead of silently dropped.
+    tx.update(userRef, updates);
+    return updates;
+  });
 
-  if (subscriptionId) {
-    updates["features.stripeSubscriptionId"] = subscriptionId;
+  if (!applied) {
+    logger.info("Membership already provisioned by this event, skipping", { uid, eventId });
+    return;
   }
+  logger.info("Membership provisioned", { uid, plan, expiresAt: applied.expiresAt });
+}
 
-  await getDb().collection("users").doc(uid).update(updates);
-  logger.info("Membership provisioned", { uid, plan, expiresAt });
+/** True when users/{uid} was already provisioned by this Stripe event. */
+export function alreadyProvisionedByEvent(
+  user: Record<string, unknown> | undefined,
+  eventId: string,
+): boolean {
+  return Boolean(eventId) && user?.membershipProvisionEventId === eventId;
 }
 
 /**
