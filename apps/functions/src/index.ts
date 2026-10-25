@@ -1074,6 +1074,11 @@ export const payments_createQuickBooksInvoice = onCall(
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
+    // Creates ledger payments and QuickBooks invoices: admin/master only.
+    const callerRole = request.auth.token.role as string | undefined;
+    if (callerRole !== "admin" && callerRole !== "master") {
+      throw new HttpsError("permission-denied", "Only admin users can create QuickBooks invoices");
+    }
 
     const { productId, customerEmail, customerName, memo } = request.data as {
       productId: string;

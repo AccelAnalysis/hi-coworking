@@ -141,6 +141,7 @@ jobs:
           tests/functions/stripe-refund-notices.test.ts
           tests/functions/stripe-webhook-idempotency.test.ts
           tests/functions/quickbooks-webhook.test.ts
+          tests/functions/qb-invoice-admin-only.test.ts
           tests/functions/member-notifications.test.ts
           tests/web/refund-copy.test.ts
           tests/functions/booking-policy.test.ts
