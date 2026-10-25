@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, Loader2, Search, UserPlus, Users } from "lucide-react";
+import { Check, Download, Loader2, Search, UserPlus, Users } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
+import { callableErrorMessage } from "@/lib/callableError";
+import { rosterCsv, rosterCsvFilename } from "@/lib/rosterCsv";
 import {
   listPublishedEvents,
   staffAddEventWalkIn,
@@ -32,6 +34,7 @@ function StaffEventsContent() {
   const [walkInName, setWalkInName] = useState("");
   const [walkInEmail, setWalkInEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function loadRoster(eventId: string) {
     setLoading(true);
@@ -40,7 +43,7 @@ function StaffEventsContent() {
       setRoster(result.data);
       setSelectedId(eventId);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not load the attendee roster.");
+      setMessage(callableErrorMessage(error, "Couldn't load the attendee roster. Try again."));
     } finally {
       setLoading(false);
     }
@@ -53,13 +56,17 @@ function StaffEventsContent() {
         const rows = await listPublishedEvents({ includePast: true });
         if (!active) return;
         setEvents(rows);
+        // /staff/events?event=ID opens that roster directly (linked from Admin > Events),
+        // including cancelled or completed events that aren't in the published list.
+        const requested = new URLSearchParams(window.location.search).get("event");
         const first = rows.find((event) => event.endTime >= Date.now() - 6 * 60 * 60 * 1000);
-        if (first) await loadRoster(first.id);
+        if (requested) await loadRoster(requested);
+        else if (first) await loadRoster(first.id);
         else setLoading(false);
       } catch (error) {
         console.error(error);
         if (active) {
-          setMessage("Could not load events.");
+          setMessage("Couldn't load events. Check your connection and refresh.");
           setLoading(false);
         }
       }
@@ -105,7 +112,7 @@ function StaffEventsContent() {
         )),
       } : current);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not check in this attendee.");
+      setMessage(callableErrorMessage(error, "Couldn't check in this attendee. Try again."));
     } finally {
       setBusyId(null);
     }
@@ -115,6 +122,7 @@ function StaffEventsContent() {
     if (!roster || !walkInName.trim()) return;
     setBusyId("walk-in");
     setMessage(null);
+    setNotice(null);
     try {
       await staffAddEventWalkIn({
         eventId: roster.event.id,
@@ -125,13 +133,31 @@ function StaffEventsContent() {
       setWalkInName("");
       setWalkInEmail("");
       setWalkInOpen(false);
+      setNotice("Walk-in added and checked in.");
       await loadRoster(roster.event.id);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not add this walk-in.");
+      setMessage(callableErrorMessage(error, "Couldn't add this walk-in. Try again."));
     } finally {
       setBusyId(null);
     }
   }
+
+  function downloadCsv() {
+    if (!roster) return;
+    const blob = new Blob([rosterCsv(roster.registrations)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = rosterCsvFilename(roster.event.title, roster.event.startTime);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const selectableEvents = roster && !events.some((event) => event.id === roster.event.id)
+    ? [roster.event, ...events]
+    : events;
 
   return (
     <AppShell>
@@ -146,15 +172,16 @@ function StaffEventsContent() {
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[17rem_1fr]">
           <aside>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Event</label>
+            <label htmlFor="staff-event-select" className="text-xs font-semibold uppercase tracking-wide text-slate-600">Event</label>
             <select
+              id="staff-event-select"
               value={selectedId}
               onChange={(event) => void loadRoster(event.target.value)}
               className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
             >
               <option value="">Select event</option>
-              {events.map((event) => (
-                <option key={event.id} value={event.id}>{event.title}</option>
+              {selectableEvents.map((event) => (
+                <option key={event.id} value={event.id}>{event.title}{event.status !== "published" ? ` (${event.status})` : ""}</option>
               ))}
             </select>
 
@@ -169,7 +196,7 @@ function StaffEventsContent() {
 
           <section>
             {loading ? (
-              <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div>
+              <div className="flex min-h-64 items-center justify-center" role="status"><Loader2 className="h-7 w-7 animate-spin text-slate-400" aria-hidden="true" /><span className="sr-only">Loading roster</span></div>
             ) : roster ? (
               <>
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-5">
@@ -177,31 +204,56 @@ function StaffEventsContent() {
                     <h2 className="text-2xl font-semibold text-slate-950">{roster.event.title}</h2>
                     <p className="mt-1 text-sm text-slate-500">{new Date(roster.event.startTime).toLocaleString()}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setWalkInOpen((open) => !open)}
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
-                  >
-                    <UserPlus className="h-4 w-4" /> Walk-in
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={downloadCsv}
+                      disabled={roster.registrations.length === 0}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-300 disabled:opacity-50"
+                    >
+                      <Download className="h-4 w-4" aria-hidden="true" /> Download CSV
+                    </button>
+                    {roster.event.status === "published" && (
+                      <button
+                        type="button"
+                        onClick={() => setWalkInOpen((open) => !open)}
+                        aria-expanded={walkInOpen}
+                        aria-controls="walk-in-form"
+                        className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        <UserPlus className="h-4 w-4" aria-hidden="true" /> Walk-in
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {walkInOpen && (
-                  <div className="mt-5 grid gap-3 rounded-2xl bg-slate-100 p-4 sm:grid-cols-[1fr_1fr_auto]">
-                    <input value={walkInName} onChange={(event) => setWalkInName(event.target.value)} placeholder="Name" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
-                    <input value={walkInEmail} onChange={(event) => setWalkInEmail(event.target.value)} placeholder="Email (optional)" type="email" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
-                    <button type="button" onClick={addWalkIn} disabled={!walkInName.trim() || busyId === "walk-in"} className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 ring-1 ring-slate-200 disabled:opacity-50">
+                  <div id="walk-in-form" className="mt-5 grid gap-3 rounded-2xl bg-slate-100 p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <label className="text-sm font-medium text-slate-700">
+                      Name
+                      <input value={walkInName} onChange={(event) => setWalkInName(event.target.value)} autoComplete="off" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm" />
+                    </label>
+                    <label className="text-sm font-medium text-slate-700">
+                      Email (optional)
+                      <input value={walkInEmail} onChange={(event) => setWalkInEmail(event.target.value)} type="email" autoComplete="off" className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm" />
+                    </label>
+                    <p className="text-xs text-slate-600 sm:col-span-3 sm:order-last">Walk-ins don&apos;t get a confirmation email.</p>
+                    <button type="button" onClick={addWalkIn} disabled={!walkInName.trim() || busyId === "walk-in"} className="min-h-11 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 ring-1 ring-slate-300 disabled:opacity-50">
                       {busyId === "walk-in" ? "Adding…" : "Add + check in"}
                     </button>
                   </div>
                 )}
 
                 <div className="relative mt-5">
-                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search attendee" className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm" />
+                  <label htmlFor="attendee-search" className="sr-only">Search attendees</label>
+                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-500" aria-hidden="true" />
+                  <input id="attendee-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search attendee" className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm" />
                 </div>
 
-                {message && <p className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm text-rose-700">{message}</p>}
+                <div aria-live="polite">
+                  {message && <p role="alert" className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm text-rose-800">{message}</p>}
+                  {notice && <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</p>}
+                </div>
 
                 <div className="mt-4 divide-y divide-slate-100 border-y border-slate-200">
                   {filtered.map((registration) => {
@@ -216,10 +268,11 @@ function StaffEventsContent() {
                           type="button"
                           onClick={() => void checkIn(registration)}
                           disabled={fullyChecked || busyId === registration.id || registration.status !== "CONFIRMED"}
-                          className={`inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${fullyChecked ? "bg-emerald-50 text-emerald-700" : "bg-white text-slate-700 ring-1 ring-slate-200"} disabled:opacity-70`}
+                          aria-label={fullyChecked ? `${registration.displayName} is checked in` : registration.status !== "CONFIRMED" ? `${registration.displayName}: ${registration.status.toLowerCase().replace(/_/g, " ")}` : `Check in ${registration.displayName}`}
+                          className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${fullyChecked ? "bg-emerald-50 text-emerald-700" : "bg-white text-slate-700 ring-1 ring-slate-200"} disabled:opacity-70`}
                         >
-                          {busyId === registration.id ? <Loader2 className="h-4 w-4 animate-spin" /> : fullyChecked ? <Check className="h-4 w-4" /> : <Users className="h-4 w-4" />}
-                          {fullyChecked ? "Checked in" : "Check in"}
+                          {busyId === registration.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : fullyChecked ? <Check className="h-4 w-4" aria-hidden="true" /> : <Users className="h-4 w-4" aria-hidden="true" />}
+                          {fullyChecked ? "Checked in" : registration.status !== "CONFIRMED" ? registration.status.toLowerCase().replace(/_/g, " ") : "Check in"}
                         </button>
                       </div>
                     );

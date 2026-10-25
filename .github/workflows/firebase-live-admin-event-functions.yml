@@ -119,7 +119,11 @@ jobs:
           submissions_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/events_v2AdminListEventSubmissions"
           sms_consent_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/members_setSmsConsent"
           terms_endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/members_acceptTerms"
-          for endpoint in "${save_endpoint}" "${publish_endpoint}" "${list_endpoint}" "${detail_endpoint}" "${register_endpoint}" "${interest_endpoint}" "${submissions_endpoint}" "${sms_consent_endpoint}" "${terms_endpoint}"; do
+          ops_endpoints=()
+          for name in events_v2AdminCancelEvent events_v2AdminCompleteEvent events_v2StaffGetRoster events_v2StaffCheckIn events_v2StaffWalkIn; do
+            ops_endpoints+=("https://us-central1-hi-coworking-plat.cloudfunctions.net/${name}")
+          done
+          for endpoint in "${save_endpoint}" "${publish_endpoint}" "${list_endpoint}" "${detail_endpoint}" "${register_endpoint}" "${interest_endpoint}" "${submissions_endpoint}" "${sms_consent_endpoint}" "${terms_endpoint}" "${ops_endpoints[@]}"; do
             check_origin "${endpoint}" "https://hi-coworking.com" yes
             check_origin "${endpoint}" "https://hi-coworking-plat.web.app" yes
             check_origin "${endpoint}" "https://evil.example" no

@@ -5,25 +5,16 @@ import { getPayment, updatePaymentStatus } from "../payments/ledger";
 import { StripeProvider } from "../payments/stripeProvider";
 import {
   asMoney,
-  availableSeats,
   cancellationDecision,
   confirmedQuantity,
   db,
   hashSecret,
-  normalizeEmail,
-  positiveInt,
   publicEvent,
-  randomSecret,
-  requireAdmin,
-  requireStaff,
-  resolvePricing,
-  sellTicketInventory,
   unsellTicketInventory,
 } from "./core";
-import { enqueueNotification, enqueueRegistrationNotifications } from "./notifications";
+import { enqueueNotification } from "./notifications";
 import { promoteWaitlist } from "./registration";
 import {
-  type AttendanceStatusV2,
   type EventDocV2,
   type RegistrationDocV2,
   type RegistrationStatusV2,
@@ -221,213 +212,15 @@ export const events_v2ProcessRefundJobs = onSchedule(
 
 export { events_v2AdminPublishEvent, events_v2AdminSaveEvent } from "./adminEventSave";
 
-export const events_v2AdminCancelEvent = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  requireAdmin(request.auth);
-  const { eventId } = request.data as { eventId?: string };
-  if (!eventId) throw new HttpsError("invalid-argument", "eventId is required.");
-  const eventRef = db().collection("events").doc(eventId);
-  const eventSnap = await eventRef.get();
-  if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
-  const event = eventSnap.data() as EventDocV2;
-  if (event.status !== "published") {
-    throw new HttpsError("failed-precondition", "Only published events can be cancelled.");
-  }
-  const [registrationsSnap, holdsSnap, waitlistSnap] = await Promise.all([
-    db().collection("eventRegistrations").where("eventId", "==", eventId).get(),
-    db().collection("eventHolds").where("eventId", "==", eventId).get(),
-    db().collection("eventWaitlist").where("eventId", "==", eventId).get(),
-  ]);
-  const batch = db().batch();
-  batch.update(eventRef, {
-    status: "cancelled",
-    confirmedQuantity: 0,
-    registrationCount: 0,
-    heldQuantity: 0,
-    ticketTypes: (event.ticketTypes || []).map((ticket) => ({ ...ticket, heldCount: 0 })),
-    cancelledAt: Date.now(),
-    updatedAt: Date.now(),
-  });
-  const notify: RegistrationDocV2[] = [];
-  for (const doc of registrationsSnap.docs) {
-    const registration = doc.data() as RegistrationDocV2;
-    if (!["CONFIRMED", "REFUND_PENDING"].includes(registration.status)) continue;
-    const refundNeeded = registration.amountPaidCents > 0 && Boolean(registration.paymentId);
-    batch.set(doc.ref, {
-      status: refundNeeded ? "REFUND_PENDING" : "CANCELLED",
-      cancelledAt: Date.now(),
-      updatedAt: Date.now(),
-    }, { merge: true });
-    if (refundNeeded && registration.paymentId) {
-      const refundRef = db().collection("eventRefundJobs").doc(`event_cancel_${registration.id}`);
-      batch.set(refundRef, {
-        id: refundRef.id,
-        eventId,
-        registrationId: registration.id,
-        paymentId: registration.paymentId,
-        amountCents: registration.amountPaidCents,
-        reason: "event_cancelled_by_hi",
-        status: "pending",
-        attempts: 0,
-        nextAttemptAt: Date.now(),
-        createdAt: Date.now(),
-      }, { merge: true });
-    }
-    notify.push(registration);
-  }
-  for (const doc of holdsSnap.docs) {
-    if (doc.data().status === "HELD") batch.set(doc.ref, { status: "CANCELLED", cancelledAt: Date.now() }, { merge: true });
-  }
-  for (const doc of waitlistSnap.docs) {
-    if (["WAITING", "OFFERED"].includes(String(doc.data().status))) {
-      batch.set(doc.ref, { status: "REMOVED", updatedAt: Date.now() }, { merge: true });
-    }
-  }
-  await batch.commit();
-  await Promise.all(notify.map((registration) => enqueueNotification({
-    id: `event_cancelled_${registration.id}`,
-    type: "EVENT_CANCELLED",
-    eventId,
-    registrationId: registration.id,
-    email: registration.email,
-    displayName: registration.displayName,
-  })));
-  return { success: true, eventId, affectedRegistrations: registrationsSnap.size };
-});
-
-export const events_v2AdminCompleteEvent = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  requireStaff(request.auth);
-  const { eventId } = request.data as { eventId?: string };
-  if (!eventId) throw new HttpsError("invalid-argument", "eventId is required.");
-  const eventRef = db().collection("events").doc(eventId);
-  const eventSnap = await eventRef.get();
-  if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
-  const event = eventSnap.data() as EventDocV2;
-  if (event.status !== "published" || event.endTime > Date.now()) {
-    throw new HttpsError("failed-precondition", "Only ended published events can be completed.");
-  }
-  const regs = await db().collection("eventRegistrations").where("eventId", "==", eventId).get();
-  const batch = db().batch();
-  batch.set(eventRef, { status: "completed", completedAt: Date.now(), updatedAt: Date.now() }, { merge: true });
-  for (const doc of regs.docs) {
-    const registration = doc.data() as RegistrationDocV2;
-    if (registration.status !== "CONFIRMED") continue;
-    const checkedIn = Math.max(0, registration.checkedInQuantity || 0);
-    const attendanceStatus: AttendanceStatusV2 = checkedIn === 0
-      ? "NO_SHOW"
-      : checkedIn >= registration.quantity ? "CHECKED_IN" : "PARTIAL";
-    batch.set(doc.ref, { attendanceStatus, updatedAt: Date.now() }, { merge: true });
-  }
-  await batch.commit();
-  return { success: true, eventId };
-});
-
-export const events_v2StaffGetRoster = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  requireStaff(request.auth);
-  const { eventId } = request.data as { eventId?: string };
-  if (!eventId) throw new HttpsError("invalid-argument", "eventId is required.");
-  const [eventSnap, regs, waitlist] = await Promise.all([
-    db().collection("events").doc(eventId).get(),
-    db().collection("eventRegistrations").where("eventId", "==", eventId).orderBy("registeredAt", "asc").get(),
-    db().collection("eventWaitlist").where("eventId", "==", eventId).orderBy("joinedAt", "asc").get(),
-  ]);
-  if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
-  return {
-    event: publicEvent(eventSnap.data() as EventDocV2),
-    registrations: regs.docs.map((doc) => doc.data()),
-    waitlist: waitlist.docs.map((doc) => doc.data()),
-  };
-});
-
-export const events_v2StaffCheckIn = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  requireStaff(request.auth);
-  const { registrationId, quantity: rawQuantity } = request.data as { registrationId?: string; quantity?: number };
-  if (!registrationId) throw new HttpsError("invalid-argument", "registrationId is required.");
-  const ref = db().collection("eventRegistrations").doc(registrationId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError("not-found", "Registration not found.");
-  const registration = snap.data() as RegistrationDocV2;
-  if (registration.status !== "CONFIRMED") {
-    throw new HttpsError("failed-precondition", "Only confirmed registrations can check in.");
-  }
-  const quantity = Math.min(registration.quantity, positiveInt(rawQuantity, registration.quantity));
-  const attendanceStatus: AttendanceStatusV2 = quantity >= registration.quantity ? "CHECKED_IN" : "PARTIAL";
-  await ref.set({ checkedInQuantity: quantity, checkedInAt: Date.now(), attendanceStatus, updatedAt: Date.now() }, { merge: true });
-  return { success: true, registrationId, checkedInQuantity: quantity, attendanceStatus };
-});
-
-export const events_v2StaffWalkIn = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");
-  requireStaff(request.auth);
-  const { eventId, name, email, ticketTypeId, quantity: rawQuantity } = request.data as {
-    eventId?: string;
-    name?: string;
-    email?: string;
-    ticketTypeId?: string;
-    quantity?: number;
-  };
-  if (!eventId) throw new HttpsError("invalid-argument", "eventId is required.");
-  const displayName = String(name || "").trim();
-  if (!displayName) throw new HttpsError("invalid-argument", "Walk-in name is required.");
-  const quantity = positiveInt(rawQuantity, 1);
-  const registrationRef = db().collection("eventRegistrations").doc();
-  const manageSecret = randomSecret();
-  const normalizedEmail = normalizeEmail(email) || `walkin-${registrationRef.id}@invalid.local`;
-
-  const result = await db().runTransaction(async (tx): Promise<{ registration: RegistrationDocV2; event: EventDocV2 }> => {
-    const eventRef = db().collection("events").doc(eventId);
-    const eventSnap = await tx.get(eventRef);
-    if (!eventSnap.exists) throw new HttpsError("not-found", "Event not found.");
-    const event = eventSnap.data() as EventDocV2;
-    if (event.status !== "published" || event.endTime <= Date.now()) {
-      throw new HttpsError("failed-precondition", "This event is not accepting walk-ins.");
-    }
-    if (availableSeats(event) < quantity) throw new HttpsError("resource-exhausted", "This event is full.");
-    const pricing = resolvePricing(event, ticketTypeId, false, quantity);
-    if (pricing.totalCents > 0) {
-      throw new HttpsError("failed-precondition", "Paid walk-ins must use the normal event checkout so payment remains reconciled.");
-    }
-    const nextConfirmed = confirmedQuantity(event) + quantity;
-    const nextTickets = sellTicketInventory(event, pricing.ticketTypeId, quantity, false);
-    const registration: RegistrationDocV2 = {
-      id: registrationRef.id,
-      eventId,
-      displayName,
-      email: normalizedEmail,
-      ticketTypeId: pricing.ticketTypeId,
-      ticketTypeName: pricing.ticketTypeName,
-      quantity,
-      publicUnitPriceCents: pricing.publicUnitPriceCents,
-      discountCents: pricing.discountCents,
-      finalUnitPriceCents: pricing.finalUnitPriceCents,
-      amountPaidCents: 0,
-      currency: pricing.currency,
-      status: "CONFIRMED",
-      attendanceStatus: "CHECKED_IN",
-      checkedInQuantity: quantity,
-      checkedInAt: Date.now(),
-      source: "staff_walkin",
-      manageSecretHash: hashSecret(manageSecret),
-      registeredAt: Date.now(),
-    };
-    tx.set(registrationRef, registration);
-    tx.update(eventRef, {
-      confirmedQuantity: nextConfirmed,
-      registrationCount: nextConfirmed,
-      ticketTypes: nextTickets,
-      updatedAt: Date.now(),
-    });
-    return { registration, event: { ...event, confirmedQuantity: nextConfirmed, registrationCount: nextConfirmed, ticketTypes: nextTickets } };
-  });
-
-  if (!normalizedEmail.endsWith("@invalid.local")) {
-    await enqueueRegistrationNotifications(result.registration, result.event, manageSecret);
-  }
-  return { success: true, registrationId: result.registration.id };
-});
+// Admin and staff operations live in adminEventOps.ts so the isolated
+// admin-event-save codebase can deploy them (audit P0-4).
+export {
+  events_v2AdminCancelEvent,
+  events_v2AdminCompleteEvent,
+  events_v2StaffCheckIn,
+  events_v2StaffGetRoster,
+  events_v2StaffWalkIn,
+} from "./adminEventOps";
 
 export const events_v2ListMyRegistrations = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required.");

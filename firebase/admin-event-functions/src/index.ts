@@ -20,3 +20,11 @@ export { events_v2AdminListEventSubmissions } from "../../../apps/functions/src/
 export { members_setSmsConsent } from "../../../apps/functions/src/eventsV2/memberSmsConsent";
 
 export { members_acceptTerms } from "../../../apps/functions/src/eventsV2/termsAcceptance";
+
+export {
+  events_v2AdminCancelEvent,
+  events_v2AdminCompleteEvent,
+  events_v2StaffCheckIn,
+  events_v2StaffGetRoster,
+  events_v2StaffWalkIn,
+} from "../../../apps/functions/src/eventsV2/adminEventOps";

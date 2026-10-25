@@ -17,6 +17,20 @@ import { DEFAULT_REFUND_CUTOFF_HOURS, type EventDocV2 } from "./types";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 
+/**
+ * Paid event checkout (events_v2FinalizeRegistration and
+ * events_v2OnPaymentUpdated) is not deployed, and events_v2BeginRegistration
+ * rejects paid tickets. Flip this only when the paid flow ships.
+ */
+export const PAID_EVENT_REGISTRATION_LIVE = false;
+
+export const PAID_EVENT_NOT_LIVE_MESSAGE =
+  "Paid tickets can't be published yet because paid registration isn't switched on. Make every ticket free, or keep this event as a draft.";
+
+export function isPaidEvent(event: Pick<EventDocV2, "price" | "ticketTypes">): boolean {
+  return (event.price || 0) > 0 || (event.ticketTypes || []).some((ticket) => (ticket.priceCents || 0) > 0);
+}
+
 export function locationWriteForSave(format: string, location: unknown) {
   if (format === "virtual") return FieldValue.delete();
   const trimmed = String(location || "").trim();
@@ -93,6 +107,9 @@ export const events_v2AdminSaveEvent = onCall(adminEventCallableOptions, async (
     updatedAt: now,
     publishedAt: existing?.publishedAt,
   };
+  if (event.status === "published" && isPaidEvent(event) && !PAID_EVENT_REGISTRATION_LIVE) {
+    throw new HttpsError("failed-precondition", PAID_EVENT_NOT_LIVE_MESSAGE);
+  }
   const write: FirebaseFirestore.DocumentData = {
     ...event,
     location: locationWriteForSave(format, input.location),
@@ -117,9 +134,13 @@ export const events_v2AdminPublishEvent = onCall(
     }
     validateEventForSave(event as unknown as Record<string, unknown>);
     if (event.startTime <= Date.now()) throw new HttpsError("failed-precondition", "A past event cannot be published.");
-    const paid = (event.price || 0) > 0 || (event.ticketTypes || []).some((ticket) => ticket.priceCents > 0);
-    if (paid && !stripeSecretKey.value()) {
-      throw new HttpsError("failed-precondition", "Stripe is not configured for paid event registration.");
+    if (isPaidEvent(event)) {
+      // The deployed registration flow only takes free tickets, so a paid
+      // event would publish with no way to register (audit P1-2).
+      if (!PAID_EVENT_REGISTRATION_LIVE) throw new HttpsError("failed-precondition", PAID_EVENT_NOT_LIVE_MESSAGE);
+      if (!stripeSecretKey.value()) {
+        throw new HttpsError("failed-precondition", "Stripe is not configured for paid event registration.");
+      }
     }
     await ref.update({ status: "published", publishedAt: Date.now(), updatedAt: Date.now() });
     return { success: true, eventId };

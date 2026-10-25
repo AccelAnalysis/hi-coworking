@@ -53,15 +53,15 @@ function createClient(name: string) {
   return { app, functions };
 }
 
-async function createSignedInUser(uid: string, role: "member" | "staff" = "member") {
+async function createSignedInUser(uid: string, role: "member" | "staff" | "admin" = "member") {
   const email = `${uid}@example.test`;
   const authAdmin = getAdminAuth(adminApp);
   await authAdmin.createUser({ uid, email, password: PASSWORD, emailVerified: true });
-  if (role === "staff") await authAdmin.setCustomUserClaims(uid, { role: "staff" });
+  if (role !== "member") await authAdmin.setCustomUserClaims(uid, { role });
   await db.collection("users").doc(uid).set({
     uid,
     email,
-    displayName: role === "staff" ? "Event Staff" : "Event Member",
+    displayName: role === "member" ? "Event Member" : "Event Staff",
     role,
     membershipStatus: role === "member" ? "active" : "none",
     plan: role === "member" ? "coworking" : null,
@@ -247,6 +247,103 @@ describe("Events v2", () => {
     );
 
     expect(result.event.location).toBe("15373 Carrollton Blvd, Carrollton, VA");
+  });
+
+  it("cancels an event without emailing anyone or issuing refunds, and holds paid seats for admin review", async () => {
+    await db.collection("events").doc("cancel-me").set(futureEvent("cancel-me", { confirmedQuantity: 2, registrationCount: 2 }));
+    const base = {
+      eventId: "cancel-me",
+      quantity: 1,
+      discountCents: 0,
+      currency: "usd",
+      status: "CONFIRMED",
+      attendanceStatus: "NOT_CHECKED_IN",
+      checkedInQuantity: 0,
+      source: "web",
+      registeredAt: Date.now(),
+      manageSecretHash: "hash",
+    };
+    await db.collection("eventRegistrations").doc("free-reg").set({
+      ...base, id: "free-reg", displayName: "Free Guest", email: "free@example.test",
+      publicUnitPriceCents: 0, finalUnitPriceCents: 0, amountPaidCents: 0,
+    });
+    await db.collection("eventRegistrations").doc("paid-reg").set({
+      ...base, id: "paid-reg", displayName: "Paid Guest", email: "paid@example.test",
+      publicUnitPriceCents: 2500, finalUnitPriceCents: 2500, amountPaidCents: 2500, paymentId: "pay-1",
+    });
+    const staff = await createSignedInUser("cancel-staff", "staff");
+    await expect(callFunction(staff, "events_v2AdminCancelEvent", { eventId: "cancel-me" })).rejects.toThrow();
+
+    const admin = await createSignedInUser("cancel-admin", "admin");
+    const result = await callFunction<{
+      cancelledRegistrations: number;
+      refundReviewRegistrations: number;
+      emailsSent: number;
+    }>(admin, "events_v2AdminCancelEvent", { eventId: "cancel-me", reason: "Speaker unavailable" });
+    expect(result).toMatchObject({ cancelledRegistrations: 1, refundReviewRegistrations: 1, emailsSent: 0 });
+
+    expect((await db.collection("events").doc("cancel-me").get()).data()?.status).toBe("cancelled");
+    expect((await db.collection("eventRegistrations").doc("free-reg").get()).data()?.status).toBe("CANCELLED");
+    expect((await db.collection("eventRegistrations").doc("paid-reg").get()).data()?.status).toBe("REFUND_PENDING");
+    const refundJobs = await db.collection("eventRefundJobs").get();
+    expect(refundJobs.docs.map((doc) => doc.data().status)).toEqual(["needs_admin_review"]);
+    const notifications = await db.collection("eventNotificationJobs").get();
+    expect(notifications.empty).toBe(true);
+    const audit = await db.collection("eventOperationAudit").get();
+    expect(audit.size).toBe(1);
+    expect(audit.docs[0].data()).toMatchObject({
+      action: "event_cancel",
+      reason: "Speaker unavailable",
+      emailsSent: 0,
+      refundsIssued: 0,
+      actorUid: "cancel-admin",
+    });
+
+    await expect(callFunction(admin, "events_v2AdminCancelEvent", { eventId: "cancel-me" })).rejects.toThrow();
+  });
+
+  it("gives staff a roster without secrets and adds walk-ins without sending email", async () => {
+    await db.collection("events").doc("roster-event").set(futureEvent("roster-event"));
+    const member = await createSignedInUser("roster-member");
+    const registration = await callFunction<{ kind: string; registrationId: string }>(
+      member,
+      "events_v2BeginRegistration",
+      { eventId: "roster-event", quantity: 1 },
+    );
+    expect(registration.kind).toBe("confirmed");
+
+    await expect(callFunction(member, "events_v2StaffGetRoster", { eventId: "roster-event" })).rejects.toThrow();
+
+    const staff = await createSignedInUser("roster-staff", "staff");
+    const walkIn = await callFunction<{ registrationId: string; emailSent: boolean }>(
+      staff,
+      "events_v2StaffWalkIn",
+      { eventId: "roster-event", name: "Walk In", email: "walkin@example.test", quantity: 1 },
+    );
+    expect(walkIn.emailSent).toBe(false);
+
+    const roster = await callFunction<{ registrations: Array<Record<string, unknown>> }>(
+      staff,
+      "events_v2StaffGetRoster",
+      { eventId: "roster-event" },
+    );
+    expect(roster.registrations).toHaveLength(2);
+    for (const row of roster.registrations) {
+      expect(row).not.toHaveProperty("manageSecretHash");
+    }
+
+    const checkIn = await callFunction<{ attendanceStatus: string }>(
+      staff,
+      "events_v2StaffCheckIn",
+      { registrationId: registration.registrationId, quantity: 1 },
+    );
+    expect(checkIn.attendanceStatus).toBe("CHECKED_IN");
+    const stored = (await db.collection("eventRegistrations").doc(registration.registrationId).get()).data();
+    expect(stored?.checkedInBy).toBe("roster-staff");
+
+    const walkInNotifications = await db.collection("eventNotificationJobs")
+      .where("registrationId", "==", walkIn.registrationId).get();
+    expect(walkInNotifications.empty).toBe(true);
   });
 
   it("fails closed when a stale client calls the retired free-registration endpoint", async () => {
