@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import {
   AlertTriangle,
@@ -16,10 +16,12 @@ import {
   UserRound,
   WalletCards,
 } from "lucide-react";
+import { AdminBookingActions } from "@/components/AdminBookingActions";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { db, functions } from "@/lib/firebase";
-import { normalizeMember, type AdminMemberRecord } from "@/lib/adminMemberData";
+import { normalizeBooking, normalizeMember, type AdminBookingRecord, type AdminMemberRecord } from "@/lib/adminMemberData";
+import { canManageBooking, memberMatchesSearch, timeLabel, weekendMessage, type OpenInterval } from "@/lib/adminBookingActions";
 import { callableErrorMessage } from "@/lib/callableError";
 import { MEMBERSHIP_TIERS } from "@hi/shared";
 
@@ -92,6 +94,8 @@ const adjustCredit = httpsCallable<
   { success: boolean; adjustment: { beforeCents: number; afterCents: number; deltaCents: number } }
 >(functions, "admin_accountCreditAdjust");
 
+const getDaySchedule = httpsCallable<{ date: string }, { isOpen: boolean; intervals: OpenInterval[] }>(functions, "booking_getDaySchedule");
+
 // Bookings run Monday to Friday, 8 AM to 5 PM (8:00 through 17:00 in 30-minute steps).
 const timeOptions = Array.from({ length: 19 }, (_, index) => {
   const totalMinutes = 8 * 60 + index * 30;
@@ -145,6 +149,10 @@ export default function AdminMemberActionsPage() {
 
 function AdminMemberActionsContent() {
   const [members, setMembers] = useState<MemberRecord[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [memberBookings, setMemberBookings] = useState<AdminBookingRecord[]>([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [dayStatus, setDayStatus] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState("");
   const [member, setMember] = useState<MemberRecord | null>(null);
   const [membership, setMembership] = useState<MembershipState | null>(null);
@@ -220,6 +228,53 @@ function AdminMemberActionsContent() {
   }, []);
 
   useEffect(() => { if (selectedUid) void loadMember(selectedUid); }, [selectedUid, loadMember]);
+
+  const loadMemberBookings = useCallback(async (uid: string) => {
+    if (!uid) { setMemberBookings([]); return; }
+    setBookingsLoading(true);
+    try {
+      const snap = await getDocs(query(collection(db, "bookings"), where("userId", "==", uid)));
+      const now = Date.now();
+      setMemberBookings(
+        snap.docs
+          .map((bookingDoc) => normalizeBooking(bookingDoc.data(), bookingDoc.id))
+          .filter((booking) => canManageBooking(booking, now))
+          .sort((a, b) => (a.start || 0) - (b.start || 0)),
+      );
+    } catch (caught) {
+      console.error(caught);
+      setMemberBookings([]);
+    } finally {
+      setBookingsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadMemberBookings(selectedUid); }, [selectedUid, loadMemberBookings]);
+
+  const filteredMembers = useMemo(() => {
+    const matches = members.filter((record) => memberMatchesSearch(record, memberSearch));
+    const current = members.find((record) => record.uid === selectedUid);
+    return current && !matches.includes(current) ? [current, ...matches] : matches;
+  }, [members, memberSearch, selectedUid]);
+
+  useEffect(() => {
+    if (!dateValue) { setDayStatus(null); return; }
+    const weekend = weekendMessage(dateValue);
+    if (weekend) { setDayStatus(weekend); return; }
+    let active = true;
+    setDayStatus(null);
+    getDaySchedule({ date: dateValue })
+      .then((result) => {
+        if (!active) return;
+        if (!result.data.isOpen) setDayStatus("Hi Coworking is closed that day. Choose another date.");
+        else if (result.data.intervals.length > 0) {
+          const hours = result.data.intervals.map((interval) => `${timeLabel(interval.startTime)} to ${timeLabel(interval.endTime)}`).join(", ");
+          setDayStatus(`Open ${hours} that day.`);
+        }
+      })
+      .catch(() => { if (active) setDayStatus(null); });
+    return () => { active = false; };
+  }, [dateValue]);
 
   async function refreshSelected() {
     if (selectedUid) await loadMember(selectedUid);
@@ -408,10 +463,22 @@ function AdminMemberActionsContent() {
         </div>
 
         <div className="mt-7 max-w-2xl">
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-400">Member</label>
+          <label htmlFor="member-search" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Find a member</label>
+          <input
+            id="member-search"
+            type="search"
+            value={memberSearch}
+            onChange={(event) => setMemberSearch(event.target.value)}
+            placeholder="Name or email"
+            aria-describedby="member-search-count"
+            autoComplete="off"
+            className="mb-3 min-h-11 w-full rounded-2xl border border-slate-300 bg-white px-4 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300"
+          />
+          <p id="member-search-count" role="status" className="sr-only">{memberSearch ? `${filteredMembers.length} matching members` : ""}</p>
+          <label htmlFor="member-select" className="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Member</label>
           <div className="relative">
-            <select value={selectedUid} onChange={(event) => setSelectedUid(event.target.value)} className="w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100">
-              {members.map((record) => <option key={record.uid} value={record.uid}>{memberName(record)}{record.email ? ` · ${record.email}` : ""}</option>)}
+            <select id="member-select" value={selectedUid} onChange={(event) => setSelectedUid(event.target.value)} className="w-full appearance-none rounded-2xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-semibold text-slate-900 outline-none focus:border-sky-300 focus:ring-4 focus:ring-sky-100">
+              {filteredMembers.map((record) => <option key={record.uid} value={record.uid}>{memberName(record)}{record.email ? ` · ${record.email}` : ""}</option>)}
             </select>
             <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           </div>
@@ -499,11 +566,38 @@ function AdminMemberActionsContent() {
 
           {tab === "booking" && <section>
             <h2 className="text-xl font-semibold text-slate-950">Book for {memberName(member)}</h2><p className="mt-1 text-sm text-slate-500">The member&apos;s plan, included hours, account credit, availability and booking window are applied on the server.</p>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3"><input type="date" value={dateValue} min={todayEastern()} onChange={(event) => setDateValue(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3" /><select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(0, -1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select><select value={endTime} onChange={(event) => setEndTime(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-3">{timeOptions.slice(1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select></div>
-            <p className="mt-2 text-sm text-slate-600">Bookings run Monday to Friday, 8 AM to 5 PM. Weekend dates are closed.</p>
-            <button type="button" disabled={actionLoading} onClick={() => void checkAvailability()} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white disabled:opacity-50">{actionLoading && <Loader2 className="h-4 w-4 animate-spin" />} Check availability</button>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              <label className="text-sm font-medium text-slate-700">Date<input type="date" value={dateValue} min={todayEastern()} onChange={(event) => setDateValue(event.target.value)} aria-describedby="book-day-status" aria-invalid={weekendMessage(dateValue) ? true : undefined} className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3" /></label>
+              <label className="text-sm font-medium text-slate-700">Start<select value={startTime} onChange={(event) => setStartTime(event.target.value)} className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3">{timeOptions.slice(0, -1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select></label>
+              <label className="text-sm font-medium text-slate-700">End<select value={endTime} onChange={(event) => setEndTime(event.target.value)} className="mt-1 block min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3">{timeOptions.slice(1).map((time) => <option key={time.value} value={time.value}>{time.label}</option>)}</select></label>
+            </div>
+            <p id="book-day-status" role="status" className={`mt-2 text-sm ${dayStatus && dayStatus.startsWith("Open") ? "text-slate-600" : dayStatus ? "font-medium text-amber-900" : "text-slate-600"}`}>{dayStatus || "Bookings run Monday to Friday, 8 AM to 5 PM. Weekend dates are closed."}</p>
+            <button type="button" disabled={actionLoading || Boolean(dayStatus && !dayStatus.startsWith("Open"))} onClick={() => void checkAvailability()} className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white disabled:opacity-50">{actionLoading && <Loader2 className="h-4 w-4 animate-spin" />} Check availability</button>
             {spaces.length > 0 && <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{spaces.map((space) => <button key={space.resourceId} type="button" disabled={!space.available || actionLoading} onClick={() => void selectSpace(space.resourceId)} className={`rounded-2xl border p-4 text-left ${resourceId === space.resourceId ? "border-slate-900 bg-slate-50" : "border-slate-200 bg-white"} disabled:bg-slate-50 disabled:text-slate-400`}><p className="font-semibold">{space.name}</p><p className="mt-1 text-xs">{space.available ? "Available" : "Unavailable"}</p></button>)}</div>}
             {quote && <div className="mt-6 rounded-2xl bg-slate-50 p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-lg font-semibold text-slate-950">{quote.resourceName}</p><p className="mt-1 text-sm text-slate-500">{quote.durationHours} hr · {quote.membershipName || "Public pricing"}</p></div><p className="text-xl font-semibold text-slate-950">{money(quote.totalCents)}</p></div><dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Included hours applied</dt><dd className="font-semibold text-slate-900">{quote.includedHoursApplied}</dd></div><div><dt className="text-slate-500">Account credit applied</dt><dd className="font-semibold text-slate-900">{money(quote.accountCreditAppliedCents)}</dd></div><div><dt className="text-slate-500">Subtotal</dt><dd className="font-semibold text-slate-900">{money(quote.subtotalCents)}</dd></div><div><dt className="text-slate-500">Stripe balance due</dt><dd className="font-semibold text-slate-900">{money(quote.totalCents)}</dd></div></dl><button type="button" disabled={actionLoading} onClick={() => void createBooking()} className="mt-5 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{quote.totalCents === 0 ? "Confirm booking" : "Hold space & create payment link"}</button></div>}
+            <div className="mt-10 border-t border-slate-200 pt-6">
+              <h3 className="text-lg font-semibold text-slate-950">Upcoming bookings for {memberName(member)}</h3>
+              <p className="mt-1 text-sm text-slate-500">Move or cancel a confirmed booking. Every change is audited.</p>
+              {bookingsLoading ? <p className="mt-4 flex items-center gap-2 text-sm text-slate-500" role="status"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading bookings…</p>
+                : memberBookings.length === 0 ? <p className="mt-4 text-sm text-slate-500">No upcoming confirmed bookings.</p>
+                : <ul className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{memberBookings.map((booking) => (
+                  <li key={booking.id} className="grid gap-2 py-4 sm:grid-cols-[1.2fr_1fr_auto] sm:items-center">
+                    <div><p className="font-semibold text-slate-950">{booking.resourceName || booking.resourceId || "Space"}</p><p className="mt-1 text-sm text-slate-500">{booking.start ? new Date(booking.start).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"} ET</p></div>
+                    <p className="text-sm text-slate-600">{booking.paymentMethod ? booking.paymentMethod.replaceAll("_", " ").toLowerCase() : "—"}</p>
+                    <p className="text-sm font-semibold text-slate-950">{money(booking.totalCents)}</p>
+                    <AdminBookingActions
+                      booking={booking}
+                      memberName={memberName(member)}
+                      onChanged={async (message) => {
+                        setError(null);
+                        setSuccess(message);
+                        await Promise.all([loadMemberBookings(member.uid), refreshSelected()]);
+                        setSuccess(message);
+                      }}
+                    />
+                  </li>
+                ))}</ul>}
+            </div>
           </section>}
 
           {tab === "credit" && <section className="max-w-2xl"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Available balance</p><h2 className="mt-2 text-3xl font-semibold text-slate-950">{money(member.accountCreditCents || 0)}</h2></div></div><div className="mt-7 grid gap-4 sm:grid-cols-2"><div><label className="mb-2 block text-sm font-semibold text-slate-700">Adjustment</label><select value={creditDirection} onChange={(event) => setCreditDirection(event.target.value as "add" | "deduct")} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="add">Add credit</option><option value="deduct">Deduct credit</option></select></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Amount</label><input type="number" min="0.01" step="0.01" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} placeholder="0.00" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Reason</label><select value={creditReason} onChange={(event) => setCreditReason(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3"><option value="service_adjustment">Service adjustment</option><option value="booking_correction">Booking correction</option><option value="billing_correction">Billing correction</option><option value="promotional_credit">Promotional credit</option><option value="other">Other</option></select></div><div><label className="mb-2 block text-sm font-semibold text-slate-700">Note</label><input type="text" value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="Why is this adjustment needed?" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3" /></div></div><button type="button" disabled={actionLoading} onClick={() => void doCreditAdjustment()} className="mt-5 rounded-full bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Apply audited adjustment</button><p className="mt-5 text-xs leading-5 text-slate-500">Every adjustment is idempotent and permanently audited with before/after balances, reason and Admin identity. Deductions cannot consume credit already reserved by an active booking checkout.</p></section>}

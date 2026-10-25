@@ -155,6 +155,7 @@ jobs:
           tests/functions/event-cancellation-policy.test.ts
           tests/functions/event-series-timezone.test.ts
           tests/functions/admin-member-operations-source.test.ts
+          tests/functions/admin-booking-management-source.test.ts
           tests/functions/admin-event-save-cors.test.ts
           tests/functions/public-event-location.test.ts
           tests/functions/public-event-actions.test.ts
@@ -186,6 +187,7 @@ jobs:
           tests/web/membership-welcome-banner.test.ts
           tests/web/comp-membership-copy.test.ts
           tests/web/admin-back-navigation.test.ts
+          tests/web/admin-booking-actions.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -197,7 +199,8 @@ jobs:
           tests/functions/bookstore-commerce.test.ts
           tests/functions/events-v2.test.ts
           tests/functions/event-interest-sms-optional.test.ts
-          tests/functions/admin-member-credit.test.ts"
+          tests/functions/admin-member-credit.test.ts
+          tests/functions/admin-booking-management.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-
