@@ -17,6 +17,7 @@
  */
 
 import { getTierByPriceId } from "./stripeConfig";
+import { shouldIgnoreStripeMembershipEvent } from "./compMembership";
 
 type IdOrObject = string | { id?: string | null } | null | undefined;
 
@@ -84,6 +85,7 @@ const CURRENT_MEMBER_STATUSES = new Set(["active", "trial", "pastDue"]);
 
 export interface MemberSubscriptionState {
   membershipStatus?: string;
+  membershipSource?: string | null;
   plan?: string | null;
   features?: Record<string, unknown> | null;
   stripeSubscriptionId?: string;
@@ -119,6 +121,9 @@ export function subscriptionUpdatedUpdates(
 ): SubscriptionUpdateDecision {
   if (!CURRENT_MEMBER_STATUSES.has(user.membershipStatus || "")) {
     return { apply: false, reason: "member_not_current" };
+  }
+  if (shouldIgnoreStripeMembershipEvent(user)) {
+    return { apply: false, reason: "comp_membership" };
   }
   if (IGNORED_SUBSCRIPTION_STATUSES.has(info.status)) {
     return { apply: false, reason: `subscription_${info.status}` };

@@ -18,6 +18,8 @@ export {
   admin_membershipChangePlan,
   admin_membershipCancel,
   admin_membershipReactivate,
+  admin_membershipGrantComp,
+  admin_membershipEndComp,
 } from "../../../apps/functions/src/adminMembershipAuthority";
 
 export {

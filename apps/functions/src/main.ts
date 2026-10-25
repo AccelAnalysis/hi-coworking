@@ -155,6 +155,8 @@ export {
   admin_membershipChangePlan,
   admin_membershipCancel,
   admin_membershipReactivate,
+  admin_membershipGrantComp,
+  admin_membershipEndComp,
 } from "./adminMembershipAuthority";
 export { admin_accountCreditAdjust } from "./adminMemberOperationsAuthority";
 export {

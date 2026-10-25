@@ -9,6 +9,8 @@
  * legacy field so older payloads keep working.
  */
 
+import { shouldIgnoreStripeMembershipEvent } from "./compMembership";
+
 /** Days of access kept after the paid period ends (30-day period + 5 = the existing 35-day rule). */
 export const RENEWAL_GRACE_DAYS = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -107,6 +109,7 @@ export function isFirstSubscriptionInvoice(billingReason?: string): boolean {
 
 export interface MemberBillingState {
   membershipStatus?: string;
+  membershipSource?: string | null;
   plan?: string | null;
   expiresAt?: number;
   pastDue?: boolean;
@@ -130,6 +133,8 @@ export function renewalUpdates(
 ): Record<string, unknown> | null {
   if (info.invoiceId && user.lastPaidInvoiceId === info.invoiceId) return null;
   if (user.membershipStatus === "cancelled") return null;
+  // An active complimentary membership is not billed by Stripe.
+  if (shouldIgnoreStripeMembershipEvent(user)) return null;
 
   const paidThrough = info.periodEndMs > 0
     ? info.periodEndMs + RENEWAL_GRACE_DAYS * DAY_MS
@@ -166,6 +171,7 @@ export function failedPaymentUpdates(
 ): Record<string, unknown> | null {
   if (info.invoiceId && user.lastPaidInvoiceId === info.invoiceId) return null;
   if (user.membershipStatus === "cancelled") return null;
+  if (shouldIgnoreStripeMembershipEvent(user)) return null;
   if (info.periodEndMs && info.periodEndMs > 0 && (user.expiresAt || 0) >= info.periodEndMs + RENEWAL_GRACE_DAYS * DAY_MS) {
     return null;
   }

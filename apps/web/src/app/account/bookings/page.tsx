@@ -20,7 +20,15 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
 import { getUserBookingsFromFirestore } from "@/lib/firestore";
-import { membershipEndsLabel, membershipSummary, welcomeBannerCopy } from "@/lib/membershipCopy";
+import {
+  compMembershipEnded,
+  compMembershipLabel,
+  isCompMembership,
+  membershipEndsLabel,
+  membershipSummary,
+  showBillingPortal,
+  welcomeBannerCopy,
+} from "@/lib/membershipCopy";
 import { MEMBERSHIP_TIERS, type Booking } from "@hi/shared";
 
 const FACILITY_TIME_ZONE = "America/New_York";
@@ -193,19 +201,34 @@ function AccountBookingsContent() {
   const membershipTier = MEMBERSHIP_TIERS.find(
     (tier) => tier.id === userDoc?.plan,
   );
+  const membershipFields = userDoc as (typeof userDoc & {
+    membershipSource?: unknown;
+    compEndsAt?: unknown;
+  }) | null | undefined;
+  const compMembership = isCompMembership(membershipFields);
   const membershipActive = (
-    userDoc?.membershipStatus === "active"
-    || userDoc?.membershipStatus === "trial"
+    (
+      userDoc?.membershipStatus === "active"
+      || userDoc?.membershipStatus === "trial"
+    )
+    // An admin-granted complimentary membership ends on its end date.
+    && !compMembershipEnded(membershipFields, now)
   );
   // Past-due members still have a Stripe subscription and need the portal
-  // to fix their payment method.
-  const hasBillingAccount = membershipActive || userDoc?.membershipStatus === "pastDue";
+  // to fix their payment method. Complimentary members have no Stripe
+  // billing, so the portal button is hidden for them.
+  const hasBillingAccount = membershipActive
+    ? showBillingPortal(membershipFields)
+    : !compMembership && userDoc?.membershipStatus === "pastDue";
   const membershipEnds = membershipActive
-    ? membershipEndsLabel(userDoc as { cancelAtPeriodEnd?: unknown; cancelAt?: unknown })
+    ? compMembership
+      ? compMembershipLabel(membershipFields as { compEndsAt?: unknown })
+      : membershipEndsLabel(userDoc as { cancelAtPeriodEnd?: unknown; cancelAt?: unknown })
     : null;
   // Invoice failures flag pastDue on an active membership (access continues
   // while Stripe retries), so prompt the member to fix their card.
   const paymentRetrying = membershipActive
+    && !compMembership
     && (userDoc as { pastDue?: unknown } | null | undefined)?.pastDue === true;
   const accountCreditCents = Math.max(
     0,
