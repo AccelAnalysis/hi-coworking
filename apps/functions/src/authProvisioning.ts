@@ -7,7 +7,7 @@
 // overwrites an existing role, membershipStatus, or any other field, and it
 // keeps every existing custom claim.
 
-// MIRROR of @hi/shared userRoleSchema (see VALID_ROLES in index.ts).
+// MIRROR of @hi/shared userRoleSchema (see ROLE_VALUES in roleAuthority.ts).
 const PLATFORM_ROLES = new Set(["master", "admin", "staff", "member", "externalVendor", "econPartner"]);
 
 export type ProvisionAuthUser = {

@@ -7,6 +7,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { provisionAuthUser } from "./authProvisioning";
+import { changeUserRole, RoleChangeError } from "./roleAuthority";
 import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
 import { resendApiKey } from "./providers/emailSecret";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
@@ -20,8 +21,6 @@ const intuitClientSecret = defineSecret("INTUIT_CLIENT_SECRET");
 
 // MIRROR of @hi/shared userRoleSchema — kept inline because @hi/shared is ESM-only.
 // Keep in sync with: packages/shared/src/index.ts → userRoleSchema
-const VALID_ROLES = ["master", "admin", "staff", "member", "externalVendor", "econPartner"] as const;
-type UserRole = (typeof VALID_ROLES)[number];
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -472,39 +471,38 @@ export const setUserRole = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in");
   }
-
-  const callerRole = request.auth.token.role as string | undefined;
-  if (callerRole !== "admin" && callerRole !== "master") {
-    throw new HttpsError("permission-denied", "Only admin or master users can set roles");
+  const { targetUid, role } = (request.data ?? {}) as Partial<SetUserRoleInput>;
+  const auth = admin.auth();
+  try {
+    const result = await changeUserRole(
+      {
+        actorUid: request.auth.uid,
+        actorRole: request.auth.token.role as string | undefined,
+        targetUid,
+        role,
+      },
+      {
+        getCustomClaims: async (uid) => (await auth.getUser(uid)).customClaims,
+        setCustomClaims: (uid, claims) => auth.setCustomUserClaims(uid, claims),
+        userExists: async (uid) => (await db.collection("users").doc(uid).get()).exists,
+        updateUserRole: async (uid, nextRole, at) => {
+          await db.collection("users").doc(uid).update({ role: nextRole, updatedAt: at });
+        },
+        writeAudit: async (record) => {
+          const ref = db.collection("roleAudit").doc();
+          await ref.set({ id: ref.id, ...record });
+          return ref.id;
+        },
+      },
+    );
+    logger.info("Role changed", { targetUid: result.uid, fromRole: result.fromRole, toRole: result.role, actorUid: request.auth.uid, auditId: result.auditId });
+    return { success: true, uid: result.uid, role: result.role };
+  } catch (error) {
+    if (error instanceof RoleChangeError) {
+      throw new HttpsError(error.code, error.message);
+    }
+    throw error;
   }
-
-  const { targetUid, role } = request.data as SetUserRoleInput;
-
-  if (!targetUid || !role) {
-    throw new HttpsError("invalid-argument", "targetUid and role are required");
-  }
-
-  if (!VALID_ROLES.includes(role as UserRole)) {
-    throw new HttpsError("invalid-argument", `Invalid role: ${role}. Must be one of: ${VALID_ROLES.join(", ")}`);
-  }
-
-  // Prevent non-master from assigning master role
-  if (role === "master" && callerRole !== "master") {
-    throw new HttpsError("permission-denied", "Only master users can assign the master role");
-  }
-
-  logger.info(`Setting role for ${targetUid} to ${role} (by ${request.auth.uid})`);
-
-  // Update custom claims
-  await admin.auth().setCustomUserClaims(targetUid, { role });
-
-  // Mirror role in Firestore user doc
-  await db.collection("users").doc(targetUid).update({
-    role,
-    updatedAt: Date.now(),
-  });
-
-  return { success: true, uid: targetUid, role };
 });
 
 // --- Leads (PR-04) ---
