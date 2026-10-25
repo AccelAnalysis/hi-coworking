@@ -16,7 +16,7 @@ export const PAYMENT_PROVIDERS = [
 
 export type PaymentProviderName = (typeof PAYMENT_PROVIDERS)[number];
 
-export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded"] as const;
+export const PAYMENT_STATUSES = ["pending", "paid", "failed", "refunded", "partially_refunded"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const PAYMENT_PURPOSES = ["membership", "event", "rfx", "booking", "referral", "bookstore", "other"] as const;
@@ -56,6 +56,47 @@ export interface WebhookResult {
   paymentId?: string;
   status?: PaymentStatus;
   metadata?: Record<string, string>;
+  /** Present for action "refund": the charge's refund state read from Stripe. */
+  refund?: StripeRefundSnapshot;
+}
+
+/** One Stripe refund on a charge. */
+export interface StripeRefundLine {
+  id: string;
+  amountCents: number;
+  /** pending | requires_action | succeeded | failed | canceled */
+  status: string;
+  createdMs: number;
+}
+
+/**
+ * The current refund state of one Stripe charge, read from the Stripe API
+ * when a refund event arrives (so out-of-order events converge on the same
+ * state). Holds IDs and amounts only, never names, emails or card numbers
+ * beyond the last four digits Stripe exposes.
+ */
+export interface StripeRefundSnapshot {
+  /** The refund the event was about. */
+  refundId: string;
+  chargeId: string;
+  paymentIntentId: string;
+  customerId: string;
+  currency: string;
+  /** Captured amount of the charge. */
+  amountCents: number;
+  /** Total refunded on the charge (failed/canceled refunds excluded by Stripe). */
+  amountRefundedCents: number;
+  refunds: StripeRefundLine[];
+  cardLast4?: string;
+  cardBrand?: string;
+  /** Ledger payments/{id} from charge or PaymentIntent metadata, when set. */
+  paymentId?: string;
+  /** Subscription invoice this charge paid, when it paid one. */
+  invoiceId?: string;
+  billingReason?: string;
+  subscriptionId?: string;
+  uid?: string;
+  plan?: string;
 }
 
 /**
@@ -100,6 +141,10 @@ export interface PaymentDocData {
   status: PaymentStatus;
   providerRefs?: Record<string, string>;
   accountingRefs?: Record<string, string>;
+  /** Cents refunded on the Stripe charge (refund webhook). */
+  amountRefunded?: number;
+  refundedAt?: number;
+  stripeRefundIds?: string[];
   createdAt: number;
   updatedAt?: number;
 }

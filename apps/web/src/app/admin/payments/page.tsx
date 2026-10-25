@@ -91,6 +91,12 @@ const STATUS_CONFIG: Record<
     bgColor: "bg-slate-50 border-slate-200",
     icon: RotateCcw,
   },
+  partially_refunded: {
+    label: "Partially refunded",
+    color: "text-slate-700",
+    bgColor: "bg-slate-50 border-slate-200",
+    icon: RotateCcw,
+  },
 };
 
 const PURPOSE_LABELS: Record<PaymentPurpose, string> = {

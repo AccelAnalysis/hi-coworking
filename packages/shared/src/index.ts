@@ -1534,7 +1534,7 @@ export const paymentProviderSchema = z.enum([
 ]);
 export type PaymentProvider = z.infer<typeof paymentProviderSchema>;
 
-export const paymentStatusSchema = z.enum(["pending", "paid", "failed", "refunded"]);
+export const paymentStatusSchema = z.enum(["pending", "paid", "failed", "refunded", "partially_refunded"]);
 export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 
 export const paymentPurposeSchema = z.enum(["membership", "event", "rfx", "booking", "referral", "bookstore", "other"]);
@@ -1552,6 +1552,10 @@ export const paymentDocSchema = z.object({
   status: paymentStatusSchema,
   providerRefs: z.record(z.string(), z.string()).optional(), // sessionId, invoiceId, etc.
   accountingRefs: z.record(z.string(), z.string()).optional(), // QBO IDs
+  // Set by the Stripe refund webhook (charge.refunded / refund.updated / refund.failed)
+  amountRefunded: z.number().nonnegative().optional(), // cents
+  refundedAt: z.number().optional(),
+  stripeRefundIds: z.array(z.string()).optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
@@ -1597,6 +1601,10 @@ export const notificationTypeSchema = z.enum([
   "system",
   "access_pin_issued",
   "access_pin_revoked",
+  "membership_refund",
+  "membership_refund_failed",
+  "membership_cancellation",
+  "membership_ended",
 ]);
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
 

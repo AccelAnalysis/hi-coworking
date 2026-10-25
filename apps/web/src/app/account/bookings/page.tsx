@@ -15,6 +15,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { MY_HI_BOOKINGS_ID } from "@/lib/myHiNav";
 import { BillingPortalButton } from "@/components/BillingPortalButton";
+import { MembershipRefundNotice, type LastRefund } from "@/components/MembershipRefundNotice";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
 import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -476,6 +477,10 @@ function AccountBookingsContent() {
                   often you work here.
                 </p>
               )}
+              <MembershipRefundNotice
+                refund={(userDoc as { lastRefund?: LastRefund } | null | undefined)?.lastRefund}
+                now={now}
+              />
               {hasBillingAccount ? <BillingPortalButton /> : null}
               <Link
                 href="/pricing"

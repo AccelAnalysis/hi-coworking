@@ -24,6 +24,10 @@ import {
   Info,
   Circle,
   KeyRound,
+  RotateCcw,
+  AlertCircle,
+  CalendarClock,
+  CalendarX,
 } from "lucide-react";
 
 const TYPE_CONFIG: Record<NotificationType, { icon: typeof Bell; color: string; label: string }> = {
@@ -35,6 +39,10 @@ const TYPE_CONFIG: Record<NotificationType, { icon: typeof Bell; color: string; 
   system: { icon: Info, color: "text-slate-600 bg-slate-100", label: "System" },
   access_pin_issued: { icon: KeyRound, color: "text-emerald-600 bg-emerald-50", label: "Access Code" },
   access_pin_revoked: { icon: KeyRound, color: "text-red-600 bg-red-50", label: "Access Revoked" },
+  membership_refund: { icon: RotateCcw, color: "text-emerald-600 bg-emerald-50", label: "Refund" },
+  membership_refund_failed: { icon: AlertCircle, color: "text-red-600 bg-red-50", label: "Refund" },
+  membership_cancellation: { icon: CalendarClock, color: "text-amber-600 bg-amber-50", label: "Membership" },
+  membership_ended: { icon: CalendarX, color: "text-slate-600 bg-slate-100", label: "Membership" },
 };
 
 export default function NotificationsPage() {

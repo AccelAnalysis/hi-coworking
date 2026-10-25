@@ -20,6 +20,7 @@ no SDK dependency.
 | `events_v2ProcessNotificationJobs` (every 5 min) | Event confirmations, reminders, waitlist, cancellations, refunds | `POST /emails`, tag `event-transactional`, idempotency key `event-notification/<jobId>/<payload hash>` |
 | `events_processCampaignJobs` | Event marketing campaign email | `POST /emails/batch` in chunks of 100, one rendered copy per recipient |
 | `stripe_webhook` (core bundle) | Membership welcome email on `checkout.session.completed` with `purpose=membership` | `POST /emails`, tags `membership_welcome` + `transactional`, idempotency key `membership-welcome/<checkoutSessionId>/<payload hash>` |
+| `stripe_webhook` (core bundle) | Membership refund confirmation (`charge.refunded`, `refund.updated`), cancellation scheduled (`customer.subscription.updated` with a cancel date), membership ended (`customer.subscription.deleted`) | `POST /emails`, tags `refund_confirmation` / `membership_cancellation_scheduled` / `membership_ended` + `transactional`, idempotency key `<tag>/<sentEmails key>` |
 
 The Power NOW confirmation sent by `expo_submitNasaLead` is separate. It has
 its own Resend client in `apps/functions/src/expo/powerNowConfirmation.ts`,
@@ -89,6 +90,25 @@ unsubscribe link. It sends at most once per Checkout session, tracked in
 `sentEmails/<checkoutSessionId>` (status `sending`, `sent`, or `failed`). A send
 failure is logged and recorded but never fails the webhook or the membership
 activation; a later redelivery of the same event retries the send.
+
+### Refund and cancellation notices
+
+`stripe_webhook` also sends three transactional member notices
+(`apps/functions/src/payments/memberNoticeEmails.ts`), each at most once:
+
+| Notice | Trigger | `sentEmails` key | Skipped when |
+| --- | --- | --- | --- |
+| Refund confirmation | A succeeded or pending refund on a membership charge (`charge.refunded`, `refund.updated`), up to 30 days old | `refund_<refundId>` | Not a membership payment |
+| Cancellation scheduled ("active until {date}") | `customer.subscription.updated` that the membership handler applied with a cancel date | `cancel_scheduled_<subscriptionId>_<cancelAtMs>` | Comp membership (`membershipSource: "comp"`), or a different subscription than the one on file |
+| Membership ended | `customer.subscription.deleted` that set `membershipStatus: "cancelled"` | `membership_ended_<subscriptionId>` | Comp membership, membership still active, or a different subscription |
+
+Refunds also update `payments/<id>` (`refunded` or `partially_refunded`,
+`amountRefunded`, `refundedAt`, `stripeRefundIds`), set `users/<uid>.lastRefund`
+for My Hi, and write a `notifications/refund_<refundId>` doc (type `payment`).
+A refund never changes the membership itself; cancelling the subscription does.
+
+The live webhook endpoint must subscribe to `charge.refunded`,
+`refund.updated` and `refund.failed` for the refund notices to work.
 
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
 secrets, so it deploys from its own bundle, `firebase/campaign-functions`
