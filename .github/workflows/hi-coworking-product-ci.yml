@@ -11,7 +11,6 @@ on:
       - "apps/web/**"
       - "packages/shared/**"
       - "firebase/admin-member-functions/**"
-      - "firebase/admin-operating-calendar-functions/**"
       - "firebase/payment-status-guard-functions/**"
       - "firebase/expo-lead-functions/**"
       - "firebase/admin-event-functions/**"
@@ -23,7 +22,6 @@ on:
       - "firebase/bookstore-functions/**"
       - "firebase/space-catalog-functions/**"
       - "firebase.admin.json"
-      - "firebase.admin-calendar.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
       - "firebase.expo-lead.json"
@@ -49,7 +47,6 @@ on:
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/hi-coworking-product-ci.yml"
-      - ".github/workflows/firebase-live-admin-operating-calendar.yml"
       - ".github/workflows/firebase-live-admin-event-functions.yml"
 
 permissions:
@@ -97,9 +94,6 @@ jobs:
 
       - name: Build isolated Admin member deploy bundle
         run: npm run build:admin-member-deploy
-
-      - name: Build isolated Admin operating-calendar deploy bundle
-        run: npm run build:admin-operating-calendar-deploy
 
       - name: Build isolated payment-status guard bundle
         run: npm run build:payment-status-guard-deploy
