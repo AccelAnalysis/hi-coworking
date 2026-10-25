@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { updatePaymentStatus } from "./payments/ledger";
 
@@ -99,6 +100,7 @@ export const bookstore_cancelOrder = onCall(async (request) => {
     tx.update(orderRef, {
       status: "cancelled",
       fulfillmentStatus: "cancelled",
+      reservationExpiresAt: FieldValue.delete(),
       reservationReleasedAt: order.reservationReleasedAt || now,
       cancelledAt: now,
       cancellationReason: reason,

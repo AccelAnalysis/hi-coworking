@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/bookstore-functions",
+      "codebase": "bookstore",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/bookstore-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/bookstore-functions/tsconfig.json"
+      ]
+    }
+  ]
+}

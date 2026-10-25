@@ -12,6 +12,7 @@ import {
   getBookstorePublicStockFn,
 } from "@/lib/bookstoreFunctions";
 import type { BookDoc, ProductVariant } from "@hi/shared";
+import { callableErrorMessage } from "@/lib/callableError";
 
 type StoreVariant = ProductVariant & {
   sku?: string;
@@ -153,8 +154,10 @@ export default function BookstoreItemPage() {
       window.location.assign(data.url);
     } catch (purchaseError) {
       console.error("Bookstore checkout failed", purchaseError);
-      const message = purchaseError instanceof Error ? purchaseError.message : "Checkout could not be started.";
-      setError(message.includes("sold out") ? "This book just sold out for pickup." : "Checkout could not be started. Please try again.");
+      const code = (purchaseError as { code?: unknown } | null)?.code;
+      setError(code === "functions/resource-exhausted"
+        ? "This book just sold out for pickup."
+        : callableErrorMessage(purchaseError, "Checkout could not be started. Please try again."));
       setPurchasing(false);
     }
   }

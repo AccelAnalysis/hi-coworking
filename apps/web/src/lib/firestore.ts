@@ -1239,11 +1239,13 @@ export async function getSeriesOccurrences(seriesId: string): Promise<EventDoc[]
   const q = query(
     collection(db, "events"),
     where("seriesId", "==", seriesId),
-    orderBy("startTime", "asc"),
-    limit(200)
+    limit(500)
   );
+  // Sorted here so the query needs no composite (seriesId, startTime) index.
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as EventDoc);
+  return snap.docs
+    .map((d) => d.data() as EventDoc)
+    .sort((a, b) => Number(a.startTime || 0) - Number(b.startTime || 0));
 }
 
 // --- Referrals (PR-16 & Monetization) ---
@@ -1461,7 +1463,9 @@ export async function getPublishedBooks(): Promise<BookDoc[]> {
 export async function getBooksBySeries(seriesTitle: string): Promise<BookDoc[]> {
   const q = query(
     collection(db, "books"),
-    where("seriesTitle", "==", seriesTitle)
+    where("seriesTitle", "==", seriesTitle),
+    // Rules only let the public list published books, so the query must say so.
+    where("published", "==", true)
   );
   const snap = await getDocs(q);
   return snap.docs
@@ -1513,11 +1517,13 @@ export async function getUserBookPurchases(
 ): Promise<BookPurchaseDoc[]> {
   const q = query(
     collection(db, "bookPurchases"),
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc")
+    where("userId", "==", userId)
   );
+  // Sorted here so the query needs no composite (userId, createdAt) index.
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as BookPurchaseDoc);
+  return snap.docs
+    .map((d) => d.data() as BookPurchaseDoc)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 }
 
 // --- Smart Access (Doors / Grants / Codes / Events) ---

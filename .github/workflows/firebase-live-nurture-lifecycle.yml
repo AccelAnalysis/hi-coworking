@@ -1,0 +1,118 @@
+name: Hi Coworking Firebase Nurture lifecycle
+
+# Manual only. Never runs on push or merge.
+# Deploys the 8 Nurture lifecycle functions (enrollment triggers start real automatic emails)
+# from the isolated firebase/nurture-lifecycle-functions bundle (codebase "nurture-lifecycle").
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type deploy nurture lifecycle to deploy the "nurture-lifecycle" codebase only'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hi-coworking-firebase-nurture-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  deploy-nurture-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT || secrets.FIREBASE_SERVICE_ACCOUNT }}
+      DEPLOY_CONFIRMATION: ${{ inputs.confirm }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Require main and the typed confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+            echo "Refusing to deploy from ${GITHUB_REF}. Run this workflow from main." >&2
+            exit 1
+          fi
+          if [[ "${DEPLOY_CONFIRMATION}" != "deploy nurture lifecycle" ]]; then
+            echo "Confirmation did not match. Type exactly: deploy nurture lifecycle" >&2
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Firebase deployment credential
+        shell: bash
+        run: |
+          if [[ -z "${FIREBASE_SERVICE_ACCOUNT}" ]]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT (or FIREBASE_SERVICE_ACCOUNT)." >&2
+            exit 1
+          fi
+
+      - name: Prepare Google application credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          credential_file="${RUNNER_TEMP}/firebase-service-account.json"
+          printf '%s' "${FIREBASE_SERVICE_ACCOUNT}" > "${credential_file}"
+          chmod 600 "${credential_file}"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Guard the Firebase project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const rc = JSON.parse(fs.readFileSync('.firebaserc', 'utf8'));
+          const project = rc.projects && rc.projects.default;
+          if (project !== 'hi-coworking-plat') {
+            throw new Error(`Refusing to deploy: .firebaserc default project is ${project || '(missing)'}, expected hi-coworking-plat.`);
+          }
+          NODE
+
+      - name: Confirm HI_COWORKING_RESEND_API_KEY exists in Secret Manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
+          enabled="$(gcloud secrets versions list HI_COWORKING_RESEND_API_KEY --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1 || true)"
+          if [[ -z "${enabled}" ]]; then
+            echo "HI_COWORKING_RESEND_API_KEY has no enabled version in hi-coworking-plat. The secret value was not printed." >&2
+            exit 1
+          fi
+
+      # firebase.nurture-lifecycle.json's predeploy builds the isolated bundle first.
+      # --only keeps every other codebase in place. Never add the force flag.
+      - name: Deploy the nurture-lifecycle codebase only
+        run: npx firebase deploy --config firebase.nurture-lifecycle.json --project hi-coworking-plat --only functions:nurture-lifecycle --non-interactive
+
+      - name: Verify nurture_adminOverview is reachable
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint="https://us-central1-hi-coworking-plat.cloudfunctions.net/nurture_adminOverview"
+          response_file="${RUNNER_TEMP}/nurture-lifecycle-preflight.txt"
+          status="$({ curl --silent --show-error --location \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request OPTIONS \
+            --header 'Origin: https://hi-coworking-plat.web.app' \
+            --header 'Access-Control-Request-Method: POST' \
+            --header 'Access-Control-Request-Headers: content-type' \
+            "${endpoint}"; } || true)"
+          if [[ "${status}" != "200" && "${status}" != "204" ]]; then
+            echo "nurture_adminOverview is not reachable after deployment (HTTP ${status})." >&2
+            cat "${response_file}" >&2 || true
+            exit 1
+          fi

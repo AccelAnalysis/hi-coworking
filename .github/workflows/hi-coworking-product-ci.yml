@@ -18,6 +18,10 @@ on:
       - "firebase/mail-functions/**"
       - "firebase/core-functions/**"
       - "firebase/campaign-functions/**"
+      - "firebase/nurture-lifecycle-functions/**"
+      - "firebase/event-series-functions/**"
+      - "firebase/bookstore-functions/**"
+      - "firebase/space-catalog-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-calendar.json"
       - "firebase.admin-events.json"
@@ -26,9 +30,17 @@ on:
       - "firebase.mail.json"
       - "firebase.campaign.json"
       - "firebase.core.json"
+      - "firebase.nurture-lifecycle.json"
+      - "firebase.event-series.json"
+      - "firebase.bookstore.json"
+      - "firebase.space-catalog.json"
       - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-core-functions.yml"
       - ".github/workflows/firebase-live-expo-lead-function.yml"
+      - ".github/workflows/firebase-live-nurture-lifecycle.yml"
+      - ".github/workflows/firebase-live-event-series.yml"
+      - ".github/workflows/firebase-live-bookstore.yml"
+      - ".github/workflows/firebase-live-space-catalog.yml"
       - "tests/functions/**"
       - "tests/rules/**"
       - "firestore.rules"
@@ -107,6 +119,18 @@ jobs:
       - name: Build isolated campaign deploy bundle
         run: npm run build --workspace functions -- --project ../../firebase/campaign-functions/tsconfig.json
 
+      - name: Build isolated nurture lifecycle deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/nurture-lifecycle-functions/tsconfig.json
+
+      - name: Build isolated event series deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/event-series-functions/tsconfig.json
+
+      - name: Build isolated bookstore deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/bookstore-functions/tsconfig.json
+
+      - name: Build isolated space catalog deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/space-catalog-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -152,6 +176,12 @@ jobs:
           tests/functions/sms-compliance.test.ts
           tests/functions/terms-acceptance.test.ts
           tests/functions/campaign-unsubscribe.test.ts
+          tests/functions/admin-tools-deploy.test.ts
+          tests/functions/admin-tools-source-contract.test.ts
+          tests/functions/event-series-admin.test.ts
+          tests/functions/bookstore-return-url.test.ts
+          tests/web/event-series-form.test.ts
+          tests/web/published-setups.test.ts
           tests/web/my-hi-nav.test.ts
           tests/web/public-rfx-quarantine.test.ts
           tests/web/membership-welcome-banner.test.ts

@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/space-catalog-functions",
+      "codebase": "space-catalog",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/space-catalog-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/space-catalog-functions/tsconfig.json"
+      ]
+    }
+  ]
+}

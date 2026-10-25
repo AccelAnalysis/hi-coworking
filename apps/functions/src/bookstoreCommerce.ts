@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import Stripe from "stripe";
 import { StripeProvider } from "./payments/stripeProvider";
 import { updatePaymentStatus } from "./payments/ledger";
 
@@ -151,15 +153,35 @@ function positiveQuantity(value: unknown): number {
   return quantity;
 }
 
+const BOOKSTORE_RETURN_ORIGINS = new Set([
+  "https://hi-coworking-plat.web.app",
+  "https://hi-coworking-plat.firebaseapp.com",
+  "https://hi-coworking.com",
+  "https://www.hi-coworking.com",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]);
+
+/** Stripe only sends customers back to Hi Coworking pages (production or a PR preview channel). */
+export function isBookstoreReturnUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (BOOKSTORE_RETURN_ORIGINS.has(url.origin)) return true;
+    return url.protocol === "https:"
+      && url.hostname.startsWith("hi-coworking-plat--")
+      && url.hostname.endsWith(".web.app")
+      && !url.port;
+  } catch {
+    return false;
+  }
+}
+
 function validatedUrl(value: unknown, field: string): string {
   const text = safeString(value, 2_048);
-  try {
-    const url = new URL(text);
-    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("protocol");
-    return url.toString();
-  } catch {
-    throw new HttpsError("invalid-argument", `${field} must be a valid http(s) URL`);
+  if (!isBookstoreReturnUrl(text)) {
+    throw new HttpsError("invalid-argument", `${field} must be a Hi Coworking page`);
   }
+  return new URL(text).toString();
 }
 
 function roleFromRequest(request: { auth?: { token?: Record<string, unknown> } | null }) {
@@ -331,6 +353,8 @@ async function releaseReservation(orderId: string, reason: string) {
     tx.update(orderRef, {
       status: "cancelled",
       fulfillmentStatus: "cancelled",
+      // Clearing the expiry keeps finished orders out of the expiry sweep query.
+      reservationExpiresAt: FieldValue.delete(),
       reservationReleasedAt: Date.now(),
       cancelledAt: Date.now(),
       cancellationReason: reason,
@@ -609,7 +633,11 @@ async function finalizePaidOrder(orderId: string, paymentId: string) {
     if (fulfillmentStatus === "ready_for_pickup" && order.pickup) {
       updates.pickup = { ...order.pickup, readyAt: now };
     }
-    tx.update(orderRef, updates as Record<string, unknown>);
+    tx.update(orderRef, {
+      ...updates,
+      // Paid orders leave the expiry sweep; otherwise they starve its limit(100) query.
+      reservationExpiresAt: FieldValue.delete(),
+    } as Record<string, unknown>);
 
     for (const item of order.items) {
       if (item.type !== "digital") continue;
@@ -671,20 +699,54 @@ export const bookstore_onPaymentUpdated = onDocumentUpdated("payments/{paymentId
   await finalizePaidOrder(orderId, event.params.paymentId);
 });
 
-export const bookstore_releaseExpiredReservations = onSchedule("every 15 minutes", async () => {
-  const now = Date.now();
-  const snap = await getDb().collection("bookstoreOrders")
-    .where("reservationExpiresAt", "<=", now)
-    .limit(100)
-    .get();
-  for (const doc of snap.docs) {
-    const order = doc.data() as BookstoreOrderDoc;
-    if (order.status === "pending_payment" && !order.reservationReleasedAt) {
+/** Stripe Checkout Sessions stay open for 24 hours unless expired explicitly. */
+const STRIPE_SESSION_MAX_AGE_MS = 24 * 60 * 60_000;
+
+/**
+ * Close the Stripe Checkout Session before releasing a reservation, so a
+ * customer can't pay for stock that has gone back on the shelf. Returns
+ * "completed" when the customer already paid (the payment webhook finalizes
+ * the order), "closed" when it's safe to release, and "unknown" on Stripe errors.
+ */
+async function closeCheckoutSession(stripe: Stripe, sessionId?: string): Promise<"closed" | "completed" | "unknown"> {
+  if (!sessionId) return "closed";
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.status === "complete") return "completed";
+    if (session.status === "open") await stripe.checkout.sessions.expire(sessionId);
+    return "closed";
+  } catch (error) {
+    logger.warn("Could not close the bookstore Stripe checkout session", { sessionId, error });
+    return "unknown";
+  }
+}
+
+export const bookstore_releaseExpiredReservations = onSchedule(
+  { schedule: "every 15 minutes", secrets: [stripeSecretKey] },
+  async () => {
+    const now = Date.now();
+    const snap = await getDb().collection("bookstoreOrders")
+      .where("reservationExpiresAt", "<=", now)
+      .limit(100)
+      .get();
+    if (snap.empty) return;
+    const stripe = new Stripe(stripeSecretKey.value(), { apiVersion: "2026-01-28.clover" });
+    for (const doc of snap.docs) {
+      const order = doc.data() as BookstoreOrderDoc;
+      if (order.status !== "pending_payment" || order.reservationReleasedAt) {
+        // Finished orders created before expiry clearing shipped: drop them from the sweep.
+        await doc.ref.update({ reservationExpiresAt: FieldValue.delete() }).catch(() => undefined);
+        continue;
+      }
+      const sessionState = await closeCheckoutSession(stripe, order.stripeCheckoutSessionId);
+      if (sessionState === "completed") continue;
+      const sessionLongGone = now - Number(order.reservationExpiresAt || now) > STRIPE_SESSION_MAX_AGE_MS;
+      if (sessionState === "unknown" && !sessionLongGone) continue;
       await releaseReservation(order.id, "checkout_expired");
       await updatePaymentStatus(order.paymentId, "failed").catch(() => undefined);
     }
-  }
-});
+  },
+);
 
 export const bookstore_getOrder = onCall(async (request) => {
   const orderId = safeId(request.data?.orderId, "orderId");

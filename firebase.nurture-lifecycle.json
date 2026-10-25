@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/nurture-lifecycle-functions",
+      "codebase": "nurture-lifecycle",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/nurture-lifecycle-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/nurture-lifecycle-functions/tsconfig.json"
+      ]
+    }
+  ]
+}
