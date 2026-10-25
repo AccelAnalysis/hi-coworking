@@ -382,7 +382,7 @@ function AdminMemberActionsContent() {
       const result = await getAvailability({ uid: member.uid, start, end });
       setSpaces(result.data.options);
       if (!result.data.options.some((option) => option.available)) setError("No spaces are available for that time range.");
-    } catch (caught) { console.error(caught); setError("Availability could not be checked. Confirm the date/time is within the member's booking window and operating hours."); }
+    } catch (caught) { console.error(caught); setError(callableErrorMessage(caught, "Availability could not be checked. Confirm the date and time are within the member's booking window and operating hours.")); }
     finally { setActionLoading(false); }
   }
 
@@ -393,7 +393,7 @@ function AdminMemberActionsContent() {
     const end = easternEpoch(dateValue, endTime);
     setActionLoading(true);
     try { setQuote((await getBookingQuote({ uid: member.uid, resourceId: id, start, end })).data); }
-    catch (caught) { console.error(caught); setError("The quote could not be created; the selected space may no longer be available."); }
+    catch (caught) { console.error(caught); setError(callableErrorMessage(caught, "The quote could not be created. The selected space may no longer be available.")); }
     finally { setActionLoading(false); }
   }
 
@@ -414,7 +414,7 @@ function AdminMemberActionsContent() {
         setCheckoutUrl(result.data.checkoutUrl);
         setSuccess("The space is held for 15 minutes. A Stripe payment link is ready for the member; the booking confirms only after payment is reported paid.");
       }
-    } catch (caught) { console.error(caught); setError("The member booking could not be created safely. No direct booking record was forced through."); }
+    } catch (caught) { console.error(caught); setError(callableErrorMessage(caught, "The member booking could not be created. No booking record was forced through.")); }
     finally { setActionLoading(false); }
   }
 
@@ -431,7 +431,7 @@ function AdminMemberActionsContent() {
       setSuccess(`Account credit updated from ${money(result.data.adjustment.beforeCents)} to ${money(result.data.adjustment.afterCents)}.`);
       setCreditAmount(""); setCreditNote("");
       await refreshSelected();
-    } catch (caught) { console.error(caught); setError("The account-credit adjustment was rejected. A deduction cannot reduce the balance below credit reserved by an active booking checkout."); }
+    } catch (caught) { console.error(caught); setError(callableErrorMessage(caught, "The account-credit adjustment was rejected. A deduction can't reduce the balance below credit reserved by an active booking checkout.")); }
     finally { setActionLoading(false); }
   }
 

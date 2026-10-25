@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, Mail, Pause, Play, RefreshCw, TriangleAlert } fr
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { functions } from "@/lib/firebase";
+import { callableErrorMessage } from "@/lib/callableError";
 
 type Campaign = {
   id: string;
@@ -50,7 +51,7 @@ function NurtureAdminContent() {
       setOverview(result.data);
     } catch (caught) {
       console.error(caught);
-      setError("Nurture operations could not be loaded. Confirm the completion functions are deployed and your Admin role is current.");
+      setError(callableErrorMessage(caught, "Nurture operations could not be loaded."));
     } finally {
       setLoading(false);
     }
@@ -67,7 +68,7 @@ function NurtureAdminContent() {
       await load();
     } catch (caught) {
       console.error(caught);
-      setError("The campaign status could not be changed.");
+      setError(callableErrorMessage(caught, "The campaign status could not be changed."));
     } finally {
       setSaving(null);
     }

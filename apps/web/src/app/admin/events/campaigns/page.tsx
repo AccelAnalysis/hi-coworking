@@ -6,6 +6,8 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { getCampaignJobs, getEventCampaigns, saveEventCampaign } from "@/lib/firestore";
 import { enqueueCampaignJobsFn } from "@/lib/functions";
 import { Megaphone, Loader2, Plus } from "lucide-react";
+import { ADMIN_CAPABILITIES } from "@/lib/adminCapabilities";
+import { callableErrorMessage } from "@/lib/callableError";
 import type { CampaignJobDoc, EventCampaignDoc } from "@hi/shared";
 
 export default function AdminEventCampaignsPage() {
@@ -13,6 +15,7 @@ export default function AdminEventCampaignsPage() {
   const [jobs, setJobs] = useState<CampaignJobDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [enqueueError, setEnqueueError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("");
   const [eventId, setEventId] = useState("");
   const [channelsCsv, setChannelsCsv] = useState("email,sms,push");
@@ -95,11 +98,15 @@ export default function AdminEventCampaignsPage() {
   };
 
   const enqueueJobs = async () => {
-    if (!selectedCampaign) return;
+    if (!selectedCampaign || !ADMIN_CAPABILITIES.eventCampaigns.live) return;
     setSaving(true);
+    setEnqueueError(null);
     try {
       await enqueueCampaignJobsFn({ campaignId: selectedCampaign.id });
       await refreshJobs(selectedCampaign.id);
+    } catch (caught) {
+      console.error(caught);
+      setEnqueueError(callableErrorMessage(caught, "The campaign couldn't be queued."));
     } finally {
       setSaving(false);
     }
@@ -112,6 +119,12 @@ export default function AdminEventCampaignsPage() {
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             <Megaphone className="h-6 w-6 text-slate-400" /> Event Campaigns
           </h1>
+          {!ADMIN_CAPABILITIES.eventCampaigns.live ? (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+              {ADMIN_CAPABILITIES.eventCampaigns.note}
+            </p>
+          ) : null}
+          {enqueueError ? <p className="mt-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-800" role="alert">{enqueueError}</p> : null}
 
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
@@ -192,8 +205,8 @@ export default function AdminEventCampaignsPage() {
                   <button
                     type="button"
                     onClick={enqueueJobs}
-                    disabled={!selectedCampaignId || saving}
-                    className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 disabled:opacity-50"
+                    disabled={!selectedCampaignId || saving || !ADMIN_CAPABILITIES.eventCampaigns.live}
+                    className="min-h-11 px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 disabled:opacity-50"
                   >
                     Enqueue Jobs
                   </button>
