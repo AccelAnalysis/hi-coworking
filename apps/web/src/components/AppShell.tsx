@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/authContext";
 import { subscribeToUnreadCount } from "@/lib/firestore";
 import { isMyHiPath, MY_HI_HREF, MY_HI_LABEL } from "@/lib/myHiNav";
+import { AdminBackNavigation } from "@/components/AdminBackNavigation";
 
 const publicLinks = [
   { href: "/spaces", label: "Spaces" },
@@ -414,6 +415,8 @@ export function AppShell({
           </div>
         </>
       )}
+
+      <AdminBackNavigation pathname={pathname} />
 
       <main
         className={cn(

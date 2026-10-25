@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, Boxes, Loader2, Minus, Plus } from "lucide-react";
+import { Boxes, Loader2, Minus, Plus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { getAllBooks } from "@/lib/firestore";
@@ -97,8 +96,7 @@ function InventoryContent() {
   return (
     <AppShell>
       <main className="mx-auto w-full max-w-6xl px-5 pb-20 pt-10 sm:px-8 md:pt-14">
-        <Link href="/admin/bookstore" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600"><ArrowLeft className="h-4 w-4" /> Bookstore catalog</Link>
-        <div className="mt-5">
+        <div>
           <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">Bookstore</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">On-site inventory</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Receive retail books, correct physical counts, and see how many copies are reserved by active pickup checkouts.</p>

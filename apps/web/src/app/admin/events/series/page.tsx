@@ -13,7 +13,6 @@ import { setSeriesOccurrenceOverrideFn } from "@/lib/functions";
 import type { EventDoc, EventSeriesDoc } from "@hi/shared";
 import {
   Loader2,
-  ArrowLeft,
   CalendarDays,
   Clock,
   Edit3,
@@ -21,7 +20,6 @@ import {
   RotateCcw,
   Save,
 } from "lucide-react";
-import Link from "next/link";
 
 export default function AdminSeriesOccurrencesPage() {
   return (
@@ -221,13 +219,6 @@ function SeriesEditorContent() {
   return (
     <AppShell>
       <div className="max-w-5xl mx-auto">
-        <Link
-          href="/admin/events"
-          className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mb-6"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to events
-        </Link>
-
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-3 mb-6">
           <CalendarDays className="h-7 w-7 text-slate-400" />
           Series Occurrence Editor
