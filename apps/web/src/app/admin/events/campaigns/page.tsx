@@ -15,7 +15,7 @@ export default function AdminEventCampaignsPage() {
   const [jobs, setJobs] = useState<CampaignJobDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [enqueueError, setEnqueueError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>("");
   const [eventId, setEventId] = useState("");
   const [channelsCsv, setChannelsCsv] = useState("email,sms,push");
@@ -39,6 +39,9 @@ export default function AdminEventCampaignsPage() {
           setSelectedCampaignId(id);
           setJobs(await getCampaignJobs(id));
         }
+      } catch (caught) {
+        console.error(caught);
+        setPageError("Campaigns couldn't be loaded. Refresh the page to try again.");
       } finally {
         setLoading(false);
       }
@@ -47,11 +50,18 @@ export default function AdminEventCampaignsPage() {
   }, []);
 
   const refreshJobs = async (campaignId: string) => {
-    setJobs(await getCampaignJobs(campaignId));
+    try {
+      setJobs(await getCampaignJobs(campaignId));
+    } catch (caught) {
+      console.error(caught);
+      setJobs([]);
+      setPageError("This campaign's jobs couldn't be loaded. Try selecting it again.");
+    }
   };
 
   const createCampaign = async () => {
     setSaving(true);
+    setPageError(null);
     try {
       const now = Date.now();
       const id = `ec_${now}_${Math.random().toString(36).slice(2, 7)}`;
@@ -92,6 +102,9 @@ export default function AdminEventCampaignsPage() {
       setCampaigns(next);
       setSelectedCampaignId(campaign.id);
       setJobs([]);
+    } catch (caught) {
+      console.error(caught);
+      setPageError("The campaign couldn't be saved. Check the fields and try again.");
     } finally {
       setSaving(false);
     }
@@ -100,13 +113,13 @@ export default function AdminEventCampaignsPage() {
   const enqueueJobs = async () => {
     if (!selectedCampaign || !ADMIN_CAPABILITIES.eventCampaigns.live) return;
     setSaving(true);
-    setEnqueueError(null);
+    setPageError(null);
     try {
       await enqueueCampaignJobsFn({ campaignId: selectedCampaign.id });
       await refreshJobs(selectedCampaign.id);
     } catch (caught) {
       console.error(caught);
-      setEnqueueError(callableErrorMessage(caught, "The campaign couldn't be queued."));
+      setPageError(callableErrorMessage(caught, "The campaign couldn't be queued."));
     } finally {
       setSaving(false);
     }
@@ -124,7 +137,7 @@ export default function AdminEventCampaignsPage() {
               {ADMIN_CAPABILITIES.eventCampaigns.note}
             </p>
           ) : null}
-          {enqueueError ? <p className="mt-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-800" role="alert">{enqueueError}</p> : null}
+          {pageError ? <p className="mt-4 rounded-xl bg-rose-50 p-4 text-sm text-rose-800" role="alert">{pageError}</p> : null}
 
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
@@ -186,6 +199,7 @@ export default function AdminEventCampaignsPage() {
                     onChange={async (e) => {
                       const id = e.target.value;
                       setSelectedCampaignId(id);
+                      setPageError(null);
                       if (id) {
                         await refreshJobs(id);
                       } else {
