@@ -7,6 +7,7 @@ import * as admin from "firebase-admin";
 import { FieldValue } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
 import { provisionAuthUser } from "./authProvisioning";
+import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
 import { resendApiKey } from "./providers/emailSecret";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
 
@@ -537,23 +538,16 @@ function setCorsHeaders(req: any, res: any): boolean {
   return false;
 }
 
-async function verifyRecaptcha(token: string, secretKey: string): Promise<{ success: boolean; score: number }> {
-  const url = "https://www.google.com/recaptcha/api/siteverify";
-  const params = new URLSearchParams({ secret: secretKey, response: token });
-
-  const resp = await fetch(`${url}?${params.toString()}`, { method: "POST" });
-  const data = await resp.json() as { success: boolean; score?: number; "error-codes"?: string[] };
-
-  if (!data.success) {
-    logger.warn("reCAPTCHA verification failed", { errors: data["error-codes"] });
-    return { success: false, score: 0 };
-  }
-  return { success: true, score: data.score ?? 0 };
+async function leadVerifierAccessToken(): Promise<string> {
+  const credential = admin.app().options.credential ?? admin.credential.applicationDefault();
+  const token = await credential.getAccessToken();
+  return token.access_token;
 }
 
 /**
  * HTTP Cloud Function: accepts POST from Coming Soon Page.
- * Verifies reCAPTCHA v3 token, then writes to leads/{leadId}.
+ * Verifies a reCAPTCHA Enterprise token (legacy v3 tokens still accepted), then
+ * writes to leads/{leadId}. Logs carry the lead id, type and score, never email or name.
  * Replaces the Google Apps Script (code.gs) backend.
  */
 export const leads_submitLead = onRequest(
@@ -576,19 +570,24 @@ export const leads_submitLead = onRequest(
         return;
       }
 
-      // --- reCAPTCHA v3 verification ---
-      const recaptchaToken = body.recaptchaToken as string | undefined;
-      if (!recaptchaToken) {
-        res.status(400).json({ error: "reCAPTCHA token is required" });
-        return;
-      }
+      // --- reCAPTCHA verification (Enterprise first, legacy v3 fallback) ---
+      const captchaResult = await verifyLeadRecaptcha({
+        body,
+        fetchImpl: fetch,
+        getAccessToken: leadVerifierAccessToken,
+        legacySecret: () => recaptchaSecret.value(),
+      });
 
-      const secret = recaptchaSecret.value();
-      const captchaResult = await verifyRecaptcha(recaptchaToken, secret);
-
-      if (!captchaResult.success || captchaResult.score < 0.3) {
-        logger.warn("Lead rejected by reCAPTCHA", { score: captchaResult.score, email: body.email });
-        res.status(403).json({ error: "Spam check failed. Please try again." });
+      if (!captchaResult.ok) {
+        const failure = leadCaptchaFailureResponse(captchaResult);
+        logger.warn("Lead rejected by reCAPTCHA", {
+          reason: captchaResult.reason,
+          provider: captchaResult.provider,
+          score: captchaResult.score,
+          type: body.type || "early_access",
+          status: failure.status,
+        });
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
 
@@ -618,10 +617,15 @@ export const leads_submitLead = onRequest(
 
       await leadRef.set(leadDoc);
 
-      logger.info("Lead created", { id: leadRef.id, email: body.email, score: captchaResult.score });
+      logger.info("Lead created", {
+        id: leadRef.id,
+        type: leadDoc.type,
+        provider: captchaResult.provider,
+        score: captchaResult.score,
+      });
       res.status(200).json({ status: "success", id: leadRef.id });
     } catch (err) {
-      logger.error("leads_submitLead error", err);
+      logger.error("leads_submitLead error", { message: err instanceof Error ? err.message : String(err) });
       res.status(500).json({ error: "Internal server error" });
     }
   }
@@ -638,8 +642,6 @@ export const leads_onNewLead = onDocumentCreated("leads/{leadId}", async (event)
   const lead = snap.data();
   logger.info("New lead received", {
     id: snap.id,
-    name: lead.name,
-    email: lead.email,
     type: lead.type,
     interestScore: lead.interestScore,
     source: lead.source,
