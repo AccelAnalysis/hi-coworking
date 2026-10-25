@@ -124,6 +124,7 @@ export function buildRefundSnapshot(input: {
 export interface RefundablePayment {
   status?: string;
   amountRefunded?: number;
+  purpose?: string;
 }
 
 /**
@@ -133,7 +134,9 @@ export interface RefundablePayment {
  *   otherwise "partially_refunded". A status of "refunded" set by an app
  *   refund flow (booking cancel, event refund) is kept even for a partial
  *   charge refund, because those flows read "refunded" to avoid refunding
- *   twice.
+ *   twice. Only membership payments become "partially_refunded": booking,
+ *   event and bookstore flows accept only "paid"/"refunded", so a partial
+ *   Stripe refund there keeps the status and records amountRefunded.
  * - Nothing refunded any more (every refund failed or was canceled): a
  *   refunded or partially_refunded payment goes back to "paid".
  */
@@ -147,7 +150,8 @@ export function refundLedgerUpdates(
   const issued = snapshot.refunds.filter(isIssuedRefund);
   let status = current.status || "paid";
   if (refundedCents > 0) {
-    status = full ? "refunded" : current.status === "refunded" ? "refunded" : "partially_refunded";
+    if (full || current.status === "refunded") status = "refunded";
+    else if (current.purpose === "membership") status = "partially_refunded";
   } else if (current.status === "refunded" || current.status === "partially_refunded") {
     status = "paid";
   }

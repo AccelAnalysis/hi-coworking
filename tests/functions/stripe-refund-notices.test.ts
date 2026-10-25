@@ -166,12 +166,17 @@ describe("refund snapshot and ledger", () => {
     expect(again.updates).toEqual(first.updates);
   });
 
-  it("marks a partial refund partially_refunded, but keeps an app-set refunded", () => {
+  it("marks a partial membership refund partially_refunded, but keeps paid for bookings and an app-set refunded", () => {
     const partial = buildRefundSnapshot({
       charge: charge({ amount_refunded: 2000 }),
       refunds: [{ id: "re_part", amount: 2000, status: "succeeded", created: REFUND_AT }],
     });
-    expect(refundLedgerUpdates({ status: "paid" }, partial, 1).status).toBe("partially_refunded");
+    expect(refundLedgerUpdates({ status: "paid", purpose: "membership" }, partial, 1).status).toBe("partially_refunded");
+    // Booking/event/bookstore flows accept only paid/refunded, so a partial
+    // Stripe refund keeps "paid" there and only records the amount.
+    const booking = refundLedgerUpdates({ status: "paid", purpose: "booking" }, partial, 1);
+    expect(booking.status).toBe("paid");
+    expect(booking.updates.amountRefunded).toBe(partial.amountRefundedCents);
     expect(refundLedgerUpdates({ status: "refunded" }, partial, 1).status).toBe("refunded");
   });
 
@@ -381,6 +386,26 @@ describe("Stripe refund events", () => {
     stripe.charges.retrieve = vi.fn().mockRejectedValue(new Error("stripe down"));
     const { body, headers } = signed("charge.refunded", charge());
     await expect(provider.handleWebhook(body, headers)).rejects.toThrow();
+  });
+
+  it("throws when the invoice or PaymentIntent lookup fails, instead of dropping the membership", async () => {
+    const invoiceDown = stubbed();
+    invoiceDown.stripe.invoicePayments.list = vi.fn().mockRejectedValue(new Error("stripe down"));
+    const first = signed("charge.refunded", charge());
+    await expect(invoiceDown.provider.handleWebhook(first.body, first.headers)).rejects.toThrow("stripe down");
+
+    const intentDown = stubbed();
+    intentDown.stripe.paymentIntents.retrieve = vi.fn().mockRejectedValue(new Error("stripe down"));
+    const second = signed("charge.refunded", charge());
+    await expect(intentDown.provider.handleWebhook(second.body, second.headers)).rejects.toThrow("stripe down");
+  });
+
+  it("treats a charge with no invoice as a one-time payment", async () => {
+    const { provider, stripe } = stubbed();
+    stripe.invoicePayments.list = vi.fn().mockResolvedValue({ data: [] });
+    const { body, headers } = signed("charge.refunded", charge());
+    const result = await provider.handleWebhook(body, headers);
+    expect(result.refund?.subscriptionId).toBeUndefined();
   });
 
   it("passes the end date and plan on customer.subscription.deleted", async () => {

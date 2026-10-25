@@ -405,33 +405,30 @@ export class StripeProvider implements PaymentProvider {
     let invoice: Parameters<typeof buildRefundSnapshot>[0]["invoice"] = null;
     if (paymentIntentId) {
       if (!charge.metadata?.paymentId) {
-        try {
-          const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
-          paymentMetadata = intent.metadata || null;
-        } catch (error) {
-          logger.warn("Could not retrieve PaymentIntent for refund", { chargeId, error });
-        }
+        // Propagates API errors (see below): one-time Checkout keeps the
+        // ledger paymentId only on the PaymentIntent.
+        const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+        paymentMetadata = intent.metadata || null;
       }
-      try {
-        const payments = await this.stripe.invoicePayments.list({
-          payment: { type: "payment_intent", payment_intent: paymentIntentId },
-          limit: 1,
-          expand: ["data.invoice"],
-        });
-        const paidInvoice = payments.data[0]?.invoice;
-        if (paidInvoice && typeof paidInvoice !== "string") {
-          const info = parseSubscriptionInvoice(paidInvoice as unknown as InvoiceLike);
-          invoice = {
-            invoiceId: info.invoiceId,
-            billingReason: info.billingReason,
-            subscriptionId: info.subscriptionId,
-            uid: info.uid,
-            plan: info.plan,
-          };
-        }
-      } catch (error) {
-        // Non-fatal: one-time payments have no invoice.
-        logger.warn("Could not look up the invoice for a refunded charge", { chargeId, error });
+      // A Stripe API error here is not swallowed: subscription charges carry
+      // no ledger paymentId, so without the invoice the refund would be lost.
+      // Throwing answers 400 before the event is marked processed, so Stripe
+      // retries. A charge with no invoice (one-time payment) returns no data.
+      const payments = await this.stripe.invoicePayments.list({
+        payment: { type: "payment_intent", payment_intent: paymentIntentId },
+        limit: 1,
+        expand: ["data.invoice"],
+      });
+      const paidInvoice = payments.data[0]?.invoice;
+      if (paidInvoice && typeof paidInvoice !== "string") {
+        const info = parseSubscriptionInvoice(paidInvoice as unknown as InvoiceLike);
+        invoice = {
+          invoiceId: info.invoiceId,
+          billingReason: info.billingReason,
+          subscriptionId: info.subscriptionId,
+          uid: info.uid,
+          plan: info.plan,
+        };
       }
     }
     return buildRefundSnapshot({
