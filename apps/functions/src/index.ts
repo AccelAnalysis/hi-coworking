@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as functionsV1 from "firebase-functions/v1";
@@ -10,7 +11,7 @@ import { provisionAuthUser } from "./authProvisioning";
 import { changeUserRole, RoleChangeError } from "./roleAuthority";
 import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
 import { resendApiKey } from "./providers/emailSecret";
-import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, ensureIdempotent, markWebhookResult, syncPaymentToQBO, backfillPaymentsToQBO } from "./payments";
+import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, syncPaymentToQBO, handleQuickBooksPaymentsWebhook, backfillPaymentsToQBO } from "./payments";
 
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
 const recaptchaSecret = defineSecret("RECAPTCHA_SECRET_KEY");
@@ -942,6 +943,20 @@ export const admin_markPaymentStatus = onCall(async (request) => {
 
 // --- QuickBooks Invoice Flow (PR-12) ---
 
+const INTUIT_OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
+
+/** Accept an OAuth state once, and only before it expires. */
+async function consumeIntuitOAuthState(state: string | undefined): Promise<boolean> {
+  if (!state || !/^hi_[0-9a-f]{48}$/.test(state)) return false;
+  const ref = db.collection("intuitOAuthStates").doc(state);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return false;
+    tx.delete(ref);
+    return Number(snap.data()?.expiresAt || 0) > Date.now();
+  });
+}
+
 /**
  * Callable: Get the Intuit OAuth authorization URL.
  * Admin clicks this to connect QuickBooks.
@@ -962,7 +977,14 @@ export const intuit_getAuthUrl = onCall(
       throw new HttpsError("invalid-argument", "redirectUri is required");
     }
 
-    const state = `hi_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Single-use, short-lived state: the callback only accepts a state this
+    // function issued to an admin (OAuth CSRF protection).
+    const state = `hi_${randomBytes(24).toString("hex")}`;
+    await db.collection("intuitOAuthStates").doc(state).set({
+      uid: request.auth.uid,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + INTUIT_OAUTH_STATE_TTL_MS,
+    });
     const url = getAuthorizationUrl(intuitClientId.value(), redirectUri, state);
 
     return { url, state };
@@ -987,13 +1009,20 @@ export const intuit_oauthCallback = onRequest(
     const error = req.query.error as string;
 
     if (error) {
-      logger.warn("Intuit OAuth error", { error });
-      res.status(400).send(`<html><body><h2>QuickBooks connection failed</h2><p>${error}</p><p>You can close this window.</p></body></html>`);
+      // Never echo query text into the page (reflected XSS); log it instead.
+      logger.warn("Intuit OAuth error", { error: String(error).slice(0, 200) });
+      res.status(400).send("<html><body><h2>QuickBooks connection failed</h2><p>QuickBooks did not grant access. You can close this window and try again from the admin dashboard.</p></body></html>");
       return;
     }
 
     if (!code || !realmId) {
       res.status(400).send("<html><body><h2>Missing code or realmId</h2></body></html>");
+      return;
+    }
+
+    if (!(await consumeIntuitOAuthState(state))) {
+      logger.warn("Intuit OAuth callback with an unknown or expired state");
+      res.status(400).send("<html><body><h2>This QuickBooks link has expired</h2><p>Start the connection again from the admin dashboard.</p></body></html>");
       return;
     }
 
@@ -1026,6 +1055,10 @@ export const intuit_oauthCallback = onRequest(
 export const intuit_checkConnection = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in");
+  }
+  const callerRole = request.auth.token.role as string | undefined;
+  if (callerRole !== "admin" && callerRole !== "master") {
+    throw new HttpsError("permission-denied", "Only admin users can check the QuickBooks connection");
   }
   const connected = await isQuickBooksConnected();
   return { connected };
@@ -1385,7 +1418,7 @@ export const qb_refundCharge = onCall(
 /**
  * HTTP endpoint: QuickBooks Payments webhook receiver.
  * Handles Intuit event notifications for payment status changes.
- * Uses ensureIdempotent() for de-duplication.
+ * Signed (Intuit HMAC), lease-idempotent per entity; see payments/quickbooksWebhook.ts.
  */
 export const qb_paymentsWebhook = onRequest(
   { secrets: [intuitClientId, intuitClientSecret], cors: false },
@@ -1394,62 +1427,15 @@ export const qb_paymentsWebhook = onRequest(
       res.status(405).json({ error: "Method not allowed" });
       return;
     }
-
-    const provider = new QuickBooksPaymentsProvider(
-      intuitClientId.value(),
-      intuitClientSecret.value()
+    // Signature verification fails closed until the Intuit webhook verifier
+    // token is stored in Secret Manager as INTUIT_WEBHOOK_VERIFIER_TOKEN and
+    // added to this function's `secrets` (owner step; see quickbooksWebhook.ts).
+    const result = await handleQuickBooksPaymentsWebhook(
+      req.rawBody as Buffer,
+      req.headers as Record<string, string | string[] | undefined>,
+      process.env.INTUIT_WEBHOOK_VERIFIER_TOKEN || "",
     );
-
-    let result;
-    try {
-      result = await provider.handleWebhook(
-        req.rawBody as Buffer,
-        req.headers as Record<string, string>
-      );
-    } catch (err) {
-      logger.error("QB Payments webhook parse error", { err });
-      res.status(400).json({ error: "Invalid webhook" });
-      return;
-    }
-
-    if (result.action === "unknown") {
-      res.status(200).json({ received: true, skipped: true });
-      return;
-    }
-
-    // Idempotency check
-    const isNew = await ensureIdempotent(result.eventId, "quickbooks_payments");
-    if (!isNew) {
-      res.status(200).json({ received: true, skipped: true });
-      return;
-    }
-
-    try {
-      // Look up payment by QB charge/entity ID if available
-      const entityId = result.metadata?.entityId;
-      if (entityId && result.status) {
-        const payments = await queryPayments({
-          provider: "quickbooks_payments",
-          limitTo: 10,
-        });
-        const match = payments.find(
-          (p) => p.providerRefs?.qbChargeId === entityId
-        );
-        if (match) {
-          await updatePaymentStatus(match.id, result.status);
-          logger.info("QB webhook updated payment", {
-            paymentId: match.id,
-            newStatus: result.status,
-          });
-        }
-      }
-      await markWebhookResult(result.eventId, "success");
-    } catch (err) {
-      logger.error("QB webhook processing error", { eventId: result.eventId, err });
-      await markWebhookResult(result.eventId, `error: ${err}`);
-    }
-
-    res.status(200).json({ received: true });
+    res.status(result.status).json(result.body);
   }
 );
 
