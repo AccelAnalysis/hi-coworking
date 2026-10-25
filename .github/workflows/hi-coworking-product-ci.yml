@@ -173,6 +173,7 @@ jobs:
           tests/functions/campaign-unsubscribe.test.ts
           tests/functions/admin-tools-deploy.test.ts
           tests/functions/admin-tools-source-contract.test.ts
+          tests/functions/space-catalog-writes.test.ts
           tests/functions/event-series-admin.test.ts
           tests/functions/bookstore-return-url.test.ts
           tests/web/event-series-form.test.ts

@@ -140,6 +140,51 @@ export const space_adminGetCatalog = onCall(async (request) => {
   };
 });
 
+/**
+ * Fields an add-on write sets. A new add-on gets defaults for anything the
+ * caller left out; an existing one keeps every field the caller did not send,
+ * so re-adding "Coffee" from the create form (or retrying that call) updates
+ * the price without wiping its description or Stripe price.
+ */
+export function addOnWrite(
+  existing: Record<string, unknown> | undefined,
+  input: AddOnInput,
+  name: string,
+  uid: string,
+  now: number,
+) {
+  const write: Record<string, unknown> = { name, updatedAt: now, updatedBy: uid };
+  const has = (key: keyof AddOnInput) => input[key] !== undefined;
+  if (!existing || has("description")) write.description = String(input.description || "").trim().slice(0, 1000);
+  if (!existing || has("priceCents")) write.priceCents = Math.max(0, Math.round(Number(input.priceCents || 0)));
+  if (!existing || has("stripePriceId")) write.stripePriceId = String(input.stripePriceId || "").trim();
+  if (!existing || has("serviceTypes")) {
+    const serviceTypes = Array.from(new Set((input.serviceTypes || []).filter((value): value is ServiceType => value === "DESK" || value === "CONFERENCE")));
+    write.serviceTypes = serviceTypes.length > 0 ? serviceTypes : ["CONFERENCE"];
+  }
+  if (!existing || has("published")) write.published = input.published !== false;
+  if (!existing) write.createdAt = now;
+  return write;
+}
+
+/**
+ * A setup save keeps the setup's current visibility unless the caller says
+ * otherwise (re-saving a hidden setup must not publish it), and sets
+ * createdAt only once.
+ */
+export function setupWrite(
+  existing: Record<string, unknown> | undefined,
+  payload: Record<string, unknown>,
+  published: boolean | undefined,
+  now: number,
+) {
+  const write: Record<string, unknown> = { ...payload };
+  if (published !== undefined) write.published = published;
+  else if (!existing) write.published = true;
+  if (!existing) write.createdAt = now;
+  return write;
+}
+
 export const space_adminUpsertSetup = onCall(async (request) => {
   const uid = requireAdmin(request);
   const input = request.data as SetupInput;
@@ -153,41 +198,48 @@ export const space_adminUpsertSetup = onCall(async (request) => {
   if (!name || (serviceType !== "DESK" && serviceType !== "CONFERENCE") || !resourceId) {
     throw new HttpsError("invalid-argument", "Name, service type, and resource are required.");
   }
-  const layoutRef = db.doc(layoutPath);
-  const layoutSnap = await layoutRef.get();
-  if (!layoutSnap.exists || layoutSnap.data()?.status !== "PUBLISHED") {
-    throw new HttpsError("failed-precondition", "Only a currently published layout can be offered to customers.");
-  }
-  const layoutResources = publishedLayoutSummary(layoutSnap as FirebaseFirestore.QueryDocumentSnapshot).resourceIds;
-  if (!layoutResources.includes(resourceId)) {
-    throw new HttpsError("invalid-argument", "Choose a resource that is placed on this layout.");
+  if (input.published !== undefined && typeof input.published !== "boolean") {
+    throw new HttpsError("invalid-argument", "published must be true or false.");
   }
   const parts = layoutPath.split("/");
-  const id = cleanId(String(input.id || `${parts[1]}-${parts[3]}-${layoutSnap.id}-${resourceId}`));
-  const now = Date.now();
+  const layoutRef = db.doc(layoutPath);
   const addOnIds = Array.from(new Set((input.addOnIds || []).map(String).map((value) => value.trim()).filter(Boolean)));
-  const payload = {
-    id,
-    layoutPath,
-    layoutId: layoutSnap.id,
-    locationId: parts[1] || "",
-    floorId: parts[3] || "",
-    name,
-    serviceType,
-    resourceId,
-    capacity: Math.max(1, Math.min(100, Math.round(Number(input.capacity || 1)))),
-    description: String(input.description || "").trim().slice(0, 1000),
-    arrangement: String(input.arrangement || "").trim().slice(0, 120),
-    addOnIds,
-    published: input.published !== false,
-    updatedAt: now,
-    updatedBy: uid,
-  };
-  const ref = db.collection(SETUPS).doc(id);
-  const existing = await ref.get();
-  // createdAt is set once, as epoch ms like updatedAt.
-  await ref.set(existing.exists ? payload : { ...payload, createdAt: now }, { merge: true });
-  return payload;
+  // One transaction: the layout check, the create-or-update decision and the
+  // write see the same state, so a retried or double-clicked save writes one
+  // setup and cannot land on a layout that was unpublished in between.
+  return db.runTransaction(async (tx) => {
+    const layoutSnap = await tx.get(layoutRef);
+    if (!layoutSnap.exists || layoutSnap.data()?.status !== "PUBLISHED") {
+      throw new HttpsError("failed-precondition", "Only a currently published layout can be offered to customers.");
+    }
+    const layoutResources = publishedLayoutSummary(layoutSnap as FirebaseFirestore.QueryDocumentSnapshot).resourceIds;
+    if (!layoutResources.includes(resourceId)) {
+      throw new HttpsError("invalid-argument", "Choose a resource that is placed on this layout.");
+    }
+    const id = cleanId(String(input.id || `${parts[1]}-${parts[3]}-${layoutSnap.id}-${resourceId}`));
+    const ref = db.collection(SETUPS).doc(id);
+    const existing = await tx.get(ref);
+    const now = Date.now();
+    const payload = {
+      id,
+      layoutPath,
+      layoutId: layoutSnap.id,
+      locationId: parts[1] || "",
+      floorId: parts[3] || "",
+      name,
+      serviceType,
+      resourceId,
+      capacity: Math.max(1, Math.min(100, Math.round(Number(input.capacity || 1)))),
+      description: String(input.description || "").trim().slice(0, 1000),
+      arrangement: String(input.arrangement || "").trim().slice(0, 120),
+      addOnIds,
+      updatedAt: now,
+      updatedBy: uid,
+    };
+    const write = setupWrite(existing.exists ? existing.data() : undefined, payload, input.published, now);
+    tx.set(ref, write, { merge: true });
+    return { ...(existing.data() || {}), ...write };
+  });
 });
 
 export const space_adminUpsertAddOn = onCall(async (request) => {
@@ -196,26 +248,17 @@ export const space_adminUpsertAddOn = onCall(async (request) => {
   const name = String(input.name || "").trim();
   if (!name) throw new HttpsError("invalid-argument", "Add-on name is required.");
   const id = cleanId(String(input.id || name));
-  const priceCents = Math.max(0, Math.round(Number(input.priceCents || 0)));
   const stripePriceId = String(input.stripePriceId || "").trim();
   if (!validStripePriceId(stripePriceId)) {
     throw new HttpsError("invalid-argument", "A Stripe price ID starts with price_. Leave it blank if this add-on isn't sold online.");
   }
-  const serviceTypes = Array.from(new Set((input.serviceTypes || []).filter((value): value is ServiceType => value === "DESK" || value === "CONFERENCE")));
-  if (serviceTypes.length === 0) serviceTypes.push("CONFERENCE");
-  const payload = {
-    id,
-    name,
-    description: String(input.description || "").trim().slice(0, 1000),
-    priceCents,
-    stripePriceId,
-    serviceTypes,
-    published: input.published !== false,
-    updatedAt: Date.now(),
-    updatedBy: uid,
-  };
-  await db.collection(ADDONS).doc(id).set(payload, { merge: true });
-  return payload;
+  const ref = db.collection(ADDONS).doc(id);
+  return db.runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
+    const write = addOnWrite(existing.exists ? existing.data() : undefined, input, name, uid, Date.now());
+    tx.set(ref, write, { merge: true });
+    return { id, ...(existing.data() || {}), ...write };
+  });
 });
 
 export const space_adminSetSetupPublished = onCall(async (request) => {
@@ -223,8 +266,20 @@ export const space_adminSetSetupPublished = onCall(async (request) => {
   const { setupId, published } = request.data as { setupId?: string; published?: boolean };
   if (!setupId || typeof published !== "boolean") throw new HttpsError("invalid-argument", "setupId and published are required.");
   const ref = db.collection(SETUPS).doc(cleanId(setupId));
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError("not-found", "Setup not found.");
-  await ref.set({ published, updatedAt: Date.now(), updatedBy: uid }, { merge: true });
-  return { success: true, setupId, published };
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "Setup not found.");
+    const data = snap.data() || {};
+    // A retry of the same change is a no-op rather than a second audit write.
+    if (data.published === published) return { success: true, setupId, published, changed: false };
+    if (published) {
+      const layoutPath = String(data.layoutPath || "");
+      const layout = layoutPath.startsWith("locations/") ? await tx.get(db.doc(layoutPath)) : null;
+      if (!layout?.exists || layout.data()?.status !== "PUBLISHED") {
+        throw new HttpsError("failed-precondition", "This setup's floor plan is no longer published. Choose a published layout before showing it to customers.");
+      }
+    }
+    tx.set(ref, { published, updatedAt: Date.now(), updatedBy: uid }, { merge: true });
+    return { success: true, setupId, published, changed: true };
+  });
 });
