@@ -189,6 +189,7 @@ jobs:
           tests/web/published-setups.test.ts
           tests/web/my-hi-nav.test.ts
           tests/web/public-rfx-quarantine.test.ts
+          tests/web/admin-capabilities.test.ts
           tests/web/membership-welcome-banner.test.ts
           tests/web/comp-membership-copy.test.ts
           tests/web/admin-back-navigation.test.ts

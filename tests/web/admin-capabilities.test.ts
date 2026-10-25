@@ -30,3 +30,11 @@ describe("Coming Soon toggle (audit P1-15)", () => {
     expect(dashboard).not.toContain("Coming Soon: ON");
   });
 });
+
+describe("Event campaigns errors (audit P2-7)", () => {
+  it("catches load, select, save and enqueue failures and shows them", () => {
+    const campaigns = read("app/admin/events/campaigns/page.tsx");
+    expect(campaigns.match(/catch \(caught\)/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(campaigns).toContain('role="alert">{pageError}');
+  });
+});
