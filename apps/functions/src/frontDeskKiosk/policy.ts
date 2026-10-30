@@ -286,6 +286,191 @@ export function attendanceFlag(input: { start: number; end: number; hasVisit: bo
   return null;
 }
 
+// ------------------------------------------------- deferred tasks ----
+//
+// Late / no-show flags and forgotten check-outs are handled by one-time
+// Cloud Tasks (no polling). Task IDs are deterministic so a redelivered
+// trigger cannot enqueue twice, and every handler re-reads current state and
+// no-ops when the booking or visit no longer matches the task.
+
+export type FrontDeskTaskKind = "late" | "no_show" | "auto_close";
+
+export type AttendanceTaskPayload = {
+  kind: "late" | "no_show";
+  bookingId: string;
+  uid: string;
+  start: number;
+  end: number;
+};
+
+export type AutoCloseTaskPayload = {
+  kind: "auto_close";
+  uid: string;
+  visitId: string;
+  dueAt: number;
+};
+
+export type FrontDeskTaskPayload = AttendanceTaskPayload | AutoCloseTaskPayload;
+
+export type PlannedTask = { id: string; scheduleAt: number; payload: FrontDeskTaskPayload };
+
+/** Cloud Tasks IDs allow letters, digits, hyphens and underscores only. */
+export function taskIdPart(value: unknown): string {
+  return String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 200) || "none";
+}
+
+export function attendanceTaskId(bookingId: string, kind: "late" | "no_show", start: number): string {
+  return `kiosk-${kind === "late" ? "late" : "noshow"}-${taskIdPart(bookingId)}-${Math.round(start)}`;
+}
+
+export function autoCloseTaskId(visitId: string, dueAt: number): string {
+  return `kiosk-close-${taskIdPart(visitId)}-${Math.round(dueAt)}`;
+}
+
+/**
+ * Cloud Tasks rejects a scheduleTime more than 30 days out. Later bookings
+ * get a relay task at this horizon that re-queues the real check.
+ */
+export const MAX_TASK_DELAY_MS = 29 * 24 * 60 * MINUTE_MS;
+/** Earlier than this before due counts as clock skew: retry, don't relay. */
+export const EARLY_DELIVERY_TOLERANCE_MS = 5 * MINUTE_MS;
+
+export function attendanceDueAt(task: Pick<AttendanceTaskPayload, "kind" | "start" | "end">): number {
+  return task.kind === "late" ? task.start + LATE_AFTER_MINUTES * MINUTE_MS : task.end;
+}
+
+/**
+ * The task to enqueue for a late / no-show check. Due within the Cloud Tasks
+ * horizon: the check itself, under its fixed ID. Further out: a relay at the
+ * horizon, whose ID also carries the relay day so trigger replays that day
+ * collapse into one.
+ */
+export function attendanceTaskPlan(payload: AttendanceTaskPayload, now: number): PlannedTask {
+  const due = attendanceDueAt(payload);
+  const id = attendanceTaskId(payload.bookingId, payload.kind, payload.start);
+  if (due - now <= MAX_TASK_DELAY_MS) return { id, scheduleAt: Math.max(now, due), payload };
+  return { id: `${id}-relay-${Math.floor(now / (24 * 60 * MINUTE_MS))}`, scheduleAt: now + MAX_TASK_DELAY_MS, payload };
+}
+
+type BookingLike = { start?: unknown; end?: unknown; status?: unknown; resourceId?: unknown; userId?: unknown } | null | undefined;
+
+/** A confirmed seat booking with a member and a valid window. */
+export function trackableBooking(id: string, data: BookingLike): KioskBooking | null {
+  if (!data) return null;
+  const start = Number(data.start);
+  const end = Number(data.end);
+  const userId = typeof data.userId === "string" ? data.userId : "";
+  if (!userId || !isConfirmedBooking(data.status) || !isSeatResource(data.resourceId)) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return { id, start, end, status: String(data.status), resourceId: String(data.resourceId), userId };
+}
+
+/**
+ * Tasks to enqueue after a booking write. Nothing is planned when the
+ * attendance-relevant fields did not change, when the booking is no longer a
+ * confirmed seat booking (stale tasks then no-op), or when it already ended.
+ * A late check whose time has passed but whose booking is still running is
+ * scheduled for now.
+ */
+export function planAttendanceTasks(input: { bookingId: string; before: BookingLike; after: BookingLike; now: number }): PlannedTask[] {
+  const after = trackableBooking(input.bookingId, input.after);
+  if (!after) return [];
+  const before = trackableBooking(input.bookingId, input.before);
+  if (before && before.start === after.start && before.end === after.end && before.userId === after.userId) return [];
+  if (after.end <= input.now) return [];
+  const base = { bookingId: after.id, uid: after.userId as string, start: after.start, end: after.end };
+  return [
+    attendanceTaskPlan({ kind: "late", ...base }, input.now),
+    attendanceTaskPlan({ kind: "no_show", ...base }, input.now),
+  ];
+}
+
+export type AttendanceDecision =
+  | { action: "noop"; reason: "stale_booking" | "attended" | "already_flagged" | "too_early" }
+  | { action: "relay" }
+  | { action: "flag"; status: AttendanceFlag }
+  | { action: "arrived_late" };
+
+/**
+ * What a late / no-show task does, given the booking as it is now. The task
+ * no-ops if the booking was cancelled, rescheduled or reassigned, if a visit
+ * overlaps it, or if the same flag is already set (duplicate delivery).
+ */
+export function decideAttendanceTask(input: {
+  task: AttendanceTaskPayload;
+  booking: KioskBooking | null;
+  hasVisit: boolean;
+  currentFlag: unknown;
+  now: number;
+}): AttendanceDecision {
+  const { task, booking } = input;
+  if (!booking || booking.start !== task.start || booking.end !== task.end || booking.userId !== task.uid) {
+    return { action: "noop", reason: "stale_booking" };
+  }
+  // Nothing is decided before the task is due.
+  const due = attendanceDueAt(task);
+  // A relay hop for a booking beyond the Cloud Tasks horizon: re-queue.
+  if (due - input.now > EARLY_DELIVERY_TOLERANCE_MS) return { action: "relay" };
+  if (input.now < due) return { action: "noop", reason: "too_early" };
+  if (input.hasVisit) {
+    if (task.kind === "no_show" && input.currentFlag === "late") return { action: "arrived_late" };
+    return { action: "noop", reason: "attended" };
+  }
+  if (input.currentFlag === task.kind || input.currentFlag === "no_show") return { action: "noop", reason: "already_flagged" };
+  return { action: "flag", status: task.kind };
+}
+
+export type AutoCloseDecision =
+  | { action: "noop"; reason: "not_open" | "different_visit" }
+  | { action: "reschedule"; dueAt: number }
+  | { action: "close"; checkOutAt: number };
+
+/**
+ * What a forgotten-check-out task does. It re-reads the closing time, so a
+ * day whose hours were extended after check-in is re-queued for the new
+ * closing time instead of being closed early.
+ */
+export function decideAutoClose(input: {
+  task: AutoCloseTaskPayload;
+  openVisitId: string | null;
+  visitStatus: unknown;
+  checkInAt: number;
+  closingAt: number;
+  dayEnd: number;
+  now: number;
+}): AutoCloseDecision {
+  if (!input.openVisitId) return { action: "noop", reason: "not_open" };
+  if (input.openVisitId !== input.task.visitId) return { action: "noop", reason: "different_visit" };
+  if (input.visitStatus !== "open") return { action: "noop", reason: "not_open" };
+  const plan = autoClosePlan({ checkInAt: input.checkInAt, closingAt: input.closingAt, dayEnd: input.dayEnd });
+  if (input.now < plan.dueAt) return { action: "reschedule", dueAt: plan.dueAt };
+  return { action: "close", checkOutAt: plan.checkOutAt };
+}
+
+/** Validates a task body from Cloud Tasks before any read. */
+export function parseFrontDeskTask(data: unknown): FrontDeskTaskPayload | null {
+  if (!data || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v.length > 0 && v.length <= 200 && !v.includes("/") ? v : null);
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  if (d.kind === "late" || d.kind === "no_show") {
+    const bookingId = str(d.bookingId);
+    const uid = str(d.uid);
+    const start = num(d.start);
+    const end = num(d.end);
+    if (!bookingId || !uid || start === null || end === null || end <= start) return null;
+    return { kind: d.kind, bookingId, uid, start, end };
+  }
+  if (d.kind === "auto_close") {
+    const uid = str(d.uid);
+    const visitId = str(d.visitId);
+    const dueAt = num(d.dueAt);
+    if (!uid || !visitId || dueAt === null) return null;
+    return { kind: "auto_close", uid, visitId, dueAt };
+  }
+  return null;
+}
+
 // --------------------------------------------------------- auto-close ----
 
 /**

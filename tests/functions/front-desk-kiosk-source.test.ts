@@ -40,9 +40,33 @@ describe("front-desk kiosk functions source", () => {
     }
   });
 
-  it("has exactly one scheduled function (one Cloud Scheduler job)", () => {
-    expect(src.match(/onSchedule\(/g)?.length).toBe(1);
-    expect(src).toContain('schedule: "*/15 8-18 * * 1-5", timeZone: "America/New_York"');
+  it("has no scheduled functions or polling: one-time Cloud Tasks only", () => {
+    const kioskSources = [
+      src,
+      read("apps/functions/src/frontDeskKiosk/policy.ts"),
+      read("apps/functions/src/frontDeskKiosk/taskQueue.ts"),
+      read("firebase/front-desk-kiosk-functions/src/index.ts"),
+    ].join("\n");
+    expect(kioskSources).not.toMatch(/onSchedule|firebase-functions\/v2\/scheduler|pubsub\.schedule|setInterval/);
+    expect(src).not.toContain("kiosk_attendanceSweep");
+    expect(src.match(/onTaskDispatched\(/g)?.length).toBe(1);
+    expect(src).toContain("export const kioskFrontDeskTask = onTaskDispatched(");
+    expect(src).toMatch(/retryConfig: \{ maxAttempts: 5, minBackoffSeconds: 30/);
+    expect(src).toContain('export const kiosk_onBookingWritten = onDocumentWritten(\n  { document: "bookings/{bookingId}", retry: true }');
+  });
+
+  it("enqueues with deterministic task IDs on the kioskFrontDeskTask queue", () => {
+    const queue = read("apps/functions/src/frontDeskKiosk/taskQueue.ts");
+    expect(queue).toContain('getFunctions(taskApp()).taskQueue(`locations/${FRONT_DESK_TASK_REGION}/functions/${FRONT_DESK_TASK_FUNCTION}`)');
+    // The placeholder service account is emulator-only.
+    expect(queue).toContain("if (!process.env.CLOUD_TASKS_EMULATOR_HOST) return undefined;");
+    expect(queue).toContain("id: task.id");
+    expect(queue).toContain("scheduleTime: new Date(task.scheduleAt)");
+    expect(queue).toContain("functions/task-already-exists");
+    // The task function's ID is also its Cloud Tasks queue ID, which allows
+    // only letters, digits and hyphens (no underscores).
+    expect(queue).toContain('FRONT_DESK_TASK_FUNCTION = "kioskFrontDeskTask"');
+    expect("kioskFrontDeskTask").toMatch(/^[A-Za-z][A-Za-z0-9-]{0,62}$/);
   });
 
   it("refuses staff accounts and unenrolled devices as kiosks", () => {
@@ -66,7 +90,7 @@ describe("front-desk kiosk functions source", () => {
   });
 
   it("exports the same functions from the codebase index, the isolated bundle and main.ts", () => {
-    const names = [...CALLABLES, "kiosk_attendanceSweep"];
+    const names = [...CALLABLES, "kiosk_onBookingWritten", "kioskFrontDeskTask"];
     const index = read("apps/functions/src/frontDeskKiosk/index.ts");
     const bundle = read("firebase/front-desk-kiosk-functions/src/index.ts");
     const main = read("apps/functions/src/main.ts");

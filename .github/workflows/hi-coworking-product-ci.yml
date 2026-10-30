@@ -204,6 +204,7 @@ jobs:
           tests/web/admin-a11y-guards.test.ts
           tests/functions/front-desk-kiosk-policy.test.ts
           tests/functions/front-desk-kiosk-source.test.ts
+          tests/functions/front-desk-kiosk-tasks.test.ts
           tests/web/front-desk-kiosk-ui.test.ts
 
       - name: Run active transaction integration tests

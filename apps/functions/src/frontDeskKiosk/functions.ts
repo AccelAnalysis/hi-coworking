@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
-import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onTaskDispatched } from "firebase-functions/v2/tasks";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
 import { adminEventCallableOptions } from "../eventsV2/adminEventCors";
@@ -13,8 +14,14 @@ import {
   LOOKUP_TTL_MS,
   LOOKUPS_PER_MINUTE,
   STAFF_ROLES,
-  attendanceFlag,
+  attendanceTaskPlan,
+  autoCloseTaskId,
   bookingMinutesUsedByVisit,
+  decideAttendanceTask,
+  decideAutoClose,
+  parseFrontDeskTask,
+  planAttendanceTasks,
+  trackableBooking,
   visitOverlapsBooking,
   autoClosePlan,
   closingTimeFromIntervals,
@@ -35,8 +42,12 @@ import {
   validateCloseReason,
   validateKioskSettings,
   type Allowance,
+  type AttendanceTaskPayload,
+  type AutoCloseTaskPayload,
   type KioskBooking,
+  type PlannedTask,
 } from "./policy";
+import { enqueueFrontDeskTasks, frontDeskTaskQueue, type TaskQueueLike } from "./taskQueue";
 
 /**
  * Front-desk iPad kiosk: check-in and check-out only.
@@ -326,18 +337,53 @@ export async function performCheckIn(input: { kioskUid: string; lookupId: unknow
   const context = await allowanceContext(lookup.uid, profile.data, now);
   const openRef = db().collection(COL.open).doc(lookup.uid);
   const visitRef = db().collection(COL.visits).doc();
+  const today = easternDayKey(now);
+  // Backstop if a closing-time task was never queued: an open visit from an
+  // earlier day is closed for review (as the task would have) on the next
+  // check-in instead of blocking it.
+  const priorOpen = (await openRef.get()).data();
+  const stale = priorOpen && String(priorOpen.dayKey || "") < today && priorOpen.visitId
+    ? {
+      visitId: String(priorOpen.visitId),
+      ...autoClosePlan({
+        checkInAt: Number(priorOpen.checkInAt),
+        closingAt: await closingAtFor(String(priorOpen.dayKey)),
+        dayEnd: easternDayBounds(String(priorOpen.dayKey)).end,
+      }),
+    }
+    : null;
 
-  return db().runTransaction(async (tx) => {
+  const result = await db().runTransaction(async (tx) => {
     const [requestSnap, openSnap] = await Promise.all([tx.get(requestRef), tx.get(openRef)]);
     if (requestSnap.exists) return requestSnap.data()?.result as Record<string, unknown>;
 
+    let openVisit = openSnap.exists ? openSnap.data() : undefined;
+    if (openVisit && stale && openVisit.visitId === stale.visitId) {
+      const staleRef = db().collection(COL.visits).doc(stale.visitId);
+      const staleSnap = await tx.get(staleRef);
+      if (staleSnap.exists && staleSnap.data()?.status === "open") {
+        tx.update(staleRef, {
+          status: "auto_closed",
+          checkOutAt: stale.checkOutAt,
+          autoClosedAt: now,
+          needsReview: true,
+          reviewReason: "forgot_checkout",
+          actualMinutes: null,
+          rawOverageMinutes: null,
+          overageMinutes: null,
+          updatedAt: now,
+        });
+      }
+      openVisit = undefined;
+    }
+
     let result: Record<string, unknown>;
-    if (openSnap.exists) {
+    if (openVisit) {
       result = {
         status: "already_checked_in",
         firstName: profile.first,
         memberLabel: profile.label,
-        checkInAt: Number(openSnap.data()?.checkInAt),
+        checkInAt: Number(openVisit.checkInAt),
       };
     } else {
       const visit = {
@@ -399,6 +445,10 @@ export async function performCheckIn(input: { kioskUid: string; lookupId: unknow
     tx.set(requestRef, { kind: "check_in", kioskUid: input.kioskUid, result, createdAt: now });
     return result;
   });
+  if (result.status === "checked_in" && typeof result.visitId === "string") {
+    await afterCheckIn({ uid: lookup.uid, visitId: result.visitId, checkInAt: Number(result.checkInAt) });
+  }
+  return result;
 }
 
 export async function performCheckOut(input: { kioskUid: string; lookupId: unknown; requestId: unknown; now?: number }) {
@@ -466,112 +516,232 @@ export const kiosk_checkOut = onCall(adminEventCallableOptions, async (request) 
   return performCheckOut({ kioskUid, lookupId: data.lookupId, requestId: data.requestId });
 });
 
-// ------------------------------------------------------------- sweep ----
+// ------------------------------------------------- deferred tasks ----
+//
+// No polling and no Cloud Scheduler job. Each confirmed seat booking gets two
+// one-time Cloud Tasks (late check at start + 15 min, no-show check at end),
+// and each check-in gets one task at that day's closing time to close a
+// forgotten check-out. All tasks run kioskFrontDeskTask, which re-reads
+// current state and no-ops when nothing is due.
 
-async function closingAtFor(dayKey: string, cache: Map<string, number>): Promise<number> {
-  const cached = cache.get(dayKey);
-  if (cached !== undefined) return cached;
+let taskQueueFactory: () => TaskQueueLike = frontDeskTaskQueue;
+
+/** Tests swap the queue for a mock. Pass null to restore Cloud Tasks. */
+export function setFrontDeskTaskQueueForTests(factory: (() => TaskQueueLike) | null) {
+  taskQueueFactory = factory ?? frontDeskTaskQueue;
+}
+
+async function closingAtFor(dayKey: string): Promise<number> {
   let closing = closingTimeFromIntervals([]);
   try {
     closing = closingTimeFromIntervals((await getResolvedBookingDay(dayKey)).intervals);
   } catch (error) {
-    logger.warn("kiosk sweep: operating calendar unavailable, using default close", { dayKey, error: String(error) });
+    logger.warn("kiosk: operating calendar unavailable, using default close", { dayKey, error: String(error) });
   }
-  const value = easternEpoch(dayKey, closing);
-  cache.set(dayKey, value);
-  return value;
+  return easternEpoch(dayKey, closing);
 }
 
-/**
- * Auto-closes forgotten check-outs and sets late / no-show flags.
- * Exported for tests; kiosk_attendanceSweep runs it on a schedule.
- */
-export async function runAttendanceSweep(now = Date.now()) {
-  const today = easternDayKey(now);
-  const closingCache = new Map<string, number>();
-  let autoClosed = 0;
+async function autoCloseTaskFor(input: { uid: string; visitId: string; dayKey: string; checkInAt: number }): Promise<PlannedTask> {
+  const plan = autoClosePlan({
+    checkInAt: input.checkInAt,
+    closingAt: await closingAtFor(input.dayKey),
+    dayEnd: easternDayBounds(input.dayKey).end,
+  });
+  return {
+    id: autoCloseTaskId(input.visitId, plan.dueAt),
+    scheduleAt: plan.dueAt,
+    payload: { kind: "auto_close", uid: input.uid, visitId: input.visitId, dueAt: plan.dueAt },
+  };
+}
 
-  const openSnap = await db().collection(COL.open).get();
-  for (const openDoc of openSnap.docs) {
-    const open = openDoc.data();
-    const visitRef = db().collection(COL.visits).doc(String(open.visitId || ""));
-    const dayKey = String(open.dayKey || easternDayKey(Number(open.checkInAt)));
-    const plan = autoClosePlan({
-      checkInAt: Number(open.checkInAt),
-      closingAt: await closingAtFor(dayKey, closingCache),
-      dayEnd: easternDayBounds(dayKey).end,
-    });
-    if (now < plan.dueAt) continue;
-    const closed = await db().runTransaction(async (tx) => {
-      const [freshOpen, visitSnap] = await Promise.all([tx.get(openDoc.ref), tx.get(visitRef)]);
-      if (!freshOpen.exists || freshOpen.data()?.visitId !== open.visitId) return false;
-      tx.delete(openDoc.ref);
-      if (!visitSnap.exists || visitSnap.data()?.status !== "open") return false;
-      tx.update(visitRef, {
-        status: "auto_closed",
-        checkOutAt: plan.checkOutAt,
-        autoClosedAt: now,
-        needsReview: true,
-        reviewReason: "forgot_checkout",
-        // No assumed overage: staff confirm the real time on review.
-        actualMinutes: null,
-        rawOverageMinutes: null,
-        overageMinutes: null,
-        updatedAt: now,
-      });
-      return true;
-    });
-    if (closed) autoClosed += 1;
+const FOLLOW_UP_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Best effort after a check-in: never fails the check-in itself. */
+async function afterCheckIn(input: { uid: string; visitId: string; checkInAt: number }) {
+  const dayKey = easternDayKey(input.checkInAt);
+  const work: Array<Promise<unknown>> = [
+    autoCloseTaskFor({ ...input, dayKey }).then((task) => enqueueFrontDeskTasks(taskQueueFactory(), [task])),
+    // A member flagged late who now arrives is shown as "arrived late".
+    db().collection(COL.flags).where("uid", "==", input.uid).where("dayKey", "==", dayKey).where("status", "==", "late").get()
+      .then((snap) => Promise.all(snap.docs
+        .filter((doc) => visitOverlapsBooking({ checkInAt: input.checkInAt, checkOutAt: null }, { start: Number(doc.data().start), end: Number(doc.data().end) }))
+        .map((doc) => doc.ref.set({ status: "arrived_late", updatedAt: input.checkInAt }, { merge: true })))),
+  ];
+  // Bounded: a slow Cloud Tasks call must not hold the kiosk screen. A missed
+  // close task is covered by the stale-visit close at the next check-in.
+  const results = await Promise.allSettled(work.map((p) => withTimeout(p, FOLLOW_UP_TIMEOUT_MS)));
+  for (const r of results) {
+    if (r.status === "rejected") logger.error("kiosk check-in follow-up failed", { visitId: input.visitId, error: String(r.reason) });
   }
+}
 
-  const { start, end } = easternDayBounds(today);
-  const [bookingSnap, visitSnap] = await Promise.all([
-    db().collection("bookings").where("start", ">=", start).where("start", "<", end).get(),
-    db().collection(COL.visits).where("dayKey", "==", today).get(),
-  ]);
-  const visits = visitSnap.docs.map((doc) => doc.data());
-  const bookings = seatBookingsForDay(
-    bookingSnap.docs.map((doc) => {
-      const b = doc.data();
-      return { id: doc.id, start: Number(b.start), end: Number(b.end), status: b.status, resourceId: b.resourceId, userId: b.userId };
-    }),
-    today,
-  );
-  let flagged = 0;
-  for (const booking of bookings) {
-    if (!booking.userId) continue;
-    const hasVisit = visits.some((v) => v.uid === booking.userId && visitOverlapsBooking(v, booking));
-    const flag = attendanceFlag({ start: booking.start, end: booking.end, hasVisit, now });
-    const ref = db().collection(COL.flags).doc(booking.id);
-    const existing = await ref.get();
+/** Late / no-show task. Idempotent: the flag doc is keyed by booking. */
+export async function runAttendanceTask(task: AttendanceTaskPayload, now = Date.now()) {
+  const bookingSnap = await db().collection("bookings").doc(task.bookingId).get();
+  const booking = bookingSnap.exists ? trackableBooking(bookingSnap.id, bookingSnap.data()) : null;
+  const dayKey = easternDayKey(task.start);
+  let hasVisit = false;
+  if (booking) {
+    const visits = await db().collection(COL.visits).where("uid", "==", task.uid).where("dayKey", "==", dayKey).get();
+    hasVisit = visits.docs.some((doc) => visitOverlapsBooking(doc.data(), booking));
+  }
+  const ref = db().collection(COL.flags).doc(task.bookingId);
+  const profile = booking ? await memberProfile(task.uid) : null;
+  const decision = await db().runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
     const current = existing.data()?.status;
-    if (flag && current !== flag) {
-      const profile = await memberProfile(booking.userId);
-      await ref.set({
-        bookingId: booking.id,
-        uid: booking.userId,
+    const result = decideAttendanceTask({ task, booking, hasVisit, currentFlag: current, now });
+    if (result.action === "flag") {
+      tx.set(ref, {
+        bookingId: task.bookingId,
+        uid: task.uid,
         memberLabel: profile?.label || "Member",
-        dayKey: today,
-        start: booking.start,
-        end: booking.end,
-        status: flag,
+        dayKey,
+        start: task.start,
+        end: task.end,
+        status: result.status,
         flaggedAt: existing.data()?.flaggedAt || now,
         updatedAt: now,
       }, { merge: true });
-      flagged += 1;
-    } else if (!flag && hasVisit && current === "late") {
-      await ref.set({ status: "arrived_late", updatedAt: now }, { merge: true });
+    } else if (result.action === "arrived_late") {
+      tx.set(ref, { status: "arrived_late", updatedAt: now }, { merge: true });
     }
+    return result;
+  });
+  if (decision.action === "relay") {
+    await enqueueFrontDeskTasks(taskQueueFactory(), [attendanceTaskPlan(task, now)]);
+    return decision;
   }
-  return { autoClosed, flagged, bookingsChecked: bookings.length };
+  // Cloud Tasks never delivers early; this only covers clock skew. Throwing
+  // makes Cloud Tasks retry after the backoff.
+  if (decision.action === "noop" && decision.reason === "too_early") {
+    throw new Error(`kiosk ${task.kind} task for ${task.bookingId} arrived before it was due`);
+  }
+  return decision;
 }
 
-/** One Cloud Scheduler job: every 15 minutes, 8 AM to 6:45 PM ET, Mon-Fri. */
-export const kiosk_attendanceSweep = onSchedule(
-  { schedule: "*/15 8-18 * * 1-5", timeZone: "America/New_York" },
-  async () => {
-    const summary = await runAttendanceSweep();
-    logger.info("kiosk_attendanceSweep", summary);
+/** Forgotten check-out task. No-ops once the visit is closed. */
+export async function runAutoCloseTask(task: AutoCloseTaskPayload, now = Date.now()) {
+  const openRef = db().collection(COL.open).doc(task.uid);
+  const visitRef = db().collection(COL.visits).doc(task.visitId);
+  const [openSnap, visitSnap] = await Promise.all([openRef.get(), visitRef.get()]);
+  const visit = visitSnap.data() || {};
+  const checkInAt = Number(visit.checkInAt);
+  // A deleted or malformed visit has nothing to close.
+  const usable = visitSnap.exists && Number.isFinite(checkInAt);
+  const dayKey = usable ? String(visit.dayKey || easternDayKey(checkInAt)) : "";
+  const decision = decideAutoClose({
+    task,
+    openVisitId: openSnap.exists ? String(openSnap.data()?.visitId || "") || null : null,
+    visitStatus: usable ? visit.status : null,
+    checkInAt,
+    closingAt: usable ? await closingAtFor(dayKey) : 0,
+    dayEnd: usable ? easternDayBounds(dayKey).end : 0,
+    now,
+  });
+  if (decision.action === "reschedule") {
+    // Delivered before it was due (clock skew): throw so Cloud Tasks retries.
+    if (decision.dueAt <= task.dueAt) {
+      throw new Error(`kiosk auto_close task for ${task.visitId} arrived before it was due`);
+    }
+    // Closing time moved later after check-in: queue the new time instead.
+    const next = await autoCloseTaskFor({ uid: task.uid, visitId: task.visitId, dayKey, checkInAt });
+    await enqueueFrontDeskTasks(taskQueueFactory(), [next]);
+    return decision;
+  }
+  if (decision.action !== "close") return decision;
+  const closed = await db().runTransaction(async (tx) => {
+    const [freshOpen, freshVisit] = await Promise.all([tx.get(openRef), tx.get(visitRef)]);
+    if (!freshOpen.exists || freshOpen.data()?.visitId !== task.visitId) return false;
+    if (!freshVisit.exists || freshVisit.data()?.status !== "open") return false;
+    tx.delete(openRef);
+    tx.update(visitRef, {
+      status: "auto_closed",
+      checkOutAt: decision.checkOutAt,
+      autoClosedAt: now,
+      needsReview: true,
+      reviewReason: "forgot_checkout",
+      // No assumed overage: staff confirm the real time on review.
+      actualMinutes: null,
+      rawOverageMinutes: null,
+      overageMinutes: null,
+      updatedAt: now,
+    });
+    return true;
+  });
+  return closed ? decision : { action: "noop" as const, reason: "not_open" as const };
+}
+
+/** Entry point for every front-desk task. Bad payloads are dropped, not retried. */
+export async function runFrontDeskTask(data: unknown, now = Date.now()) {
+  const task = parseFrontDeskTask(data);
+  if (!task) {
+    logger.warn("kioskFrontDeskTask: ignoring malformed task");
+    return { action: "noop" as const, reason: "malformed" as const };
+  }
+  return task.kind === "auto_close" ? runAutoCloseTask(task, now) : runAttendanceTask(task, now);
+}
+
+/**
+ * Enqueues the late and no-show tasks for a booking write. Exported for
+ * tests. Returns the planned task IDs.
+ */
+export async function enqueueBookingTasks(input: { bookingId: string; before: unknown; after: unknown; now?: number }) {
+  const tasks = planAttendanceTasks({
+    bookingId: input.bookingId,
+    before: input.before as Record<string, unknown> | undefined,
+    after: input.after as Record<string, unknown> | undefined,
+    now: input.now ?? Date.now(),
+  });
+  if (!tasks.length) return { enqueued: [], duplicates: [] };
+  return enqueueFrontDeskTasks(taskQueueFactory(), tasks);
+}
+
+/** Give up retrying a booking event after this long (retries run up to 7 days). */
+const BOOKING_EVENT_MAX_AGE_MS = 6 * 60 * MINUTE_MS;
+
+/**
+ * One trigger on every booking write, so the seven booking write paths need
+ * no changes. Re-enqueues only when the start, end, member or confirmed seat
+ * status changed; cancelled or moved bookings leave their old tasks to no-op.
+ */
+export const kiosk_onBookingWritten = onDocumentWritten(
+  { document: "bookings/{bookingId}", retry: true },
+  async (event) => {
+    const age = Date.now() - Date.parse(event.time);
+    if (Number.isFinite(age) && age > BOOKING_EVENT_MAX_AGE_MS) {
+      logger.error("kiosk_onBookingWritten: giving up on an old event", { bookingId: event.params.bookingId });
+      return;
+    }
+    const result = await enqueueBookingTasks({
+      bookingId: event.params.bookingId,
+      before: event.data?.before?.data(),
+      after: event.data?.after?.data(),
+    });
+    if (result.enqueued.length || result.duplicates.length) {
+      logger.info("kiosk_onBookingWritten", { bookingId: event.params.bookingId, ...result });
+    }
+  },
+);
+
+/** The only task queue: one-time tasks, retried with backoff. */
+export const kioskFrontDeskTask = onTaskDispatched(
+  {
+    retryConfig: { maxAttempts: 5, minBackoffSeconds: 30, maxBackoffSeconds: 600, maxDoublings: 4 },
+    rateLimits: { maxConcurrentDispatches: 5 },
+    timeoutSeconds: 60,
+  },
+  async (request) => {
+    const result = await runFrontDeskTask(request.data);
+    logger.info("kioskFrontDeskTask", { result });
   },
 );
 

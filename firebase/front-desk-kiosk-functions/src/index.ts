@@ -1,6 +1,7 @@
 // Isolated deploy source for the front-desk iPad kiosk (codebase
 // "front-desk-kiosk"): kiosk check-in/out, the staff front-desk tools, the
-// member check-in code, and one scheduled attendance sweep.
+// member check-in code, a bookings trigger that queues one-time late / no-show
+// checks, and the Cloud Tasks function that runs them (no scheduled jobs).
 //
 // This source declares no secrets. Do not import main.ts, index.ts,
 // eventMarketing.ts or smsProvider.ts here: eventMarketing declares TWILIO_*,
@@ -13,7 +14,8 @@ export {
   kiosk_lookupMember,
   kiosk_checkIn,
   kiosk_checkOut,
-  kiosk_attendanceSweep,
+  kiosk_onBookingWritten,
+  kioskFrontDeskTask,
   admin_kioskOverview,
   admin_kioskCloseVisit,
   admin_kioskResolveAlert,

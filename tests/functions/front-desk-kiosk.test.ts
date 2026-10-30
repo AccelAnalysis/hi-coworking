@@ -94,13 +94,13 @@ function easternNoonToday() {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-let sweep: typeof import("../../apps/functions/src/frontDeskKiosk/functions");
+let tasks: typeof import("../../apps/functions/src/frontDeskKiosk/functions");
 let policy: typeof import("../../apps/functions/src/frontDeskKiosk/policy");
 
 beforeAll(async () => {
   adminApp = initializeAdminApp({ projectId: PROJECT_ID }, "front-desk-kiosk-tests");
   db = getAdminFirestore(adminApp);
-  sweep = await import("../../apps/functions/src/frontDeskKiosk/functions");
+  tasks = await import("../../apps/functions/src/frontDeskKiosk/functions");
   policy = await import("../../apps/functions/src/frontDeskKiosk/policy");
 });
 
@@ -267,8 +267,143 @@ describe("check-in and check-out", () => {
   });
 });
 
-describe("attendance sweep and staff close", () => {
-  it("auto-closes forgotten check-outs at closing time for review, with no assumed overage", async () => {
+describe("deferred tasks and staff close", () => {
+  type Enqueued = { data: Record<string, unknown>; id: string; scheduleTime: Date };
+  let queued: Enqueued[] = [];
+
+  beforeEach(() => {
+    queued = [];
+    tasks.setFrontDeskTaskQueueForTests(() => ({
+      enqueue: async (data, opts) => {
+        if (queued.some((q) => q.id === opts.id)) throw Object.assign(new Error("exists"), { code: "functions/task-already-exists" });
+        queued.push({ data: data as Record<string, unknown>, id: opts.id, scheduleTime: opts.scheduleTime });
+      },
+    }));
+  });
+
+  afterAll(() => tasks.setFrontDeskTaskQueueForTests(null));
+
+  function tomorrow() {
+    return policy.easternDayKey(policy.easternDayBounds(easternNoonToday()).end + 60 * MIN);
+  }
+
+  async function seatBooking(id: string, uid: string, start: number, end: number, status = "CONFIRMED") {
+    await db.collection("bookings").doc(id).set({ userId: uid, resourceId: "seat-1", status, start, end });
+  }
+
+  function attendance(kind: "late" | "no_show", bookingId: string, uid: string, start: number, end: number) {
+    return { kind, bookingId, uid, start, end };
+  }
+
+  async function flag(bookingId: string) {
+    return (await db.collection("kioskBookingFlags").doc(bookingId).get()).data();
+  }
+
+  it("runs end to end: a booking write queues a Cloud Task that flags a late member", async () => {
+    await member("quinn", { displayName: "Quinn Ray" });
+    const now = Date.now();
+    // Late check is due now; the no-show check is an hour away.
+    await seatBooking("quinn-booking", "quinn", now - 20 * MIN, now + 60 * MIN);
+    let status: unknown;
+    for (let attempt = 0; attempt < 60 && status !== "late"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      status = (await flag("quinn-booking"))?.status;
+    }
+    expect(status).toBe("late");
+    expect(await flag("quinn-booking")).toMatchObject({ bookingId: "quinn-booking", uid: "quinn", memberLabel: "Quinn R." });
+    expect((await db.collection("bookings").doc("quinn-booking").get()).data()?.status).toBe("CONFIRMED");
+  }, 45_000);
+
+  it("plans late and no-show tasks with deterministic IDs, once per booking time", async () => {
+    const noon = policy.easternEpoch(tomorrow(), "12:00");
+    const booking = { userId: "lee", resourceId: "seat-1", status: "CONFIRMED", start: noon, end: noon + 120 * MIN };
+    const first = await tasks.enqueueBookingTasks({ bookingId: "b1", before: undefined, after: booking, now: noon - 600 * MIN });
+    expect(first.enqueued).toEqual([`kiosk-late-b1-${noon}`, `kiosk-noshow-b1-${noon}`]);
+    expect(queued.map((q) => q.scheduleTime.getTime())).toEqual([noon + 15 * MIN, noon + 120 * MIN]);
+    // A replayed trigger event re-plans the same IDs and is a no-op.
+    const replay = await tasks.enqueueBookingTasks({ bookingId: "b1", before: undefined, after: booking, now: noon - 600 * MIN });
+    expect(replay).toEqual({ enqueued: [], duplicates: [`kiosk-late-b1-${noon}`, `kiosk-noshow-b1-${noon}`] });
+    // Unrelated edits queue nothing; a reschedule queues new IDs.
+    expect((await tasks.enqueueBookingTasks({ bookingId: "b1", before: booking, after: { ...booking, note: "x" } })).enqueued).toEqual([]);
+    const moved = { ...booking, start: noon + 60 * MIN, end: noon + 180 * MIN };
+    expect((await tasks.enqueueBookingTasks({ bookingId: "b1", before: booking, after: moved, now: noon - 600 * MIN })).enqueued)
+      .toEqual([`kiosk-late-b1-${noon + 60 * MIN}`, `kiosk-noshow-b1-${noon + 60 * MIN}`]);
+    expect((await tasks.enqueueBookingTasks({ bookingId: "b1", before: booking, after: { ...booking, status: "CANCELLED" } })).enqueued).toEqual([]);
+  });
+
+  it("flags a member who has not checked in, late then no-show, and handles duplicate delivery", async () => {
+    const day = tomorrow();
+    const start = policy.easternEpoch(day, "10:00");
+    const end = start + 120 * MIN;
+    await member("kai", { displayName: "Kai Moss" });
+    await seatBooking("kai-booking", "kai", start, end);
+
+    const late = attendance("late", "kai-booking", "kai", start, end);
+    expect(await tasks.runFrontDeskTask(late, start + 15 * MIN)).toMatchObject({ action: "flag", status: "late" });
+    const first = await flag("kai-booking");
+    expect(first).toMatchObject({ status: "late", uid: "kai", memberLabel: "Kai M.", dayKey: day, start, end });
+    // Cloud Tasks is at-least-once: a second delivery changes nothing.
+    expect(await tasks.runFrontDeskTask(late, start + 20 * MIN)).toMatchObject({ action: "noop", reason: "already_flagged" });
+    expect(await flag("kai-booking")).toEqual(first);
+
+    const noShow = attendance("no_show", "kai-booking", "kai", start, end);
+    expect(await tasks.runFrontDeskTask(noShow, end)).toMatchObject({ action: "flag", status: "no_show" });
+    expect(await flag("kai-booking")).toMatchObject({ status: "no_show", flaggedAt: first!.flaggedAt });
+    expect(await tasks.runFrontDeskTask(noShow, end + MIN)).toMatchObject({ action: "noop", reason: "already_flagged" });
+    expect(await tasks.runFrontDeskTask(late, end + MIN)).toMatchObject({ action: "noop", reason: "already_flagged" });
+    expect((await flag("kai-booking"))?.status).toBe("no_show");
+  });
+
+  it("does nothing for a member who checked in, and marks a late member who arrives", async () => {
+    const day = tomorrow();
+    const start = policy.easternEpoch(day, "09:00");
+    const end = start + 180 * MIN;
+    await member("lee", { displayName: "Lee Hart" });
+    await member("ana", { displayName: "Ana Cruz" });
+    await seatBooking("lee-booking", "lee", start, end);
+    await seatBooking("ana-booking", "ana", start, end);
+    await db.collection("kioskVisits").doc("visit-ana").set({ id: "visit-ana", uid: "ana", dayKey: day, status: "open", checkInAt: start - 5 * MIN, checkOutAt: null });
+
+    expect(await tasks.runFrontDeskTask(attendance("late", "ana-booking", "ana", start, end), start + 15 * MIN)).toMatchObject({ action: "noop", reason: "attended" });
+    expect(await tasks.runFrontDeskTask(attendance("no_show", "ana-booking", "ana", start, end), end)).toMatchObject({ action: "noop", reason: "attended" });
+    expect(await flag("ana-booking")).toBeUndefined();
+
+    await tasks.runFrontDeskTask(attendance("late", "lee-booking", "lee", start, end), start + 15 * MIN);
+    expect((await flag("lee-booking"))?.status).toBe("late");
+    await db.collection("kioskVisits").doc("visit-lee").set({ id: "visit-lee", uid: "lee", dayKey: day, status: "open", checkInAt: start + 40 * MIN, checkOutAt: null });
+    expect(await tasks.runFrontDeskTask(attendance("no_show", "lee-booking", "lee", start, end), end)).toMatchObject({ action: "arrived_late" });
+    expect((await flag("lee-booking"))?.status).toBe("arrived_late");
+  });
+
+  it("no-ops for cancelled, rescheduled, reassigned, deleted, early and malformed tasks", async () => {
+    const day = tomorrow();
+    const start = policy.easternEpoch(day, "13:00");
+    const end = start + 60 * MIN;
+    await member("rae", { displayName: "Rae Lin" });
+    await seatBooking("cancelled", "rae", start, end, "CANCELLED");
+    await seatBooking("moved", "rae", start + 120 * MIN, end + 120 * MIN);
+    await seatBooking("reassigned", "someone-else", start, end);
+
+    for (const id of ["cancelled", "moved", "reassigned", "deleted"]) {
+      expect(await tasks.runFrontDeskTask(attendance("late", id, "rae", start, end), start + 15 * MIN)).toMatchObject({ action: "noop", reason: "stale_booking" });
+      expect(await tasks.runFrontDeskTask(attendance("no_show", id, "rae", start, end), end)).toMatchObject({ action: "noop", reason: "stale_booking" });
+      expect(await flag(id)).toBeUndefined();
+    }
+    // The moved booking's own tasks still work at its new time.
+    expect(await tasks.runFrontDeskTask(attendance("late", "moved", "rae", start + 120 * MIN, end + 120 * MIN), start + 135 * MIN)).toMatchObject({ action: "flag" });
+
+    // Slightly early delivery (clock skew) throws so Cloud Tasks retries.
+    await seatBooking("early", "rae", start, end);
+    await expect(tasks.runFrontDeskTask(attendance("late", "early", "rae", start, end), start + 12 * MIN)).rejects.toThrow(/before it was due/);
+    expect(await flag("early")).toBeUndefined();
+    // A relay hop for a far-off booking re-queues the real check instead.
+    expect(await tasks.runFrontDeskTask(attendance("late", "early", "rae", start, end), start - 10 * 24 * 60 * MIN)).toEqual({ action: "relay" });
+    expect(queued.map((q) => [q.id, q.scheduleTime.getTime()])).toEqual([[`kiosk-late-early-${start}`, start + 15 * MIN]]);
+    expect(await flag("early")).toBeUndefined();
+    expect(await tasks.runFrontDeskTask({ kind: "late", bookingId: "a/b", uid: "rae", start, end })).toMatchObject({ reason: "malformed" });
+  });
+
+  it("auto-closes a forgotten check-out at closing time for review, with no assumed overage", async () => {
     const day = easternNoonToday();
     const yesterday = policy.easternDayKey(policy.easternDayBounds(day).start - 60 * MIN);
     const checkInAt = policy.easternEpoch(yesterday, "10:00");
@@ -279,15 +414,22 @@ describe("attendance sweep and staff close", () => {
     });
     await db.collection("kioskOpenVisits").doc("taylor").set({ uid: "taylor", visitId: "visit-taylor", checkInAt, dayKey: yesterday });
 
-    const result = await sweep.runAttendanceSweep(policy.easternEpoch(day, "12:00"));
-    expect(result.autoClosed).toBe(1);
+    // Closing time comes from the operating calendar; the task was due then.
+    const now = policy.easternEpoch(day, "12:00");
+    const task = { kind: "auto_close", uid: "taylor", visitId: "visit-taylor", dueAt: checkInAt + 60 * MIN };
+    const decision = await tasks.runFrontDeskTask(task, now) as { action: string; checkOutAt: number };
+    expect(decision.action).toBe("close");
     const visit = (await db.collection("kioskVisits").doc("visit-taylor").get()).data()!;
     expect(visit.status).toBe("auto_closed");
     expect(visit.needsReview).toBe(true);
     expect(visit.reviewReason).toBe("forgot_checkout");
     expect(visit.overageMinutes).toBeNull();
+    expect(visit.checkOutAt).toBe(decision.checkOutAt);
     expect(visit.checkOutAt).toBeGreaterThan(checkInAt);
     expect((await db.collection("kioskOpenVisits").doc("taylor").get()).exists).toBe(false);
+    // Duplicate delivery: already closed, nothing changes.
+    expect(await tasks.runFrontDeskTask(task, now + MIN)).toMatchObject({ action: "noop", reason: "not_open" });
+    expect((await db.collection("kioskVisits").doc("visit-taylor").get()).data()).toEqual(visit);
 
     const staff = await signedIn({ uid: "desk-staff", role: "staff" });
     await expectCode(call(staff, "admin_kioskCloseVisit", { visitId: "visit-taylor", checkOutAt: checkInAt + 90 * MIN, reason: "" }), "invalid-argument");
@@ -302,26 +444,53 @@ describe("attendance sweep and staff close", () => {
     expect(audit.size).toBe(1);
     expect(audit.docs[0].data().details).toMatchObject({ visitId: "visit-taylor", fromStatus: "auto_closed", reason: "Member confirmed they left at 11:30" });
     await expectCode(call(staff, "admin_kioskCloseVisit", { visitId: "visit-taylor", checkOutAt: checkInAt + 60 * MIN, reason: "again" }), "failed-precondition");
+    // The staff close is final: a late task delivery cannot reopen or re-close it.
+    expect(await tasks.runFrontDeskTask(task, now + 2 * MIN)).toMatchObject({ action: "noop" });
   });
 
-  it("flags late and no-show bookings without touching the booking", async () => {
+  it("leaves a checked-out visit alone, re-queues when closing moved later, and retries early delivery", async () => {
+    const day = tomorrow();
+    const checkInAt = policy.easternEpoch(day, "10:00");
+    await db.collection("kioskVisits").doc("visit-done").set({ id: "visit-done", uid: "jo", dayKey: day, status: "closed", checkInAt, checkOutAt: checkInAt + 60 * MIN });
+    expect(await tasks.runFrontDeskTask({ kind: "auto_close", uid: "jo", visitId: "visit-done", dueAt: checkInAt + 60 * MIN }, checkInAt + 600 * MIN))
+      .toMatchObject({ action: "noop", reason: "not_open" });
+    // A visit that no longer exists is a no-op, not an error to retry.
+    await db.collection("kioskOpenVisits").doc("gone").set({ uid: "gone", visitId: "visit-gone", checkInAt, dayKey: day });
+    expect(await tasks.runFrontDeskTask({ kind: "auto_close", uid: "gone", visitId: "visit-gone", dueAt: checkInAt + 60 * MIN }, checkInAt + 600 * MIN))
+      .toMatchObject({ action: "noop", reason: "not_open" });
+
+    await db.collection("kioskVisits").doc("visit-open").set({ id: "visit-open", uid: "mo", dayKey: day, status: "open", checkInAt, checkOutAt: null });
+    await db.collection("kioskOpenVisits").doc("mo").set({ uid: "mo", visitId: "visit-open", checkInAt, dayKey: day });
+    // A task queued for an earlier close than the day's hours now say.
+    const stale = { kind: "auto_close", uid: "mo", visitId: "visit-open", dueAt: checkInAt + MIN };
+    const decision = await tasks.runFrontDeskTask(stale, checkInAt + MIN) as { action: string; dueAt: number };
+    expect(decision.action).toBe("reschedule");
+    expect(decision.dueAt).toBeGreaterThan(checkInAt + MIN);
+    expect(queued.map((q) => q.id)).toEqual([`kiosk-close-visit-open-${decision.dueAt}`]);
+    expect(queued[0].scheduleTime.getTime()).toBe(decision.dueAt);
+    expect(queued[0].data).toEqual({ kind: "auto_close", uid: "mo", visitId: "visit-open", dueAt: decision.dueAt });
+    // The re-queued task delivered early (clock skew) throws so Cloud Tasks retries.
+    await expect(tasks.runFrontDeskTask(queued[0].data, decision.dueAt - MIN)).rejects.toThrow(/before it was due/);
+    expect((await db.collection("kioskVisits").doc("visit-open").get()).data()?.status).toBe("open");
+    expect(await tasks.runFrontDeskTask(queued[0].data, decision.dueAt)).toMatchObject({ action: "close" });
+  });
+
+  it("closes yesterday's open visit when the member checks in again", async () => {
     const day = easternNoonToday();
-    const noon = policy.easternEpoch(day, "12:00");
-    await member("lee", { displayName: "Lee Hart" });
-    await member("kai", { displayName: "Kai Moss" });
-    await db.collection("bookings").doc("late-booking").set({ userId: "lee", resourceId: "seat-1", status: "CONFIRMED", start: noon - 30 * MIN, end: noon + 60 * MIN });
-    await db.collection("bookings").doc("missed-booking").set({ userId: "kai", resourceId: "seat-2", status: "CONFIRMED", start: noon - 180 * MIN, end: noon - 60 * MIN });
-    await db.collection("bookings").doc("future-booking").set({ userId: "kai", resourceId: "seat-2", status: "CONFIRMED", start: noon + 60 * MIN, end: noon + 120 * MIN });
-
-    const result = await sweep.runAttendanceSweep(noon);
-    expect(result).toMatchObject({ flagged: 2, bookingsChecked: 3 });
-    expect((await db.collection("kioskBookingFlags").doc("late-booking").get()).data()?.status).toBe("late");
-    expect((await db.collection("kioskBookingFlags").doc("missed-booking").get()).data()?.status).toBe("no_show");
-    expect((await db.collection("kioskBookingFlags").doc("future-booking").get()).exists).toBe(false);
-    expect((await db.collection("bookings").doc("late-booking").get()).data()?.status).toBe("CONFIRMED");
-
-    await db.collection("kioskVisits").doc("visit-lee").set({ id: "visit-lee", uid: "lee", dayKey: day, status: "open", checkInAt: noon + 5 * MIN });
-    await sweep.runAttendanceSweep(noon + 10 * MIN);
-    expect((await db.collection("kioskBookingFlags").doc("late-booking").get()).data()?.status).toBe("arrived_late");
+    const yesterday = policy.easternDayKey(policy.easternDayBounds(day).start - 60 * MIN);
+    const checkInAt = policy.easternEpoch(yesterday, "10:00");
+    const email = await member("sky", { displayName: "Sky Moon" });
+    await db.collection("kioskVisits").doc("visit-sky").set({
+      id: "visit-sky", uid: "sky", memberLabel: "Sky M.", dayKey: yesterday, monthKey: yesterday.slice(0, 7),
+      status: "open", checkInAt, checkOutAt: null, allowanceSource: "monthly", allowanceMinutes: 60, needsReview: false,
+    });
+    await db.collection("kioskOpenVisits").doc("sky").set({ uid: "sky", visitId: "visit-sky", checkInAt, dayKey: yesterday });
+    const kiosk = await kioskDevice();
+    const { lookupId } = await call<{ lookupId: string }>(kiosk, "kiosk_lookupMember", { query: email });
+    const result = await call<{ status: string; visitId: string }>(kiosk, "kiosk_checkIn", { lookupId, requestId: requestId() });
+    expect(result.status).toBe("checked_in");
+    const old = (await db.collection("kioskVisits").doc("visit-sky").get()).data()!;
+    expect(old).toMatchObject({ status: "auto_closed", needsReview: true, reviewReason: "forgot_checkout", overageMinutes: null });
+    expect((await db.collection("kioskOpenVisits").doc("sky").get()).data()?.visitId).toBe(result.visitId);
   });
 });
