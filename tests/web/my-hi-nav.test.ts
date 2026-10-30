@@ -12,10 +12,10 @@ import { BILLING_PORTAL_RETURN_URL } from "../../apps/functions/src/memberBillin
 
 const read = (path: string) => readFileSync(path, "utf8");
 
-describe("My Hi navigation", () => {
-  it("treats /my-hi and the legacy bookings route as My Hi", () => {
+describe("SayHi navigation", () => {
+  it("treats /my-hi and the legacy bookings route as SayHi", () => {
     expect(MY_HI_HREF).toBe("/my-hi");
-    expect(MY_HI_LABEL).toBe("My Hi");
+    expect(MY_HI_LABEL).toBe("SayHi");
     expect(isMyHiPath("/my-hi")).toBe(true);
     expect(isMyHiPath("/my-hi/")).toBe(true);
     expect(isMyHiPath(LEGACY_BOOKINGS_HREF)).toBe(true);
@@ -24,7 +24,7 @@ describe("My Hi navigation", () => {
     expect(isMyHiPath(null)).toBe(false);
   });
 
-  it("labels the account entry My Hi in the header, account menu and mobile drawer", () => {
+  it("labels the account entry SayHi in the header, account menu and mobile drawer", () => {
     const shell = read("apps/web/src/components/AppShell.tsx");
     expect(shell).not.toContain('href="/account/bookings"');
     expect(shell).not.toMatch(/>\s*Bookings\s*</);
@@ -36,7 +36,7 @@ describe("My Hi navigation", () => {
     expect(shell).toContain("min-h-11");
   });
 
-  it("keeps bookings reachable from inside My Hi and keeps the bookings route", () => {
+  it("keeps bookings reachable from inside SayHi and keeps the bookings route", () => {
     const page = read("apps/web/src/app/account/bookings/page.tsx");
     expect(MY_HI_BOOKINGS_ID).toBe("bookings");
     expect(page).toContain("id={MY_HI_BOOKINGS_ID}");

@@ -5,7 +5,7 @@ export type { LastRefund };
 
 /**
  * The member's latest membership refund, inside the dark Membership card on
- * My Hi. role="status" so a screen reader hears it politely when the user
+ * SayHi. role="status" so a screen reader hears it politely when the user
  * doc loads; the icon is decorative and the title carries the meaning, so
  * nothing relies on color alone.
  */

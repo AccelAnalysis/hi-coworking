@@ -5,7 +5,7 @@ import { REFUND_NOTICE_DAYS, refundNoticeCopy } from "../../apps/web/src/lib/ref
 const REFUNDED_AT = Date.UTC(2026, 9, 24, 22, 1);
 const DAY = 24 * 60 * 60 * 1000;
 
-describe("My Hi refund notice copy", () => {
+describe("SayHi refund notice copy", () => {
   it("shows an issued refund with its date and timing", () => {
     expect(refundNoticeCopy({ amountCents: 4900, currency: "usd", refundedAt: REFUNDED_AT, full: true, status: "issued" }, REFUNDED_AT + DAY))
       .toEqual({

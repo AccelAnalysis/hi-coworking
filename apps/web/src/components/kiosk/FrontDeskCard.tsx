@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { formatDayTime, formatMinutes, membersKioskSummary, type MemberKioskSummary } from "@/lib/frontDeskKiosk";
 
 /**
- * My Hi card: the member's front-desk check-in code and this month's visits.
+ * SayHi card: the member's front-desk check-in code and this month's visits.
  * Hidden while loading and whenever the callable is missing or refuses
  * (Hosting can deploy before the front-desk functions).
  */

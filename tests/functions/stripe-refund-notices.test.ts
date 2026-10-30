@@ -191,7 +191,7 @@ describe("refund snapshot and ledger", () => {
   });
 });
 
-describe("My Hi refund summary and notification", () => {
+describe("SayHi refund summary and notification", () => {
   it("summarizes the newest issued refund and flags a failed one", () => {
     const summary = memberRefundSummary(null, snapshot())!;
     expect(summary).toMatchObject({ refundId: "re_test_1", amountCents: 4900, full: true, status: "issued" });
@@ -208,7 +208,7 @@ describe("My Hi refund summary and notification", () => {
     expect(memberRefundSummary(newer, snapshot())).toBeNull();
   });
 
-  it("builds an bell-feed refund notification linking to My Hi", () => {
+  it("builds an bell-feed refund notification linking to SayHi", () => {
     const snap = snapshot();
     const note = refundNotification("member-1", snap, snap.refunds[0], 5);
     expect(note).toMatchObject({ id: "membership_refund_re_test_1", type: "membership_refund", linkTo: "/my-hi", read: false });
@@ -225,7 +225,7 @@ describe("member notice email copy", () => {
     renderMembershipEndedEmail({ endedAtMs: Date.UTC(2026, 9, 24, 22), planId: "virtual", origin: ORIGIN }),
   ];
 
-  it("has the refund amount, card, timing and My Hi link", () => {
+  it("has the refund amount, card, timing and SayHi link", () => {
     const copy = all[0];
     expect(copy.subject).toBe("Your Hi Coworking refund of $49.00 is on its way");
     expect(copy.text).toContain("We've refunded $49.00 to your Visa card ending in 4242.");
@@ -246,7 +246,7 @@ describe("member notice email copy", () => {
     expect(all[2].text).toContain("Hi there,");
   });
 
-  it("names Accel Analysis, links My Hi and has no marketing footer", () => {
+  it("names Accel Analysis, links SayHi and has no marketing footer", () => {
     for (const copy of all) {
       for (const body of [copy.html, copy.text]) {
         expect(body).toContain(COMPANY_NAME);

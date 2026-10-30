@@ -87,7 +87,7 @@ function MyEventsContent() {
             <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">My events</h1>
           </div>
           <div className="flex gap-3 text-sm font-semibold">
-            <Link href="/my-hi" className="inline-flex min-h-11 items-center text-slate-500 hover:text-slate-950">My Hi</Link>
+            <Link href="/my-hi" className="inline-flex min-h-11 items-center text-slate-500 hover:text-slate-950">SayHi</Link>
             <Link href="/events" className="text-sky-800 hover:text-sky-950">Find events</Link>
           </div>
         </div>

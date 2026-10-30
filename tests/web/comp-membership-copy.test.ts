@@ -33,7 +33,7 @@ describe("complimentary membership on /my-hi", () => {
     expect(compMembershipLabel({ compEndsAt: Date.UTC(2027, 0, 1, 4, 59) })).toBe("Complimentary through December 31, 2026");
   });
 
-  it("wires the comp state into the My Hi page", () => {
+  it("wires the comp state into the SayHi page", () => {
     const page = readFileSync("apps/web/src/app/account/bookings/page.tsx", "utf8");
     expect(page).toContain("showBillingPortal(membershipFields)");
     expect(page).toContain("!compMembershipEnded(membershipFields, now)");

@@ -7,7 +7,7 @@
  *    paid when every refund failed; amountRefunded; refundedAt). Derived from
  *    the charge's current state, so replays converge on the same result.
  * 2. Membership refunds only (a membership payment or a subscription
- *    invoice): users/{uid}.lastRefund for My Hi, a Notifications (bell) entry
+ *    invoice): users/{uid}.lastRefund for SayHi, a Notifications (bell) entry
  *    and a refund confirmation email, each once per refund; a failed refund
  *    gets a "didn't go through" notification. Event, booking and
  *    bookstore refunds keep the notices their own refund flows send.
@@ -164,7 +164,7 @@ export async function handleStripeRefund(
       if (summary) tx.update(userRef, { lastRefund: summary, updatedAt: Date.now() });
     });
   } catch (error) {
-    logger.error("Membership refund: could not update My Hi summary (non-fatal)", {
+    logger.error("Membership refund: could not update SayHi summary (non-fatal)", {
       ...logContext,
       uid,
       error: String(error),

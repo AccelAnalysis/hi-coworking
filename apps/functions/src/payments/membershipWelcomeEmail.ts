@@ -88,9 +88,9 @@ export function renderMembershipWelcomeEmail(input: {
   const bookLine = tier.includedHoursPerMonth > 0
     ? `Book a desk or the meeting room online. Choose a date and we'll show the hours that are open and check live availability. Your included hours are applied automatically when you book.`
     : `Book a desk or the meeting room online whenever you want to work from the space. Choose a date and we'll show the hours that are open and check live availability.`;
-  const accountLine = "Your My Hi page shows your membership, upcoming bookings, access details, and any account credit.";
+  const accountLine = "Your SayHi page shows your membership, upcoming bookings, access details, and any account credit.";
   const hoursLine = `Open ${SPACE_HOURS}.`;
-  const renewLine = "Your membership renews monthly. To update your payment method, view invoices, change your plan, or cancel, open My Hi and choose Manage membership & billing. If you cancel, your membership stays active until the end of the period you've paid for.";
+  const renewLine = "Your membership renews monthly. To update your payment method, view invoices, change your plan, or cancel, open SayHi and choose Manage membership & billing. If you cancel, your membership stays active until the end of the period you've paid for.";
   const helpLine = `For help with anything else, reply to this email or write to us at ${CONTACT_EMAIL}.`;
 
   const p = "margin:0 0 16px;font-size:16px;line-height:1.7;color:#475569";
@@ -112,7 +112,7 @@ export function renderMembershipWelcomeEmail(input: {
     + `<h2 style="${h2}">Using the space</h2>`
     + `<p style="${p}">${escapeHtml(bookLine)}</p>`
     + `<p style="margin:24px 0"><a href="${escapeHtml(bookUrl)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:650">Book a desk</a></p>`
-    + `<p style="${p}">${escapeHtml(accountLine)} <a href="${escapeHtml(accountUrl)}" style="${link}">Open My Hi</a></p>`
+    + `<p style="${p}">${escapeHtml(accountLine)} <a href="${escapeHtml(accountUrl)}" style="${link}">Open SayHi</a></p>`
     + `<h2 style="${h2}">Find us</h2>`
     + `<p style="${p}">Hi Coworking<br>${escapeHtml(SPACE_ADDRESS)}<br>${escapeHtml(hoursLine)}</p>`
     + `<h2 style="${h2}">Your membership</h2>`
@@ -136,7 +136,7 @@ export function renderMembershipWelcomeEmail(input: {
     `Book a desk: ${bookUrl}`,
     "",
     `${accountLine}`,
-    `Open My Hi: ${accountUrl}`,
+    `Open SayHi: ${accountUrl}`,
     "",
     "FIND US",
     "Hi Coworking",

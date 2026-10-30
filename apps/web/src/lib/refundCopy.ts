@@ -1,5 +1,5 @@
 /**
- * My Hi copy for the member's latest membership refund.
+ * SayHi copy for the member's latest membership refund.
  *
  * stripe_webhook writes users/{uid}.lastRefund on charge.refunded,
  * refund.updated and refund.failed (see apps/functions/src/payments/
@@ -7,7 +7,7 @@
  */
 
 const FACILITY_TIME_ZONE = "America/New_York";
-/** How long My Hi shows a refund after it was issued. */
+/** How long SayHi shows a refund after it was issued. */
 export const REFUND_NOTICE_DAYS = 60;
 
 export interface LastRefund {

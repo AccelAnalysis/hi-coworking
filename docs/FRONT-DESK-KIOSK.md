@@ -4,7 +4,7 @@ The front-desk kiosk is an iPad at the front desk that members use to check in w
 
 - **Kiosk page:** `/kiosk/front-desk`. It is a PWA with a manifest at `/kiosk/front-desk.webmanifest` and is meant to run under iPad Guided Access.
 - **Staff page:** `/admin/front-desk`, which needs a staff role. It shows open visits, visits that need review, quiet hours alerts, late and no-show flags, and today's visits. Admins also see the kiosk screen settings and the device list.
-- **Members:** the My Hi bookings page shows a "Front-desk check-in" card. It has the member's 6-character code, this month's visits, and any extra time recorded.
+- **Members:** the SayHi bookings page shows a "Front-desk check-in" card. It has the member's 6-character code, this month's visits, and any extra time recorded.
 
 ## How it behaves
 
@@ -53,7 +53,7 @@ How it is built:
    - It deploys only the `front-desk-kiosk` codebase (`firebase.front-desk-kiosk.json`, source `firebase/front-desk-kiosk-functions`) with `--only functions:front-desk-kiosk`, then probes `kiosk_session`.
    - The bundle declares no secrets.
    - It creates or updates the Cloud Tasks queue `kioskFrontDeskTask` in us-central1. It sets no invoker, so it makes no IAM changes.
-4. **Hosting.** This deploys automatically on merge. Until step 3 is done, the admin page shows a "not switched on yet" note, the dashboard hides the front-desk counts, and the My Hi card stays hidden.
+4. **Hosting.** This deploys automatically on merge. Until step 3 is done, the admin page shows a "not switched on yet" note, the dashboard hides the front-desk counts, and the SayHi card stays hidden.
 5. **Turn it on.** After the functions are live, set `frontDesk.live` to `true` in `apps/web/src/lib/adminCapabilities.ts` in a follow-up PR.
 
 ### Google Cloud setup (project `hi-coworking-plat`)
@@ -102,7 +102,7 @@ gcloud run services add-iam-policy-binding kioskfrontdesktask --region us-centra
 6. **Display settings.** Go to Settings → Display & Brightness → Auto-Lock → **Never**. Keep the iPad on power. The page also requests a screen wake lock.
 7. **Adjust timing (optional).** Admins can change "Show logo after" and "Logo shows for" in **Admin → Front desk → Kiosk screen**.
 
-Members can find their code on My Hi → Bookings ("Front-desk check-in"). They can also type their email.
+Members can find their code on SayHi → Bookings ("Front-desk check-in"). They can also type their email.
 
 ## Brand notes (kiosk screens only)
 
