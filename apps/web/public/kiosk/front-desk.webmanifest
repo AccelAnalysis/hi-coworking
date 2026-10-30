@@ -1,0 +1,19 @@
+{
+  "name": "Hi Coworking front desk",
+  "short_name": "Front desk",
+  "description": "Member check-in and check-out.",
+  "id": "/kiosk/front-desk",
+  "start_url": "/kiosk/front-desk",
+  "scope": "/kiosk/front-desk",
+  "display_override": ["fullscreen"],
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#101D4B",
+  "theme_color": "#101D4B",
+  "lang": "en",
+  "icons": [
+    { "src": "/brand/hi-coworking/kiosk-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/hi-coworking/kiosk-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/hi-coworking/apple-touch-icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}

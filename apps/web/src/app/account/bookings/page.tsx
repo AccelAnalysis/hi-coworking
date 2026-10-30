@@ -17,6 +17,7 @@ import { MY_HI_BOOKINGS_ID } from "@/lib/myHiNav";
 import { BillingPortalButton } from "@/components/BillingPortalButton";
 import { MembershipRefundNotice, type LastRefund } from "@/components/MembershipRefundNotice";
 import { BookingManagementCard } from "@/components/BookingManagementCard";
+import { FrontDeskCard } from "@/components/kiosk/FrontDeskCard";
 import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
@@ -489,6 +490,8 @@ function AccountBookingsContent() {
                 Compare plans
               </Link>
             </div>
+
+            <FrontDeskCard />
 
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
               <h2 className="font-semibold text-slate-900">

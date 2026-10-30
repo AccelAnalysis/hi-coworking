@@ -5,7 +5,7 @@
  * The dashboard labels these tiles "Not live yet" and the tool's page shows
  * the note, so an admin isn't left guessing why an action fails.
  */
-export type AdminCapability = "doorAccess" | "eventCampaigns";
+export type AdminCapability = "doorAccess" | "eventCampaigns" | "frontDesk";
 
 export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: string }> = {
   doorAccess: {
@@ -15,6 +15,10 @@ export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: 
   eventCampaigns: {
     live: false,
     note: "Campaign sending isn't switched on yet. You can draft campaigns, but queuing sends won't work until it's deployed.",
+  },
+  frontDesk: {
+    live: false,
+    note: "The front-desk kiosk isn't switched on yet. Visits, alerts and devices will appear here once the front-desk kiosk functions and rules are deployed.",
   },
 };
 

@@ -212,3 +212,20 @@ export {
   space_adminUpsertAddOn,
   space_adminSetSetupPublished,
 } from "./spaceCatalog";
+
+// Front-desk iPad kiosk (deploys from firebase/front-desk-kiosk-functions,
+// codebase "front-desk-kiosk"; exported here so the emulator serves it).
+export {
+  kiosk_session,
+  kiosk_lookupMember,
+  kiosk_checkIn,
+  kiosk_checkOut,
+  kiosk_onBookingWritten,
+  kioskFrontDeskTask,
+  admin_kioskOverview,
+  admin_kioskCloseVisit,
+  admin_kioskResolveAlert,
+  admin_kioskSetSettings,
+  admin_kioskDeviceSet,
+  members_kioskSummary,
+} from "./frontDeskKiosk";

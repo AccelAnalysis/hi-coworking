@@ -746,5 +746,42 @@ service cloud.firestore {
     match /powerNowEmailDaily/{dayId} {
       allow read, write: if false;
     }
+
+    // Front-desk iPad kiosk. Server-only: every read and write goes through
+    // the kiosk_*, admin_kiosk* and members_kioskSummary callables (Admin
+    // SDK). The kiosk claim never grants client access to anything here.
+    match /kioskVisits/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskOpenVisits/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskAlerts/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskBookingFlags/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskRequests/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskLookups/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskRateLimits/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskDevices/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskSettings/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskMemberCodes/{docId} {
+      allow read, write: if false;
+    }
+    match /kioskCodeIndex/{docId} {
+      allow read, write: if false;
+    }
   }
 }

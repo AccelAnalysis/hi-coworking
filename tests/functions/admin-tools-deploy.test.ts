@@ -127,6 +127,29 @@ const BUNDLES: Bundle[] = [
     confirm: "deploy member record",
     probe: "admin_consentList",
   },
+  {
+    codebase: "front-desk-kiosk",
+    ids: [
+      "admin_kioskCloseVisit",
+      "admin_kioskDeviceSet",
+      "admin_kioskOverview",
+      "admin_kioskResolveAlert",
+      "admin_kioskSetSettings",
+      "kioskFrontDeskTask",
+      "kiosk_checkIn",
+      "kiosk_checkOut",
+      "kiosk_lookupMember",
+      "kiosk_onBookingWritten",
+      "kiosk_session",
+      "members_kioskSummary",
+    ],
+    params: [],
+    bound: {},
+    secretFiles: [],
+    auto: false,
+    confirm: "deploy front desk kiosk",
+    probe: "kiosk_session",
+  },
 ];
 
 function manifest(source: string) {

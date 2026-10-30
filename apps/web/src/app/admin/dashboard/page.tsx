@@ -11,6 +11,7 @@ import {
   CalendarClock,
   CalendarDays,
   Clock3,
+  ConciergeBell,
   CreditCard,
   DoorOpen,
   Hammer,
@@ -34,6 +35,7 @@ import { db, functions } from "@/lib/firebase";
 import { getPublicSiteSettings, setPublicSiteSettings, type PublicSiteSettingsDoc } from "@/lib/firestore";
 import { ADMIN_CAPABILITIES, type AdminCapability } from "@/lib/adminCapabilities";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { adminKioskOverview } from "@/lib/frontDeskKiosk";
 
 type Row = Record<string, unknown> & { id: string };
 type NurtureOverview = { summary: { active: number; completed: number; failed: number; suppressed: number } };
@@ -48,6 +50,7 @@ const MODULES: readonly Module[] = [
   { href: "/admin/spaces", label: "Hours & closures", description: "Operating schedule, booking rules, and date exceptions", icon: Clock3 },
   { href: "/admin/spaces/catalog", label: "Published setups", description: "Customer arrangements, capacities, and upsell add-ons", icon: Sparkles },
   { href: "/admin/builder", label: "Visual designer", description: "Locations, floors, layouts, and publishing", icon: Hammer },
+  { href: "/admin/front-desk", label: "Front desk", description: "Kiosk check-ins, open visits, review, and staff-only hours alerts", icon: ConciergeBell, capability: "frontDesk" },
   { href: "/admin/access", label: "Door access", description: "Grant status, code delivery, unlock, resend, and revoke", icon: DoorOpen, capability: "doorAccess" },
   { href: "/admin/nurture", label: "Nurture", description: "Acquisition, customer development, renewal, and retention", icon: Mail },
   { href: "/admin/events", label: "Events", description: "Registrations, holds, waitlist, and lifecycle", icon: CalendarDays },
@@ -93,7 +96,7 @@ export default function AdminDashboardPage() {
 
 function AdminDashboardContent() {
   const { user } = useAuth();
-  const [data, setData] = useState<{ users: Row[]; bookings: Row[]; payments: Row[]; events: Row[]; leads: Row[]; accessCodes: Row[]; nurtureFailed: number; nurtureUnavailable: boolean } | null>(null);
+  const [data, setData] = useState<{ users: Row[]; bookings: Row[]; payments: Row[]; events: Row[]; leads: Row[]; accessCodes: Row[]; nurtureFailed: number; nurtureUnavailable: boolean; frontDeskReview: number; frontDeskAlerts: number; frontDeskUnavailable: boolean } | null>(null);
   const [siteSettings, setSiteSettings] = useState<PublicSiteSettingsDoc>({ id: "public", comingSoonEnabled: false, updatedAt: 0 });
   const [loading, setLoading] = useState(true);
   const [savingComingSoon, setSavingComingSoon] = useState(false);
@@ -104,12 +107,14 @@ function AdminDashboardContent() {
     setLoading(true);
     setError(null);
     try {
-      const [users, bookings, payments, events, leads, accessCodes, settings, nurture] = await Promise.all([
+      const [users, bookings, payments, events, leads, accessCodes, settings, nurture, frontDesk] = await Promise.all([
         rows("users"), rows("bookings"), rows("payments"), rows("events"), rows("leads"), rows("accessCodes"),
         getPublicSiteSettings(),
         getNurtureOverview({}).then((result) => result.data).catch(() => null),
+        // Front-desk functions deploy separately from Hosting; a missing callable just hides its counts.
+        adminKioskOverview({}).then((result) => result.data).catch(() => null),
       ]);
-      setData({ users, bookings, payments, events, leads, accessCodes, nurtureFailed: nurture?.summary.failed || 0, nurtureUnavailable: nurture === null });
+      setData({ users, bookings, payments, events, leads, accessCodes, nurtureFailed: nurture?.summary.failed || 0, nurtureUnavailable: nurture === null, frontDeskReview: frontDesk?.needsReview.length || 0, frontDeskAlerts: frontDesk?.alerts.length || 0, frontDeskUnavailable: frontDesk === null });
       setSiteSettings(settings);
     } catch (caught) {
       console.error(caught);
@@ -148,6 +153,8 @@ function AdminDashboardContent() {
         pastDue.length ? { label: "Past-due memberships", count: pastDue.length, href: "/admin/members" } : null,
         accessFailures.length ? { label: "Access code failures", count: accessFailures.length, href: "/admin/access" } : null,
         data.nurtureFailed ? { label: "Nurture enrollments failed", count: data.nurtureFailed, href: "/admin/nurture" } : null,
+        data.frontDeskAlerts ? { label: "Front-desk hours alerts", count: data.frontDeskAlerts, href: "/admin/front-desk" } : null,
+        data.frontDeskReview ? { label: "Front-desk visits to review", count: data.frontDeskReview, href: "/admin/front-desk" } : null,
       ].filter((item): item is { label: string; count: number; href: string } => Boolean(item)),
       upcoming,
     };
@@ -178,7 +185,7 @@ function AdminDashboardContent() {
         {loading && !view ? <div className="flex items-center justify-center py-24"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div> : null}
         {view ? <>
           <section className="mt-8 grid gap-px overflow-hidden rounded-3xl bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">{view.metrics.map(([label, value, note]) => <div key={label} className="bg-white p-5"><p className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p><p className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{value}</p><p className="mt-1 text-xs text-slate-500">{note || "Last 30 days"}</p></div>)}</section>
-          <section className="mt-10 grid gap-8 lg:grid-cols-2"><div><div className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Action required</h2></div>{view.actions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.actions.map((item) => <Link key={item.label} href={item.href} className="flex min-h-16 items-center gap-4 py-3"><span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-900">{item.count}</span><span className="flex-1 text-sm font-semibold text-slate-900">{item.label}</span><ArrowRight className="h-4 w-4 text-slate-400" /></Link>)}</div> : <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900">No tracked payment, membership, access, or nurture exceptions currently require action.</p>}{data?.nurtureUnavailable ? <p className="mt-3 text-sm text-slate-600" role="status">{"Nurture failures couldn't be checked just now, so they aren't counted here. Open Nurture to see its status."}</p> : null}</div><div><div className="flex items-center gap-2"><CalendarClock className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Next bookings</h2></div><div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.upcoming.map((booking) => <div key={booking.id} className="flex items-center justify-between gap-4 py-3 text-sm"><span><span className="block font-medium text-slate-950">{String(booking.resourceName || booking.resourceId || "Space")}</span><span className="text-xs text-slate-500">{String(booking.userName || booking.guestEmail || "Member")}</span></span><span className="text-right text-xs text-slate-600">{new Date(Number(booking.start)).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}</span></div>)}{view.upcoming.length === 0 ? <p className="py-5 text-sm text-slate-500">No confirmed future bookings.</p> : null}</div></div></section>
+          <section className="mt-10 grid gap-8 lg:grid-cols-2"><div><div className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Action required</h2></div>{view.actions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.actions.map((item) => <Link key={item.label} href={item.href} className="flex min-h-16 items-center gap-4 py-3"><span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-900">{item.count}</span><span className="flex-1 text-sm font-semibold text-slate-900">{item.label}</span><ArrowRight className="h-4 w-4 text-slate-400" /></Link>)}</div> : <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900">No tracked payment, membership, access, or nurture exceptions currently require action.</p>}{data?.nurtureUnavailable ? <p className="mt-3 text-sm text-slate-600" role="status">{"Nurture failures couldn't be checked just now, so they aren't counted here. Open Nurture to see its status."}</p> : null}{data?.frontDeskUnavailable && ADMIN_CAPABILITIES.frontDesk.live ? <p className="mt-3 text-sm text-slate-600" role="status">{"Front-desk alerts couldn't be checked just now, so they aren't counted here. Open Front desk to see them."}</p> : null}</div><div><div className="flex items-center gap-2"><CalendarClock className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Next bookings</h2></div><div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.upcoming.map((booking) => <div key={booking.id} className="flex items-center justify-between gap-4 py-3 text-sm"><span><span className="block font-medium text-slate-950">{String(booking.resourceName || booking.resourceId || "Space")}</span><span className="text-xs text-slate-500">{String(booking.userName || booking.guestEmail || "Member")}</span></span><span className="text-right text-xs text-slate-600">{new Date(Number(booking.start)).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}</span></div>)}{view.upcoming.length === 0 ? <p className="py-5 text-sm text-slate-500">No confirmed future bookings.</p> : null}</div></div></section>
           <section className="mt-12 border-t border-slate-300 pt-8"><h2 className="text-xl font-semibold text-slate-950">Operating workspaces</h2><div className="mt-5 grid gap-px overflow-hidden rounded-3xl bg-slate-200 sm:grid-cols-2 lg:grid-cols-3">{MODULES.map((module) => { const Icon = module.icon; return <Link key={module.href} href={module.href} className="group min-h-32 bg-white p-5 transition hover:bg-slate-50"><div className="flex items-start justify-between"><Icon className="h-5 w-5 text-slate-500" /><ArrowRight className="h-4 w-4 text-slate-300" /></div><h3 className="mt-4 flex flex-wrap items-center gap-2 font-semibold text-slate-950">{module.label}{module.capability && !ADMIN_CAPABILITIES[module.capability].live ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Not live yet</span> : null}</h3><p className="mt-1 text-sm leading-5 text-slate-600">{module.description}</p></Link>; })}</div></section>
           <section className="mt-9 flex flex-col gap-4 border-t border-slate-200 pt-7 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="flex items-center gap-2 text-sm font-semibold text-slate-950"><Rocket className="h-4 w-4 text-slate-500" /> Public site mode</h2><p className="mt-1 text-sm text-slate-600" id="site-mode-status">{siteSettings.comingSoonEnabled ? "The public site shows the Coming Soon page. Member and staff pages still work." : "The public site is open to everyone."}</p></div><button type="button" onClick={() => setConfirmSiteMode(true)} disabled={savingComingSoon} aria-describedby="site-mode-status" className={`inline-flex min-h-11 items-center justify-center rounded-full px-5 text-sm font-semibold ${siteSettings.comingSoonEnabled ? "bg-emerald-700 text-white" : "border border-slate-300 text-slate-900"}`}>{siteSettings.comingSoonEnabled ? "Open site to public…" : "Switch to Coming Soon…"}</button></section>
           <ConfirmSheet
