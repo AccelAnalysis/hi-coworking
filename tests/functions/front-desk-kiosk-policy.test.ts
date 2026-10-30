@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   attendanceFlag,
+  bookingMinutesUsedByVisit,
+  visitOverlapsBooking,
   autoClosePlan,
   closingTimeFromIntervals,
   computeAllowance,
@@ -137,6 +139,43 @@ describe("Eastern time and daylight saving", () => {
     const checkIn = easternEpoch("2026-11-01", "00:30");
     const checkOut = easternEpoch("2026-11-01", "03:30");
     expect(computeOverage({ checkInAt: checkIn, checkOutAt: checkOut, allowanceMinutes: 180 }).actualMinutes).toBe(240);
+  });
+});
+
+describe("same-day repeat visits against one booking", () => {
+  const booking = { id: "b", start: 0, end: 60 * MIN, status: "CONFIRMED", resourceId: "seat-1" };
+  it("deducts booked minutes used by earlier closed visits", () => {
+    const used = bookingMinutesUsedByVisit({ allowanceSource: "booking", allowanceMinutes: 60, checkInAt: 0, checkOutAt: 60 * MIN });
+    expect(used).toBe(60);
+    const second = computeAllowance({ dayBookings: [booking], includedHoursPerMonth: null, usedBookingHoursThisMonth: 0, walkInIncludedMinutesThisMonth: 0, bookingMinutesUsedToday: used });
+    expect(second.source).toBe("booking");
+    expect(second.allowanceMinutes).toBe(0);
+    expect(computeOverage({ checkInAt: 2 * 60 * MIN, checkOutAt: 3 * 60 * MIN, allowanceMinutes: second.allowanceMinutes }).overageMinutes).toBe(60);
+  });
+  it("caps a visit's use at its allowance and ignores open or monthly visits", () => {
+    expect(bookingMinutesUsedByVisit({ allowanceSource: "booking", allowanceMinutes: 30, checkInAt: 0, checkOutAt: 90 * MIN })).toBe(30);
+    expect(bookingMinutesUsedByVisit({ allowanceSource: "booking", allowanceMinutes: 60, checkInAt: 0, checkOutAt: 20 * MIN })).toBe(20);
+    expect(bookingMinutesUsedByVisit({ allowanceSource: "booking", allowanceMinutes: 60, checkInAt: 0, checkOutAt: null })).toBe(0);
+    expect(bookingMinutesUsedByVisit({ allowanceSource: "monthly", allowanceMinutes: 60, checkInAt: 0, checkOutAt: 60 * MIN })).toBe(0);
+    const partial = computeAllowance({ dayBookings: [booking], includedHoursPerMonth: null, usedBookingHoursThisMonth: 0, walkInIncludedMinutesThisMonth: 0, bookingMinutesUsedToday: 20 });
+    expect(partial.allowanceMinutes).toBe(40);
+  });
+});
+
+describe("attendance needs an overlapping visit", () => {
+  const start = easternEpoch("2026-11-04", "14:00");
+  const end = easternEpoch("2026-11-04", "16:00");
+  it("does not count an earlier, closed morning visit", () => {
+    const morning = { checkInAt: easternEpoch("2026-11-04", "09:00"), checkOutAt: easternEpoch("2026-11-04", "11:00") };
+    expect(visitOverlapsBooking(morning, { start, end })).toBe(false);
+  });
+  it("counts open visits, visits inside the window, and visits that end inside it", () => {
+    expect(visitOverlapsBooking({ checkInAt: easternEpoch("2026-11-04", "09:00"), checkOutAt: null }, { start, end })).toBe(true);
+    expect(visitOverlapsBooking({ checkInAt: start + 20 * MIN, checkOutAt: end + 30 * MIN }, { start, end })).toBe(true);
+    expect(visitOverlapsBooking({ checkInAt: start - 60 * MIN, checkOutAt: start + 5 * MIN }, { start, end })).toBe(true);
+  });
+  it("does not count a visit that starts after the booking ends", () => {
+    expect(visitOverlapsBooking({ checkInAt: end, checkOutAt: null }, { start, end })).toBe(false);
   });
 });
 

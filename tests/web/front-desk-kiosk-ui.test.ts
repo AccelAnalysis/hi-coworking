@@ -156,4 +156,9 @@ describe("front-desk admin and member wiring", () => {
     expect(page).toContain('requiredRole="staff"');
     expect(page).toMatch(/reason/i);
   });
+  it("ignores late lookup, check-in and check-out responses after the kiosk resets", () => {
+    const source = read("src/components/kiosk/FrontDeskKiosk.tsx");
+    expect(source).toMatch(/const goStart = useCallback\(\(\) => \{\s*flowRef\.current \+= 1;/);
+    expect(source.match(/if \(flowRef\.current !== flow\) return;/g)?.length).toBe(3);
+  });
 });

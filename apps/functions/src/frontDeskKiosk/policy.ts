@@ -181,6 +181,8 @@ export function computeAllowance(input: {
   includedHoursPerMonth: number | null;
   usedBookingHoursThisMonth: number;
   walkInIncludedMinutesThisMonth: number;
+  /** Booked minutes already used by earlier closed visits the same day. */
+  bookingMinutesUsedToday?: number;
 }): Allowance {
   const remainingMonthlyMinutes = input.includedHoursPerMonth && input.includedHoursPerMonth > 0
     ? Math.max(
@@ -197,7 +199,7 @@ export function computeAllowance(input: {
     const minutes = input.dayBookings.reduce((sum, b) => sum + (b.end - b.start) / MINUTE_MS, 0);
     return {
       source: "booking",
-      allowanceMinutes: Math.round(minutes),
+      allowanceMinutes: Math.max(0, Math.round(minutes - Math.max(0, input.bookingMinutesUsedToday ?? 0))),
       bookedWindow: {
         start: Math.min(...input.dayBookings.map((b) => b.start)),
         end: Math.max(...input.dayBookings.map((b) => b.end)),
@@ -255,6 +257,27 @@ export function hoursAlertReason(input: {
 // ---------------------------------------------------- late / no-show ----
 
 export type AttendanceFlag = "late" | "no_show";
+
+/**
+ * Booked minutes an earlier, closed same-day visit used up: its stay capped
+ * at the allowance it was given. Open visits use nothing yet.
+ */
+export function bookingMinutesUsedByVisit(visit: { allowanceSource?: unknown; allowanceMinutes?: unknown; checkInAt?: unknown; checkOutAt?: unknown }): number {
+  if (visit.allowanceSource !== "booking" || visit.checkOutAt == null) return 0;
+  const stay = Math.max(0, (Number(visit.checkOutAt) - Number(visit.checkInAt)) / MINUTE_MS);
+  const allowed = Math.max(0, Number(visit.allowanceMinutes || 0));
+  return Number.isFinite(stay) ? Math.round(Math.min(stay, allowed)) : 0;
+}
+
+/** True when a visit overlaps the booking window (an open visit runs on). */
+export function visitOverlapsBooking(
+  visit: { checkInAt?: unknown; checkOutAt?: unknown },
+  booking: { start: number; end: number },
+): boolean {
+  const checkInAt = Number(visit.checkInAt);
+  if (!Number.isFinite(checkInAt) || checkInAt >= booking.end) return false;
+  return visit.checkOutAt == null || Number(visit.checkOutAt) > booking.start;
+}
 
 export function attendanceFlag(input: { start: number; end: number; hasVisit: boolean; now: number }): AttendanceFlag | null {
   if (input.hasVisit) return null;

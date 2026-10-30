@@ -14,6 +14,8 @@ import {
   LOOKUPS_PER_MINUTE,
   STAFF_ROLES,
   attendanceFlag,
+  bookingMinutesUsedByVisit,
+  visitOverlapsBooking,
   autoClosePlan,
   closingTimeFromIntervals,
   computeAllowance,
@@ -220,6 +222,10 @@ export async function allowanceContext(uid: string, user: FirebaseFirestore.Docu
     const b = doc.data();
     return { id: doc.id, start: Number(b.start), end: Number(b.end), status: b.status, resourceId: b.resourceId, userId: b.userId };
   });
+  const bookingMinutesUsedToday = visitSnap.docs
+    .map((doc) => doc.data())
+    .filter((v) => v.dayKey === dayKey)
+    .reduce((sum, v) => sum + bookingMinutesUsedByVisit(v), 0);
   const walkInIncluded = visitSnap.docs
     .map((doc) => doc.data())
     .filter((v) => v.monthKey === monthKey && v.allowanceSource === "monthly")
@@ -233,6 +239,7 @@ export async function allowanceContext(uid: string, user: FirebaseFirestore.Docu
     includedHoursPerMonth: hasDeskPlan && tier ? tier.includedHoursPerMonth : null,
     usedBookingHoursThisMonth: usage ? usage.usedHours + reservedHours : 0,
     walkInIncludedMinutesThisMonth: walkInIncluded,
+    bookingMinutesUsedToday,
   });
   return {
     allowance,
@@ -533,7 +540,7 @@ export async function runAttendanceSweep(now = Date.now()) {
   let flagged = 0;
   for (const booking of bookings) {
     if (!booking.userId) continue;
-    const hasVisit = visits.some((v) => v.uid === booking.userId && Number(v.checkInAt) < booking.end);
+    const hasVisit = visits.some((v) => v.uid === booking.userId && visitOverlapsBooking(v, booking));
     const flag = attendanceFlag({ start: booking.start, end: booking.end, hasVisit, now });
     const ref = db().collection(COL.flags).doc(booking.id);
     const existing = await ref.get();

@@ -86,6 +86,8 @@ export function FrontDeskKiosk() {
   const screenRef = useRef<Screen>(screen);
   const idleRef = useRef(false);
   const settingsRef = useRef<KioskSettings>(DEFAULT_SETTINGS);
+  /** Bumped on every reset so late responses from an abandoned flow are ignored. */
+  const flowRef = useRef(0);
 
   useKioskScreen(Boolean(user));
 
@@ -97,6 +99,7 @@ export function FrontDeskKiosk() {
   }, []);
 
   const goStart = useCallback(() => {
+    flowRef.current += 1;
     setQuery("");
     setBusy(false);
     setScreen({ name: "start" });
@@ -201,16 +204,18 @@ export function FrontDeskKiosk() {
         setError("Enter your email or member code.");
         return;
       }
+      const flow = flowRef.current;
       setBusy(true);
       setError(null);
       try {
         const result = await kioskLookupMember({ query: value });
+        if (flowRef.current !== flow) return;
         setQuery("");
         setScreen({ name: "confirm", mode, lookup: result.data, requestId: newRequestId() });
       } catch (caught) {
-        handleFailure(caught);
+        if (flowRef.current === flow) handleFailure(caught);
       } finally {
-        setBusy(false);
+        if (flowRef.current === flow) setBusy(false);
       }
     },
     [query, setScreen, handleFailure],
@@ -218,22 +223,25 @@ export function FrontDeskKiosk() {
 
   const confirm = useCallback(
     async (mode: Mode, lookup: KioskLookup, requestId: string) => {
+      const flow = flowRef.current;
       setBusy(true);
       setError(null);
       try {
         if (mode === "check_in") {
           const { data } = await kioskCheckIn({ lookupId: lookup.lookupId, requestId });
+          if (flowRef.current !== flow) return;
           if (data.status === "checked_in") setScreen({ name: "checked_in", result: data });
           else setScreen({ name: "already_in", firstName: data.firstName, checkInAt: data.checkInAt });
         } else {
           const { data } = await kioskCheckOut({ lookupId: lookup.lookupId, requestId });
+          if (flowRef.current !== flow) return;
           if (data.status === "checked_out") setScreen({ name: "checked_out", result: data });
           else setScreen({ name: "not_in", firstName: data.firstName });
         }
       } catch (caught) {
-        handleFailure(caught);
+        if (flowRef.current === flow) handleFailure(caught);
       } finally {
-        setBusy(false);
+        if (flowRef.current === flow) setBusy(false);
       }
     },
     [setScreen, handleFailure],
