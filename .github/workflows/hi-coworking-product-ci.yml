@@ -207,6 +207,7 @@ jobs:
           tests/functions/front-desk-kiosk-tasks.test.ts
           tests/web/front-desk-kiosk-ui.test.ts
           tests/web/public-launch-gate.test.ts
+          tests/web/safari15-support.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -240,6 +241,9 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: demo-hi-coworking.appspot.com
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
           NEXT_PUBLIC_FIREBASE_APP_ID: 1:1234567890:web:demo
+
+      - name: Verify exported JavaScript parses on Safari 15 (front-desk iPad)
+        run: npm run check:safari15
 
       - name: Verify Firebase Hosting serves exported Admin routes
         shell: bash
