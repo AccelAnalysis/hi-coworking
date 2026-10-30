@@ -17,7 +17,7 @@ export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: 
     note: "Campaign sending isn't switched on yet. You can draft campaigns, but queuing sends won't work until it's deployed.",
   },
   frontDesk: {
-    live: false,
+    live: true,
     note: "The front-desk kiosk isn't switched on yet. Visits, alerts and devices will appear here once the front-desk kiosk functions and rules are deployed.",
   },
 };
