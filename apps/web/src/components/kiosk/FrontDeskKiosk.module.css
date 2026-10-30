@@ -1,0 +1,79 @@
+/*
+ * Front-desk kiosk motion. Opacity crossfades only, plus a slight rise for
+ * the idle mark when motion is allowed. Under prefers-reduced-motion the rise
+ * and the breathing are dropped and only the crossfade remains.
+ */
+
+.screen {
+  animation: screen-in 280ms ease-out both;
+}
+
+.idle {
+  transition: opacity 900ms ease-in-out, visibility 0s linear 900ms;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.idleVisible {
+  transition: opacity 900ms ease-in-out, visibility 0s linear 0s;
+  opacity: 1;
+  visibility: visible;
+}
+
+.idleMark {
+  transition: transform 1200ms ease-out;
+  transform: translateY(12px) scale(0.97);
+}
+
+.idleVisible .idleMark {
+  transform: translateY(0) scale(1);
+  animation: breathe 6s ease-in-out 1.2s infinite;
+}
+
+.glow {
+  background:
+    radial-gradient(60% 55% at 8% 100%, rgba(74, 85, 133, 0.55), rgba(16, 29, 75, 0) 70%),
+    linear-gradient(180deg, #101d4b 0%, #0e1a44 100%);
+}
+
+@keyframes screen-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.025);
+  }
+}
+
+@keyframes fade-only {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen {
+    animation: fade-only 200ms linear both;
+  }
+  .idleMark,
+  .idleVisible .idleMark {
+    transition: none;
+    transform: none;
+    animation: none;
+  }
+}

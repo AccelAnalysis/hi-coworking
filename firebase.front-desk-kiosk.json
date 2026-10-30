@@ -1,0 +1,13 @@
+{
+  "functions": [
+    {
+      "source": "firebase/front-desk-kiosk-functions",
+      "codebase": "front-desk-kiosk",
+      "region": "us-central1",
+      "predeploy": [
+        "rm -rf firebase/front-desk-kiosk-functions/lib",
+        "npm run build --workspace functions -- --project ../../firebase/front-desk-kiosk-functions/tsconfig.json"
+      ]
+    }
+  ]
+}

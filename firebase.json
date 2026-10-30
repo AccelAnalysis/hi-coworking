@@ -56,6 +56,12 @@
         "headers": [
           { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" }
         ]
+      },
+      {
+        "source": "/kiosk/front-desk.webmanifest",
+        "headers": [
+          { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" }
+        ]
       }
     ],
     "rewrites": [

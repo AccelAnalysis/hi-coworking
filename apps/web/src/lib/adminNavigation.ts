@@ -18,6 +18,7 @@ export const ADMIN_ROUTES: Record<string, AdminRoute> = {
   "/admin/spaces/catalog": { label: "Published setups" },
   "/admin/builder": { label: "Visual designer" },
   "/admin/access": { label: "Door access" },
+  "/admin/front-desk": { label: "Front desk" },
   "/admin/nurture": { label: "Nurture" },
   "/admin/events": { label: "Events" },
   "/admin/events/new": { label: "Event editor", parent: "/admin/events" },

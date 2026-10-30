@@ -22,6 +22,7 @@ on:
       - "firebase/bookstore-functions/**"
       - "firebase/space-catalog-functions/**"
       - "firebase/member-record-functions/**"
+      - "firebase/front-desk-kiosk-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
@@ -34,6 +35,7 @@ on:
       - "firebase.bookstore.json"
       - "firebase.space-catalog.json"
       - "firebase.member-record.json"
+      - "firebase.front-desk-kiosk.json"
       - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-core-functions.yml"
       - ".github/workflows/firebase-live-expo-lead-function.yml"
@@ -42,6 +44,7 @@ on:
       - ".github/workflows/firebase-live-bookstore.yml"
       - ".github/workflows/firebase-live-space-catalog.yml"
       - ".github/workflows/firebase-live-member-record.yml"
+      - ".github/workflows/firebase-live-front-desk-kiosk.yml"
       - "tests/functions/**"
       - "tests/rules/**"
       - "firestore.rules"
@@ -131,6 +134,9 @@ jobs:
       - name: Build isolated member record deploy bundle
         run: npm run build --workspace functions -- --project ../../firebase/member-record-functions/tsconfig.json
 
+      - name: Build isolated front-desk kiosk deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/front-desk-kiosk-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -196,6 +202,9 @@ jobs:
           tests/web/admin-back-navigation.test.ts
           tests/web/admin-booking-actions.test.ts
           tests/web/admin-a11y-guards.test.ts
+          tests/functions/front-desk-kiosk-policy.test.ts
+          tests/functions/front-desk-kiosk-source.test.ts
+          tests/web/front-desk-kiosk-ui.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -208,14 +217,15 @@ jobs:
           tests/functions/events-v2.test.ts
           tests/functions/event-interest-sms-optional.test.ts
           tests/functions/admin-member-credit.test.ts
-          tests/functions/admin-booking-management.test.ts"
+          tests/functions/admin-booking-management.test.ts
+          tests/functions/front-desk-kiosk.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-
           npx firebase emulators:exec
           --project demo-hi-coworking
           --only firestore
-          "npx vitest run tests/rules/events-v2.rules.test.ts"
+          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts"
 
       - name: Build production web application
         run: npm run build
@@ -249,6 +259,8 @@ jobs:
             'admin/roles',
             'admin/events',
             'staff',
+            'admin/front-desk',
+            'kiosk/front-desk',
           ];
 
           for (const route of routes) {
