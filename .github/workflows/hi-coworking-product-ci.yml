@@ -206,6 +206,7 @@ jobs:
           tests/functions/front-desk-kiosk-source.test.ts
           tests/functions/front-desk-kiosk-tasks.test.ts
           tests/web/front-desk-kiosk-ui.test.ts
+          tests/web/public-launch-gate.test.ts
 
       - name: Run active transaction integration tests
         run: >-
