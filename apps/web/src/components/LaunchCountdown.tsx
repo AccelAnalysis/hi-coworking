@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PUBLIC_LAUNCH_AT, isPublicLaunchReached } from "@/lib/publicLaunch";
 import styles from "./LaunchCountdown.module.css";
-
-// November 1 is in Eastern Standard Time (UTC-05:00), after DST ends.
-export const PUBLIC_LAUNCH_AT = new Date("2026-11-01T08:00:00-05:00").getTime();
 
 type CountdownValue = {
   days: string;
@@ -49,7 +47,7 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
       const now = Date.now();
       setCountdown(getCountdownValue(now));
 
-      if (now >= PUBLIC_LAUNCH_AT) {
+      if (isPublicLaunchReached(now)) {
         onComplete?.();
       }
     };
