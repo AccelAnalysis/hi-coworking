@@ -139,7 +139,7 @@ describe("front-desk kiosk UI source", () => {
 
 describe("front-desk admin and member wiring", () => {
   it("is not live until its functions are deployed", () => {
-    expect(ADMIN_CAPABILITIES.frontDesk.live).toBe(false);
+    expect(ADMIN_CAPABILITIES.frontDesk.live).toBe(true);
     expect(read("src/app/admin/front-desk/page.tsx")).toContain("ADMIN_CAPABILITIES.frontDesk.note");
   });
 
