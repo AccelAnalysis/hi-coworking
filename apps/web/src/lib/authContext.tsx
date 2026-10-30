@@ -41,6 +41,9 @@ const AuthContext = createContext<AuthContextType>({
   refreshClaims: async () => {},
 });
 
+/** Longest the app waits for Firebase Auth before showing signed-out or signed-in UI. */
+export const AUTH_READY_TIMEOUT_MS = 8000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,18 +58,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ID token listener: updates on sign-in/sign-out and token refresh (incl. custom claims changes)
   useEffect(() => {
+    // Never leave the app on a loading screen: if the first auth answer or the
+    // claims fetch stalls (seen on an iPad home-screen app), stop waiting.
+    const giveUp = window.setTimeout(() => setLoading(false), AUTH_READY_TIMEOUT_MS);
     const unsubscribe = onIdTokenChanged(auth, async (u) => {
       setUser(u);
-      if (u) {
-        await fetchClaims(u);
-      } else {
-        setClaims(null);
-        setUserDoc(null);
+      try {
+        if (u) {
+          await fetchClaims(u);
+        } else {
+          setClaims(null);
+          setUserDoc(null);
+        }
+      } catch (error) {
+        console.error("Could not read sign-in claims", error);
+      } finally {
+        window.clearTimeout(giveUp);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      window.clearTimeout(giveUp);
+      unsubscribe();
+    };
   }, [fetchClaims]);
 
   // Real-time listener for Firestore user doc (entitlements)

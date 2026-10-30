@@ -71,6 +71,22 @@ function serverMessage(caught: unknown): string {
   return `Something went wrong. ${KIOSK_STAFF_MESSAGE}`;
 }
 
+
+/** How long the kiosk waits for its session before treating the network as down. */
+const SESSION_TIMEOUT_MS = 15_000;
+/** When to offer "Try again" on the start-up screen. */
+const SLOW_START_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(Object.assign(new Error("internal"), { code: "functions/unavailable" })), ms);
+    promise.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      (error) => { window.clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export function FrontDeskKiosk() {
   const { user, loading, signIn, signOut } = useAuth();
   const [session, setSession] = useState<Session>({ state: "loading" });
@@ -80,6 +96,7 @@ export function FrontDeskKiosk() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [slowStart, setSlowStart] = useState(false);
 
   const lastActivity = useRef(0);
   const logoShownAt = useRef(0);
@@ -108,7 +125,7 @@ export function FrontDeskKiosk() {
   // ------------------------------------------------------------- session
   const loadSession = useCallback(async () => {
     try {
-      const result = await kioskSession({});
+      const result = await withTimeout(kioskSession({}), SESSION_TIMEOUT_MS);
       settingsRef.current = result.data.settings;
       setOffline(false);
       setSession({ state: "ready", deviceLabel: result.data.deviceLabel, settings: result.data.settings });
@@ -129,6 +146,16 @@ export function FrontDeskKiosk() {
     const timer = window.setInterval(() => void loadSession(), SESSION_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [loading, user, loadSession]);
+
+  // A start-up that takes this long is stuck; offer a reload instead of a frozen screen.
+  useEffect(() => {
+    if (!(loading || (user && session.state === "loading"))) {
+      setSlowStart(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlowStart(true), SLOW_START_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading, user, session.state]);
 
   // ------------------------------------------------------------- offline
   useEffect(() => {
@@ -249,7 +276,18 @@ export function FrontDeskKiosk() {
 
   // --------------------------------------------------------------- views
   if (loading || (user && session.state === "loading")) {
-    return <Frame><p className={body} role="status">Getting the front desk ready…</p></Frame>;
+    return (
+      <Frame>
+        <div className="mx-auto flex w-full max-w-[640px] flex-col items-center gap-8 text-center">
+          <p className={body} role="status">Getting the front desk ready…</p>
+          {slowStart && (
+            <button type="button" className={secondaryButton} onClick={() => window.location.reload()}>
+              Try again
+            </button>
+          )}
+        </div>
+      </Frame>
+    );
   }
 
   if (!user) return <KioskSignIn signIn={signIn} />;
