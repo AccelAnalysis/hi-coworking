@@ -196,6 +196,7 @@ jobs:
           tests/web/admin-back-navigation.test.ts
           tests/web/admin-booking-actions.test.ts
           tests/web/admin-a11y-guards.test.ts
+          tests/web/public-launch-gate.test.ts
 
       - name: Run active transaction integration tests
         run: >-

@@ -9,7 +9,8 @@ import {
   type PublicSiteSettingsDoc,
 } from "@/lib/firestore";
 import { ComingSoonExperience } from "@/components/ComingSoonExperience";
-import { LaunchCountdown, PUBLIC_LAUNCH_AT } from "@/components/LaunchCountdown";
+import { LaunchCountdown } from "@/components/LaunchCountdown";
+import { PUBLIC_LAUNCH_AT, isPublicLaunchReached } from "@/lib/publicLaunch";
 
 const DEFAULT_SETTINGS: PublicSiteSettingsDoc = {
   id: "public",
@@ -53,7 +54,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
   const { loading: authLoading, role } = useAuth();
   const [settings, setSettings] = useState<PublicSiteSettingsDoc>(DEFAULT_SETTINGS);
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [launchReached, setLaunchReached] = useState(() => Date.now() >= PUBLIC_LAUNCH_AT);
+  const [launchReached, setLaunchReached] = useState(() => isPublicLaunchReached(Date.now()));
 
   useEffect(() => {
     const unsub = subscribeToPublicSiteSettings((next) => {
