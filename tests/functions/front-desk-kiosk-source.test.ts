@@ -52,7 +52,7 @@ describe("front-desk kiosk functions source", () => {
     expect(src.match(/onTaskDispatched\(/g)?.length).toBe(1);
     expect(src).toContain("export const kioskFrontDeskTask = onTaskDispatched(");
     expect(src).toMatch(/retryConfig: \{ maxAttempts: 5, minBackoffSeconds: 30/);
-    expect(src).toContain('export const kiosk_onBookingWritten = onDocumentWritten(\n  { document: "bookings/{bookingId}", retry: true }');
+    expect(src).toContain('export const kiosk_onBookingWritten = onDocumentWritten(\n  { document: "bookings/{bookingId}" }');
   });
 
   it("enqueues with deterministic task IDs on the kioskFrontDeskTask queue", () => {
