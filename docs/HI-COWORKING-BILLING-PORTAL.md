@@ -1,6 +1,6 @@
 # Hi Coworking self-serve billing (Stripe Customer Portal)
 
-Members manage their own billing from **My Hi** (https://hi-coworking.com/my-hi).
+Members manage their own billing from **SayHi** (https://hi-coworking.com/my-hi).
 The membership card has a **Manage membership & billing** button. It calls the
 callable `members_createBillingPortalSession`, which opens a Stripe Customer
 Portal session for the member's own Stripe customer and sends them there.
@@ -51,7 +51,7 @@ The portal configuration comes from `STRIPE_BILLING_PORTAL_CONFIGURATION_ID`
 Applied in a transaction to the member found the same way as invoice events.
 It sets `plan` from the subscription's price (unknown prices keep the plan and
 log a warning), `cancelAtPeriodEnd` and `cancelAt` (ms, shown as "Ends on
-{date}" on My Hi), and fills `stripeCustomerId` / `features.stripeSubscriptionId`
+{date}" on SayHi), and fills `stripeCustomerId` / `features.stripeSubscriptionId`
 when missing. It never changes `membershipStatus` or `expiresAt`: access still
 ends only on `customer.subscription.deleted`, and payment state stays with the
 invoice events. It skips members who are not active/trial/pastDue (a cancelled

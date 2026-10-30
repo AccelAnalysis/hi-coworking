@@ -339,7 +339,7 @@ export function FrontDeskKiosk() {
                   placeholder="Email or 6-character code"
                 />
                 <p id="kiosk-lookup-hint" className="text-[20px] text-[#3A4675]">
-                  Your member code is on your My Hi page.
+                  Your member code is on your SayHi page.
                 </p>
               </div>
               <ErrorText error={error} />

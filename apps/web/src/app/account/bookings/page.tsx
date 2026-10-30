@@ -257,7 +257,7 @@ function AccountBookingsContent() {
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-slate-600">
-              My Hi
+              SayHi
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
               Your space at Hi Coworking

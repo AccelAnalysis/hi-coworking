@@ -754,7 +754,7 @@ export const admin_membershipReactivate = onCall(
       currency: tier.currency,
       purpose: "membership",
       purposeRefId: tier.id,
-      // Land on My Hi with the same welcome banner as self-serve Checkout.
+      // Land on SayHi with the same welcome banner as self-serve Checkout.
       successUrl: `${origin}/my-hi?payment=success&plan=${encodeURIComponent(tier.id)}`,
       cancelUrl: `${origin}/pricing?membership=cancelled`,
       metadata: {

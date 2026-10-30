@@ -139,7 +139,7 @@ export function renderRefundEmail(input: {
     `We've refunded ${amount} to ${destination}.`
       + (partial ? ` This is a partial refund of your ${formatMoney(input.chargeAmountCents || 0, input.currency)} payment.` : ""),
     "Refunds usually take 5–10 business days to appear on your statement, depending on your bank.",
-    "You can see your membership and billing details in My Hi at any time.",
+    "You can see your membership and billing details in SayHi at any time.",
   ];
   return layout({
     subject: `Your Hi Coworking refund of ${amount} is on its way`,
@@ -168,7 +168,7 @@ export function renderCancellationScheduledEmail(input: {
     paragraphs: [
       `We've received your request to cancel your ${plan}. Your membership stays active until ${date}, and it won't renew after that.`,
       "Until then, you can keep booking desks and the meeting room as usual.",
-      `If you change your mind, you can keep your membership: open My Hi and choose Manage membership & billing before ${date}.`,
+      `If you change your mind, you can keep your membership: open SayHi and choose Manage membership & billing before ${date}.`,
     ],
     accountUrl: `${origin}/my-hi`,
     linkLabel: "Manage membership & billing",
@@ -191,7 +191,7 @@ export function renderMembershipEndedEmail(input: {
     greeting: greetingFor(input.firstName),
     paragraphs: [
       `Your ${plan} ended on ${date}, and you won't be charged for it again.`,
-      "Thank you for being part of Hi Coworking. If you'd like to come back, you can choose a plan again at any time from My Hi.",
+      "Thank you for being part of Hi Coworking. If you'd like to come back, you can choose a plan again at any time from SayHi.",
     ],
     accountUrl: `${origin}/my-hi`,
     linkLabel: "Manage membership & billing",

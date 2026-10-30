@@ -143,7 +143,7 @@ describe("front-desk admin and member wiring", () => {
     expect(read("src/app/admin/front-desk/page.tsx")).toContain("ADMIN_CAPABILITIES.frontDesk.note");
   });
 
-  it("tolerates missing callables on the dashboard and My Hi", () => {
+  it("tolerates missing callables on the dashboard and SayHi", () => {
     const dashboard = read("src/app/admin/dashboard/page.tsx");
     expect(dashboard).toContain('capability: "frontDesk"');
     expect(dashboard).toContain("adminKioskOverview({}).then((result) => result.data).catch(() => null)");

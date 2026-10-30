@@ -50,7 +50,7 @@ describe("membership copy on /my-hi", () => {
 });
 
 describe("Checkout return wiring", () => {
-  it("renders My Hi in place at /my-hi so the Checkout query string survives", () => {
+  it("renders SayHi in place at /my-hi so the Checkout query string survives", () => {
     const myHi = readFileSync("apps/web/src/app/my-hi/page.tsx", "utf8");
     expect(myHi).toContain('export { default } from "../account/bookings/page";');
     expect(myHi).not.toContain("redirect(");

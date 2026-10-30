@@ -104,7 +104,7 @@ activation; a later redelivery of the same event retries the send.
 
 Refunds also update `payments/<id>` (`refunded` or `partially_refunded`,
 `amountRefunded`, `refundedAt`, `stripeRefundIds`), set `users/<uid>.lastRefund`
-for My Hi, and write a `notifications/refund_<refundId>` doc (type `payment`).
+for SayHi, and write a `notifications/refund_<refundId>` doc (type `payment`).
 A refund never changes the membership itself; cancelling the subscription does.
 
 The live webhook endpoint must subscribe to `charge.refunded`,

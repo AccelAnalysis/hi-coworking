@@ -182,7 +182,7 @@ export interface MemberRefundSummary {
 }
 
 /**
- * users/{uid}.lastRefund for My Hi: the newest issued refund on the charge.
+ * users/{uid}.lastRefund for SayHi: the newest issued refund on the charge.
  * Returns null when nothing should change: an older charge than the one on
  * file, or a failure for a charge that was never shown.
  */
