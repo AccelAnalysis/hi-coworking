@@ -712,9 +712,11 @@ const BOOKING_EVENT_MAX_AGE_MS = 6 * 60 * MINUTE_MS;
  * One trigger on every booking write, so the seven booking write paths need
  * no changes. Re-enqueues only when the start, end, member or confirmed seat
  * status changed; cancelled or moved bookings leave their old tasks to no-op.
+ * No automatic retry: Firebase only enables a failure policy with --force, which we never use.
+ * A failed enqueue is logged; the booking simply gets no late or no-show flag.
  */
 export const kiosk_onBookingWritten = onDocumentWritten(
-  { document: "bookings/{bookingId}", retry: true },
+  { document: "bookings/{bookingId}" },
   async (event) => {
     const age = Date.now() - Date.parse(event.time);
     if (Number.isFinite(age) && age > BOOKING_EVENT_MAX_AGE_MS) {
