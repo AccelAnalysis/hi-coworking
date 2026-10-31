@@ -234,9 +234,9 @@ export function AppShell({
                         {isStaff && (
                           <Link
                             href="/staff"
-                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-emerald-700 transition-colors hover:bg-emerald-50"
+                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-[#3A4675] transition-colors hover:bg-[#EEF0F6]"
                           >
-                            <User className="h-4 w-4 text-emerald-500" />
+                            <User className="h-4 w-4 text-[#4A5585]" />
                             Staff
                           </Link>
                         )}
@@ -383,9 +383,9 @@ export function AppShell({
                   {isStaff && (
                     <Link
                       href="/staff"
-                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-emerald-700"
+                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-[#3A4675]"
                     >
-                      <User className="h-4 w-4 text-emerald-500" />
+                      <User className="h-4 w-4 text-[#4A5585]" />
                       Staff
                     </Link>
                   )}

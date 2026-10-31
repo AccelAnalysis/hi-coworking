@@ -142,12 +142,12 @@ export default function PricingPage() {
                     key={tier.id}
                     className={`bg-white rounded-2xl p-6 md:p-8 shadow-sm flex flex-col relative ${
                       isPopular
-                        ? "ring-2 ring-emerald-500/20 border border-emerald-200"
+                        ? "ring-2 ring-[#101D4B]/20 border border-[#C5CADB]"
                         : "ring-1 ring-slate-200"
                     }`}
                   >
                     {isPopular && (
-                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-semibold text-white bg-emerald-600 px-3 py-1 rounded-full shadow-lg shadow-emerald-600/20 uppercase tracking-wider">
+                      <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-semibold text-white bg-[#101D4B] px-3 py-1 rounded-full shadow-lg shadow-[#101D4B]/20 uppercase tracking-wider">
                         Best for regular use
                       </span>
                     )}
@@ -160,18 +160,18 @@ export default function PricingPage() {
                       <span className="text-lg text-slate-500 font-normal">/mo</span>
                     </p>
 
-                    <div className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                    <div className="mt-4 p-3 rounded-xl bg-[#EEF0F6] border border-[#C5CADB]">
                       {isVirtualOffice ? (
                         <>
-                          <p className="text-sm font-semibold text-emerald-900">No desk hours included</p>
-                          <p className="text-xs text-emerald-700 mt-0.5">Coworking desk use: $17.50/hr</p>
+                          <p className="text-sm font-semibold text-[#101D4B]">No desk hours included</p>
+                          <p className="text-xs text-[#3A4675] mt-0.5">Coworking desk use: $17.50/hr</p>
                         </>
                       ) : (
                         <>
-                          <p className="text-sm font-semibold text-emerald-900">
+                          <p className="text-sm font-semibold text-[#101D4B]">
                             {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
                           </p>
-                          <p className="text-xs text-emerald-700 mt-0.5">
+                          <p className="text-xs text-[#3A4675] mt-0.5">
                             Additional hours: {tier.id === "coworking" ? "20%" : "30%"} off the regular hourly price
                           </p>
                         </>
@@ -181,7 +181,7 @@ export default function PricingPage() {
                     <ul className="mt-5 space-y-3 flex-1">
                       {visibleFeatures.map((feature) => (
                         <li key={feature} className="flex items-center gap-3 text-slate-600 text-sm">
-                          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                          <div className="w-5 h-5 rounded-full bg-[#EEF0F6] flex items-center justify-center text-[#101D4B] shrink-0">
                             <Check size={12} strokeWidth={3} />
                           </div>
                           {feature}
