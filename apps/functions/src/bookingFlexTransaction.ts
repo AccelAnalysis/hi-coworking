@@ -6,6 +6,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
+import { sayhiFlowEnabled } from "./sayhi/config";
 import {
   GUEST_HOURLY_RATE_CENTS,
   getDeskMembershipTierById,
@@ -640,6 +641,8 @@ export const booking_beginCheckout = onCall(
       cancelUrl,
       mode: "payment",
       collectBillingAddress: true,
+      // SayHi overtime: keep the card for extra time past the booking.
+      saveCardForLaterCharges: sayhiFlowEnabled(),
       lineItemLabel: `${quote.resourceName} · ${quote.durationHours} hour${quote.durationHours === 1 ? "" : "s"}`,
       metadata: {
         paymentId: payment.id,

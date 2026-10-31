@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { resolveSayHiFlags } from "../../apps/web/src/lib/sayhiFlags";
 import { ACCESS_CODE_HINT, accessCodeView } from "../../apps/web/src/lib/accessCodeView";
 import { demoData, demoKind } from "../../apps/web/src/lib/sayhiDemo";
+import { billingAddressLines, readBillingAddress } from "../../apps/web/src/lib/billingAddressView";
 
 const read = (path: string) => readFileSync(path, "utf8");
 /** Source without comments, so only shipped strings are checked. */
@@ -148,5 +149,59 @@ describe("public site gate", () => {
     expect(gate).toContain("const previewBypass = SAYHI_FLOW && SAYHI_PREVIEW_DEMO;");
     expect(resolveSayHiFlags({}).demo).toBe(false);
     expect(resolveSayHiFlags({}).flow).toBe(false);
+  });
+});
+
+describe("SayHi billing pieces (Oct 31, 2026)", () => {
+  const terms = code("apps/web/src/app/terms/page.tsx");
+  const card = code("apps/web/src/components/kiosk/FrontDeskCard.tsx");
+  const myHi = code("apps/web/src/app/account/bookings/page.tsx");
+  const address = code("apps/web/src/components/sayhi/BillingAddressCard.tsx");
+
+  it("keeps the new Terms wording behind the SayHi flow", () => {
+    expect(terms).toContain("termsSections(SAYHI_FLOW)");
+    expect(terms).toContain('id: "extra-time"');
+    expect(terms).toMatch(/within 15 minutes after your booking ends/);
+    expect(terms).toMatch(/Everyone enters with their own\s+code/);
+    expect(terms).toMatch(/cancelled automatically, along with their door codes/);
+    expect(terms).toMatch(/at any time/);
+  });
+
+  it("switches the visits card to charging wording only with the flow on", () => {
+    expect(card).toContain("SAYHI_FLOW ? (");
+    expect(card).toContain("isn&apos;t charged automatically");
+    expect(card).toMatch(/no extra charge/);
+  });
+
+  it("shows the billing address and membership-end note only with the flow on", () => {
+    expect(myHi).toContain("SAYHI_FLOW ? (\n              <BillingAddressCard");
+    expect(myHi).toContain("if (!SAYHI_FLOW || !user) return;");
+    expect(myHi).toContain("SAYHI_FLOW && membershipEnds && !compMembership");
+    expect(address).toContain("<address");
+  });
+
+  it("formats the billing address readback", () => {
+    const value = readBillingAddress({ line1: "1 Sample St", line2: "", city: "Exampleville", state: "VA", postalCode: "00000", country: "us" });
+    expect(value && billingAddressLines(value)).toEqual(["1 Sample St", "Exampleville, VA 00000"]);
+    expect(readBillingAddress({ city: "Exampleville" })).toBeNull();
+    expect(readBillingAddress(null)).toBeNull();
+  });
+
+  it("has preview samples for every new piece, all fictional", () => {
+    expect(demoKind("?demo=ending")).toBe("ending");
+    const ending = demoData("ending", NOW);
+    expect(ending.userDoc).toMatchObject({ cancelAtPeriodEnd: true });
+    expect(demoData("member", NOW).kioskSummary?.visits.some((v) => v.chargeStatus === "billed_next_invoice")).toBe(true);
+    expect(demoData("guest", NOW).kioskSummary?.visits.some((v) => v.chargeStatus === "charged")).toBe(true);
+    expect(demoData("guest", NOW).billingAddress?.postalCode).toBe("00000");
+    expect(demoData("empty", NOW).billingAddress).toBeNull();
+    expect(JSON.stringify(ending)).not.toMatch(/@|\+1\d{10}|\(\d{3}\)/);
+  });
+
+  it("uses customer wording on the new pieces", () => {
+    for (const source of [terms, card, address, myHi]) {
+      expect(source).not.toMatch(/\bfree\b/i);
+      expect(source).not.toMatch(/\b(demo|feature flag|preview)\b[^"\n]*<\/(p|h2|span|li)>/i);
+    }
   });
 });

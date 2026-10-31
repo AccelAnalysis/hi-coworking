@@ -4,15 +4,63 @@
  * code. Production builds never set the flag, so this never renders there.
  */
 import type { AccessGrantSummary } from "@/lib/accessCodeView";
+import type { BillingAddress } from "@/lib/billingAddressView";
+import type { MemberKioskSummary } from "@/lib/frontDeskKiosk";
 
-export type DemoKind = "member" | "guest" | "empty";
+const HOUR = 3_600_000;
+
+/** member, guest, empty, and ending (a member whose cancellation is scheduled). */
+export type DemoKind = "member" | "guest" | "empty" | "ending";
 
 export function demoKind(search: string): DemoKind | null {
   const value = new URLSearchParams(search).get("demo");
-  return value === "member" || value === "guest" || value === "empty" ? value : null;
+  return value === "member" || value === "guest" || value === "empty" || value === "ending" ? value : null;
 }
 
-const HOUR = 3_600_000;
+/** Fictional address for the preview only. */
+const DEMO_BILLING_ADDRESS: BillingAddress = {
+  line1: "100 Sample Street",
+  line2: "Suite 2",
+  city: "Exampleville",
+  state: "VA",
+  postalCode: "00000",
+  country: "US",
+};
+
+function demoKioskSummary(kind: DemoKind, base: number): MemberKioskSummary | null {
+  if (kind === "empty") return null;
+  const guest = kind === "guest";
+  const day = 24 * HOUR;
+  const visit = (daysAgo: number, minutes: number, extra: Partial<MemberKioskSummary["visits"][number]>) => {
+    const checkInAt = base - daysAgo * day;
+    return {
+      visitId: `demo-visit-${daysAgo}`,
+      status: "closed",
+      checkInAt,
+      checkOutAt: checkInAt + minutes * 60_000,
+      actualMinutes: minutes,
+      overageMinutes: null,
+      needsReview: false,
+      overtimeMinutes: null,
+      overtimeCents: null,
+      chargeStatus: "not_charged",
+      ...extra,
+    };
+  };
+  const visits = guest
+    ? [visit(3, 150, { overageMinutes: 30, overtimeMinutes: 30, overtimeCents: 875, chargeStatus: "charged" })]
+    : [
+      visit(2, 250, { overageMinutes: 10 }),
+      visit(5, 285, { overageMinutes: 45, overtimeMinutes: 45, overtimeCents: 1050, chargeStatus: "billed_next_invoice" }),
+      visit(8, 235, {}),
+    ];
+  return {
+    monthKey: "2026-11",
+    visits,
+    totalOverageMinutes: visits.reduce((sum, v) => sum + Number(v.overageMinutes || 0), 0),
+  };
+}
+
 
 function nextWeekdayAt(base: number, daysAhead: number, hourEt: number) {
   const date = new Date(base + daysAhead * 24 * HOUR);
@@ -51,8 +99,25 @@ export function demoData(kind: DemoKind, now: number) {
     codeId: null,
     code: index === 2 ? null : codes[index],
   }));
-  const userDoc = kind === "member"
-    ? { plan: "coworking", membershipStatus: "active", accountCreditCents: 0 }
-    : { membershipStatus: "none", accountCreditCents: 0 };
-  return { bookings, grants, userDoc, displayName: kind === "member" ? "Sample Member" : "Sample Guest" };
+  const member = kind === "member" || kind === "ending";
+  const userDoc = kind === "ending"
+    ? {
+      plan: "coworking",
+      membershipStatus: "active",
+      accountCreditCents: 0,
+      cancelAtPeriodEnd: true,
+      // Ends after the first sample booking, before the later ones.
+      cancelAt: nextWeekdayAt(base, 1, 18),
+    }
+    : member
+      ? { plan: "coworking", membershipStatus: "active", accountCreditCents: 0 }
+      : { membershipStatus: "none", accountCreditCents: 0 };
+  return {
+    bookings,
+    grants,
+    userDoc,
+    displayName: member ? "Sample Member" : "Sample Guest",
+    billingAddress: kind === "empty" ? null : DEMO_BILLING_ADDRESS,
+    kioskSummary: demoKioskSummary(kind, base),
+  };
 }

@@ -41,3 +41,17 @@ export function membershipCheckoutExtras(input: {
   const item = { price: input.priceId, quantity: 1 };
   return input.chosen ? { lineItems: [item], optionalItems: [] } : { lineItems: [], optionalItems: [item] };
 }
+
+/**
+ * Server switch for the SayHi billing pieces Jonathan added on Oct 31, 2026:
+ * overtime charging, the billing-address readback, saving the card at a
+ * booking checkout for later overtime, and cancelling future bookings and
+ * door codes when a membership ends. Read from the environment like
+ * VIRTUAL_ADDRESS_ENABLED, so no deploy bundle gains a param. Unset or
+ * anything but exactly "true" keeps every one of those paths off.
+ */
+export const SAYHI_FLOW_ENABLED_PARAM = "SAYHI_FLOW_ENABLED";
+
+export function sayhiFlowEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return isFlagOn(env[SAYHI_FLOW_ENABLED_PARAM]);
+}

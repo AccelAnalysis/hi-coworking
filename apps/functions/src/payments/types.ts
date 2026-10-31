@@ -5,6 +5,8 @@
  * but are kept inline to avoid cross-package module issues in Cloud Functions.
  */
 
+import type { BillingAddress } from "../sayhi/billingAddress";
+
 // --- Payment Provider Enum ---
 
 export const PAYMENT_PROVIDERS = [
@@ -40,6 +42,11 @@ export interface CheckoutSessionInput {
   /** Extra recurring prices (virtual address add-on, off by default). */
   extraLineItems?: Array<{ price: string; quantity: number }>;
   optionalItems?: Array<{ price: string; quantity: number }>;
+  /**
+   * One-time payments only: keep the card on the Stripe customer so later
+   * extra time can be charged to it (SAYHI_FLOW_ENABLED, off by default).
+   */
+  saveCardForLaterCharges?: boolean;
 }
 
 export interface CheckoutSessionResult {
@@ -63,6 +70,8 @@ export interface WebhookResult {
   metadata?: Record<string, string>;
   /** Present for action "refund": the charge's refund state read from Stripe. */
   refund?: StripeRefundSnapshot;
+  /** checkout.session.completed: the billing address the customer entered. */
+  billingAddress?: BillingAddress | null;
 }
 
 /** One Stripe refund on a charge. */

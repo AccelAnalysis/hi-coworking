@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { httpsCallable } from "firebase/functions";
+import { doc, getDoc } from "firebase/firestore";
 import {
   ArrowRight,
   Calendar,
@@ -22,7 +23,7 @@ import { FrontDeskCard } from "@/components/kiosk/FrontDeskCard";
 import { MembershipWelcomeBanner } from "@/components/MembershipWelcomeBanner";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
-import { functions } from "@/lib/firebase";
+import { db, functions } from "@/lib/firebase";
 import { getUserBookingsFromFirestore } from "@/lib/firestore";
 import {
   compMembershipEnded,
@@ -37,7 +38,9 @@ import { MEMBERSHIP_TIERS, type Booking } from "@hi/shared";
 import { AccessCodeBlock } from "@/components/sayhi/AccessCodeBlock";
 import { AccessCodeStack } from "@/components/sayhi/AccessCodeStack";
 import type { AccessGrantSummary } from "@/lib/accessCodeView";
-import { SAYHI_PREVIEW_DEMO, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
+import { SAYHI_FLOW, SAYHI_PREVIEW_DEMO, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
+import { BillingAddressCard } from "@/components/sayhi/BillingAddressCard";
+import { readBillingAddress, type BillingAddress } from "@/lib/billingAddressView";
 import { demoData, demoKind, type DemoKind } from "@/lib/sayhiDemo";
 
 const FACILITY_TIME_ZONE = "America/New_York";
@@ -130,6 +133,25 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
   const loading = sample ? false : bookingsLoading;
   const accessLoading = sample ? false : grantsLoading;
   const [now, setNow] = useState(0);
+  const [loadedBillingAddress, setBillingAddress] = useState<BillingAddress | null>(null);
+  const billingAddress = sample ? sample.billingAddress : loadedBillingAddress;
+
+  // SayHi billing-address readback: the server copies it from Stripe
+  // Checkout into the member's own accountDetails doc.
+  useEffect(() => {
+    if (!SAYHI_FLOW || !user) return;
+    let active = true;
+    getDoc(doc(db, "accountDetails", user.uid))
+      .then((snap) => {
+        if (active) setBillingAddress(readBillingAddress(snap.data()?.billingAddress));
+      })
+      .catch(() => {
+        if (active) setBillingAddress(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -484,6 +506,12 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
                   {membershipEnds}
                 </p>
               ) : null}
+              {SAYHI_FLOW && membershipEnds && !compMembership ? (
+                <p className="mt-1 text-sm leading-6 text-slate-200" data-testid="sayhi-membership-end-note">
+                  Bookings after that date will be cancelled automatically,
+                  along with their access codes.
+                </p>
+              ) : null}
               {paymentRetrying ? (
                 <p className="mt-1 text-sm font-semibold text-amber-200">
                   Your last payment didn&apos;t go through. Update your payment
@@ -535,7 +563,11 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
               </div>
             ) : null}
 
-            <FrontDeskCard />
+            {SAYHI_FLOW ? (
+              <BillingAddressCard address={billingAddress} canManageBilling={hasBillingAccount} />
+            ) : null}
+
+            <FrontDeskCard demoSummary={sample?.kioskSummary ?? null} />
 
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
               <h2 className="font-semibold text-slate-900">

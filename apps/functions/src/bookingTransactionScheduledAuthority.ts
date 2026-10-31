@@ -1,9 +1,11 @@
 import { onCall } from "firebase-functions/v2/https";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as bookingTransaction from "./bookingFlexTransaction";
 import * as bookingManagement from "./bookingManagement";
 import { seamApiKey } from "./access";
 import { assertWindowWithinOperatingCalendar } from "./bookingOperatingCalendar";
+import { cancelBookingsAfterMembershipEnd, chargeOvertimeForVisit } from "./sayhi/billingTriggers";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -42,5 +44,32 @@ export const booking_reschedule = onCall(
   async (request) => {
     await validateRequestedWindow(request);
     return runCallable(bookingManagement.booking_reschedule, request);
+  },
+);
+
+// SayHi billing (Jonathan, Oct 31, 2026). Both no-op unless the
+// SAYHI_FLOW_ENABLED env flag is exactly "true"; it is false in every
+// committed env file.
+export const sayhi_chargeOvertime = onDocumentUpdated(
+  { document: "kioskVisits/{visitId}", secrets: [stripeSecretKey, stripeWebhookSecret] },
+  async (event) => {
+    await chargeOvertimeForVisit({
+      visitId: event.params.visitId,
+      before: event.data?.before.data(),
+      after: event.data?.after.data(),
+      stripeSecretKey: () => stripeSecretKey.value(),
+      stripeWebhookSecret: () => stripeWebhookSecret.value(),
+    });
+  },
+);
+
+export const sayhi_onMembershipEnded = onDocumentUpdated(
+  { document: "users/{uid}", secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
+  async (event) => {
+    await cancelBookingsAfterMembershipEnd({
+      uid: event.params.uid,
+      before: event.data?.before.data(),
+      after: event.data?.after.data(),
+    });
   },
 );

@@ -23,6 +23,8 @@ on:
       - "firebase/space-catalog-functions/**"
       - "firebase/member-record-functions/**"
       - "firebase/front-desk-kiosk-functions/**"
+      - "firebase/access-functions/**"
+      - "firebase/booking-transaction-functions/**"
       - "firebase.admin.json"
       - "firebase.admin-events.json"
       - "firebase.payment-status-guard.json"
@@ -36,6 +38,8 @@ on:
       - "firebase.space-catalog.json"
       - "firebase.member-record.json"
       - "firebase.front-desk-kiosk.json"
+      - "firebase.access.json"
+      - "firebase.booking.json"
       - ".github/workflows/firebase-live-mail-functions.yml"
       - ".github/workflows/firebase-live-core-functions.yml"
       - ".github/workflows/firebase-live-expo-lead-function.yml"
@@ -137,6 +141,9 @@ jobs:
       - name: Build isolated front-desk kiosk deploy bundle
         run: npm run build --workspace functions -- --project ../../firebase/front-desk-kiosk-functions/tsconfig.json
 
+      - name: Build isolated access (Seam) deploy bundle
+        run: npm run build --workspace functions -- --project ../../firebase/access-functions/tsconfig.json
+
       - name: Lint web application
         run: npm run lint
 
@@ -213,6 +220,10 @@ jobs:
           tests/functions/sayhi-virtual-address-flag.test.ts
           tests/functions/sayhi-email-brand.test.ts
           tests/web/sayhi-flow.test.ts
+          tests/functions/access-functions-deploy.test.ts
+          tests/functions/sayhi-overtime.test.ts
+          tests/functions/sayhi-membership-end.test.ts
+          tests/functions/sayhi-billing-address.test.ts
 
       - name: Run active transaction integration tests
         run: >-

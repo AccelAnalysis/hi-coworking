@@ -21,6 +21,7 @@ firebase/booth-kiosk-functions/lib/
 firebase/booth-kiosk-functions/.secret.local
 firebase/expo-lead-functions/lib/
 firebase/mail-functions/lib/
+firebase/access-functions/lib/
 firebase/core-functions/lib/
 firebase/campaign-functions/lib/
 firebase/space-catalog-functions/lib/

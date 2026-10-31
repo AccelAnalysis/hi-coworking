@@ -18,6 +18,7 @@ import type {
 import { parseSubscriptionInvoice, type InvoiceLike } from "./stripeInvoice";
 import { parseSubscriptionUpdate, type SubscriptionLike } from "./stripeSubscription";
 import { buildRefundSnapshot, idOf, type ChargeLike } from "./stripeRefund";
+import { billingAddressFromStripe } from "../sayhi/billingAddress";
 
 function safeMetadataValue(value?: string) {
   return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -94,7 +95,9 @@ export class StripeProvider implements PaymentProvider {
     } else {
       sessionConfig.payment_intent_data = {
         metadata: checkoutMetadata,
+        ...(input.saveCardForLaterCharges ? { setup_future_usage: "off_session" as const } : {}),
       };
+      if (input.saveCardForLaterCharges) sessionConfig.customer_creation = "always";
     }
 
     const session = await this.stripe.checkout.sessions.create(sessionConfig);
@@ -246,6 +249,54 @@ export class StripeProvider implements PaymentProvider {
     };
   }
 
+  /**
+   * Charge extra time (SayHi overtime). A member with a live subscription gets
+   * an invoice item on that subscription, so it lands on the next monthly
+   * bill. Otherwise the card saved at the booking checkout is charged off
+   * session. The idempotency key makes a retried trigger safe.
+   */
+  async chargeOvertime(input: {
+    amountCents: number;
+    description: string;
+    idempotencyKey: string;
+    metadata: Record<string, string>;
+    subscriptionId?: string;
+    bookingPaymentIntentId?: string;
+  }): Promise<{ method: "subscription_invoice_item" | "payment_intent"; id: string; status: string }> {
+    if (!(input.amountCents > 0)) throw new Error("Overtime amount must be positive.");
+    const subscription = input.subscriptionId
+      ? await this.stripe.subscriptions.retrieve(input.subscriptionId)
+      : null;
+    const subscriptionCustomer = idOf(subscription?.customer as string | { id?: string } | null);
+    if (subscription && subscriptionCustomer && ["active", "trialing", "past_due"].includes(subscription.status)) {
+      const item = await this.stripe.invoiceItems.create({
+        customer: subscriptionCustomer,
+        subscription: subscription.id,
+        amount: input.amountCents,
+        currency: "usd",
+        description: input.description,
+        metadata: input.metadata,
+      }, { idempotencyKey: input.idempotencyKey });
+      return { method: "subscription_invoice_item", id: item.id, status: "pending_invoice" };
+    }
+    if (!input.bookingPaymentIntentId) throw new NoCardOnFileError();
+    const original = await this.stripe.paymentIntents.retrieve(input.bookingPaymentIntentId);
+    const customer = idOf(original.customer as string | { id?: string } | null);
+    const paymentMethod = idOf(original.payment_method as string | { id?: string } | null);
+    if (!customer || !paymentMethod) throw new NoCardOnFileError();
+    const intent = await this.stripe.paymentIntents.create({
+      amount: input.amountCents,
+      currency: "usd",
+      customer,
+      payment_method: paymentMethod,
+      off_session: true,
+      confirm: true,
+      description: input.description,
+      metadata: input.metadata,
+    }, { idempotencyKey: input.idempotencyKey });
+    return { method: "payment_intent", id: intent.id, status: intent.status };
+  }
+
   async handleWebhook(
     rawBody: Buffer,
     headers: Record<string, string>,
@@ -289,6 +340,7 @@ export class StripeProvider implements PaymentProvider {
                 ? session.customer
                 : "",
           },
+          billingAddress: billingAddressFromStripe(session.customer_details?.address),
         };
       }
       case "invoice.payment_succeeded":
@@ -479,5 +531,13 @@ export class StripeProvider implements PaymentProvider {
       });
       return "pending";
     }
+  }
+}
+
+/** No saved card or subscription to charge extra time to. */
+export class NoCardOnFileError extends Error {
+  constructor() {
+    super("No card on file for extra time.");
+    this.name = "NoCardOnFileError";
   }
 }

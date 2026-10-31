@@ -1,7 +1,27 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatDayTime, formatMinutes, membersKioskSummary, type MemberKioskSummary } from "@/lib/frontDeskKiosk";
+import { SAYHI_FLOW } from "@/lib/sayhiFlags";
+
+type Visit = MemberKioskSummary["visits"][number];
+
+function money(cents: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+/** What the member sees for one visit's extra-time charge (SayHi flow). */
+export function overtimeChargeLabel(visit: Visit): string | null {
+  if (!visit.overtimeCents || !visit.overtimeMinutes) return null;
+  const amount = `${formatMinutes(visit.overtimeMinutes)} extra · ${money(visit.overtimeCents)}`;
+  switch (visit.chargeStatus) {
+    case "charged": return `${amount} charged`;
+    case "billed_next_invoice": return `${amount} on your next bill`;
+    case "charging": return `${amount} processing`;
+    default: return `${amount} · our team will follow up`;
+  }
+}
 
 /**
  * SayHi card: this month's visits and check-out reminder. There is no
@@ -10,10 +30,12 @@ import { formatDayTime, formatMinutes, membersKioskSummary, type MemberKioskSumm
  * Hidden while loading and whenever the callable is missing or refuses
  * (Hosting can deploy before the front-desk functions).
  */
-export function FrontDeskCard() {
-  const [summary, setSummary] = useState<MemberKioskSummary | null>(null);
+export function FrontDeskCard({ demoSummary = null }: { demoSummary?: MemberKioskSummary | null } = {}) {
+  const [loaded, setSummary] = useState<MemberKioskSummary | null>(null);
+  const summary = demoSummary ?? loaded;
 
   useEffect(() => {
+    if (demoSummary) return;
     let active = true;
     membersKioskSummary({})
       .then((result) => {
@@ -25,7 +47,7 @@ export function FrontDeskCard() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [demoSummary]);
 
   if (!summary) return null;
   const recent = summary.visits.slice(0, 3);
@@ -56,13 +78,22 @@ export function FrontDeskCard() {
                   ? "Checked in"
                   : visit.needsReview
                     ? "Under review"
-                    : `${formatMinutes(visit.actualMinutes)}${visit.overageMinutes ? ` · ${formatMinutes(visit.overageMinutes)} extra` : ""}`}
+                    : (SAYHI_FLOW && overtimeChargeLabel(visit))
+                      || `${formatMinutes(visit.actualMinutes)}${visit.overageMinutes ? ` · ${formatMinutes(visit.overageMinutes)} extra` : ""}`}
               </span>
             </li>
           ))}
         </ul>
       ) : null}
-      {summary.totalOverageMinutes > 0 ? (
+      {SAYHI_FLOW ? (
+        <p className="mt-3 text-xs leading-5 text-slate-600">
+          Check out within 15 minutes after your booking ends and there&apos;s no extra charge. After that, extra time is
+          charged to your card on file, or added to your next membership bill.{" "}
+          <Link href="/terms#extra-time" className="font-semibold text-[#101D4B] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]">
+            How extra time works
+          </Link>
+        </p>
+      ) : summary.totalOverageMinutes > 0 ? (
         <p className="mt-3 text-xs leading-5 text-slate-600">Extra time is past your booking or included hours. It&apos;s recorded for review and isn&apos;t charged automatically.</p>
       ) : null}
     </div>

@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "source": "firebase/access-functions",
+    "region": "us-central1",
+    "predeploy": [
+      "rm -rf firebase/access-functions/lib",
+      "npm run build --workspace functions -- --project ../../firebase/access-functions/tsconfig.json"
+    ]
+  }
+}

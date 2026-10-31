@@ -993,6 +993,10 @@ export const members_kioskSummary = onCall(adminEventCallableOptions, async (req
       actualMinutes: v.actualMinutes ?? null,
       overageMinutes: v.overageMinutes ?? null,
       needsReview: v.needsReview === true,
+      // SayHi overtime (written by sayhi_chargeOvertime when it is on).
+      overtimeMinutes: typeof v.overtimeMinutes === "number" ? v.overtimeMinutes : null,
+      overtimeCents: typeof v.overtimeCents === "number" ? v.overtimeCents : null,
+      chargeStatus: typeof v.chargeStatus === "string" ? v.chargeStatus : "not_charged",
     }));
   return {
     monthKey,
