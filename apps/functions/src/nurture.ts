@@ -13,6 +13,7 @@ import {
   compMembershipEnded,
   isCompMembership,
 } from "./payments/compMembership";
+import { EMAIL_BODY_FONT, EMAIL_BUTTON_STYLE, EMAIL_HEADLINE_FONT, EMAIL_LOGO_HTML, EMAIL_NAVY } from "./payments/emailBrand";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -321,9 +322,9 @@ function renderMessage(enrollment: Enrollment, step: CampaignStep) {
   const subject = step.subject.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const body = step.body.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const cta = href && step.ctaLabel
-    ? `<p style="margin:28px 0"><a href="${escapeHtml(href)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#fff;text-decoration:none;font-weight:650">${escapeHtml(step.ctaLabel)}</a></p>`
+    ? `<p style="margin:28px 0"><a href="${escapeHtml(href)}" style="${EMAIL_BUTTON_STYLE}">${escapeHtml(step.ctaLabel)}</a></p>`
     : "";
-  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"><div style="max-width:620px;margin:0 auto;padding:40px 24px"><div style="font-size:14px;font-weight:700;letter-spacing:.02em">Hi Coworking</div><h1 style="margin:24px 0 12px;font-size:28px;line-height:1.2">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#64748b">You are receiving this because you contacted, booked, or hold an account with Hi Coworking. <a href="${escapeHtml(unsubscribeHref)}" style="color:#475569">Manage follow-up preferences</a>.<br>${escapeHtml(NURTURE_POSTAL_ADDRESS)}</p></div></body></html>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}"><div style="max-width:620px;margin:0 auto;padding:40px 24px">${EMAIL_LOGO_HTML}<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2;color:${EMAIL_NAVY}">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#64748b">You are receiving this because you contacted, booked, or hold an account with Hi Coworking. <a href="${escapeHtml(unsubscribeHref)}" style="color:#475569">Manage follow-up preferences</a>.<br>${escapeHtml(NURTURE_POSTAL_ADDRESS)}</p></div></body></html>`;
   return { subject, html, text: `${body}\n\n${href || ""}\n\nManage follow-up preferences: ${unsubscribeHref}\n${NURTURE_POSTAL_ADDRESS}`.trim() };
 }
 

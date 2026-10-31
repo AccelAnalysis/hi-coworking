@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { httpsCallable } from "firebase/functions";
 import {
+  ArrowRight,
   Calendar,
   Clock,
   CreditCard,
-  KeyRound,
   Loader2,
   MapPin,
   ReceiptText,
+  Sparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { MY_HI_BOOKINGS_ID } from "@/lib/myHiNav";
@@ -33,11 +34,20 @@ import {
   welcomeBannerCopy,
 } from "@/lib/membershipCopy";
 import { MEMBERSHIP_TIERS, type Booking } from "@hi/shared";
+import { AccessCodeBlock } from "@/components/sayhi/AccessCodeBlock";
+import { AccessCodeStack } from "@/components/sayhi/AccessCodeStack";
+import type { AccessGrantSummary } from "@/lib/accessCodeView";
+import { SAYHI_PREVIEW_DEMO, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
+import { demoData, demoKind, type DemoKind } from "@/lib/sayhiDemo";
 
 const FACILITY_TIME_ZONE = "America/New_York";
 
 const FOCUS_RING =
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900";
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]";
+
+/** Hi Navy primary button (white text, 44pt minimum target). */
+const PRIMARY_BUTTON =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-[#101D4B] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#3A4675]";
 
 /** The query string, read without a hydration mismatch in the static export. */
 function useLocationSearch() {
@@ -60,17 +70,6 @@ type ManagedBooking = Omit<Booking, "paymentMethod"> & {
   paymentMethod?: string;
 };
 
-type AccessGrantSummary = {
-  grantId: string;
-  bookingId: string;
-  doorName: string;
-  startsAt: number;
-  endsAt: number;
-  grantStatus: string;
-  codeStatus: string | null;
-  codeLast2: string | null;
-  codeId: string | null;
-};
 
 const getAccessGrants = httpsCallable<
   Record<string, never>,
@@ -101,22 +100,12 @@ function money(cents: number) {
   }).format(cents / 100);
 }
 
-function accessMessage(access?: AccessGrantSummary) {
-  if (!access) {
-    return "Access details will appear here after the facility credential is issued.";
-  }
-  if (access.grantStatus === "active" && access.codeStatus !== "failed") {
-    return access.codeLast2
-      ? `Your ${access.doorName} access code has been issued and ends in ${access.codeLast2}. The full code was sent securely.`
-      : `Your ${access.doorName} access credential is active.`;
-  }
-  if (access.codeStatus === "failed") {
-    return "Your booking is confirmed, but the access credential needs staff attention. Contact Hi Coworking before arrival.";
-  }
-  return "Your access credential is being prepared. Check again before arrival.";
-}
-
 export default function AccountBookingsPage() {
+  const search = useLocationSearch();
+  // Private preview only: sample data without signing in. The flag is never
+  // set for production builds, so this branch is compiled out there.
+  const demo = SAYHI_PREVIEW_DEMO ? demoKind(search) : null;
+  if (demo) return <AccountBookingsContent demo={demo} />;
   return (
     <RequireAuth>
       <AccountBookingsContent />
@@ -124,14 +113,22 @@ export default function AccountBookingsPage() {
   );
 }
 
-function AccountBookingsContent() {
-  const { user, userDoc } = useAuth();
+function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
+  const auth = useAuth();
   const search = useLocationSearch();
+  const [demoNow] = useState(() => (demo ? Date.now() : 0));
+  const sample = demo ? demoData(demo, demoNow) : null;
+  const user = sample ? null : auth.user;
+  const userDoc = (sample ? sample.userDoc : auth.userDoc) as typeof auth.userDoc;
   const [welcomeDismissed, setWelcomeDismissed] = useState(false);
-  const [bookings, setBookings] = useState<ManagedBooking[]>([]);
-  const [accessGrants, setAccessGrants] = useState<AccessGrantSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [accessLoading, setAccessLoading] = useState(true);
+  const [loadedBookings, setBookings] = useState<ManagedBooking[]>([]);
+  const [loadedGrants, setAccessGrants] = useState<AccessGrantSummary[]>([]);
+  const [bookingsLoading, setLoading] = useState(true);
+  const [grantsLoading, setAccessLoading] = useState(true);
+  const bookings = sample ? (sample.bookings as unknown as ManagedBooking[]) : loadedBookings;
+  const accessGrants = sample ? sample.grants : loadedGrants;
+  const loading = sample ? false : bookingsLoading;
+  const accessLoading = sample ? false : grantsLoading;
   const [now, setNow] = useState(0);
 
   useEffect(() => {
@@ -240,6 +237,9 @@ function AccountBookingsContent() {
 
   const returnParams = useMemo(() => new URLSearchParams(search), [search]);
   const showWelcome = returnParams.get("payment") === "success" && !welcomeDismissed;
+  // Guest pass and conference room customers land here right after paying.
+  const justBooked = returnParams.get("booked") === "1" && !welcomeDismissed;
+  const firstName = (sample?.displayName ?? auth.user?.displayName ?? "").split(" ")[0];
   const welcomeCopy = welcomeBannerCopy({
     membershipActive,
     activeTier: membershipTier,
@@ -259,12 +259,12 @@ function AccountBookingsContent() {
             <p className="text-sm font-medium text-slate-600">
               SayHi
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-              Your space at Hi Coworking
+            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight text-[#101D4B]">
+              {firstName ? `Hi, ${firstName}` : "Your space at Hi Coworking"}
             </h1>
             <p className="mt-2 max-w-2xl text-slate-600">
-              Book a coworking desk or the meeting room, see your upcoming
-              visits, and find the access details for each one.
+              Your bookings, the access code for each one, and your plan, all
+              in one place.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -276,9 +276,9 @@ function AccountBookingsContent() {
             </a>
             <Link
               href="/book"
-              className={`inline-flex min-h-11 items-center justify-center rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
+              className={`${PRIMARY_BUTTON} ${FOCUS_RING}`}
             >
-              Book a space
+              Book again
             </Link>
           </div>
         </div>
@@ -286,6 +286,41 @@ function AccountBookingsContent() {
         {showWelcome && (
           <MembershipWelcomeBanner copy={welcomeCopy} onDismiss={dismissWelcome} />
         )}
+
+        {justBooked && !showWelcome && (
+          <section
+            aria-labelledby="sayhi-booked-title"
+            className="mb-8 rounded-2xl bg-[#EEF0F6] p-5 ring-1 ring-[#C5CADB] sm:p-6"
+          >
+            <div role="status" aria-live="polite">
+              <h2 id="sayhi-booked-title" className="font-display text-xl font-semibold text-[#101D4B]">
+                You&apos;re booked. Welcome to Hi Coworking.
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-[#3A4675]">
+                Here&apos;s what happens next.
+              </p>
+            </div>
+            <ol className="mt-4 grid gap-3 text-sm leading-6 text-[#101D4B] sm:grid-cols-3">
+              <li className="rounded-xl bg-white p-4 ring-1 ring-[#C5CADB]"><span className="font-semibold">1. Your code.</span> Your access code for each booking is on this page.</li>
+              <li className="rounded-xl bg-white p-4 ring-1 ring-[#C5CADB]"><span className="font-semibold">2. Let yourself in.</span> Enter the code on the door keypad. That checks you in.</li>
+              <li className="rounded-xl bg-white p-4 ring-1 ring-[#C5CADB]"><span className="font-semibold">3. Check out.</span> Use the front-desk iPad when you leave.</li>
+            </ol>
+            <button
+              type="button"
+              onClick={dismissWelcome}
+              className={`mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-[#101D4B] underline underline-offset-4 ${FOCUS_RING}`}
+            >
+              Got it
+            </button>
+          </section>
+        )}
+
+        <AccessCodeStack
+          bookings={upcomingBookings}
+          accessByBooking={accessByBooking}
+          loading={accessLoading}
+          now={now}
+        />
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
           <section
@@ -335,21 +370,7 @@ function AccountBookingsContent() {
                       </span>
                     </div>
 
-                    <div className="mt-5 rounded-xl bg-slate-50 p-4">
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <KeyRound className="h-4 w-4" />
-                        Access
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {accessLoading
-                          ? "Loading access details…"
-                          : accessMessage(access)}
-                      </p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Credentials are valid only for the confirmed booking
-                        window, including the facility grace period.
-                      </p>
-                    </div>
+                    <AccessCodeBlock access={access} loading={accessLoading} now={now} />
 
                     <BookingManagementCard
                       bookingId={booking.id}
@@ -386,16 +407,22 @@ function AccountBookingsContent() {
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                   <Link
                     href="/book"
-                    className={`inline-flex min-h-11 items-center rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 ${FOCUS_RING}`}
+                    className={`${PRIMARY_BUTTON} ${FOCUS_RING}`}
                   >
                     Book a desk
                   </Link>
+                </div>
+                <div className="mx-auto mt-6 max-w-sm rounded-xl bg-[#EEF0F6] p-4 text-left">
                   <Link
-                    href="/spaces"
-                    className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold text-slate-900 underline underline-offset-4 ${FOCUS_RING}`}
+                    href="/book"
+                    className={`inline-flex min-h-11 items-center gap-2 font-semibold text-[#101D4B] underline underline-offset-4 ${FOCUS_RING}`}
                   >
-                    See the space
+                    Try a guest pass
+                    <ArrowRight aria-hidden="true" className="h-4 w-4" />
                   </Link>
+                  <p className="text-sm text-[#3A4675]">
+                    Book an hour at a desk and work here today.
+                  </p>
                 </div>
               </div>
             )}
@@ -440,8 +467,8 @@ function AccountBookingsContent() {
           </section>
 
           <aside className="space-y-6">
-            <div className="rounded-2xl bg-slate-900 p-6 text-white shadow-sm">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-300">
+            <div className="rounded-2xl bg-[#101D4B] p-6 text-white shadow-sm">
+              <div className="flex items-center gap-2 text-sm font-semibold text-[#C5CADB]">
                 <CreditCard className="h-4 w-4" />
                 Membership
               </div>
@@ -491,6 +518,23 @@ function AccountBookingsContent() {
               </Link>
             </div>
 
+            {!membershipActive ? (
+              <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-[#C5CADB]" data-testid="sayhi-upgrade">
+                <h2 className="flex items-center gap-2 font-semibold text-[#101D4B]">
+                  <Sparkles aria-hidden="true" className="h-4 w-4" />
+                  Working here often?
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Member and Plus plans include desk hours every month and a lower
+                  rate for extra time.
+                  {VIRTUAL_ADDRESS ? " You can also add a virtual business address." : ""}
+                </p>
+                <Link href="/pricing" className={`mt-3 ${PRIMARY_BUTTON} ${FOCUS_RING}`}>
+                  See membership plans
+                </Link>
+              </div>
+            ) : null}
+
             <FrontDeskCard />
 
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
@@ -517,8 +561,8 @@ function AccountBookingsContent() {
                 {money(accountCreditCents)}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                Credit from a late cancellation is applied automatically to
-                your next eligible booking, before card payment.
+                Credit from a cancelled booking is applied automatically to
+                your next booking.
                 {membershipActive && membershipTier && membershipTier.includedHoursPerMonth > 0
                   ? " Eligible cancellations also restore included hours automatically."
                   : ""}

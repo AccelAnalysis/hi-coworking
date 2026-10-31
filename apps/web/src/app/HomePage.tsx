@@ -5,6 +5,9 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import {
   ArrowRight,
+  CalendarClock,
+  Presentation,
+  UserPlus,
   MapPin,
   Wifi,
   Users,
@@ -15,6 +18,7 @@ import { MicroCoworkingSection } from "@/components/sections/MicroCoworkingSecti
 import { WhyHiExistsSection } from "@/components/sections/WhyHiExistsSection";
 import { CoreWorkspaceSection } from "@/components/sections/CoreWorkspaceSection";
 import { PublicSiteGate } from "@/components/PublicSiteGate";
+import { SAYHI_FLOW } from "@/lib/sayhiFlags";
 
 const MapComponent = dynamic(
   () => import("@/components/MapComponent").then((m) => m.MapComponent),
@@ -41,6 +45,10 @@ export function HomePage() {
             <p className="text-xl md:text-2xl text-slate-600 max-w-2xl mx-auto leading-relaxed font-light">
               A micro-coworking space designed for focus, flexibility, and real local use—not massive floors or long contracts.
             </p>
+            {SAYHI_FLOW ? (
+              <SayHiHomeActions />
+            ) : (
+              <>
             <MapComponent />
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-8">
               <Link
@@ -56,6 +64,8 @@ export function HomePage() {
                 View Pricing
               </Link>
             </div>
+              </>
+            )}
           </div>
         </header>
 
@@ -115,5 +125,38 @@ export function HomePage() {
         </div>
       </AppShell>
     </PublicSiteGate>
+  );
+}
+
+/** Home page decision (Jonathan, Oct 30, 2026, 6:30 PM): three actions, each
+ * with its own next step, then the map. Behind NEXT_PUBLIC_SAYHI_FLOW. */
+const HOME_ACTIONS = [
+  { href: "/pricing", label: "Join", detail: "Membership plans", icon: UserPlus },
+  { href: "/book", label: "Book a Guest Pass", detail: "Pick a date and time for a desk", icon: CalendarClock },
+  { href: "/book?resource=mode-conference", label: "Book the Conference Room", detail: "See the room's calendar", icon: Presentation },
+] as const;
+
+function SayHiHomeActions() {
+  return (
+    <div className="space-y-8 pt-2" data-testid="sayhi-home-actions">
+      <p className="inline-flex rounded-full bg-[#EEF0F6] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#101D4B]">
+        Early Access
+      </p>
+      <ul className="grid gap-4 sm:grid-cols-3">
+        {HOME_ACTIONS.map((action) => (
+          <li key={action.href}>
+            <Link
+              href={action.href}
+              className="group flex min-h-24 h-full flex-col items-center justify-center gap-1 rounded-2xl bg-[#101D4B] px-5 py-5 text-white shadow-lg shadow-[#101D4B]/15 transition hover:bg-[#3A4675] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]"
+            >
+              <action.icon aria-hidden="true" className="h-6 w-6" />
+              <span className="text-lg font-semibold">{action.label}</span>
+              <span className="text-sm text-[#C5CADB]">{action.detail}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <MapComponent />
+    </div>
   );
 }

@@ -230,3 +230,4 @@ export {
   members_kioskSummary,
   admin_followUpSetStatus,
 } from "./frontDeskKiosk";
+export { members_saveAccountDetails, va_submitForm1583 } from "./sayhi/functions";

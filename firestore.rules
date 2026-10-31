@@ -790,5 +790,18 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if false;
     }
+
+    // SayHi Create your account: company and phone, written by
+    // members_saveAccountDetails only.
+    match /accountDetails/{uid} {
+      allow read: if isOwner(uid) || isStaff();
+      allow write: if false;
+    }
+
+    // Virtual address paperwork status (VA is off by default). Server-written.
+    match /vaApplications/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
   }
 }

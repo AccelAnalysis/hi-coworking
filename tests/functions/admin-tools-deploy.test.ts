@@ -143,6 +143,8 @@ const BUNDLES: Bundle[] = [
       "kiosk_onBookingWritten",
       "kiosk_session",
       "members_kioskSummary",
+      "members_saveAccountDetails",
+      "va_submitForm1583",
     ],
     params: [],
     bound: {},

@@ -68,11 +68,21 @@ export class StripeProvider implements PaymentProvider {
     const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       mode: isSubscription ? "subscription" : "payment",
       customer_email: input.metadata?.email,
-      line_items: [lineItem],
+      line_items: [lineItem, ...(input.extraLineItems || [])],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       metadata: checkoutMetadata,
     };
+    if (input.collectBillingAddress) {
+      sessionConfig.billing_address_collection = "required";
+    }
+    if (input.optionalItems?.length) {
+      sessionConfig.optional_items = input.optionalItems.map((item) => ({
+        price: item.price,
+        quantity: item.quantity,
+        adjustable_quantity: { enabled: false },
+      }));
+    }
 
     if (isSubscription) {
       sessionConfig.subscription_data = {

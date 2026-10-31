@@ -28,6 +28,9 @@ type State =
   | { kind: "success"; bookingId: string; accountReady: boolean }
   | { kind: "error"; message: string };
 
+/** SayHi, with the one-time "You're booked" welcome and next steps. */
+const SAYHI_AFTER_BOOKING = "/my-hi?booked=1#bookings";
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -138,6 +141,11 @@ export default function BookingCompletePage() {
           window.localStorage.removeItem(
             "hi-coworking-booking-hold",
           );
+          if (accountReady) {
+            // Every customer lands on SayHi right after paying (step 7).
+            window.location.replace(SAYHI_AFTER_BOOKING);
+            return;
+          }
           setState({
             kind: "success",
             bookingId: result.data.bookingId,
@@ -176,8 +184,7 @@ export default function BookingCompletePage() {
               Confirming your booking…
             </h1>
             <p className="mt-2 text-slate-600">
-              We are reconciling payment, securing the space, and preparing
-              access.
+              This takes a few seconds.
             </p>
           </div>
         ) : state.kind === "success" ? (
@@ -190,21 +197,20 @@ export default function BookingCompletePage() {
               Your space is confirmed.
             </h1>
             <p className="mx-auto mt-3 max-w-lg text-slate-600">
-              Your reservation is saved. Access is issued only against the
-              confirmed booking, and booking management lives in Account.
+              Your access code and booking details are on your SayHi page.
             </p>
             {!state.accountReady && (
               <p className="mx-auto mt-4 max-w-lg rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                The booking is confirmed. Log in with the member account to
-                view or manage it; do not pay again.
+                Your booking is confirmed. Sign in to see your access code and
+                manage your booking. There&apos;s no need to pay again.
               </p>
             )}
             <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
               <Link
-                href="/my-hi#bookings"
-                className="inline-flex min-h-12 items-center justify-center rounded-full bg-slate-950 px-6 py-3 font-medium text-white hover:bg-slate-800"
+                href={SAYHI_AFTER_BOOKING}
+                className="inline-flex min-h-12 items-center justify-center rounded-full bg-[#101D4B] px-6 py-3 font-medium text-white hover:bg-[#3A4675]"
               >
-                View booking
+                Go to SayHi
               </Link>
               <Link
                 href="/spaces"

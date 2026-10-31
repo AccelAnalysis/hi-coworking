@@ -27,7 +27,7 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
   {
     id: "stripe",
     label: "Pay with Card",
-    description: "Credit or debit card via Stripe",
+    description: "Credit or debit card",
     icon: CreditCard,
     iconColor: "text-indigo-600",
     bgColor: "bg-indigo-50",

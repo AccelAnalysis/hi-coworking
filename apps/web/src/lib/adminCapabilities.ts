@@ -5,7 +5,7 @@
  * The dashboard labels these tiles "Not live yet" and the tool's page shows
  * the note, so an admin isn't left guessing why an action fails.
  */
-export type AdminCapability = "doorAccess" | "eventCampaigns" | "frontDesk";
+export type AdminCapability = "doorAccess" | "eventCampaigns" | "frontDesk" | "followUps" | "virtualAddress";
 
 export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: string }> = {
   doorAccess: {
@@ -19,6 +19,14 @@ export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: 
   frontDesk: {
     live: true,
     note: "The front-desk kiosk isn't switched on yet. Visits, alerts and devices will appear here once the front-desk kiosk functions and rules are deployed.",
+  },
+  followUps: {
+    live: false,
+    note: "The follow-up queue isn't switched on yet. Items will appear here once the follow-up functions and rules are deployed.",
+  },
+  virtualAddress: {
+    live: false,
+    note: "Virtual address is switched off. Form 1583 follow-ups appear only after it's switched on.",
   },
 };
 

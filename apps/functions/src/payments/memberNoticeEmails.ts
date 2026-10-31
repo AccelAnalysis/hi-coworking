@@ -36,6 +36,7 @@ import {
 import { getTierById } from "./stripeConfig";
 import { formatMoney, refundDestination } from "./stripeRefund";
 import type { StripeRefundLine, StripeRefundSnapshot } from "./types";
+import { EMAIL_BODY_FONT, EMAIL_BUTTON_STYLE, EMAIL_HEADLINE_FONT, EMAIL_LOGO_HTML, EMAIL_NAVY } from "./emailBrand";
 
 export const REFUND_CONFIRMATION_CATEGORY = "refund_confirmation";
 export const CANCELLATION_SCHEDULED_CATEGORY = "membership_cancellation_scheduled";
@@ -81,7 +82,7 @@ function layout(input: {
   footerReason: string;
 }): NoticeCopy {
   const p = "margin:0 0 16px;font-size:16px;line-height:1.7;color:#475569";
-  const link = "color:#0f172a;font-weight:600";
+  const link = `color:${EMAIL_NAVY};font-weight:600`;
   const helpLine = `If you have any questions, reply to this email or write to us at ${CONTACT_EMAIL}.`;
   const helpHtml = escapeHtml(helpLine).replace(
     escapeHtml(CONTACT_EMAIL),
@@ -90,13 +91,13 @@ function layout(input: {
   const footer = `Hi Coworking · ${COMPANY_NAME} · ${SPACE_ADDRESS}`;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.subject)}</title></head>`
-    + `<body style="margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">`
+    + `<body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}">`
     + `<div style="max-width:620px;margin:0 auto;padding:40px 24px">`
-    + `<div style="font-size:14px;font-weight:700;letter-spacing:.02em">Hi Coworking</div>`
-    + `<h1 style="margin:24px 0 12px;font-size:28px;line-height:1.2">${escapeHtml(input.heading)}</h1>`
+    + `${EMAIL_LOGO_HTML}`
+    + `<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2;color:${EMAIL_NAVY}">${escapeHtml(input.heading)}</h1>`
     + `<p style="${p}">${escapeHtml(input.greeting)}</p>`
     + input.paragraphs.map((line) => `<p style="${p}">${escapeHtml(line)}</p>`).join("")
-    + `<p style="margin:24px 0"><a href="${escapeHtml(input.accountUrl)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:650">${escapeHtml(input.linkLabel)}</a></p>`
+    + `<p style="margin:24px 0"><a href="${escapeHtml(input.accountUrl)}" style="${EMAIL_BUTTON_STYLE}">${escapeHtml(input.linkLabel)}</a></p>`
     + `<p style="${p}">${helpHtml}</p>`
     + `<p style="${p}">Thank you,<br>The Hi Coworking team</p>`
     + `<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:12px;line-height:1.6;color:#64748b">${escapeHtml(input.footerReason)} ${escapeHtml(footer)} · <a href="mailto:${CONTACT_EMAIL}" style="color:#475569">${CONTACT_EMAIL}</a></p>`

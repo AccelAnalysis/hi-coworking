@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Clock, Users } from "lucide-react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
@@ -8,6 +8,8 @@ import { AppShell } from "@/components/AppShell";
 import { PublicSiteGate } from "@/components/PublicSiteGate";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
+import { SAYHI_FLOW, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
+import { rememberVirtualAddressChoice, virtualAddressChoice } from "@/lib/sayhiAccount";
 import {
   MEMBERSHIP_TIERS,
   GUEST_PRICING,
@@ -15,7 +17,7 @@ import {
 } from "@hi/shared";
 
 const createCheckout = httpsCallable<
-  { tierId: string; successUrl: string; cancelUrl: string },
+  { tierId: string; successUrl: string; cancelUrl: string; virtualAddress?: boolean },
   { sessionId: string; url: string; paymentId: string }
 >(functions, "stripe_createCheckoutSession");
 
@@ -40,6 +42,23 @@ export default function PricingPage() {
   const { user } = useAuth();
   const [loadingTier, setLoadingTier] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Virtual address (built, OFF): the option here and the pop-up on the way to
+  // Create your account show only when NEXT_PUBLIC_VIRTUAL_ADDRESS is on.
+  const [vaChosen, setVaChosen] = useState(false);
+  const [vaOfferFor, setVaOfferFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (VIRTUAL_ADDRESS) setVaChosen(virtualAddressChoice() === true);
+  }, []);
+  const chooseVa = (chosen: boolean) => {
+    setVaChosen(chosen);
+    rememberVirtualAddressChoice(chosen);
+  };
+  const goToCreateAccount = (tierId: string) => {
+    window.location.href = `/register?plan=${encodeURIComponent(tierId)}`;
+  };
+  const primaryClass = SAYHI_FLOW
+    ? "bg-[#101D4B] text-white hover:bg-[#3A4675] shadow-[#101D4B]/20"
+    : "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20";
 
   const handleSubscribe = async (tierId: string) => {
     if (!user) return;
@@ -51,6 +70,7 @@ export default function PricingPage() {
         tierId,
         successUrl: `${window.location.origin}/my-hi?payment=success&plan=${encodeURIComponent(tierId)}`,
         cancelUrl: `${window.location.origin}/pricing?payment=cancelled`,
+        ...(VIRTUAL_ADDRESS && vaChosen && tierId !== "virtual" ? { virtualAddress: true } : {}),
       });
 
       if (result.data.url) {
@@ -175,7 +195,7 @@ export default function PricingPage() {
                         disabled={loadingTier !== null}
                         className={`mt-8 w-full py-3 rounded-full font-medium transition-all duration-300 shadow-lg disabled:opacity-60 disabled:cursor-not-allowed ${
                           isPopular
-                            ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
+                            ? primaryClass
                             : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
                         }`}
                       >
@@ -187,12 +207,27 @@ export default function PricingPage() {
                           isVirtualOffice ? "Choose Virtual Office" : "Become a Member"
                         )}
                       </button>
+                    ) : SAYHI_FLOW ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (VIRTUAL_ADDRESS && !isVirtualOffice && !vaChosen) setVaOfferFor(tier.id);
+                          else goToCreateAccount(tier.id);
+                        }}
+                        className={`mt-8 w-full min-h-11 py-3 rounded-full font-medium transition-all duration-300 shadow-lg ${
+                          isPopular
+                            ? primaryClass
+                            : "bg-white text-[#101D4B] border border-[#C5CADB] hover:bg-[#EEF0F6] shadow-slate-200/50"
+                        }`}
+                      >
+                        {isVirtualOffice ? "Choose Virtual Office" : "Become a Member"}
+                      </button>
                     ) : (
                       <Link
                         href="/register"
                         className={`mt-8 block text-center py-3 rounded-full font-medium transition-all duration-300 shadow-lg ${
                           isPopular
-                            ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-900/20"
+                            ? primaryClass
                             : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
                         }`}
                       >
@@ -222,11 +257,51 @@ export default function PricingPage() {
                     ${(CONFERENCE_ROOM_CONFIG.hourlyRateCents / 100).toFixed(0)}
                   </span>
                   <span className="text-base text-slate-500">/hr</span>
+                  {SAYHI_FLOW ? (
+                    <Link
+                      href="/book?resource=mode-conference"
+                      className={`mt-3 flex min-h-11 items-center justify-center rounded-full px-5 py-2 text-sm font-semibold ${primaryClass}`}
+                    >
+                      Book the Conference Room
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
 
+
+          {VIRTUAL_ADDRESS ? (
+            <div className="mb-10" data-testid="va-option">
+              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Add-on</h2>
+              <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-[#C5CADB]">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-5 w-5 shrink-0 accent-[#101D4B]"
+                  checked={vaChosen}
+                  onChange={(e) => chooseVa(e.target.checked)}
+                />
+                <span>
+                  <span className="block font-semibold text-[#101D4B]">Virtual business address · $49/mo</span>
+                  <span className="block text-sm text-slate-600">
+                    A business mailing address with mail handling, added to your membership.
+                  </span>
+                </span>
+              </label>
+            </div>
+          ) : null}
+
+          {vaOfferFor ? (
+            <VirtualAddressOffer
+              onAnswer={(chosen) => {
+                chooseVa(chosen);
+                const tierId = vaOfferFor;
+                setVaOfferFor(null);
+                goToCreateAccount(tierId);
+              }}
+              onClose={() => setVaOfferFor(null)}
+            />
+          ) : null}
 
           <p className="text-center text-sm text-slate-500 mt-8">
             Physical coworking bookings include Wi-Fi and shared amenities. Memberships renew monthly. Cancel anytime.
@@ -234,5 +309,53 @@ export default function PricingPage() {
         </div>
       </AppShell>
     </PublicSiteGate>
+  );
+}
+
+/** Step 4 pop-up: offered once on the way to Create your account. */
+function VirtualAddressOffer({ onAnswer, onClose }: { onAnswer: (chosen: boolean) => void; onClose: () => void }) {
+  const firstButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    firstButton.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#101D4B]/40 p-4 sm:items-center">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="va-offer-title"
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+        data-testid="va-offer"
+      >
+        <h2 id="va-offer-title" className="font-display text-xl font-semibold text-[#101D4B]">
+          Add a virtual business address?
+        </h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          Use Hi Coworking as your business mailing address, with mail handling, for $49/mo.
+        </p>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row-reverse">
+          <button
+            ref={firstButton}
+            type="button"
+            onClick={() => onAnswer(true)}
+            className="min-h-11 flex-1 rounded-full bg-[#101D4B] px-5 text-sm font-semibold text-white hover:bg-[#3A4675]"
+          >
+            Add it
+          </button>
+          <button
+            type="button"
+            onClick={() => onAnswer(false)}
+            className="min-h-11 flex-1 rounded-full border border-[#C5CADB] px-5 text-sm font-semibold text-[#101D4B] hover:bg-[#EEF0F6]"
+          >
+            No thanks
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

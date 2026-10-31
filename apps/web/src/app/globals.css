@@ -22,6 +22,26 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* SayHi flow branding (approved Oct 30, 2026): Fraunces SemiBold headlines,
+   DM Sans everywhere else, no Geist or Inter. Only applied when the
+   NEXT_PUBLIC_SAYHI_FLOW build switch is on. */
+body.sayhi-brand {
+  --font-logo: var(--font-dm-sans), Arial, sans-serif;
+  --font-mono: var(--font-dm-sans), Arial, sans-serif;
+  --hi-navy: #101d4b;
+  --hi-navy-700: #3a4675;
+  --hi-navy-500: #4a5585;
+  --hi-mist: #eef0f6;
+  --hi-line: #c5cadb;
+}
+
+body.sayhi-brand h1,
+body.sayhi-brand h2.font-display,
+body.sayhi-brand .font-display {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-weight: 600;
+}
+
 ::selection {
   background-color: #a7f3d0; /* emerald-200 */
   color: #064e3b; /* emerald-900 */
