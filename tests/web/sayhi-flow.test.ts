@@ -141,3 +141,12 @@ describe("virtual address stays hidden while off", () => {
     expect(read("apps/web/src/lib/sayhiAccount.ts")).toContain("/my-hi?payment=success&plan=${encodeURIComponent(tierId)}");
   });
 });
+
+describe("public site gate", () => {
+  it("only skips Coming Soon on the preview build (flow + preview demo flags), never by default", () => {
+    const gate = read("apps/web/src/components/PublicSiteGate.tsx");
+    expect(gate).toContain("const previewBypass = SAYHI_FLOW && SAYHI_PREVIEW_DEMO;");
+    expect(resolveSayHiFlags({}).demo).toBe(false);
+    expect(resolveSayHiFlags({}).flow).toBe(false);
+  });
+});

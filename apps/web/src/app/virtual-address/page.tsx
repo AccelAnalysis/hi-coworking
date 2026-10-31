@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { functions } from "@/lib/firebase";
 import { RequireAuth } from "@/components/RequireAuth";
-import { VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
+import { SAYHI_PREVIEW_DEMO, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
 
 const submitForm1583 = httpsCallable<Record<string, never>, { ok: boolean }>(functions, "va_submitForm1583");
 
@@ -17,6 +17,11 @@ const submitForm1583 = httpsCallable<Record<string, never>, { ok: boolean }>(fun
  * owner, a staff member, or a notary.
  */
 export default function VirtualAddressPage() {
+  const [previewDemo, setPreviewDemo] = useState(false);
+  useEffect(() => {
+    // Private preview only: ?demo shows the steps without signing in.
+    if (SAYHI_PREVIEW_DEMO && new URLSearchParams(window.location.search).has("demo")) setPreviewDemo(true);
+  }, []);
   if (!VIRTUAL_ADDRESS) {
     return (
       <main className="mx-auto max-w-xl px-6 py-24 text-center">
@@ -27,6 +32,7 @@ export default function VirtualAddressPage() {
       </main>
     );
   }
+  if (previewDemo) return <Form1583Steps />;
   return (
     <RequireAuth>
       <Form1583Steps />

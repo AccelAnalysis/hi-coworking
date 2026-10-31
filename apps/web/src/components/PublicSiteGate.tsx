@@ -11,6 +11,7 @@ import {
 import { ComingSoonExperience } from "@/components/ComingSoonExperience";
 import { LaunchCountdown } from "@/components/LaunchCountdown";
 import { PUBLIC_LAUNCH_AT, isPublicLaunchReached } from "@/lib/publicLaunch";
+import { SAYHI_FLOW, SAYHI_PREVIEW_DEMO } from "@/lib/sayhiFlags";
 
 const DEFAULT_SETTINGS: PublicSiteSettingsDoc = {
   id: "public",
@@ -88,7 +89,11 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
 
   // Staff can preview the live site while Coming Soon is on for visitors.
   // The launch time expires the gate automatically.
-  const bypassComingSoon = role === "staff" || role === "admin" || role === "master";
+  // The private SayHi preview channel (built with NEXT_PUBLIC_SAYHI_FLOW and
+  // NEXT_PUBLIC_SAYHI_PREVIEW_DEMO, never set in production) shows the new
+  // pages instead of Coming Soon so reviewers can click through them.
+  const previewBypass = SAYHI_FLOW && SAYHI_PREVIEW_DEMO;
+  const bypassComingSoon = previewBypass || role === "staff" || role === "admin" || role === "master";
   const showComingSoon = settings.comingSoonEnabled && !bypassComingSoon && !launchReached;
 
   if (authLoading || settingsLoading) {
