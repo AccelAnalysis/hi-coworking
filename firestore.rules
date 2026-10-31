@@ -783,5 +783,12 @@ service cloud.firestore {
     match /kioskCodeIndex/{docId} {
       allow read, write: if false;
     }
+    // Staff follow-up queue (owner: Jessica, Member & Event Operations).
+    // Admins read it in Admin > Follow-ups; only server code writes it
+    // (status changes go through the admin_followUpSetStatus callable).
+    match /staffFollowUps/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
   }
 }

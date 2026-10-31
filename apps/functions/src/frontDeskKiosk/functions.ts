@@ -32,7 +32,7 @@ import {
   easternEpoch,
   easternMonthKey,
   firstName,
-  generateMemberCode,
+  doorCodeUsableAt,
   hoursAlertReason,
   maskedName,
   normalizeKioskSettings,
@@ -48,6 +48,9 @@ import {
   type PlannedTask,
 } from "./policy";
 import { enqueueFrontDeskTasks, frontDeskTaskQueue, type TaskQueueLike } from "./taskQueue";
+import { hashPin } from "../providers/seamProvider";
+import { queueFollowUp } from "../followUps/store";
+import { needsNoCheckinFollowUp, noCheckoutBillingCap, normalizeResolutionNote, FOLLOW_UPS_COLLECTION } from "../followUps/policy";
 
 /**
  * Front-desk iPad kiosk: check-in and check-out only.
@@ -68,7 +71,10 @@ import { enqueueFrontDeskTasks, frontDeskTaskQueue, type TaskQueueLike } from ".
  *   kioskRateLimits/{kioskUid}_{minute} lookup throttle
  *   kioskDevices/{kioskUid}      enrolled devices
  *   kioskSettings/frontDesk      idle logo timing
- *   kioskMemberCodes/{uid}, kioskCodeIndex/{code} member check-in codes
+ *   kioskMemberCodes/{uid}, kioskCodeIndex/{code} retired permanent check-in
+ *                                codes (no longer written or read; members
+ *                                use their per-booking door code)
+ *   staffFollowUps/{id}          Jessica's follow-up queue (../followUps)
  *
  * Overage minutes and the plan rate are recorded only. Nothing is charged.
  */
@@ -88,8 +94,6 @@ const COL = {
   rate: "kioskRateLimits",
   devices: "kioskDevices",
   settings: "kioskSettings",
-  codes: "kioskMemberCodes",
-  codeIndex: "kioskCodeIndex",
 } as const;
 
 const SETTINGS_DOC = "frontDesk";
@@ -177,8 +181,31 @@ async function findMemberUid(raw: unknown): Promise<string | null> {
       throw error;
     }
   }
-  const snap = await db().collection(COL.codeIndex).doc(query.code).get();
-  return snap.exists ? String(snap.data()?.uid || "") || null : null;
+  return findDoorCodeOwner(query.code, Date.now());
+}
+
+/**
+ * The member whose per-booking door code this is, if the booking is on now.
+ * Only the SHA-256 of each PIN is stored (accessCodes.codeHash), so the
+ * typed code is hashed and matched; the plain code is never stored or logged.
+ */
+export async function findDoorCodeOwner(code: string, now: number): Promise<string | null> {
+  const codes = await db().collection("accessCodes").where("codeHash", "==", hashPin(code)).limit(10).get();
+  for (const codeDoc of codes.docs) {
+    const data = codeDoc.data();
+    const grantId = typeof data.grantId === "string" ? data.grantId : "";
+    if (!grantId) continue;
+    const grant = (await db().collection("accessGrants").doc(grantId).get()).data();
+    if (!grant || typeof grant.userId !== "string") continue;
+    if (doorCodeUsableAt({
+      codeStatus: data.status,
+      grantStatus: grant.status,
+      startsAt: Number(grant.startsAt),
+      endsAt: Number(grant.endsAt),
+      now,
+    })) return grant.userId;
+  }
+  return null;
 }
 
 type MemberProfile = { uid: string; data: FirebaseFirestore.DocumentData; label: string; first: string };
@@ -353,7 +380,9 @@ export async function performCheckIn(input: { kioskUid: string; lookupId: unknow
     }
     : null;
 
+  let staleClosed: { visitId: string; bookingId: string | null; checkOutAt?: number } | null = null;
   const result = await db().runTransaction(async (tx) => {
+    staleClosed = null;
     const [requestSnap, openSnap] = await Promise.all([tx.get(requestRef), tx.get(openRef)]);
     if (requestSnap.exists) return requestSnap.data()?.result as Record<string, unknown>;
 
@@ -362,9 +391,17 @@ export async function performCheckIn(input: { kioskUid: string; lookupId: unknow
       const staleRef = db().collection(COL.visits).doc(stale.visitId);
       const staleSnap = await tx.get(staleRef);
       if (staleSnap.exists && staleSnap.data()?.status === "open") {
+        const staleEnd = (staleSnap.data()?.bookedWindow as { end?: number } | null | undefined)?.end;
+        staleClosed = { visitId: stale.visitId, bookingId: firstBookingId(staleSnap.data()?.bookingIds) };
+        staleClosed.checkOutAt = noCheckoutBillingCap({
+          checkInAt: Number(staleSnap.data()?.checkInAt),
+          autoCloseAt: stale.checkOutAt,
+          bookedEnd: staleEnd,
+        });
         tx.update(staleRef, {
           status: "auto_closed",
-          checkOutAt: stale.checkOutAt,
+          checkOutAt: staleClosed.checkOutAt,
+          billingCapApplied: staleEnd != null,
           autoClosedAt: now,
           needsReview: true,
           reviewReason: "forgot_checkout",
@@ -445,6 +482,17 @@ export async function performCheckIn(input: { kioskUid: string; lookupId: unknow
     tx.set(requestRef, { kind: "check_in", kioskUid: input.kioskUid, result, createdAt: now });
     return result;
   });
+  const closedStale = staleClosed as { visitId: string; bookingId: string | null; checkOutAt?: number } | null;
+  if (closedStale) {
+    await queueFollowUp({
+      type: "no_checkout",
+      memberId: lookup.uid,
+      visitId: closedStale.visitId,
+      bookingId: closedStale.bookingId,
+      billingCapAt: closedStale.checkOutAt ?? null,
+      now,
+    });
+  }
   if (result.status === "checked_in" && typeof result.visitId === "string") {
     await afterCheckIn({ uid: lookup.uid, visitId: result.visitId, checkInAt: Number(result.checkInAt) });
   }
@@ -593,6 +641,18 @@ export async function runAttendanceTask(task: AttendanceTaskPayload, now = Date.
     const visits = await db().collection(COL.visits).where("uid", "==", task.uid).where("dayKey", "==", dayKey).get();
     hasVisit = visits.docs.some((doc) => visitOverlapsBooking(doc.data(), booking));
   }
+  // The door unlock checks a member in (a visit is created), but the unlock
+  // event is also checked so a member who opened the door with their code is
+  // never chased for a missing check-in.
+  let doorUnlocked = false;
+  if (booking && !hasVisit && task.kind === "no_show") {
+    const unlocks = await db().collection("accessEvents")
+      .where("bookingId", "==", task.bookingId)
+      .where("eventType", "==", "door_unlocked")
+      .limit(1)
+      .get();
+    doorUnlocked = !unlocks.empty;
+  }
   const ref = db().collection(COL.flags).doc(task.bookingId);
   const profile = booking ? await memberProfile(task.uid) : null;
   const decision = await db().runTransaction(async (tx) => {
@@ -616,6 +676,9 @@ export async function runAttendanceTask(task: AttendanceTaskPayload, now = Date.
     }
     return result;
   });
+  if (decision.action === "flag" && needsNoCheckinFollowUp({ flagStatus: decision.status, hasVisit, doorUnlocked })) {
+    await queueFollowUp({ type: "no_checkin", memberId: task.uid, bookingId: task.bookingId, now });
+  }
   if (decision.action === "relay") {
     await enqueueFrontDeskTasks(taskQueueFactory(), [attendanceTaskPlan(task, now)]);
     return decision;
@@ -658,6 +721,9 @@ export async function runAutoCloseTask(task: AutoCloseTaskPayload, now = Date.no
     return decision;
   }
   if (decision.action !== "close") return decision;
+  const bookedEnd = (visit.bookedWindow as { end?: number } | null | undefined)?.end;
+  // No check-out: billing is capped at the booked end time plus one hour.
+  const checkOutAt = noCheckoutBillingCap({ checkInAt, autoCloseAt: decision.checkOutAt, bookedEnd });
   const closed = await db().runTransaction(async (tx) => {
     const [freshOpen, freshVisit] = await Promise.all([tx.get(openRef), tx.get(visitRef)]);
     if (!freshOpen.exists || freshOpen.data()?.visitId !== task.visitId) return false;
@@ -665,7 +731,8 @@ export async function runAutoCloseTask(task: AutoCloseTaskPayload, now = Date.no
     tx.delete(openRef);
     tx.update(visitRef, {
       status: "auto_closed",
-      checkOutAt: decision.checkOutAt,
+      checkOutAt,
+      billingCapApplied: bookedEnd != null,
       autoClosedAt: now,
       needsReview: true,
       reviewReason: "forgot_checkout",
@@ -677,7 +744,16 @@ export async function runAutoCloseTask(task: AutoCloseTaskPayload, now = Date.no
     });
     return true;
   });
-  return closed ? decision : { action: "noop" as const, reason: "not_open" as const };
+  if (!closed) return { action: "noop" as const, reason: "not_open" as const };
+  await queueFollowUp({
+    type: "no_checkout",
+    memberId: task.uid,
+    visitId: task.visitId,
+    bookingId: firstBookingId(visit.bookingIds),
+    billingCapAt: checkOutAt,
+    now,
+  });
+  return { ...decision, checkOutAt };
 }
 
 /** Entry point for every front-desk task. Bad payloads are dropped, not retried. */
@@ -900,34 +976,11 @@ export const admin_kioskDeviceSet = onCall(adminEventCallableOptions, async (req
 
 // ------------------------------------------------------------ member ----
 
-async function ensureMemberCode(uid: string): Promise<string> {
-  const ref = db().collection(COL.codes).doc(uid);
-  const existing = await ref.get();
-  if (existing.exists && existing.data()?.code) return String(existing.data()?.code);
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const code = generateMemberCode();
-    const indexRef = db().collection(COL.codeIndex).doc(code);
-    const created = await db().runTransaction(async (tx) => {
-      const [mine, taken] = await Promise.all([tx.get(ref), tx.get(indexRef)]);
-      if (mine.exists && mine.data()?.code) return String(mine.data()?.code);
-      if (taken.exists) return null;
-      const now = Date.now();
-      tx.set(indexRef, { uid, createdAt: now });
-      tx.set(ref, { uid, code, createdAt: now });
-      return code;
-    });
-    if (created) return created;
-  }
-  throw new HttpsError("unavailable", "Couldn't create a check-in code. Try again.");
-}
-
 export const members_kioskSummary = onCall(adminEventCallableOptions, async (request) => {
   const uid = requireMemberAccount(request);
   const monthKey = easternMonthKey(Date.now());
-  const [code, visitSnap] = await Promise.all([
-    ensureMemberCode(uid),
-    db().collection(COL.visits).where("uid", "==", uid).get(),
-  ]);
+  // No permanent check-in code. Members use their per-booking door code.
+  const visitSnap = await db().collection(COL.visits).where("uid", "==", uid).get();
   const visits = visitSnap.docs
     .map((d) => d.data())
     .filter((v) => v.monthKey === monthKey)
@@ -942,9 +995,69 @@ export const members_kioskSummary = onCall(adminEventCallableOptions, async (req
       needsReview: v.needsReview === true,
     }));
   return {
-    code,
     monthKey,
     visits,
     totalOverageMinutes: visits.reduce((sum, v) => sum + Number(v.overageMinutes || 0), 0),
   };
+});
+
+function firstBookingId(value: unknown): string | null {
+  return Array.isArray(value) && typeof value[0] === "string" ? value[0] : null;
+}
+
+// ------------------------------------------------------- door check-in ----
+
+/**
+ * Door unlock = check-in (Jonathan, Oct 30, 2026). Called by the Seam webhook
+ * when a member's per-booking code opens the door. Runs the same check-in as
+ * the iPad (same allowance, alerts and idempotency), recorded against a
+ * pseudo-kiosk id "door_<doorId>". An already-open visit is left alone.
+ */
+export async function checkInFromDoorUnlock(input: { uid: string; doorId: string; eventKey: string; now?: number }) {
+  const now = input.now ?? Date.now();
+  const kioskUid = `door_${input.doorId}`.slice(0, 120);
+  const requestId = input.eventKey.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64).padEnd(8, "0");
+  const profile = await memberProfile(input.uid);
+  if (!profile) return { status: "not_found" as const };
+  const lookupId = randomUUID();
+  await db().collection(COL.lookups).doc(lookupId).set({
+    id: lookupId,
+    uid: input.uid,
+    kioskUid,
+    memberLabel: profile.label,
+    firstName: profile.first,
+    source: "door",
+    createdAt: now,
+    expiresAt: now + LOOKUP_TTL_MS,
+  });
+  return performCheckIn({ kioskUid, lookupId, requestId, now });
+}
+
+// ------------------------------------------------------ follow-up queue ----
+
+/**
+ * Marks an item in Jessica's follow-up queue done (or reopens it). Admins
+ * read the queue directly (rules: admin read, no client writes); every
+ * write goes through here and is audited.
+ */
+export const admin_followUpSetStatus = onCall(adminEventCallableOptions, async (request) => {
+  const adminUid = requireAdmin(request);
+  const data = (request.data || {}) as { id?: unknown; status?: unknown; note?: unknown };
+  if (typeof data.id !== "string" || !/^[A-Za-z0-9_-]{3,200}$/.test(data.id)) {
+    throw new HttpsError("invalid-argument", "Pick a follow-up.");
+  }
+  if (data.status !== "done" && data.status !== "open") throw new HttpsError("invalid-argument", "Pick done or open.");
+  const ref = db().collection(FOLLOW_UPS_COLLECTION).doc(data.id);
+  const now = Date.now();
+  const note = normalizeResolutionNote(data.note);
+  const memberUid = await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "That follow-up no longer exists.");
+    tx.update(ref, data.status === "done"
+      ? { status: "done", resolvedAt: now, resolvedBy: adminUid, resolutionNote: note, updatedAt: now }
+      : { status: "open", resolvedAt: null, resolvedBy: null, resolutionNote: null, updatedAt: now });
+    return String(snap.data()?.memberId || "");
+  });
+  await writeAudit({ action: `follow_up_${data.status}`, memberUid, adminUid, details: { followUpId: data.id } });
+  return { ok: true };
 });

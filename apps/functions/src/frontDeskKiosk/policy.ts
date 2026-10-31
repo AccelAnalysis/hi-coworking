@@ -25,9 +25,6 @@ export const LOGO_SECONDS_RANGE = { min: 3, max: 15 } as const;
 export const CLOSE_REASON_MIN = 3;
 export const CLOSE_REASON_MAX = 300;
 export const DEFAULT_CLOSE_TIME = "17:00";
-/** Unambiguous code alphabet: no 0/O, 1/I/L. */
-export const MEMBER_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-export const MEMBER_CODE_LENGTH = 6;
 
 const MINUTE_MS = 60_000;
 
@@ -492,14 +489,19 @@ export function closingTimeFromIntervals(intervals: Array<{ endTime: string }>):
 
 // ------------------------------------------------------ lookup inputs ----
 
-export type LookupQuery = { kind: "email"; email: string } | { kind: "code"; code: string };
+/**
+ * What a member types at the iPad: their email, or the door code for a booking
+ * of theirs that is active now (the per-booking Seam PIN; one code only, so
+ * there is no separate front-desk code). Door codes are 4 to 8 digits.
+ */
+export type LookupQuery = { kind: "email"; email: string } | { kind: "door_code"; code: string };
 
-export function normalizeMemberCode(value: string): string {
-  return value.toUpperCase().replace(/[\s-]/g, "");
+export function normalizeDoorCode(value: string): string {
+  return value.replace(/[\s-]/g, "");
 }
 
-export function isValidMemberCode(code: string): boolean {
-  return code.length === MEMBER_CODE_LENGTH && [...code].every((ch) => MEMBER_CODE_ALPHABET.includes(ch));
+export function isValidDoorCode(code: string): boolean {
+  return /^\d{4,8}$/.test(code);
 }
 
 export function parseLookupQuery(raw: unknown): LookupQuery | null {
@@ -510,16 +512,29 @@ export function parseLookupQuery(raw: unknown): LookupQuery | null {
     const email = value.toLowerCase();
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? { kind: "email", email } : null;
   }
-  const code = normalizeMemberCode(value);
-  return isValidMemberCode(code) ? { kind: "code", code } : null;
+  const code = normalizeDoorCode(value);
+  return isValidDoorCode(code) ? { kind: "door_code", code } : null;
 }
 
-export function generateMemberCode(random: () => number = Math.random): string {
-  let code = "";
-  for (let i = 0; i < MEMBER_CODE_LENGTH; i += 1) {
-    code += MEMBER_CODE_ALPHABET[Math.floor(random() * MEMBER_CODE_ALPHABET.length) % MEMBER_CODE_ALPHABET.length];
-  }
-  return code;
+/** How early before its booking a door code is accepted at the iPad (matches the lock grace). */
+export const DOOR_CODE_EARLY_MS = 15 * 60_000;
+
+/**
+ * Whether a door code's grant lets its owner check in at the iPad now: the
+ * code and grant are live and now is inside the booked window (plus the
+ * early allowance). A code for another day never matches.
+ */
+export function doorCodeUsableAt(input: {
+  codeStatus: unknown;
+  grantStatus: unknown;
+  startsAt: number;
+  endsAt: number;
+  now: number;
+}): boolean {
+  if (input.codeStatus !== "active" && input.codeStatus !== "programming") return false;
+  if (input.grantStatus !== "active" && input.grantStatus !== "pending") return false;
+  if (!Number.isFinite(input.startsAt) || !Number.isFinite(input.endsAt)) return false;
+  return input.now >= input.startsAt - DOOR_CODE_EARLY_MS && input.now < input.endsAt;
 }
 
 // ------------------------------------------------------------- names ----

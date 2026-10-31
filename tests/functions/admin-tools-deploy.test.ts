@@ -130,6 +130,7 @@ const BUNDLES: Bundle[] = [
   {
     codebase: "front-desk-kiosk",
     ids: [
+      "admin_followUpSetStatus",
       "admin_kioskCloseVisit",
       "admin_kioskDeviceSet",
       "admin_kioskOverview",

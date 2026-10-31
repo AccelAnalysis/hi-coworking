@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   deleteApp as deleteAdminApp,
@@ -173,14 +174,25 @@ describe("lookup", () => {
     await expectCode(call(kiosk, "kiosk_lookupMember", { query: "kiosk-ipad@example.test" }), "not-found");
   });
 
-  it("finds a member by the code on their account page", async () => {
+  it("finds a member by their live booking door code; no permanent member code", async () => {
     const samFns = await signedIn({ uid: "sam-signed", role: "member", profile: { displayName: "Sam Lee" } });
-    const summary = await call<{ code: string; visits: unknown[] }>(samFns, "members_kioskSummary");
-    expect(policy.isValidMemberCode(summary.code)).toBe(true);
-    expect((await call<{ code: string }>(samFns, "members_kioskSummary")).code).toBe(summary.code);
+    const summary = await call<Record<string, unknown>>(samFns, "members_kioskSummary");
+    expect(summary).not.toHaveProperty("code");
+    const now = Date.now();
+    await db.collection("accessGrants").doc("grant-sam").set({
+      id: "grant-sam", userId: "sam-signed", bookingId: "booking-sam", doorId: "door-1",
+      status: "active", startsAt: now - 5 * MIN, endsAt: now + 60 * MIN,
+    });
+    await db.collection("accessCodes").doc("code-sam").set({
+      id: "code-sam", grantId: "grant-sam", status: "active",
+      codeHash: createHash("sha256").update("482193").digest("hex"), codeLast2: "93",
+    });
     const kiosk = await kioskDevice();
-    const found = await call<{ memberLabel: string }>(kiosk, "kiosk_lookupMember", { query: summary.code.toLowerCase() });
+    const found = await call<{ memberLabel: string }>(kiosk, "kiosk_lookupMember", { query: "482193" });
     expect(found.memberLabel).toBe("Sam L.");
+    await expectCode(call(kiosk, "kiosk_lookupMember", { query: "111111" }), "not-found");
+    await db.collection("accessGrants").doc("grant-sam").update({ status: "revoked" });
+    await expectCode(call(kiosk, "kiosk_lookupMember", { query: "482193" }), "not-found");
   });
 
   it("is rate-limited per device", async () => {
@@ -352,6 +364,26 @@ describe("deferred tasks and staff close", () => {
     expect(await tasks.runFrontDeskTask(noShow, end + MIN)).toMatchObject({ action: "noop", reason: "already_flagged" });
     expect(await tasks.runFrontDeskTask(late, end + MIN)).toMatchObject({ action: "noop", reason: "already_flagged" });
     expect((await flag("kai-booking"))?.status).toBe("no_show");
+
+    // No door code use and no iPad check-in: Jessica gets one follow-up.
+    const followUps = await db.collection("staffFollowUps").where("bookingId", "==", "kai-booking").get();
+    expect(followUps.docs.map((d) => d.id)).toEqual(["no_checkin_kai-booking"]);
+    expect(followUps.docs[0].data()).toMatchObject({
+      owner: "jessica", ownerTeam: "Member & Event Operations", type: "no_checkin",
+      bookingId: "kai-booking", memberId: "kai", status: "open",
+    });
+    expect(JSON.stringify(followUps.docs[0].data())).not.toMatch(/@|Kai M/);
+  });
+
+  it("does not flag a no-check-in follow-up when the member's door code was used", async () => {
+    const day = tomorrow();
+    const start = policy.easternEpoch(day, "15:00");
+    const end = start + 60 * MIN;
+    await member("dee", { displayName: "Dee Park" });
+    await seatBooking("dee-booking", "dee", start, end);
+    await db.collection("accessEvents").doc("evt-dee").set({ bookingId: "dee-booking", eventType: "door_unlocked", createdAt: start + 2 * MIN });
+    await tasks.runFrontDeskTask(attendance("no_show", "dee-booking", "dee", start, end), end);
+    expect((await db.collection("staffFollowUps").doc("no_checkin_dee-booking").get()).exists).toBe(false);
   });
 
   it("does nothing for a member who checked in, and marks a late member who arrives", async () => {
@@ -427,6 +459,10 @@ describe("deferred tasks and staff close", () => {
     expect(visit.checkOutAt).toBe(decision.checkOutAt);
     expect(visit.checkOutAt).toBeGreaterThan(checkInAt);
     expect((await db.collection("kioskOpenVisits").doc("taylor").get()).exists).toBe(false);
+    // Jessica reviews every visit with no check-out.
+    expect((await db.collection("staffFollowUps").doc("no_checkout_visit-taylor").get()).data()).toMatchObject({
+      owner: "jessica", type: "no_checkout", visitId: "visit-taylor", memberId: "taylor", status: "open",
+    });
     // Duplicate delivery: already closed, nothing changes.
     expect(await tasks.runFrontDeskTask(task, now + MIN)).toMatchObject({ action: "noop", reason: "not_open" });
     expect((await db.collection("kioskVisits").doc("visit-taylor").get()).data()).toEqual(visit);
@@ -437,6 +473,15 @@ describe("deferred tasks and staff close", () => {
       visitId: "visit-taylor", checkOutAt: checkInAt + 90 * MIN, reason: "Member confirmed they left at 11:30",
     });
     expect(closed.overageMinutes).toBe(30);
+
+    // Only admins resolve follow-ups, through the server callable.
+    const followUpId = "no_checkout_visit-taylor";
+    await expectCode(call(staff, "admin_followUpSetStatus", { id: followUpId, status: "done" }), "permission-denied");
+    const ops = await signedIn({ uid: "ops-admin", role: "admin" });
+    await call(ops, "admin_followUpSetStatus", { id: followUpId, status: "done", note: "Checked the visit time" });
+    expect((await db.collection("staffFollowUps").doc(followUpId).get()).data()).toMatchObject({
+      status: "done", resolvedBy: "ops-admin", resolutionNote: "Checked the visit time",
+    });
     const after = (await db.collection("kioskVisits").doc("visit-taylor").get()).data()!;
     expect(after.status).toBe("staff_closed");
     expect(after.needsReview).toBe(false);
