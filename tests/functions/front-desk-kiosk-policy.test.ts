@@ -12,9 +12,9 @@ import {
   easternEpoch,
   easternMonthKey,
   firstName,
-  generateMemberCode,
+  doorCodeUsableAt,
   hoursAlertReason,
-  isValidMemberCode,
+  isValidDoorCode,
   maskedName,
   normalizeKioskSettings,
   parseLookupQuery,
@@ -202,17 +202,26 @@ describe("late, no-show and auto-close", () => {
 });
 
 describe("lookup, names and settings", () => {
-  it("parses an email or a member code", () => {
+  it("parses an email or a door code (member codes are retired)", () => {
     expect(parseLookupQuery("  Member@Example.Test ")).toEqual({ kind: "email", email: "member@example.test" });
-    expect(parseLookupQuery("hk7-m2p")).toEqual({ kind: "code", code: "HK7M2P" });
-    expect(parseLookupQuery("HK7M2O")).toBeNull(); // O is not in the alphabet
+    expect(parseLookupQuery(" 4821-93 ")).toEqual({ kind: "door_code", code: "482193" });
+    expect(parseLookupQuery("hk7-m2p")).toBeNull(); // old letter member codes no longer work
+    expect(parseLookupQuery("123")).toBeNull();
     expect(parseLookupQuery("abc")).toBeNull();
     expect(parseLookupQuery("not an email@")).toBeNull();
     expect(parseLookupQuery(42)).toBeNull();
+    expect(isValidDoorCode("1234")).toBe(true);
+    expect(isValidDoorCode("123456789")).toBe(false);
   });
-  it("generates unambiguous codes", () => {
-    for (let i = 0; i < 50; i += 1) expect(isValidMemberCode(generateMemberCode())).toBe(true);
-    expect(generateMemberCode(() => 0)).toBe("AAAAAA");
+  it("accepts a door code only while its booking is live", () => {
+    const startsAt = Date.UTC(2026, 10, 20, 14);
+    const endsAt = startsAt + 2 * 60 * MIN;
+    const live = { codeStatus: "active", grantStatus: "active", startsAt, endsAt };
+    expect(doorCodeUsableAt({ ...live, now: startsAt - 10 * MIN })).toBe(true);
+    expect(doorCodeUsableAt({ ...live, now: startsAt - 20 * MIN })).toBe(false);
+    expect(doorCodeUsableAt({ ...live, now: endsAt })).toBe(false);
+    expect(doorCodeUsableAt({ ...live, codeStatus: "removed", now: startsAt })).toBe(false);
+    expect(doorCodeUsableAt({ ...live, grantStatus: "revoked", now: startsAt })).toBe(false);
   });
   it("masks names to first name and last initial, never an email", () => {
     expect(maskedName({ displayName: "Avery Quinn Kim" })).toBe("Avery K.");

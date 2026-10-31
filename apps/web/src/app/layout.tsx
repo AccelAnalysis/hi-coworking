@@ -6,6 +6,7 @@ import { FormsHostGuard } from "@/components/FormsHostGuard";
 import { AuthProvider } from "@/lib/authContext";
 import { formsHostGuardScript } from "@/lib/formsHostGuard";
 import { HOME_DESCRIPTION, HOME_TITLE, PUBLIC_SITE_ORIGIN } from "@/lib/publicSite";
+import { SAYHI_FLOW } from "@/lib/sayhiFlags";
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -45,7 +46,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${dmSans.variable} ${fraunces.variable} ${geistSans.variable} ${geistMono.variable} antialiased min-h-dvh`}
+        className={`${dmSans.variable} ${fraunces.variable} ${SAYHI_FLOW ? "sayhi-brand" : `${geistSans.variable} ${geistMono.variable}`} antialiased min-h-dvh`}
       >
         <Script id="forms-host-guard" strategy="beforeInteractive">
           {formsHostGuardScript()}

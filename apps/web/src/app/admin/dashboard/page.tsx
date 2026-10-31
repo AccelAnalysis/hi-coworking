@@ -27,6 +27,7 @@ import {
   UserCog,
   Users,
   WalletCards,
+  ClipboardList,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -51,6 +52,7 @@ const MODULES: readonly Module[] = [
   { href: "/admin/spaces/catalog", label: "Published setups", description: "Customer arrangements, capacities, and upsell add-ons", icon: Sparkles },
   { href: "/admin/builder", label: "Visual designer", description: "Locations, floors, layouts, and publishing", icon: Hammer },
   { href: "/admin/front-desk", label: "Front desk", description: "Kiosk check-ins, open visits, review, and staff-only hours alerts", icon: ConciergeBell, capability: "frontDesk" },
+  { href: "/admin/follow-ups", label: "Follow-ups", description: "No check-out, no check-in, and virtual address paperwork for Member & Event Operations", icon: ClipboardList, capability: "followUps" },
   { href: "/admin/access", label: "Door access", description: "Grant status, code delivery, unlock, resend, and revoke", icon: DoorOpen, capability: "doorAccess" },
   { href: "/admin/nurture", label: "Nurture", description: "Acquisition, customer development, renewal, and retention", icon: Mail },
   { href: "/admin/events", label: "Events", description: "Registrations, holds, waitlist, and lifecycle", icon: CalendarDays },

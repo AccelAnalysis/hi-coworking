@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { formatDayTime, formatMinutes, membersKioskSummary, type MemberKioskSummary } from "@/lib/frontDeskKiosk";
 
 /**
- * SayHi card: the member's front-desk check-in code and this month's visits.
+ * SayHi card: this month's visits and check-out reminder. There is no
+ * separate front-desk code; the per-booking door code (or email) works on the
+ * iPad (decision "one code only", Oct 30, 2026).
  * Hidden while loading and whenever the callable is missing or refuses
  * (Hosting can deploy before the front-desk functions).
  */
@@ -30,12 +32,9 @@ export function FrontDeskCard() {
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200" data-testid="front-desk-card">
-      <h2 className="text-sm font-medium text-slate-600">Front-desk check-in</h2>
-      <p className="mt-1 font-mono text-2xl font-bold tracking-[0.18em] text-slate-900" aria-label={`Member code ${summary.code.split("").join(" ")}`}>
-        {summary.code}
-      </p>
+      <h2 className="font-semibold text-[#101D4B]">Your visits</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600">
-        Enter this code or your email on the front-desk iPad when you arrive and when you leave.
+        Your access code checks you in at the door. When you leave, check out on the front-desk iPad with that code or your email.
       </p>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>

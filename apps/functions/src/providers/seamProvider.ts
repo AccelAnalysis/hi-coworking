@@ -86,6 +86,18 @@ export async function createTimeBoundCode(
 }
 
 /**
+ * Read one access code's PIN from Seam. Used only to show a member their own
+ * code on the signed-in SayHi page; the result is never stored or logged.
+ */
+export async function getCodePin(seamApiKey: string, seamCodeId: string): Promise<string | null> {
+  const data = await seamRequest(seamApiKey, "POST", "/access_codes/get", {
+    access_code_id: seamCodeId,
+  }) as { access_code?: { code?: unknown } };
+  const code = data.access_code?.code;
+  return typeof code === "string" && code ? code : null;
+}
+
+/**
  * Delete an access code from a Seam-connected device.
  * Used for cancellations, no-shows, and expiry cleanup.
  */

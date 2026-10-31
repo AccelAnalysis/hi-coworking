@@ -35,6 +35,11 @@ export interface CheckoutSessionInput {
   metadata?: Record<string, string>;
   mode?: "subscription" | "payment";
   lineItemLabel?: string; // For ad-hoc one-time payments
+  /** Ask Stripe Checkout for the billing address (SayHi step 6). */
+  collectBillingAddress?: boolean;
+  /** Extra recurring prices (virtual address add-on, off by default). */
+  extraLineItems?: Array<{ price: string; quantity: number }>;
+  optionalItems?: Array<{ price: string; quantity: number }>;
 }
 
 export interface CheckoutSessionResult {

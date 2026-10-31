@@ -208,6 +208,11 @@ jobs:
           tests/web/front-desk-kiosk-ui.test.ts
           tests/web/public-launch-gate.test.ts
           tests/web/safari15-support.test.ts
+          tests/functions/access-code-visibility.test.ts
+          tests/functions/follow-up-queue-policy.test.ts
+          tests/functions/sayhi-virtual-address-flag.test.ts
+          tests/functions/sayhi-email-brand.test.ts
+          tests/web/sayhi-flow.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -228,7 +233,7 @@ jobs:
           npx firebase emulators:exec
           --project demo-hi-coworking
           --only firestore
-          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts"
+          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts tests/rules/staff-follow-ups.rules.test.ts tests/rules/sayhi-account-details.rules.test.ts"
 
       - name: Build production web application
         run: npm run build

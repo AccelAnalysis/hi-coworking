@@ -639,6 +639,7 @@ export const booking_beginCheckout = onCall(
       successUrl,
       cancelUrl,
       mode: "payment",
+      collectBillingAddress: true,
       lineItemLabel: `${quote.resourceName} · ${quote.durationHours} hour${quote.durationHours === 1 ? "" : "s"}`,
       metadata: {
         paymentId: payment.id,

@@ -18,6 +18,8 @@ import { useAuth } from "@/lib/authContext";
 import { subscribeToUnreadCount } from "@/lib/firestore";
 import { isMyHiPath, MY_HI_HREF, MY_HI_LABEL } from "@/lib/myHiNav";
 import { AdminBackNavigation } from "@/components/AdminBackNavigation";
+import { HiLogo } from "@/components/HiLogo";
+import { SAYHI_FLOW } from "@/lib/sayhiFlags";
 
 const publicLinks = [
   { href: "/spaces", label: "Spaces" },
@@ -110,15 +112,21 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <nav className="sticky top-0 z-50 bg-slate-900 text-white shadow-lg">
+      <nav className={cn("sticky top-0 z-50 text-white shadow-lg", SAYHI_FLOW ? "bg-[#101D4B]" : "bg-slate-900")}>
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-4">
           <div className="flex items-center gap-8">
+            {SAYHI_FLOW ? (
+              <Link href="/" className="flex shrink-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                <HiLogo tone="dark" />
+              </Link>
+            ) : (
             <Link href="/" className="font-logo flex shrink-0 items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-2xl rounded-bl-none bg-white text-sm font-bold text-slate-900 shadow-lg shadow-white/10">
                 Hi
               </div>
               <span className="text-xl font-bold tracking-tight">Coworking</span>
             </Link>
+            )}
 
             <div className="hidden gap-5 lg:flex">
               {publicLinks.map((item) => (
@@ -226,9 +234,9 @@ export function AppShell({
                         {isStaff && (
                           <Link
                             href="/staff"
-                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-emerald-700 transition-colors hover:bg-emerald-50"
+                            className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm text-[#3A4675] transition-colors hover:bg-[#EEF0F6]"
                           >
-                            <User className="h-4 w-4 text-emerald-500" />
+                            <User className="h-4 w-4 text-[#4A5585]" />
                             Staff
                           </Link>
                         )}
@@ -310,10 +318,14 @@ export function AppShell({
                 className="font-logo flex items-center gap-2"
                 onClick={() => setDrawerOpen(false)}
               >
+                {SAYHI_FLOW ? <HiLogo size={28} /> : (
+                <>
                 <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
                   Hi
                 </div>
                 <span className="text-lg font-bold text-slate-900">Coworking</span>
+                </>
+                )}
               </Link>
               <button
                 type="button"
@@ -371,9 +383,9 @@ export function AppShell({
                   {isStaff && (
                     <Link
                       href="/staff"
-                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-emerald-700"
+                      className="flex min-h-11 items-center gap-3 py-2 text-sm font-medium text-[#3A4675]"
                     >
-                      <User className="h-4 w-4 text-emerald-500" />
+                      <User className="h-4 w-4 text-[#4A5585]" />
                       Staff
                     </Link>
                   )}
@@ -433,10 +445,14 @@ export function AppShell({
           <div className="mb-8 grid grid-cols-2 gap-8 md:grid-cols-4">
             <div className="col-span-2 md:col-span-1">
               <Link href="/" className="font-logo mb-3 flex items-center gap-2">
+                {SAYHI_FLOW ? <HiLogo size={28} /> : (
+                <>
                 <div className="flex h-7 w-7 items-center justify-center rounded-xl rounded-bl-none bg-slate-900 text-xs font-bold text-white">
                   Hi
                 </div>
                 <span className="text-lg font-bold text-slate-900">Coworking</span>
+                </>
+                )}
               </Link>
               <p className="text-sm leading-relaxed text-slate-500">
                 Big ideas. Intimate space.

@@ -130,6 +130,7 @@ const BUNDLES: Bundle[] = [
   {
     codebase: "front-desk-kiosk",
     ids: [
+      "admin_followUpSetStatus",
       "admin_kioskCloseVisit",
       "admin_kioskDeviceSet",
       "admin_kioskOverview",
@@ -142,6 +143,8 @@ const BUNDLES: Bundle[] = [
       "kiosk_onBookingWritten",
       "kiosk_session",
       "members_kioskSummary",
+      "members_saveAccountDetails",
+      "va_submitForm1583",
     ],
     params: [],
     bound: {},

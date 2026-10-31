@@ -45,7 +45,7 @@ export function BillingPortalButton() {
         onClick={open}
         disabled={opening}
         aria-busy={opening}
-        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-white px-5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70"
+        className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-white px-5 text-sm font-semibold text-[#101D4B] transition hover:bg-[#EEF0F6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-70"
       >
         {opening ? (
           <>
@@ -54,12 +54,12 @@ export function BillingPortalButton() {
           </>
         ) : (
           <>
-            Manage membership &amp; billing
+            Manage membership and billing
             <ExternalLink aria-hidden="true" className="h-4 w-4" />
           </>
         )}
       </button>
-      <p className="mt-2 text-xs leading-5 text-slate-300">
+      <p className="mt-2 text-xs leading-5 text-[#C5CADB]">
         Update your payment method, view invoices, change your plan, or cancel.
       </p>
       {error ? (
