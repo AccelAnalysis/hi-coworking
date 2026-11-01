@@ -191,7 +191,7 @@ describe("SayHi billing pieces (Oct 31, 2026)", () => {
     expect(demoKind("?demo=ending")).toBe("ending");
     const ending = demoData("ending", NOW);
     expect(ending.userDoc).toMatchObject({ cancelAtPeriodEnd: true });
-    expect(demoData("member", NOW).kioskSummary?.visits.some((v) => v.chargeStatus === "billed_next_invoice")).toBe(true);
+    expect(demoData("member", NOW).kioskSummary?.visits.some((v) => v.chargeStatus === "charged" && v.overtimeIncludedMinutes === 30)).toBe(true);
     expect(demoData("guest", NOW).kioskSummary?.visits.some((v) => v.chargeStatus === "charged")).toBe(true);
     expect(demoData("guest", NOW).billingAddress?.postalCode).toBe("00000");
     expect(demoData("empty", NOW).billingAddress).toBeNull();

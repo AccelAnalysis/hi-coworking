@@ -85,6 +85,7 @@ export type MemberKioskSummary = {
     /** SayHi overtime, present once the server records a charge. */
     overtimeMinutes?: number | null;
     overtimeCents?: number | null;
+    overtimeIncludedMinutes?: number | null;
     chargeStatus?: string;
   }>;
   totalOverageMinutes: number;

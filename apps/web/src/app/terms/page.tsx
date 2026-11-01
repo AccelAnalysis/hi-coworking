@@ -74,9 +74,12 @@ function termsSections(sayhi: boolean): Section[] {
                 <ul className="list-disc space-y-1 pl-5">
                   <li>Check out within 15 minutes after your booking ends and there&apos;s no extra charge.</li>
                   <li>
-                    After that, extra time is charged in 15-minute steps at your plan&apos;s extra-hour
-                    rate, or the guest hourly rate, to your card on file or your next membership bill.
+                    After that, extra time is counted in 15-minute steps. If your plan has included hours
+                    left for the month, extra time comes out of those first. Anything beyond that is
+                    charged right away at your plan&apos;s extra-hour rate to the payment method on file
+                    for your membership.
                   </li>
+                  <li>For guests, extra time is charged at the guest hourly rate to the card used for the booking.</li>
                   <li>Leaving early? Your booked time is still charged.</li>
                   <li>
                     If you don&apos;t check out, time is billed up to one hour past your booking and

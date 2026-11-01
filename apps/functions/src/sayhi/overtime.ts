@@ -10,6 +10,10 @@
  *    visit waits for staff review. Only a visit the member checked out of, or
  *    one staff closed with the real time, is ever charged.
  *  - Leaving early: the booking was already paid or applied in full.
+ *  - Members with a live plan (Jonathan, Nov 1, 2026, 6:18 AM ET): the extra
+ *    time comes out of the plan's remaining included hours for the month
+ *    first; only what is left is charged, right away, to the payment method
+ *    on file. Nothing is added to the next membership bill.
  * Only visits tied to a booking have a booked end, so a walk-in that draws
  * on monthly included hours keeps the existing record-only overage.
  */
@@ -47,6 +51,54 @@ export function overtimeForVisit(visit: OvertimeVisit): Overtime {
   return { minutes, cents: Math.round((minutes / 60) * rateCents) };
 }
 
+export type OvertimeSplit = {
+  /** Billable extra minutes (after grace and 15-minute steps). */
+  minutes: number;
+  /** Minutes taken from the plan's remaining included hours. */
+  includedMinutes: number;
+  /** Minutes left to charge. */
+  chargedMinutes: number;
+  /** Amount to charge now for chargedMinutes. */
+  chargedCents: number;
+};
+
+/**
+ * Split billable extra time between remaining included plan minutes and a
+ * charge. Pass remainingIncludedMinutes = 0 for guests and non-plan users.
+ */
+export function splitOvertime(overtime: Overtime, remainingIncludedMinutes: number, rateCents: number): OvertimeSplit {
+  const minutes = Math.max(0, Math.round(overtime.minutes));
+  const available = Math.max(0, Math.floor(Number(remainingIncludedMinutes) || 0));
+  const includedMinutes = Math.min(minutes, available);
+  const chargedMinutes = minutes - includedMinutes;
+  const rate = Math.max(0, Math.round(Number(rateCents) || 0));
+  const chargedCents = includedMinutes === 0
+    ? Math.max(0, Math.round(overtime.cents))
+    : Math.round((chargedMinutes / 60) * rate);
+  return { minutes, includedMinutes, chargedMinutes, chargedCents };
+}
+
+/**
+ * Included minutes left this month, using the same accounting as the front
+ * desk (computeAllowance): plan hours minus booked/reserved hours minus
+ * included minutes already used by walk-in visits.
+ */
+export function remainingIncludedMinutes(input: {
+  includedHoursPerMonth: number | null | undefined;
+  usedHours: number;
+  reservedHours: number;
+  walkInIncludedMinutes: number;
+}): number {
+  const included = Number(input.includedHoursPerMonth) || 0;
+  if (!(included > 0)) return 0;
+  return Math.max(0, Math.floor(
+    included * 60
+    - Math.max(0, input.usedHours) * 60
+    - Math.max(0, input.reservedHours) * 60
+    - Math.max(0, input.walkInIncludedMinutes),
+  ));
+}
+
 /** True once, when a visit moves into a charge-eligible closed state. */
 export function shouldChargeOvertime(before: OvertimeVisit | undefined, after: OvertimeVisit | undefined): boolean {
   if (!after) return false;
@@ -57,6 +109,8 @@ export function shouldChargeOvertime(before: OvertimeVisit | undefined, after: O
   return overtimeForVisit(after).cents > 0;
 }
 
-export function overtimeDescription(minutes: number): string {
-  return `Hi Coworking extra time: ${minutes} minutes past your booking`;
+export function overtimeDescription(minutes: number, includedMinutes = 0): string {
+  return includedMinutes > 0
+    ? `Hi Coworking extra time: ${minutes} minutes past your booking (${includedMinutes} from included hours)`
+    : `Hi Coworking extra time: ${minutes} minutes past your booking`;
 }

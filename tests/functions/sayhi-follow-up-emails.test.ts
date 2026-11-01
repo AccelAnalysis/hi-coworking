@@ -28,10 +28,22 @@ const ON = { SAYHI_FLOW_ENABLED: "true" };
 function previewSamples() {
   return [
     {
-      id: "extra-time-next-bill",
-      label: "Extra time, added to the next membership bill",
-      trigger: "Sent once per visit, right after extra time is added to the member's next membership bill.",
-      ...renderExtraTimeEmail({ billing: "next_bill", firstName: "Jordan", bookedEnd: END_5PM, checkOutAt: END_5PM + 42 * MIN, minutes: 45, cents: 1050, origin: ORIGIN }),
+      id: "extra-time-included",
+      label: "Extra time, all from the member's included hours",
+      trigger: "Sent once per visit, right after extra time is fully covered by the member's included plan hours (no charge).",
+      ...renderExtraTimeEmail({ billing: "included", firstName: "Jordan", bookedEnd: END_5PM, checkOutAt: END_5PM + 42 * MIN, minutes: 45, includedMinutes: 45, cents: 0, origin: ORIGIN }),
+    },
+    {
+      id: "extra-time-partly-included",
+      label: "Extra time, partly from included hours, the rest charged",
+      trigger: "Sent once per visit, right after included plan hours cover part of the extra time and the rest is charged to the member's payment method on file.",
+      ...renderExtraTimeEmail({ billing: "partly_included", firstName: "Jordan", bookedEnd: END_5PM, checkOutAt: END_5PM + 42 * MIN, minutes: 45, includedMinutes: 30, cents: 350, origin: ORIGIN }),
+    },
+    {
+      id: "extra-time-member-card",
+      label: "Extra time, no included hours left, all charged",
+      trigger: "Sent once per visit, right after extra time is charged to the member's payment method on file because no included plan hours are left.",
+      ...renderExtraTimeEmail({ billing: "member_card", firstName: "Jordan", bookedEnd: END_5PM, checkOutAt: END_5PM + 42 * MIN, minutes: 45, cents: 1050, origin: ORIGIN }),
     },
     {
       id: "extra-time-card",
@@ -125,13 +137,22 @@ describe("SayHi follow-up email copy", () => {
   });
 
   it("states the right billing destination and amount in Eastern time", () => {
-    const [nextBill, card, noCheckout] = samples;
-    expect(nextBill.subject).toBe("Extra time from your visit on Tuesday, November 3");
-    expect(nextBill.text).toContain("Your booking ended at 5:00 PM, and you checked out at 5:42 PM.");
-    expect(nextBill.text).toContain("45 minutes of extra time, for $10.50");
-    expect(nextBill.text).toContain("next membership bill");
-    expect(nextBill.text).not.toContain("card");
-    expect(card.text).toContain("30 minutes of extra time, for $8.75");
+    const [included, partly, memberCard, card, noCheckout] = samples;
+    for (const sample of [included, partly, memberCard, card]) {
+      expect(sample.subject).toBe("Extra time from your visit on Tuesday, November 3");
+      expect(sample.text).not.toMatch(/next (membership )?bill/i);
+    }
+    expect(card.subject).toBe(included.subject);
+    expect(included.text).toContain("Your booking ended at 5:00 PM, and you checked out at 5:42 PM.");
+    expect(included.text).toContain("so this visit has 45 minutes of extra time. All 45 minutes came from your plan's included hours for this month.");
+    expect(included.text).toContain("There's no charge for this extra time");
+    expect(included.text).not.toMatch(/\$\d/);
+    expect(included.text).not.toContain("charged");
+    expect(partly.text).toContain("so this visit has 45 minutes of extra time. Of that, 30 minutes came from your plan's included hours for this month, and the other 15 minutes came to $3.50.");
+    expect(partly.text).toContain("We've charged $3.50 to the payment method on file for your membership.");
+    expect(memberCard.text).toContain("so this visit has 45 minutes of extra time, for $10.50. You had no included plan hours left this month to put toward it.");
+    expect(memberCard.text).toContain("We've charged this amount to the payment method on file for your membership.");
+    expect(card.text).toContain("30 minutes of extra time, for $8.75.");
     expect(card.text).toContain("card you used for your booking");
     expect(card.text).not.toContain("membership bill");
     expect(noCheckout.subject).toBe("We didn't see you check out on Tuesday, November 3");
@@ -158,8 +179,13 @@ describe("SayHi follow-up email copy", () => {
 
 describe("when SayHi follow-up emails send", () => {
   it("picks the extra-time moment and variant", () => {
-    expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charging" }, { ...visitBase, chargeStatus: "billed_next_invoice" })).toBe("next_bill");
+    const plan = { ...visitBase, overtimeBilling: "plan" };
+    expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "not_charged" }, { ...plan, chargeStatus: "covered_by_plan_hours", overtimeIncludedMinutes: 45, overtimeCents: 0 })).toBe("included");
+    expect(extraTimeEmailBilling({ ...plan, chargeStatus: "charging" }, { ...plan, chargeStatus: "charged", overtimeIncludedMinutes: 30, overtimeCents: 350 })).toBe("partly_included");
+    expect(extraTimeEmailBilling({ ...plan, chargeStatus: "charging" }, { ...plan, chargeStatus: "charged", overtimeIncludedMinutes: 0 })).toBe("member_card");
+    expect(extraTimeEmailBilling({ ...plan, chargeStatus: "charging" }, { ...plan, chargeStatus: "billed_next_invoice" })).toBeNull();
     expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charging" }, { ...visitBase, chargeStatus: "charged" })).toBe("card");
+    expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charging" }, { ...visitBase, overtimeBilling: "guest", chargeStatus: "charged" })).toBe("card");
     expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charged" }, { ...visitBase, chargeStatus: "charged" })).toBeNull();
     expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charging" }, { ...visitBase, chargeStatus: "charge_failed" })).toBeNull();
     expect(extraTimeEmailBilling({ ...visitBase, chargeStatus: "charging" }, { ...visitBase, chargeStatus: "no_card_on_file" })).toBeNull();
@@ -180,7 +206,7 @@ describe("when SayHi follow-up emails send", () => {
   it("sends one extra-time email per visit", async () => {
     const { provider, sent } = fakeProvider();
     const { store, docs } = memoryStore({ email: "member@example.test", displayName: "Jordan Lee" });
-    const input = { visitId: "v1", before: { ...visitBase, chargeStatus: "charging" }, after: { ...visitBase, chargeStatus: "billed_next_invoice" } };
+    const input = { visitId: "v1", before: { ...visitBase, chargeStatus: "charging" }, after: { ...visitBase, overtimeBilling: "plan", overtimeIncludedMinutes: 30, overtimeCents: 350, chargeStatus: "charged" } };
     expect(await sendExtraTimeEmail(input, { provider, store, env: ON, origin: ORIGIN })).toBe("sent");
     expect(await sendExtraTimeEmail(input, { provider, store, env: ON, origin: ORIGIN })).toBe("skipped_already_sent");
     expect(sent).toHaveLength(1);

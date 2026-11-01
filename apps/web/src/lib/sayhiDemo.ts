@@ -56,7 +56,7 @@ function demoKioskSummary(kind: DemoKind, base: number): MemberKioskSummary | nu
     ? [visit(3, 150, { overageMinutes: 30, overtimeMinutes: 30, overtimeCents: 875, chargeStatus: "charged" })]
     : [
       visit(2, 250, { overageMinutes: 10 }),
-      visit(5, 285, { overageMinutes: 45, overtimeMinutes: 45, overtimeCents: 1050, chargeStatus: "billed_next_invoice" }),
+      visit(5, 285, { overageMinutes: 45, overtimeMinutes: 45, overtimeIncludedMinutes: 30, overtimeCents: 350, chargeStatus: "charged" }),
       visit(8, 235, {}),
     ];
   return {

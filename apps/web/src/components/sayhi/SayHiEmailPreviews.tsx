@@ -6,7 +6,7 @@ import { SAYHI_EMAIL_PREVIEWS } from "@/lib/sayhiEmailPreviews.generated";
 /**
  * Private preview only (/my-hi?demo=emails, NEXT_PUBLIC_SAYHI_PREVIEW_DEMO):
  * the SayHi follow-up emails exactly as the server renders them, with
- * fictional sample visits. Wording is a draft until Jonathan approves it.
+ * fictional sample visits. Wording approved by Jonathan on Nov 1, 2026.
  */
 export default function SayHiEmailPreviews() {
   return (

@@ -13,11 +13,16 @@ function money(cents: number) {
 
 /** What the member sees for one visit's extra-time charge (SayHi flow). */
 export function overtimeChargeLabel(visit: Visit): string | null {
-  if (!visit.overtimeCents || !visit.overtimeMinutes) return null;
-  const amount = `${formatMinutes(visit.overtimeMinutes)} extra · ${money(visit.overtimeCents)}`;
+  if (!visit.overtimeMinutes) return null;
+  const extra = `${formatMinutes(visit.overtimeMinutes)} extra`;
+  const included = visit.overtimeIncludedMinutes && visit.overtimeIncludedMinutes > 0
+    ? ` · ${formatMinutes(visit.overtimeIncludedMinutes)} from included hours`
+    : "";
+  if (visit.chargeStatus === "covered_by_plan_hours") return `${extra} · from included hours`;
+  if (!visit.overtimeCents) return null;
+  const amount = `${extra}${included} · ${money(visit.overtimeCents)}`;
   switch (visit.chargeStatus) {
     case "charged": return `${amount} charged`;
-    case "billed_next_invoice": return `${amount} on your next bill`;
     case "charging": return `${amount} processing`;
     default: return `${amount} · our team will follow up`;
   }
@@ -87,8 +92,9 @@ export function FrontDeskCard({ demoSummary = null }: { demoSummary?: MemberKios
       ) : null}
       {SAYHI_FLOW ? (
         <p className="mt-3 text-xs leading-5 text-slate-600">
-          Check out within 15 minutes after your booking ends and there&apos;s no extra charge. After that, extra time is
-          charged to your card on file, or added to your next membership bill.{" "}
+          Check out within 15 minutes after your booking ends and there&apos;s no extra charge. After that, extra time
+          comes out of any included plan hours you have left, and the rest is charged right away to your payment method
+          on file.{" "}
           <Link href="/terms#extra-time" className="font-semibold text-[#101D4B] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]">
             How extra time works
           </Link>

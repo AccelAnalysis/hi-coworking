@@ -1,9 +1,13 @@
 /**
- * SayHi follow-up emails (draft, Nov 1, 2026). Wording needs Jonathan's
- * explicit approval before these go live.
+ * SayHi follow-up emails. Wording approved by Jonathan (Nov 1, 2026, 6:18 AM
+ * ET) with the included-hours billing change; the new billing variants are
+ * part of that change.
  *
- *  - Extra time: sent once per visit after an extra-time charge lands, either
- *    on the next membership bill or on the card used for the booking.
+ *  - Extra time: sent once per visit after extra time is settled. Members
+ *    with a live plan: covered by included hours, partly covered with the
+ *    rest charged to the payment method on file, or all charged. Guests:
+ *    charged to the card used for the booking. Never sent when there is no
+ *    card or the charge fails (that goes to staff review).
  *  - No check-out: sent once per visit when the visit is flagged for staff
  *    review because nobody checked out.
  *
@@ -34,12 +38,18 @@ import { sayhiFlowEnabled } from "./config";
 
 export const EXTRA_TIME_EMAIL_TYPE = "sayhi_extra_time";
 export const NO_CHECKOUT_EMAIL_TYPE = "sayhi_no_checkout";
-export const EXTRA_TIME_EMAIL_TEMPLATE = "sayhi-extra-time-v1";
+export const EXTRA_TIME_EMAIL_TEMPLATE = "sayhi-extra-time-v2";
 export const NO_CHECKOUT_EMAIL_TEMPLATE = "sayhi-no-checkout-v1";
 export const EMAIL_TIME_ZONE = "America/New_York";
 
 export type FollowUpEmailCopy = { subject: string; html: string; text: string };
-export type ExtraTimeBilling = "next_bill" | "card";
+/**
+ * included: all extra time came from plan hours (no charge).
+ * partly_included: some from plan hours, the rest charged.
+ * member_card: no plan hours left, all charged to the member's payment method.
+ * card: guest or non-plan visit, charged to the booking card.
+ */
+export type ExtraTimeBilling = "included" | "partly_included" | "member_card" | "card";
 
 /** One sentEmails marker per visit per email type. */
 export function followUpEmailId(type: typeof EXTRA_TIME_EMAIL_TYPE | typeof NO_CHECKOUT_EMAIL_TYPE, visitId: string): string {
@@ -127,7 +137,11 @@ export function renderExtraTimeEmail(input: {
   firstName?: string;
   bookedEnd: number;
   checkOutAt: number;
+  /** All billable extra minutes. */
   minutes: number;
+  /** Minutes taken from included plan hours (included / partly_included). */
+  includedMinutes?: number;
+  /** Amount charged (0 when fully covered). */
   cents: number;
   origin?: string;
 }): FollowUpEmailCopy {
@@ -135,30 +149,54 @@ export function renderExtraTimeEmail(input: {
   const date = formatVisitDate(input.bookedEnd);
   const amount = formatAmount(input.cents);
   const duration = formatDuration(input.minutes);
+  const includedMinutes = Math.max(0, Math.min(input.minutes, Math.round(input.includedMinutes || 0)));
+  const included = formatDuration(includedMinutes);
+  const rest = formatDuration(input.minutes - includedMinutes);
   const subject = `Extra time from your visit on ${date}`;
   const headline = "Extra time from your visit";
+  const rules = "Checking out within 15 minutes after a booking ends has no extra charge. After that, extra time is counted in 15-minute steps from the end of your booking, so this visit has";
+  let amounts: string;
+  let billingLine: string;
+  let preheader: string;
+  switch (input.billing) {
+    case "included":
+      amounts = `${rules} ${duration} of extra time. All ${duration} came from your plan's included hours for this month.`;
+      billingLine = "There's no charge for this extra time, and there's nothing else you need to do.";
+      preheader = `${duration} of extra time, covered by your included hours.`;
+      break;
+    case "partly_included":
+      amounts = `${rules} ${duration} of extra time. Of that, ${included} came from your plan's included hours for this month, and the other ${rest} came to ${amount}.`;
+      billingLine = `We've charged ${amount} to the payment method on file for your membership. There's nothing else you need to do.`;
+      preheader = `${duration} of extra time, ${included} from your included hours, ${amount} charged.`;
+      break;
+    case "member_card":
+      amounts = `${rules} ${duration} of extra time, for ${amount}. You had no included plan hours left this month to put toward it.`;
+      billingLine = "We've charged this amount to the payment method on file for your membership. There's nothing else you need to do.";
+      preheader = `${duration} of extra time, ${amount}.`;
+      break;
+    default:
+      amounts = `${rules} ${duration} of extra time, for ${amount}.`;
+      billingLine = "We've charged this amount to the card you used for your booking. There's nothing else you need to do.";
+      preheader = `${duration} of extra time, ${amount}.`;
+  }
   const blocks: Block[] = [
     { kind: "p", text: input.firstName ? `Hi ${input.firstName},` : "Hi there," },
     {
       kind: "p",
       text: `Thanks for working at Hi Coworking on ${date}. Your booking ended at ${formatVisitTime(input.bookedEnd)}, and you checked out at ${formatVisitTime(input.checkOutAt)}.`,
     },
-    {
-      kind: "p",
-      text: `Checking out within 15 minutes after a booking ends has no extra charge. After that, extra time is counted in 15-minute steps from the end of your booking, so this visit has ${duration} of extra time, for ${amount}.`,
-    },
-    {
-      kind: "p",
-      text: input.billing === "next_bill"
-        ? "This amount will be added to your next membership bill. There's nothing else you need to do."
-        : "We've charged this amount to the card you used for your booking. There's nothing else you need to do.",
-    },
+    { kind: "p", text: amounts },
+    { kind: "p", text: billingLine },
     { kind: "p", text: "You can see your visits, including any extra time, in SayHi." },
     { kind: "button", label: "Open SayHi", url: `${origin}/my-hi` },
     { kind: "link", before: "Read ", label: "how extra time works", url: `${origin}/terms#extra-time` },
-    { kind: "p", text: "Questions about this charge? Reply to this email and our team will help." },
+    {
+      kind: "p",
+      text: input.billing === "included"
+        ? "Questions about your extra time? Reply to this email and our team will help."
+        : "Questions about this charge? Reply to this email and our team will help.",
+    },
   ];
-  const preheader = `${duration} of extra time, ${amount}.`;
   return { subject, html: layout({ preheader, headline, blocks, signoff: SIGNOFF, footer: FOOTER }), text: text({ headline, blocks, signoff: SIGNOFF, footer: FOOTER }) };
 }
 
@@ -194,27 +232,37 @@ export function renderNoCheckoutEmail(input: {
 // When to send
 // ---------------------------------------------------------------------------
 
-const BILLED = ["billed_next_invoice", "charged"] as const;
+const SETTLED = ["charged", "covered_by_plan_hours"] as const;
 
 export type VisitLike = {
   uid?: unknown;
   status?: unknown;
   chargeStatus?: unknown;
+  overtimeBilling?: unknown;
   overtimeMinutes?: unknown;
+  overtimeIncludedMinutes?: unknown;
   overtimeCents?: unknown;
   bookedWindow?: { start?: unknown; end?: unknown } | null;
   checkInAt?: unknown;
   checkOutAt?: unknown;
 };
 
-/** The billing variant when this update is the moment extra time was charged, else null. */
+/** The email variant when this update is the moment extra time was settled, else null. */
 export function extraTimeEmailBilling(before: VisitLike | undefined, after: VisitLike | undefined): ExtraTimeBilling | null {
   if (!after) return null;
-  const isBilled = (status: unknown) => (BILLED as readonly unknown[]).includes(status);
-  if (!isBilled(after.chargeStatus) || isBilled(before?.chargeStatus)) return null;
-  if (!(Number(after.overtimeCents) > 0) || !(Number(after.overtimeMinutes) > 0)) return null;
+  const isSettled = (status: unknown) => (SETTLED as readonly unknown[]).includes(status);
+  if (!isSettled(after.chargeStatus) || isSettled(before?.chargeStatus)) return null;
+  const minutes = Number(after.overtimeMinutes);
+  const included = Math.max(0, Number(after.overtimeIncludedMinutes) || 0);
+  const cents = Number(after.overtimeCents);
+  if (!(minutes > 0)) return null;
   if (!Number.isFinite(Number(after.bookedWindow?.end)) || !Number.isFinite(Number(after.checkOutAt))) return null;
-  return after.chargeStatus === "billed_next_invoice" ? "next_bill" : "card";
+  if (after.chargeStatus === "covered_by_plan_hours") {
+    return after.overtimeBilling === "plan" && included >= minutes ? "included" : null;
+  }
+  if (!(cents > 0)) return null;
+  if (after.overtimeBilling !== "plan") return "card";
+  return included > 0 ? "partly_included" : "member_card";
 }
 
 /** A staff follow-up for a visit nobody checked out of (Jessica's flag). */
@@ -315,13 +363,14 @@ export async function sendExtraTimeEmail(
     const uid = typeof after?.uid === "string" ? after.uid : "";
     if (!billing || !after || !uid) return "skipped_not_applicable";
     const minutes = Number(after.overtimeMinutes);
-    const cents = Number(after.overtimeCents);
+    const includedMinutes = Math.max(0, Number(after.overtimeIncludedMinutes) || 0);
+    const cents = Math.max(0, Number(after.overtimeCents) || 0);
     return await deliver({
       type: EXTRA_TIME_EMAIL_TYPE,
       template: EXTRA_TIME_EMAIL_TEMPLATE,
       visitId: input.visitId,
       uid,
-      extra: { billing, overtimeMinutes: minutes, overtimeCents: cents },
+      extra: { billing, overtimeMinutes: minutes, overtimeIncludedMinutes: includedMinutes, overtimeCents: cents },
       options,
       render: (firstName) => renderExtraTimeEmail({
         billing,
@@ -329,6 +378,7 @@ export async function sendExtraTimeEmail(
         bookedEnd: Number(after.bookedWindow?.end),
         checkOutAt: Number(after.checkOutAt),
         minutes,
+        includedMinutes,
         cents,
         origin: options.origin,
       }),

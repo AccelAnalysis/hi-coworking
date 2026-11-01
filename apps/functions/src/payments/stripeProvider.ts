@@ -250,39 +250,51 @@ export class StripeProvider implements PaymentProvider {
   }
 
   /**
-   * Charge extra time (SayHi overtime). A member with a live subscription gets
-   * an invoice item on that subscription, so it lands on the next monthly
-   * bill. Otherwise the card saved at the booking checkout is charged off
-   * session. The idempotency key makes a retried trigger safe.
+   * Charge extra time (SayHi overtime) right away, off session (Jonathan,
+   * Nov 1, 2026: never added to the next membership bill).
+   *  - Member with a live plan: the default payment method of the member's
+   *    customer (customer invoice default, else the subscription default).
+   *    The customer comes from the member's subscription when its metadata
+   *    uid is empty or this member, else from the cached customer id.
+   *  - Everyone else: the card saved at the booking checkout.
+   * The idempotency key makes a retried trigger safe.
    */
   async chargeOvertime(input: {
     amountCents: number;
     description: string;
     idempotencyKey: string;
     metadata: Record<string, string>;
-    subscriptionId?: string;
+    member?: { uid: string; subscriptionId?: string; customerId?: string };
     bookingPaymentIntentId?: string;
-  }): Promise<{ method: "subscription_invoice_item" | "payment_intent"; id: string; status: string }> {
+  }): Promise<{ method: "member_default_payment_method" | "payment_intent"; id: string; status: string }> {
     if (!(input.amountCents > 0)) throw new Error("Overtime amount must be positive.");
-    const subscription = input.subscriptionId
-      ? await this.stripe.subscriptions.retrieve(input.subscriptionId)
-      : null;
-    const subscriptionCustomer = idOf(subscription?.customer as string | { id?: string } | null);
-    if (subscription && subscriptionCustomer && ["active", "trialing", "past_due"].includes(subscription.status)) {
-      const item = await this.stripe.invoiceItems.create({
-        customer: subscriptionCustomer,
-        subscription: subscription.id,
-        amount: input.amountCents,
-        currency: "usd",
-        description: input.description,
-        metadata: input.metadata,
-      }, { idempotencyKey: input.idempotencyKey });
-      return { method: "subscription_invoice_item", id: item.id, status: "pending_invoice" };
+    let customer = "";
+    let paymentMethod = "";
+    let method: "member_default_payment_method" | "payment_intent" = "payment_intent";
+    if (input.member) {
+      method = "member_default_payment_method";
+      let subscriptionDefault = "";
+      if (input.member.subscriptionId?.startsWith("sub_")) {
+        const subscription = await this.stripe.subscriptions.retrieve(input.member.subscriptionId);
+        const ownerUid = subscription.metadata?.uid || "";
+        if (!ownerUid || ownerUid === input.member.uid) {
+          customer = idOf(subscription.customer as string | { id?: string } | null);
+          subscriptionDefault = idOf(subscription.default_payment_method as string | { id?: string } | null);
+        }
+      }
+      if (!customer && input.member.customerId?.startsWith("cus_")) customer = input.member.customerId;
+      if (!customer) throw new NoCardOnFileError();
+      const record = await this.stripe.customers.retrieve(customer);
+      const customerDefault = "deleted" in record && record.deleted
+        ? ""
+        : idOf((record as Stripe.Customer).invoice_settings?.default_payment_method as string | { id?: string } | null);
+      paymentMethod = customerDefault || subscriptionDefault;
+    } else {
+      if (!input.bookingPaymentIntentId) throw new NoCardOnFileError();
+      const original = await this.stripe.paymentIntents.retrieve(input.bookingPaymentIntentId);
+      customer = idOf(original.customer as string | { id?: string } | null);
+      paymentMethod = idOf(original.payment_method as string | { id?: string } | null);
     }
-    if (!input.bookingPaymentIntentId) throw new NoCardOnFileError();
-    const original = await this.stripe.paymentIntents.retrieve(input.bookingPaymentIntentId);
-    const customer = idOf(original.customer as string | { id?: string } | null);
-    const paymentMethod = idOf(original.payment_method as string | { id?: string } | null);
     if (!customer || !paymentMethod) throw new NoCardOnFileError();
     const intent = await this.stripe.paymentIntents.create({
       amount: input.amountCents,
@@ -294,7 +306,7 @@ export class StripeProvider implements PaymentProvider {
       description: input.description,
       metadata: input.metadata,
     }, { idempotencyKey: input.idempotencyKey });
-    return { method: "payment_intent", id: intent.id, status: intent.status };
+    return { method, id: intent.id, status: intent.status };
   }
 
   async handleWebhook(
