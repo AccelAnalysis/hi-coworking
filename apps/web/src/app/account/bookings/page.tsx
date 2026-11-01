@@ -41,7 +41,15 @@ import type { AccessGrantSummary } from "@/lib/accessCodeView";
 import { SAYHI_FLOW, SAYHI_PREVIEW_DEMO, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
 import { BillingAddressCard } from "@/components/sayhi/BillingAddressCard";
 import { readBillingAddress, type BillingAddress } from "@/lib/billingAddressView";
-import { demoData, demoKind, type DemoKind } from "@/lib/sayhiDemo";
+import { demoData, demoKind, isEmailPreview, type DemoKind } from "@/lib/sayhiDemo";
+import dynamic from "next/dynamic";
+
+// Private preview only. The check reads process.env directly so the bundler
+// drops the import (and the draft email copy) from production builds.
+const SayHiEmailPreviews =
+  process.env.NEXT_PUBLIC_SAYHI_PREVIEW_DEMO === "true"
+    ? dynamic(() => import("@/components/sayhi/SayHiEmailPreviews"), { ssr: false })
+    : () => null;
 
 const FACILITY_TIME_ZONE = "America/New_York";
 
@@ -107,6 +115,7 @@ export default function AccountBookingsPage() {
   const search = useLocationSearch();
   // Private preview only: sample data without signing in. The flag is never
   // set for production builds, so this branch is compiled out there.
+  if (SAYHI_PREVIEW_DEMO && isEmailPreview(search)) return <SayHiEmailPreviews />;
   const demo = SAYHI_PREVIEW_DEMO ? demoKind(search) : null;
   if (demo) return <AccountBookingsContent demo={demo} />;
   return (

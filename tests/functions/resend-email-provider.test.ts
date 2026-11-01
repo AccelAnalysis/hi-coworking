@@ -234,6 +234,8 @@ describe("Hi Coworking mail wiring", () => {
       "apps/functions/src/eventsV2/notifications.ts",
       "apps/functions/src/index.ts",
       "apps/functions/src/nurture.ts",
+      // SayHi follow-up emails (mail source, off behind SAYHI_FLOW_ENABLED).
+      "apps/functions/src/sayhi/followUpEmailTriggers.ts",
     ]);
     // stripe_webhook (core bundle) binds it for the membership welcome email.
     const index = read("apps/functions/src/index.ts");

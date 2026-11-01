@@ -224,6 +224,7 @@ jobs:
           tests/functions/sayhi-overtime.test.ts
           tests/functions/sayhi-membership-end.test.ts
           tests/functions/sayhi-billing-address.test.ts
+          tests/functions/sayhi-follow-up-emails.test.ts
 
       - name: Run active transaction integration tests
         run: >-

@@ -17,6 +17,11 @@ export function demoKind(search: string): DemoKind | null {
   return value === "member" || value === "guest" || value === "empty" || value === "ending" ? value : null;
 }
 
+/** /my-hi?demo=emails shows the follow-up email previews. */
+export function isEmailPreview(search: string): boolean {
+  return new URLSearchParams(search).get("demo") === "emails";
+}
+
 /** Fictional address for the preview only. */
 const DEMO_BILLING_ADDRESS: BillingAddress = {
   line1: "100 Sample Street",
