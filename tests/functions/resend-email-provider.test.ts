@@ -233,6 +233,8 @@ describe("Hi Coworking mail wiring", () => {
       "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
       "apps/functions/src/index.ts",
+      // New-lead alerts for intakeLeads (off behind LEAD_ALERTS_ENABLED).
+      "apps/functions/src/leadAlertTriggers.ts",
       "apps/functions/src/nurture.ts",
       // SayHi follow-up emails (mail source, off behind SAYHI_FLOW_ENABLED).
       "apps/functions/src/sayhi/followUpEmailTriggers.ts",
