@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type deploy mail functions to deploy nurture_process and events_v2ProcessNotificationJobs only'
+        description: 'Type deploy mail functions to deploy nurture_process, events_v2ProcessNotificationJobs and mail_sendQueued only'
         required: true
         type: string
 
@@ -92,4 +92,4 @@ jobs:
 
       # firebase.mail.json's predeploy builds the isolated bundle first.
       - name: Deploy the two mail workers only
-        run: npx firebase deploy --config firebase.mail.json --project hi-coworking-plat --only functions:nurture_process,functions:events_v2ProcessNotificationJobs --non-interactive
+        run: npx firebase deploy --config firebase.mail.json --project hi-coworking-plat --only functions:nurture_process,functions:events_v2ProcessNotificationJobs,functions:mail_sendQueued --non-interactive
