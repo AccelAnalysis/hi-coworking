@@ -30,7 +30,7 @@
     "deploy:admin-member": "firebase deploy --config firebase.admin.json --project hi-coworking-plat --only functions:admin-member-ops",
     "deploy:admin-operating-calendar": "firebase deploy --config firebase.admin-calendar.json --project hi-coworking-plat --only functions:admin-operating-calendar",
     "deploy:payment-status-guard": "firebase deploy --config firebase.payment-status-guard.json --project hi-coworking-plat --only functions:admin_markPaymentStatus",
-    "deploy:lead-admin": "firebase deploy --config firebase.lead-admin.json --project hi-coworking-plat --only functions:leadsAdmin_listIntake,functions:leadsAdmin_setIntakeNotes",
+    "deploy:lead-admin": "firebase deploy --config firebase.lead-admin.json --project hi-coworking-plat --only functions:leadsAdmin_listIntake,functions:leadsAdmin_setIntakeNotes,functions:intake_onNewLead",
     "deploy:expo-lead": "firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead",
     "export:intake-leads": "node scripts/export-intake-leads.mjs",
     "deploy:admin-event": "firebase deploy --config firebase.admin-events.json --project hi-coworking-plat --only functions:admin-event-save",

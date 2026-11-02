@@ -12,6 +12,9 @@ import { changeUserRole, RoleChangeError } from "./roleAuthority";
 import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
 import { parseLeadSubmission } from "./leadContact";
 import { resendApiKey } from "./providers/emailSecret";
+import { buildWebLeadAlert, sendLeadAlert } from "./leadAlerts";
+import { ResendEmailProvider } from "./providers/emailProvider";
+import "./leadAlertParams";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, syncPaymentToQBO, handleQuickBooksPaymentsWebhook, backfillPaymentsToQBO } from "./payments";
 
 // Secrets (set via `firebase functions:secrets:set <KEY>`)
@@ -635,23 +638,31 @@ export const leads_submitLead = onRequest(
 
 /**
  * Firestore trigger: fires when a new lead is created.
- * Logs to admin feed (email notification can be added via Resend later).
+ * Logs it, then emails the team when LEAD_ALERTS_ENABLED is "true"
+ * (default off). Imported leads (sheets backfill, nurtureExempt) never alert.
  */
-export const leads_onNewLead = onDocumentCreated("leads/{leadId}", async (event) => {
-  const snap = event.data;
-  if (!snap) return;
+export const leads_onNewLead = onDocumentCreated(
+  { document: "leads/{leadId}", secrets: [resendApiKey] },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
 
-  const lead = snap.data();
-  logger.info("New lead received", {
-    id: snap.id,
-    type: lead.type,
-    interestScore: lead.interestScore,
-    source: lead.source,
-  });
+    const lead = snap.data();
+    logger.info("New lead received", {
+      id: snap.id,
+      type: lead.type,
+      interestScore: lead.interestScore,
+      source: lead.source,
+    });
 
-  // TODO (PR-14): Send email notification to admin via Resend
-  // TODO (PR-14): Create notification doc in notifications/{adminUid}/{notifId}
-});
+    await sendLeadAlert({
+      leadKey: `leads/${snap.id}`,
+      data: lead,
+      build: buildWebLeadAlert,
+      provider: () => new ResendEmailProvider(resendApiKey.value()),
+    });
+  }
+);
 
 /**
  * Callable: Submit a contact form message from the platform contact page.

@@ -128,8 +128,14 @@ describe("isolated core functions deploy", () => {
     expect(Object.keys(core.endpoints ?? {}).sort()).toEqual(CORE_IDS);
     for (const id of CORE_IDS) expect(core.endpoints?.[id]).toEqual(main.endpoints?.[id]);
 
-    const declared = (core.params ?? []).map((param) => `${param.name}:${param.type}`).sort();
+    const declared = (core.params ?? [])
+      .filter((param) => param.type === "secret")
+      .map((param) => `${param.name}:${param.type}`)
+      .sort();
     expect(declared).toEqual(CORE_SECRETS.map((name) => `${name}:secret`));
+    // New-lead alert params are plain strings with defaults (alerts off), never secrets.
+    const strings = (core.params ?? []).filter((param) => param.type !== "secret").map((param) => `${param.name}:${param.type}`).sort();
+    expect(strings).toEqual(["LEAD_ALERTS_ENABLED:string", "LEAD_ALERT_TO:string"]);
     const bound = Object.values(core.endpoints ?? {}).flatMap((endpoint) => (endpoint.secretEnvironmentVariables ?? []).map((secret) => secret.key));
     for (const name of [...declared.map((entry) => entry.split(":")[0]), ...bound]) expect(name).not.toMatch(BANNED);
     expect(JSON.stringify(core)).not.toMatch(/TWILIO_|LINKEDIN_|X_CLIENT/);

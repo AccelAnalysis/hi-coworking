@@ -101,7 +101,7 @@ describe("lead-admin deploy isolation", () => {
     expect(rules).toMatch(/match \/intakeLeads\/\{leadId\} \{\s*allow read, write: if false;/);
   });
 
-  it("deploys only the two callables from an entry with no secrets", () => {
+  it("deploys only the lead-admin functions from an entry with no new secrets", () => {
     const entry = read("firebase/lead-admin-functions/src/index.ts");
     expect(entry).toContain(
       'export { leadsAdmin_listIntake, leadsAdmin_setIntakeNotes } from "../../../apps/functions/src/leadAdmin"',
@@ -109,7 +109,7 @@ describe("lead-admin deploy isolation", () => {
     expect(read("apps/functions/src/leadAdmin.ts")).not.toContain("defineSecret");
     const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     expect(pkg.scripts["deploy:lead-admin"]).toBe(
-      "firebase deploy --config firebase.lead-admin.json --project hi-coworking-plat --only functions:leadsAdmin_listIntake,functions:leadsAdmin_setIntakeNotes",
+      "firebase deploy --config firebase.lead-admin.json --project hi-coworking-plat --only functions:leadsAdmin_listIntake,functions:leadsAdmin_setIntakeNotes,functions:intake_onNewLead",
     );
     expect(read("apps/functions/src/main.ts")).toContain(
       'export { leadsAdmin_listIntake, leadsAdmin_setIntakeNotes } from "./leadAdmin"',
