@@ -5,7 +5,8 @@
 // for every secret declared anywhere in the source it analyzes, even with
 // --only, so a deploy from apps/functions fails until those are set.
 //
-// This entry imports only the two mail workers. The only secret it declares
+// This entry imports only the mail workers (nurture, event notifications and
+// the `mail` queue sender for access-code-ready email). The only secret it declares
 // is HI_COWORKING_RESEND_API_KEY. Keep it that way: do not import
 // eventMarketing.ts (or main.ts / index.ts) here.
 //
@@ -21,4 +22,5 @@ import "./bootstrap";
 
 export { nurture_process } from "../../../apps/functions/src/nurture";
 export { events_v2ProcessNotificationJobs } from "../../../apps/functions/src/eventsV2/notifications";
+export { mail_sendQueued } from "../../../apps/functions/src/accessCodes/mailQueue";
 export { sayhi_sendExtraTimeEmail, sayhi_sendNoCheckoutEmail } from "../../../apps/functions/src/sayhi/followUpEmailTriggers";

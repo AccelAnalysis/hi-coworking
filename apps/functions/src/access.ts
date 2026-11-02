@@ -671,7 +671,7 @@ async function logAccessEvent(params: {
 
 /**
  * Tells the member their code is ready: an in-app notice and a mail-queue
- * entry, both linking to SayHi. Neither contains the code or any digits of
+ * entry (sent by mail_sendQueued), both linking to SayHi. Neither contains the code or any digits of
  * it; the code shows only on the signed-in SayHi and booking pages.
  */
 async function sendAccessReadyNotice(
@@ -696,6 +696,10 @@ async function sendAccessReadyNotice(
     to: userId,
     resolveEmail: true,
     ...mail,
+    // Sent by mail_sendQueued (accessCodes/mailQueue.ts); never after endsAt.
+    endsAt: params.endsAt,
+    status: "pending",
+    attempts: 0,
     createdAt: Date.now(),
   });
 
