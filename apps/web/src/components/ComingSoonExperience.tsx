@@ -646,8 +646,10 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [surveyError, setSurveyError] = useState("");
+  const [surveyEmail, setSurveyEmail] = useState("");
 
   const q = SURVEY_QUESTIONS[step];
+  const isLastStep = step === SURVEY_QUESTIONS.length - 1;
   const progress = ((step + 1) / SURVEY_QUESTIONS.length) * 100;
 
   const setSingle = (value: string) => {
@@ -674,12 +676,17 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
       setStep((s) => s + 1);
       return;
     }
+    const email = surveyEmail.trim();
+    if (email && !isPlausibleSurveyEmail(email)) {
+      setSurveyError("Please check your email address, or leave it blank to stay anonymous.");
+      return;
+    }
     setIsSubmitting(true);
     setSurveyError("");
+    // Email is optional: anonymous responses send no contact details at all.
     const outcome = await submitLead({
       type: "survey",
-      name: "Survey Respondent",
-      email: "anonymous@survey.local",
+      ...(email ? { email } : {}),
       answers,
       source: "web-coming-soon",
       submission_version: "4.0",
@@ -763,6 +770,28 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
               />
             )}
           </div>
+
+          {isLastStep && (
+            <div className="mt-6 border-t border-slate-100 pt-5">
+              <label htmlFor="survey-email" className="block text-sm font-semibold text-slate-800">
+                Email <span className="font-normal text-slate-500">(optional)</span>
+              </label>
+              <p id="survey-email-hint" className="text-xs text-slate-500 mt-1 mb-2">
+                Leave it blank to stay anonymous, or add it to hear about launch updates.
+              </p>
+              <input
+                id="survey-email"
+                type="email"
+                autoComplete="email"
+                inputMode="email"
+                aria-describedby="survey-email-hint"
+                value={surveyEmail}
+                onChange={(e) => setSurveyEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-slate-900 outline-none"
+              />
+            </div>
+          )}
         </div>
 
         {surveyError && (
@@ -791,6 +820,10 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+function isPlausibleSurveyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function submitLead(payload: Record<string, unknown>): Promise<LeadSubmitOutcome> {

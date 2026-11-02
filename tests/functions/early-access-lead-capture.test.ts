@@ -56,7 +56,7 @@ describe("Coming Soon lead endpoint (web)", () => {
     const fetchImpl = vi.fn(async () => jsonResponse(200, { status: "success", id: "x" }));
     const getToken = vi.fn(async () => "token-123");
     const outcome = await submitLeadRequest(
-      { type: "survey", name: "Survey Respondent", email: "anonymous@survey.local" },
+      { type: "survey", answers: { 1: "From home" } },
       { url: "https://lead.test", fetchImpl: fetchImpl as unknown as typeof fetch, getToken },
     );
     expect(outcome).toEqual({ ok: true });

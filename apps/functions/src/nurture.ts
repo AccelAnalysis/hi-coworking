@@ -6,6 +6,7 @@ import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
 import { ResendEmailProvider } from "./providers/emailProvider";
 import { resendApiKey } from "./providers/emailSecret";
+import { isDeliverableLeadEmail, leadEnrollmentDecision } from "./leadContact";
 import { NURTURE_POSTAL_ADDRESS, campaignHref as resolveCampaignHref } from "./nurtureLinks";
 import {
   COMP_MEMBERSHIP_SOURCE,
@@ -210,8 +211,10 @@ function normalizeEmail(value: unknown) {
   return String(value || "").trim().toLowerCase();
 }
 
+// Rejects malformed and reserved-domain addresses (e.g. anonymous@survey.local)
+// for every Nurture path, so no sequence ever targets an undeliverable inbox.
 function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return isDeliverableLeadEmail(value);
 }
 
 function stableHash(value: string) {
@@ -497,12 +500,17 @@ export const nurture_scanLifecycle = onSchedule({ schedule: "every day 09:00", t
 export const nurture_onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) => {
   const data = event.data?.data();
   if (!data) return;
-  const email = normalizeEmail(data.email);
-  if (!isValidEmail(email)) return;
+  // Anonymous surveys, placeholder or reserved-domain addresses (.local, .test, ...)
+  // and quiet imports (nurtureExempt) never start a sequence.
+  const decision = leadEnrollmentDecision(data);
+  if (!decision.enroll) {
+    logger.info("Lead not enrolled in Nurture", { leadId: event.params.leadId, reason: decision.reason });
+    return;
+  }
   await enrollContact("LEAD_CREATED", {
     contactType: "lead",
     contactId: event.params.leadId,
-    email,
+    email: decision.email,
     displayName: String(data.name || data.displayName || ""),
   }, event.params.leadId);
 });
