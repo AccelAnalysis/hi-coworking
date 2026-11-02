@@ -7,4 +7,6 @@ export {
   booking_getCancellationPreview,
   booking_cancel,
   booking_reschedule,
+  sayhi_chargeOvertime,
+  sayhi_onMembershipEnded,
 } from "../../../apps/functions/src/bookingTransactionScheduledAuthority";

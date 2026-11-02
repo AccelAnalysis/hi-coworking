@@ -35,7 +35,7 @@ function loadGraph(entry: string): string[] {
   return files;
 }
 
-const MAIL_IDS = ["events_v2ProcessNotificationJobs", "nurture_process"];
+const MAIL_IDS = ["events_v2ProcessNotificationJobs", "nurture_process", "sayhi_sendExtraTimeEmail", "sayhi_sendNoCheckoutEmail"];
 const DEPLOY =
   "npx firebase deploy --config firebase.mail.json --project hi-coworking-plat --only functions:nurture_process,functions:events_v2ProcessNotificationJobs --non-interactive";
 

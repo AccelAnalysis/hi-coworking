@@ -22,4 +22,10 @@ export {
   admin_kioskSetSettings,
   admin_kioskDeviceSet,
   members_kioskSummary,
+  admin_followUpSetStatus,
 } from "../../../apps/functions/src/frontDeskKiosk";
+
+// SayHi flow (Oct 30, 2026): account details (company, phone) from Create
+// your account, and the Form 1583 paperwork callable, which refuses every
+// call while VIRTUAL_ADDRESS_ENABLED is not "true" (unset here, so off).
+export { members_saveAccountDetails, va_submitForm1583 } from "../../../apps/functions/src/sayhi/functions";

@@ -126,6 +126,7 @@ import { events_upsertSeries, events_extendHorizon, events_setSeriesOccurrenceOv
 // not from here, so firebase/core-functions can load this file without
 // declaring those secrets.
 import { events_onMediaUploaded } from "./eventMedia";
+import { membershipCheckoutExtras, virtualAddressEnabled, virtualAddressPriceId } from "./sayhi/config";
 import { bookstore_createCheckoutSession } from "./bookstore";
 import { bookstore_getDownloadLink } from "./digitalFulfillment";
 import {
@@ -691,6 +692,8 @@ interface CreateCheckoutInput {
   tierId: string;
   successUrl: string;
   cancelUrl: string;
+  /** Picked the virtual address on Plans and pricing (ignored while VA is off). */
+  virtualAddress?: boolean;
 }
 
 /**
@@ -704,7 +707,7 @@ export const stripe_createCheckoutSession = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { tierId, successUrl, cancelUrl } = request.data as CreateCheckoutInput;
+    const { tierId, successUrl, cancelUrl, virtualAddress } = request.data as CreateCheckoutInput;
 
     if (!tierId || !successUrl || !cancelUrl) {
       throw new HttpsError("invalid-argument", "tierId, successUrl, and cancelUrl are required");
@@ -743,6 +746,15 @@ export const stripe_createCheckoutSession = onCall(
       purposeRefId: tier.id,
       successUrl,
       cancelUrl,
+      collectBillingAddress: true,
+      ...(() => {
+        const extras = membershipCheckoutExtras({
+          enabled: virtualAddressEnabled() && tier.id !== "virtual",
+          priceId: virtualAddressPriceId(),
+          chosen: virtualAddress === true,
+        });
+        return { extraLineItems: extras.lineItems, optionalItems: extras.optionalItems };
+      })(),
       metadata: {
         email,
         stripePriceId: tier.stripePriceId,

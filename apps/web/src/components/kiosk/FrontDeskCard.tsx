@@ -1,17 +1,46 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatDayTime, formatMinutes, membersKioskSummary, type MemberKioskSummary } from "@/lib/frontDeskKiosk";
+import { SAYHI_FLOW } from "@/lib/sayhiFlags";
+
+type Visit = MemberKioskSummary["visits"][number];
+
+function money(cents: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+/** What the member sees for one visit's extra-time charge (SayHi flow). */
+export function overtimeChargeLabel(visit: Visit): string | null {
+  if (!visit.overtimeMinutes) return null;
+  const extra = `${formatMinutes(visit.overtimeMinutes)} extra`;
+  const included = visit.overtimeIncludedMinutes && visit.overtimeIncludedMinutes > 0
+    ? ` · ${formatMinutes(visit.overtimeIncludedMinutes)} from included hours`
+    : "";
+  if (visit.chargeStatus === "covered_by_plan_hours") return `${extra} · from included hours`;
+  if (!visit.overtimeCents) return null;
+  const amount = `${extra}${included} · ${money(visit.overtimeCents)}`;
+  switch (visit.chargeStatus) {
+    case "charged": return `${amount} charged`;
+    case "charging": return `${amount} processing`;
+    default: return `${amount} · our team will follow up`;
+  }
+}
 
 /**
- * SayHi card: the member's front-desk check-in code and this month's visits.
+ * SayHi card: this month's visits and check-out reminder. There is no
+ * separate front-desk code; the per-booking door code (or email) works on the
+ * iPad (decision "one code only", Oct 30, 2026).
  * Hidden while loading and whenever the callable is missing or refuses
  * (Hosting can deploy before the front-desk functions).
  */
-export function FrontDeskCard() {
-  const [summary, setSummary] = useState<MemberKioskSummary | null>(null);
+export function FrontDeskCard({ demoSummary = null }: { demoSummary?: MemberKioskSummary | null } = {}) {
+  const [loaded, setSummary] = useState<MemberKioskSummary | null>(null);
+  const summary = demoSummary ?? loaded;
 
   useEffect(() => {
+    if (demoSummary) return;
     let active = true;
     membersKioskSummary({})
       .then((result) => {
@@ -23,19 +52,16 @@ export function FrontDeskCard() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [demoSummary]);
 
   if (!summary) return null;
   const recent = summary.visits.slice(0, 3);
 
   return (
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200" data-testid="front-desk-card">
-      <h2 className="text-sm font-medium text-slate-600">Front-desk check-in</h2>
-      <p className="mt-1 font-mono text-2xl font-bold tracking-[0.18em] text-slate-900" aria-label={`Member code ${summary.code.split("").join(" ")}`}>
-        {summary.code}
-      </p>
+      <h2 className="font-semibold text-[#101D4B]">Your visits</h2>
       <p className="mt-2 text-sm leading-6 text-slate-600">
-        Enter this code or your email on the front-desk iPad when you arrive and when you leave.
+        Your access code checks you in at the door. When you leave, check out on the front-desk iPad with that code or your email.
       </p>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
@@ -57,13 +83,23 @@ export function FrontDeskCard() {
                   ? "Checked in"
                   : visit.needsReview
                     ? "Under review"
-                    : `${formatMinutes(visit.actualMinutes)}${visit.overageMinutes ? ` · ${formatMinutes(visit.overageMinutes)} extra` : ""}`}
+                    : (SAYHI_FLOW && overtimeChargeLabel(visit))
+                      || `${formatMinutes(visit.actualMinutes)}${visit.overageMinutes ? ` · ${formatMinutes(visit.overageMinutes)} extra` : ""}`}
               </span>
             </li>
           ))}
         </ul>
       ) : null}
-      {summary.totalOverageMinutes > 0 ? (
+      {SAYHI_FLOW ? (
+        <p className="mt-3 text-xs leading-5 text-slate-600">
+          Check out within 15 minutes after your booking ends and there&apos;s no extra charge. After that, extra time
+          comes out of any included plan hours you have left, and the rest is charged right away to your payment method
+          on file.{" "}
+          <Link href="/terms#extra-time" className="font-semibold text-[#101D4B] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]">
+            How extra time works
+          </Link>
+        </p>
+      ) : summary.totalOverageMinutes > 0 ? (
         <p className="mt-3 text-xs leading-5 text-slate-600">Extra time is past your booking or included hours. It&apos;s recorded for review and isn&apos;t charged automatically.</p>
       ) : null}
     </div>

@@ -61,9 +61,9 @@ export const WELCOME_NEXT_STEPS: NextStep[] = [
     detail: "Pick a date to see open hours and live availability.",
   },
   {
-    href: "/spaces",
-    label: "See the space",
-    detail: "Look around before your first visit.",
+    href: "/pricing",
+    label: "Plans and pricing",
+    detail: "Compare plans, or change yours anytime.",
   },
   {
     href: "/contact",

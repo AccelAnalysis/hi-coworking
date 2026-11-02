@@ -73,9 +73,21 @@ export type KioskOverview = {
 };
 
 export type MemberKioskSummary = {
-  code: string;
   monthKey: string;
-  visits: Array<{ visitId: string; status: string; checkInAt: number; checkOutAt: number | null; actualMinutes: number | null; overageMinutes: number | null; needsReview: boolean }>;
+  visits: Array<{
+    visitId: string;
+    status: string;
+    checkInAt: number;
+    checkOutAt: number | null;
+    actualMinutes: number | null;
+    overageMinutes: number | null;
+    needsReview: boolean;
+    /** SayHi overtime, present once the server records a charge. */
+    overtimeMinutes?: number | null;
+    overtimeCents?: number | null;
+    overtimeIncludedMinutes?: number | null;
+    chargeStatus?: string;
+  }>;
   totalOverageMinutes: number;
 };
 

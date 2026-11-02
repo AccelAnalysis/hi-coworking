@@ -16,6 +16,7 @@ const CALLABLES = [
   "admin_kioskSetSettings",
   "admin_kioskDeviceSet",
   "members_kioskSummary",
+  "admin_followUpSetStatus",
 ];
 const COLLECTIONS = [
   "kioskVisits",
@@ -123,5 +124,13 @@ describe("front-desk kiosk functions source", () => {
       expect(block, name).not.toBeNull();
       expect(block![1]).toMatch(/allow read, write: if false;/);
     }
+  });
+
+  it("retires the permanent member check-in code: lookup is by email or a live booking door code", () => {
+    expect(src).not.toMatch(/generateMemberCode|ensureMemberCode|codes: "kioskMemberCodes"|codeIndex: "kioskCodeIndex"/);
+    expect(src).toMatch(/codeHash", "==", hashPin\(code\)/);
+    expect(src).not.toMatch(/collection\("mail"\)|resend|fetch\(/i);
+    const summary = src.slice(src.indexOf("export const members_kioskSummary"));
+    expect(summary.slice(0, summary.indexOf("\n});"))).not.toMatch(/\bcode\b:/);
   });
 });

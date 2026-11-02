@@ -8,7 +8,11 @@ import {
   remoteUnlock,
   getDeviceStatus,
   validateSeamSignature,
+  getCodePin,
+  hashPin,
 } from "./providers/seamProvider";
+import { accessReadyMail, accessReadyNotification, ownerMaySeeCode } from "./accessCodes/policy";
+import { checkInFromDoorUnlock } from "./frontDeskKiosk/functions";
 
 const db = admin.firestore();
 
@@ -23,7 +27,8 @@ const NO_SHOW_GRACE_MINUTES = 30;
 /**
  * Called immediately after a booking is confirmed.
  * Finds the door for the resource, creates an AccessGrant, programs a time-bound PIN via Seam,
- * writes an AccessCode doc (hash only), and sends notifications.
+ * writes an AccessCode doc (hash only), and tells the member their code is
+ * ready on SayHi. The code itself is never put in an email or notification.
  */
 export async function createAccessGrant(
   bookingId: string,
@@ -98,7 +103,6 @@ export async function createAccessGrant(
   const userName = userData?.displayName || userData?.email || userId;
 
   // 6. Program PIN via Seam
-  let plainPin: string | null = null;
   let seamCodeId: string | undefined;
   let codeHash: string | undefined;
   let codeLast2: string | undefined;
@@ -115,7 +119,6 @@ export async function createAccessGrant(
       new Date(gracedEnd),
       `HiCo-${bookingId.slice(-6)}-${userName.split(" ")[0]}`
     );
-    plainPin = result.plainPin;
     seamCodeId = result.seamCodeId;
     codeHash = result.codeHash;
     codeLast2 = result.codeLast2;
@@ -161,23 +164,16 @@ export async function createAccessGrant(
     notes: codeStatus === "failed" ? failureReason : `Code programmed, last2: ${codeLast2}`,
   });
 
-  // 10. Send PIN notification (only if code was created successfully)
-  if (plainPin && codeStatus !== "failed") {
-    await sendPinNotification(userId, {
+  // 10. Tell the member the code is ready on SayHi (no code in the notice).
+  if (codeStatus !== "failed") {
+    await sendAccessReadyNotice(userId, {
       bookingId,
-      grantId: grantRef.id,
-      codeId: codeRef.id,
       doorName: door.name,
-      pin: plainPin,
-      codeLast2: codeLast2!,
       startsAt: gracedStart,
       endsAt: gracedEnd,
-      userName,
     });
     await codeRef.update({ deliveredAt: Date.now(), updatedAt: Date.now() });
   }
-
-  // 11. plain PIN is now out of scope — GC will clean it up
 }
 
 // --- Internal: Revoke Access Grant ---
@@ -288,6 +284,7 @@ export const access_getMyGrants = onCall(
         const code = codesSnap.empty ? null : codesSnap.docs[0].data();
         const doorSnap = await db.collection("doors").doc(grant.doorId).get();
         const door = doorSnap.data();
+        const fullCode = await ownerCode({ uid, grant, code, now });
 
         return {
           grantId: gDoc.id,
@@ -299,6 +296,8 @@ export const access_getMyGrants = onCall(
           codeStatus: code?.status ?? null,
           codeLast2: code?.codeLast2 ?? null,
           codeId: code ? codesSnap.docs[0].id : null,
+          // Full code for the owner's live booking only (SayHi and booking page).
+          code: fullCode,
         };
       })
     );
@@ -306,6 +305,29 @@ export const access_getMyGrants = onCall(
     return { grants };
   }
 );
+
+/**
+ * The full code for the signed-in owner's live booking, read from Seam and
+ * checked against the stored hash. Never cached, stored or logged.
+ */
+async function ownerCode(input: {
+  uid: string;
+  grant: FirebaseFirestore.DocumentData;
+  code: FirebaseFirestore.DocumentData | null;
+  now: number;
+}): Promise<string | null> {
+  if (!ownerMaySeeCode({ requesterUid: input.uid, grant: input.grant, code: input.code, now: input.now })) return null;
+  const seamCodeId = input.code?.seamCodeId;
+  if (typeof seamCodeId !== "string" || !seamCodeId) return null;
+  try {
+    const pin = await getCodePin(seamApiKey.value(), seamCodeId);
+    if (!pin || (input.code?.codeHash && hashPin(pin) !== input.code.codeHash)) return null;
+    return pin;
+  } catch {
+    logger.warn("Access code lookup failed", { grantBooking: input.grant.bookingId });
+    return null;
+  }
+}
 
 // --- Callable: Admin Revoke Grant ---
 
@@ -476,6 +498,8 @@ export const access_seamWebhook = onRequest(
 
     // Validate signature
     const sig = req.headers["seam-signature"] as string | undefined;
+    // Only a verified event may check a member in at the door.
+    let verified = false;
     if (sig) {
       const rawBody = JSON.stringify(req.body);
       const valid = validateSeamSignature(rawBody, sig, seamWebhookSecret.value());
@@ -484,6 +508,7 @@ export const access_seamWebhook = onRequest(
         res.status(401).send("Invalid signature");
         return;
       }
+      verified = true;
     }
 
     const event = req.body as {
@@ -496,7 +521,7 @@ export const access_seamWebhook = onRequest(
     logger.info("Seam webhook received", { event_type: event.event_type, device_id: event.device_id });
 
     try {
-      await handleSeamEvent(event);
+      await handleSeamEvent(event, verified);
       res.status(200).json({ ok: true });
     } catch (err: unknown) {
       logger.error("Seam webhook handler error", { error: err instanceof Error ? err.message : String(err) });
@@ -507,10 +532,12 @@ export const access_seamWebhook = onRequest(
 
 async function handleSeamEvent(event: {
   event_type: string;
+  event_id?: string;
   device_id?: string;
   access_code_id?: string;
   properties?: Record<string, unknown>;
-}): Promise<void> {
+}, verified = false): Promise<void> {
+  let grantUserId: string | undefined;
   const now = Date.now();
   const { event_type, device_id, access_code_id } = event;
 
@@ -554,6 +581,7 @@ async function handleSeamEvent(event: {
         const grantSnap = await db.collection("accessGrants").doc(grantId).get();
         if (grantSnap.exists) {
           bookingId = grantSnap.data()!.bookingId;
+          grantUserId = grantSnap.data()!.userId;
           // Update grant status to active when code goes active
           if (event_type === "access_code.set") {
             await grantSnap.ref.update({ status: "active", updatedAt: now });
@@ -602,6 +630,22 @@ async function handleSeamEvent(event: {
       notes: `Seam webhook: ${event_type}`,
     });
   }
+
+  // Door unlock with a member's own booking code checks them in (Jonathan,
+  // Oct 30, 2026). The iPad is then for check-out, extra time, and anyone
+  // who didn't use their code.
+  if (event_type === "lock.unlocked" && verified && grantUserId && doorId) {
+    try {
+      await checkInFromDoorUnlock({
+        uid: grantUserId,
+        doorId,
+        eventKey: event.event_id || `${grantId}_${now}`,
+        now,
+      });
+    } catch (err: unknown) {
+      logger.error("Door check-in failed", { grantId, bookingId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 }
 
 // --- Helpers ---
@@ -625,69 +669,37 @@ async function logAccessEvent(params: {
   });
 }
 
-async function sendPinNotification(
+/**
+ * Tells the member their code is ready: an in-app notice and a mail-queue
+ * entry, both linking to SayHi. Neither contains the code or any digits of
+ * it; the code shows only on the signed-in SayHi and booking pages.
+ */
+async function sendAccessReadyNotice(
   userId: string,
-  params: {
-    bookingId: string;
-    grantId: string;
-    codeId: string;
-    doorName: string;
-    pin: string;
-    codeLast2: string;
-    startsAt: number;
-    endsAt: number;
-    userName: string;
-  }
+  params: { bookingId: string; doorName: string; startsAt: number; endsAt: number }
 ): Promise<void> {
-  const { doorName, pin, startsAt, endsAt, userName } = params;
-  const startStr = new Date(startsAt).toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  const endStr = new Date(endsAt).toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
-  // In-app notification
+  const notice = accessReadyNotification(params);
   const notifRef = db.collection("notifications").doc();
   await notifRef.set({
     id: notifRef.id,
     uid: userId,
-    type: "access_pin_issued",
-    title: "Your Access Code is Ready",
-    body: `Code: ${pin} — valid ${startStr}–${endStr} at ${doorName}. Code activates 5 min before your booking.`,
-    linkTo: "/dashboard/access",
+    ...notice,
     read: false,
     createdAt: Date.now(),
   });
 
-  // Email via existing email pattern — write to a mail queue collection
-  // The email provider picks this up asynchronously
+  const origin = (process.env.PUBLIC_SITE_URL || "https://hi-coworking.com").replace(/\/+$/, "");
+  const mail = accessReadyMail({ ...params, origin });
   const mailRef = db.collection("mail").doc();
   await mailRef.set({
     id: mailRef.id,
     to: userId,
     resolveEmail: true,
-    template: "access_pin_issued",
-    data: {
-      userName,
-      doorName,
-      pin,
-      startTime: startStr,
-      endTime: endStr,
-      bookingId: params.bookingId,
-    },
+    ...mail,
     createdAt: Date.now(),
   });
 
-  logger.info("PIN notification sent", { userId, bookingId: params.bookingId });
+  logger.info("Access code ready notice queued", { userId, bookingId: params.bookingId });
 }
 
 async function sendResendNotification(
@@ -702,7 +714,7 @@ async function sendResendNotification(
     userName: string;
   }
 ): Promise<void> {
-  const { doorName, codeLast2, startsAt, endsAt, userName } = params;
+  const { startsAt } = params;
   const startStr = new Date(startsAt).toLocaleString("en-US", {
     timeZone: "America/New_York",
     month: "short",
@@ -716,15 +728,15 @@ async function sendResendNotification(
   await notifRef.set({
     id: notifRef.id,
     uid: userId,
-    type: "access_pin_issued",
-    title: "Access Code Reminder",
-    body: `Your code ends in ••${codeLast2} — valid from ${startStr} at ${doorName}. Contact support if your code isn't working.`,
-    linkTo: "/dashboard/access",
+    type: "access_code_ready",
+    title: "Your access code is on SayHi",
+    body: `Your access code for ${startStr} is on your SayHi page.`,
+    linkTo: "/my-hi",
     read: false,
     createdAt: Date.now(),
   });
 
-  logger.info("PIN resend notification sent", { userId, codeLast2, userName });
+  logger.info("Access code reminder sent", { userId, bookingId: params.bookingId });
 }
 
 export { NO_SHOW_GRACE_MINUTES };

@@ -228,7 +228,7 @@ export function FrontDeskKiosk() {
     async (mode: Mode) => {
       const value = query.trim();
       if (!value) {
-        setError("Enter your email or member code.");
+        setError("Enter your email or today's access code.");
         return;
       }
       const flow = flowRef.current;
@@ -356,7 +356,7 @@ export function FrontDeskKiosk() {
               <h1 className={`${headline} text-center`}>{screen.mode === "check_in" ? "Check in" : "Check out"}</h1>
               <div className="space-y-3">
                 <label htmlFor="kiosk-lookup" className="block text-[24px] font-semibold text-[#101D4B]">
-                  Email or member code
+                  Email or access code
                 </label>
                 <input
                   id="kiosk-lookup"
@@ -374,10 +374,10 @@ export function FrontDeskKiosk() {
                   aria-invalid={error ? true : undefined}
                   autoFocus
                   className="min-h-[88px] w-full rounded-[24px] border-2 border-[#4A5585] bg-white px-6 text-[28px] text-[#101D4B] placeholder:text-[#4A5585] focus:border-[#101D4B] focus:outline focus:outline-4 focus:outline-offset-2 focus:outline-[#101D4B]"
-                  placeholder="Email or 6-character code"
+                  placeholder="Email or access code"
                 />
                 <p id="kiosk-lookup-hint" className="text-[20px] text-[#3A4675]">
-                  Your member code is on your SayHi page.
+                  Use the same access code as the door. It&apos;s on your SayHi page.
                 </p>
               </div>
               <ErrorText error={error} />

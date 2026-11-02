@@ -11,4 +11,6 @@ export {
   admin_kioskSetSettings,
   admin_kioskDeviceSet,
   members_kioskSummary,
+  admin_followUpSetStatus,
 } from "./functions";
+export { checkInFromDoorUnlock, findDoorCodeOwner } from "./functions";

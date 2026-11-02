@@ -35,6 +35,8 @@ import {
   sendMembershipEndedEmail,
 } from "./memberNoticeEmails";
 import { notifyCancellationScheduled, notifyMembershipEnded } from "./memberNotifications";
+import { sayhiFlowEnabled } from "../sayhi/config";
+import { BILLING_ACCOUNT_DETAILS_COLLECTION, type BillingAddress } from "../sayhi/billingAddress";
 
 function getDb() { return admin.firestore(); }
 
@@ -183,6 +185,25 @@ async function processWebhookResult(
  * 2. Provision membership entitlements on users/{uid}
  * 3. Sync to QBO accounting if connected (PR-14)
  */
+/**
+ * SayHi billing-address readback (SAYHI_FLOW_ENABLED, off by default). The
+ * address the customer typed at Stripe Checkout is copied to the
+ * server-written accountDetails doc so SayHi can show it back. Best effort:
+ * a failure here never blocks payment processing.
+ */
+async function saveBillingAddressReadback(uid: string, address: BillingAddress): Promise<void> {
+  try {
+    await getDb().collection(BILLING_ACCOUNT_DETAILS_COLLECTION).doc(uid).set({
+      uid,
+      billingAddress: address,
+      billingAddressSource: "stripe_checkout",
+      billingAddressUpdatedAt: Date.now(),
+    }, { merge: true });
+  } catch (err) {
+    logger.warn("Billing address readback failed", { uid, error: String(err) });
+  }
+}
+
 async function handlePaymentSucceeded(
   result: WebhookResult,
   intuitClientId?: string,
@@ -203,6 +224,10 @@ async function handlePaymentSucceeded(
         ...(result.metadata?.paymentIntentId ? { stripePaymentIntentId: result.metadata.paymentIntentId } : {}),
       },
     });
+  }
+
+  if (uid && result.billingAddress && sayhiFlowEnabled()) {
+    await saveBillingAddressReadback(uid, result.billingAddress);
   }
 
   // Events v2 finalization consumes the authoritative capacity hold. Do this

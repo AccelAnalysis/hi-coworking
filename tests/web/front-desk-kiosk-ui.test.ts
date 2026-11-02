@@ -148,7 +148,7 @@ describe("front-desk admin and member wiring", () => {
     expect(dashboard).toContain('capability: "frontDesk"');
     expect(dashboard).toContain("adminKioskOverview({}).then((result) => result.data).catch(() => null)");
     expect(read("src/components/kiosk/FrontDeskCard.tsx")).toContain("if (!summary) return null;");
-    expect(read("src/app/account/bookings/page.tsx")).toContain("<FrontDeskCard />");
+    expect(read("src/app/account/bookings/page.tsx")).toContain("<FrontDeskCard demoSummary={sample?.kioskSummary ?? null} />");
   });
 
   it("requires a reason when staff close a visit", () => {

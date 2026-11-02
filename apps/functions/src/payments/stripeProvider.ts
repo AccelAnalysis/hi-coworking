@@ -18,6 +18,7 @@ import type {
 import { parseSubscriptionInvoice, type InvoiceLike } from "./stripeInvoice";
 import { parseSubscriptionUpdate, type SubscriptionLike } from "./stripeSubscription";
 import { buildRefundSnapshot, idOf, type ChargeLike } from "./stripeRefund";
+import { billingAddressFromStripe } from "../sayhi/billingAddress";
 
 function safeMetadataValue(value?: string) {
   return (value || "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -68,11 +69,21 @@ export class StripeProvider implements PaymentProvider {
     const sessionConfig: Stripe.Checkout.SessionCreateParams = {
       mode: isSubscription ? "subscription" : "payment",
       customer_email: input.metadata?.email,
-      line_items: [lineItem],
+      line_items: [lineItem, ...(input.extraLineItems || [])],
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       metadata: checkoutMetadata,
     };
+    if (input.collectBillingAddress) {
+      sessionConfig.billing_address_collection = "required";
+    }
+    if (input.optionalItems?.length) {
+      sessionConfig.optional_items = input.optionalItems.map((item) => ({
+        price: item.price,
+        quantity: item.quantity,
+        adjustable_quantity: { enabled: false },
+      }));
+    }
 
     if (isSubscription) {
       sessionConfig.subscription_data = {
@@ -84,7 +95,9 @@ export class StripeProvider implements PaymentProvider {
     } else {
       sessionConfig.payment_intent_data = {
         metadata: checkoutMetadata,
+        ...(input.saveCardForLaterCharges ? { setup_future_usage: "off_session" as const } : {}),
       };
+      if (input.saveCardForLaterCharges) sessionConfig.customer_creation = "always";
     }
 
     const session = await this.stripe.checkout.sessions.create(sessionConfig);
@@ -236,6 +249,66 @@ export class StripeProvider implements PaymentProvider {
     };
   }
 
+  /**
+   * Charge extra time (SayHi overtime) right away, off session (Jonathan,
+   * Nov 1, 2026: never added to the next membership bill).
+   *  - Member with a live plan: the default payment method of the member's
+   *    customer (customer invoice default, else the subscription default).
+   *    The customer comes from the member's subscription when its metadata
+   *    uid is empty or this member, else from the cached customer id.
+   *  - Everyone else: the card saved at the booking checkout.
+   * The idempotency key makes a retried trigger safe.
+   */
+  async chargeOvertime(input: {
+    amountCents: number;
+    description: string;
+    idempotencyKey: string;
+    metadata: Record<string, string>;
+    member?: { uid: string; subscriptionId?: string; customerId?: string };
+    bookingPaymentIntentId?: string;
+  }): Promise<{ method: "member_default_payment_method" | "payment_intent"; id: string; status: string }> {
+    if (!(input.amountCents > 0)) throw new Error("Overtime amount must be positive.");
+    let customer = "";
+    let paymentMethod = "";
+    let method: "member_default_payment_method" | "payment_intent" = "payment_intent";
+    if (input.member) {
+      method = "member_default_payment_method";
+      let subscriptionDefault = "";
+      if (input.member.subscriptionId?.startsWith("sub_")) {
+        const subscription = await this.stripe.subscriptions.retrieve(input.member.subscriptionId);
+        const ownerUid = subscription.metadata?.uid || "";
+        if (!ownerUid || ownerUid === input.member.uid) {
+          customer = idOf(subscription.customer as string | { id?: string } | null);
+          subscriptionDefault = idOf(subscription.default_payment_method as string | { id?: string } | null);
+        }
+      }
+      if (!customer && input.member.customerId?.startsWith("cus_")) customer = input.member.customerId;
+      if (!customer) throw new NoCardOnFileError();
+      const record = await this.stripe.customers.retrieve(customer);
+      const customerDefault = "deleted" in record && record.deleted
+        ? ""
+        : idOf((record as Stripe.Customer).invoice_settings?.default_payment_method as string | { id?: string } | null);
+      paymentMethod = customerDefault || subscriptionDefault;
+    } else {
+      if (!input.bookingPaymentIntentId) throw new NoCardOnFileError();
+      const original = await this.stripe.paymentIntents.retrieve(input.bookingPaymentIntentId);
+      customer = idOf(original.customer as string | { id?: string } | null);
+      paymentMethod = idOf(original.payment_method as string | { id?: string } | null);
+    }
+    if (!customer || !paymentMethod) throw new NoCardOnFileError();
+    const intent = await this.stripe.paymentIntents.create({
+      amount: input.amountCents,
+      currency: "usd",
+      customer,
+      payment_method: paymentMethod,
+      off_session: true,
+      confirm: true,
+      description: input.description,
+      metadata: input.metadata,
+    }, { idempotencyKey: input.idempotencyKey });
+    return { method, id: intent.id, status: intent.status };
+  }
+
   async handleWebhook(
     rawBody: Buffer,
     headers: Record<string, string>,
@@ -279,6 +352,7 @@ export class StripeProvider implements PaymentProvider {
                 ? session.customer
                 : "",
           },
+          billingAddress: billingAddressFromStripe(session.customer_details?.address),
         };
       }
       case "invoice.payment_succeeded":
@@ -469,5 +543,13 @@ export class StripeProvider implements PaymentProvider {
       });
       return "pending";
     }
+  }
+}
+
+/** No saved card or subscription to charge extra time to. */
+export class NoCardOnFileError extends Error {
+  constructor() {
+    super("No card on file for extra time.");
+    this.name = "NoCardOnFileError";
   }
 }

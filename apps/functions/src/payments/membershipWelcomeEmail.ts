@@ -19,6 +19,7 @@ import {
 } from "../providers/emailProvider";
 import { getTierById, type MembershipTier } from "./stripeConfig";
 import type { WebhookResult } from "./types";
+import { EMAIL_BODY_FONT, EMAIL_BUTTON_STYLE, EMAIL_HEADLINE_FONT, EMAIL_LOGO_HTML, EMAIL_NAVY } from "./emailBrand";
 
 export const MEMBERSHIP_WELCOME_TEMPLATE = "membership-welcome-v1";
 export const MEMBERSHIP_WELCOME_CATEGORY = "membership_welcome";
@@ -95,23 +96,23 @@ export function renderMembershipWelcomeEmail(input: {
 
   const p = "margin:0 0 16px;font-size:16px;line-height:1.7;color:#475569";
   const h2 = "margin:28px 0 10px;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#64748b";
-  const link = "color:#0f172a;font-weight:600";
+  const link = `color:${EMAIL_NAVY};font-weight:600`;
   const list = highlights
     .map((line) => `<li style="margin:0 0 8px">${escapeHtml(line)}</li>`)
     .join("");
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(subject)}</title></head>`
-    + `<body style="margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">`
+    + `<body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}">`
     + `<div style="max-width:620px;margin:0 auto;padding:40px 24px">`
-    + `<div style="font-size:14px;font-weight:700;letter-spacing:.02em">Hi Coworking</div>`
-    + `<h1 style="margin:24px 0 12px;font-size:28px;line-height:1.2">Welcome to Hi Coworking</h1>`
+    + `${EMAIL_LOGO_HTML}`
+    + `<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2;color:${EMAIL_NAVY}">Welcome to Hi Coworking</h1>`
     + `<p style="${p}">${escapeHtml(greeting)}</p>`
     + `<p style="${p}">${escapeHtml(intro)}</p>`
     + `<h2 style="${h2}">What your plan includes</h2>`
     + `<ul style="margin:0 0 8px;padding-left:20px;font-size:16px;line-height:1.6;color:#475569">${list}</ul>`
     + `<h2 style="${h2}">Using the space</h2>`
     + `<p style="${p}">${escapeHtml(bookLine)}</p>`
-    + `<p style="margin:24px 0"><a href="${escapeHtml(bookUrl)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:650">Book a desk</a></p>`
+    + `<p style="margin:24px 0"><a href="${escapeHtml(bookUrl)}" style="${EMAIL_BUTTON_STYLE}">Book a desk</a></p>`
     + `<p style="${p}">${escapeHtml(accountLine)} <a href="${escapeHtml(accountUrl)}" style="${link}">Open SayHi</a></p>`
     + `<h2 style="${h2}">Find us</h2>`
     + `<p style="${p}">Hi Coworking<br>${escapeHtml(SPACE_ADDRESS)}<br>${escapeHtml(hoursLine)}</p>`

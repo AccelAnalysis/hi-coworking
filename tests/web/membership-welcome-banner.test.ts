@@ -90,7 +90,7 @@ describe("self-serve billing on /my-hi", () => {
     const button = readFileSync("apps/web/src/components/BillingPortalButton.tsx", "utf8");
     expect(button).toContain('"members_createBillingPortalSession"');
     expect(button).toContain("window.location.assign(url)");
-    expect(button).toContain("Manage membership &amp; billing");
+    expect(button).toContain("Manage membership and billing");
     expect(button).toContain("min-h-11");
     expect(button).toContain("focus-visible:outline-2");
     expect(button).toContain("aria-busy={opening}");
