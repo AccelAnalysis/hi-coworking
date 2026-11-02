@@ -7,12 +7,13 @@ import {
   deleteCode,
   remoteUnlock,
   getDeviceStatus,
-  validateSeamSignature,
   getCodePin,
   hashPin,
 } from "./providers/seamProvider";
 import { accessReadyMail, accessReadyNotification, ownerMaySeeCode } from "./accessCodes/policy";
 import { checkInFromDoorUnlock } from "./frontDeskKiosk/functions";
+import { handleSeamWebhookRequest } from "./accessCodes/seamWebhook";
+import { runIdempotentWebhook } from "./payments/idempotency";
 
 const db = admin.firestore();
 
@@ -97,12 +98,7 @@ export async function createAccessGrant(
     notes: `Grant created for booking ${bookingId}`,
   });
 
-  // 5. Get user email for code naming
-  const userSnap = await db.collection("users").doc(userId).get();
-  const userData = userSnap.data();
-  const userName = userData?.displayName || userData?.email || userId;
-
-  // 6. Program PIN via Seam
+  // 5. Program PIN via Seam
   let seamCodeId: string | undefined;
   let codeHash: string | undefined;
   let codeLast2: string | undefined;
@@ -117,7 +113,7 @@ export async function createAccessGrant(
       door.seamDeviceId,
       new Date(gracedStart),
       new Date(gracedEnd),
-      `HiCo-${bookingId.slice(-6)}-${userName.split(" ")[0]}`
+      `HiCo-${bookingId.slice(-6)}` // booking reference only; no member name sent to Seam
     );
     seamCodeId = result.seamCodeId;
     codeHash = result.codeHash;
@@ -488,45 +484,37 @@ export const access_adminGetDoorStatus = onCall(
 
 // --- HTTP: Seam Webhook Handler ---
 
+/**
+ * Seam webhooks (delivered by Svix). Fails closed: only requests with a valid
+ * Svix signature over the raw body are processed, each svix-id at most once
+ * (see accessCodes/seamWebhook.ts). Logs only the event type and outcome.
+ */
 export const access_seamWebhook = onRequest(
   { secrets: [seamApiKey, seamWebhookSecret] },
   async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).send("Method Not Allowed");
-      return;
-    }
-
-    // Validate signature
-    const sig = req.headers["seam-signature"] as string | undefined;
-    // Only a verified event may check a member in at the door.
-    let verified = false;
-    if (sig) {
-      const rawBody = JSON.stringify(req.body);
-      const valid = validateSeamSignature(rawBody, sig, seamWebhookSecret.value());
-      if (!valid) {
-        logger.warn("Seam webhook signature invalid");
-        res.status(401).send("Invalid signature");
-        return;
-      }
-      verified = true;
-    }
-
-    const event = req.body as {
-      event_type: string;
-      device_id?: string;
-      access_code_id?: string;
-      properties?: Record<string, unknown>;
-    };
-
-    logger.info("Seam webhook received", { event_type: event.event_type, device_id: event.device_id });
-
+    let secret: string | undefined;
     try {
-      await handleSeamEvent(event, verified);
-      res.status(200).json({ ok: true });
-    } catch (err: unknown) {
-      logger.error("Seam webhook handler error", { error: err instanceof Error ? err.message : String(err) });
-      res.status(500).json({ error: "Internal error" });
+      secret = seamWebhookSecret.value() || undefined;
+    } catch {
+      secret = undefined;
     }
+    const result = await handleSeamWebhookRequest(
+      { method: req.method, headers: req.headers, rawBody: req.rawBody },
+      {
+        secret,
+        nowSeconds: Math.floor(Date.now() / 1000),
+        runOnce: async (svixId, process) => {
+          const run = await runIdempotentWebhook(`seam_${svixId}`, "seam", process);
+          return run.outcome;
+        },
+        handle: (event) => handleSeamEvent(event, true),
+      },
+    );
+    const log = { eventType: result.eventType ?? null, outcome: result.outcome, reason: result.reason ?? null, status: result.status };
+    if (result.outcome === "failed") logger.error("Seam webhook", log);
+    else if (result.outcome === "rejected" || result.outcome === "bad_payload") logger.warn("Seam webhook", log);
+    else logger.info("Seam webhook", log);
+    res.status(result.status).json(result.body);
   }
 );
 
