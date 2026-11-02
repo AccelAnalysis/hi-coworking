@@ -24,6 +24,16 @@ export function hashPin(pin: string): string {
   return crypto.createHash("sha256").update(pin).digest("hex");
 }
 
+/** Seam's machine-readable error type, e.g. "invalid_input"; never the message. */
+export function seamErrorType(text: string): string | null {
+  try {
+    const type = (JSON.parse(text) as { error?: { type?: unknown } })?.error?.type;
+    return typeof type === "string" && /^[a-z0-9_.:-]{1,80}$/i.test(type) ? type : null;
+  } catch {
+    return null;
+  }
+}
+
 async function seamRequest(
   seamApiKey: string,
   method: "GET" | "POST" | "DELETE",
@@ -44,8 +54,11 @@ async function seamRequest(
   const text = await res.text();
 
   if (!res.ok) {
-    logger.error("Seam API error", { status: res.status, path, body: text });
-    throw new Error(`Seam API ${res.status}: ${text}`);
+    // Never log or rethrow Seam's response body (it can echo codes or names);
+    // keep only the status and Seam's error type.
+    const errorType = seamErrorType(text);
+    logger.error("Seam API error", { status: res.status, path: path.split("?")[0], errorType });
+    throw new Error(`Seam API ${res.status}${errorType ? ` (${errorType})` : ""}`);
   }
 
   try {
@@ -154,27 +167,4 @@ export async function getDeviceStatus(
     batteryLevel: props.battery_level,
     locked: props.locked,
   };
-}
-
-/**
- * Validate a Seam webhook signature.
- * Seam signs with HMAC-SHA256 using the webhook secret.
- */
-export function validateSeamSignature(
-  payload: string,
-  signature: string,
-  webhookSecret: string
-): boolean {
-  const expected = crypto
-    .createHmac("sha256", webhookSecret)
-    .update(payload)
-    .digest("hex");
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(signature, "hex"),
-      Buffer.from(expected, "hex")
-    );
-  } catch {
-    return false;
-  }
 }
