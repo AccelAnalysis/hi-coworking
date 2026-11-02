@@ -10,6 +10,7 @@ import * as logger from "firebase-functions/logger";
 import { provisionAuthUser } from "./authProvisioning";
 import { changeUserRole, RoleChangeError } from "./roleAuthority";
 import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
+import { parseLeadSubmission } from "./leadContact";
 import { resendApiKey } from "./providers/emailSecret";
 import { handleStripeWebhook, createPayment, updatePaymentStatus, getTierById, StripeProvider, QuickBooksLinkProvider, QuickBooksPaymentsProvider, getAuthorizationUrl, exchangeCodeForTokens, isQuickBooksConnected, createQuickBooksInvoice, getInvoiceStatus, mapInvoiceStatusToPaymentStatus, queryPayments, syncPaymentToQBO, handleQuickBooksPaymentsWebhook, backfillPaymentsToQBO } from "./payments";
 
@@ -564,9 +565,10 @@ export const leads_submitLead = onRequest(
     try {
       const body = req.body;
 
-      // --- Validate required fields ---
-      if (!body.email || !body.name) {
-        res.status(400).json({ error: "name and email are required" });
+      // --- Validate contact fields (surveys may be anonymous) ---
+      const parsed = parseLeadSubmission(body);
+      if (!parsed.ok) {
+        res.status(400).json({ error: parsed.error });
         return;
       }
 
@@ -584,7 +586,7 @@ export const leads_submitLead = onRequest(
           reason: captchaResult.reason,
           provider: captchaResult.provider,
           score: captchaResult.score,
-          type: body.type || "early_access",
+          type: parsed.type,
           status: failure.status,
         });
         res.status(failure.status).json({ error: failure.error });
@@ -601,15 +603,15 @@ export const leads_submitLead = onRequest(
       const leadRef = db.collection("leads").doc();
       const leadDoc = {
         id: leadRef.id,
-        name: body.name,
-        email: body.email,
+        name: parsed.name,
+        email: parsed.email,
         interests,
         message: body.message || "",
         intent: body.intent || "",
         source: body.source || "coming-soon-page",
         version: body.submission_version || "2.0",
         interestScore,
-        type: body.type || "early_access",  // "early_access" or "survey"
+        type: parsed.type,  // "early_access" or "survey"
         surveyAnswers: body.answers || null, // Survey data if type === "survey"
         recaptchaScore: captchaResult.score,
         createdAt: Date.now(),
