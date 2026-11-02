@@ -21,7 +21,7 @@ export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: 
     note: "The front-desk kiosk isn't switched on yet. Visits, alerts and devices will appear here once the front-desk kiosk functions and rules are deployed.",
   },
   followUps: {
-    live: false,
+    live: true,
     note: "The follow-up queue isn't switched on yet. Items will appear here once the follow-up functions and rules are deployed.",
   },
   virtualAddress: {
