@@ -105,6 +105,7 @@ export const leads_onNewLead = legacy.leads_onNewLead;
 export const leads_submitContact = legacy.leads_submitContact;
 export { expo_submitNasaLead } from "./expo/submitNasaLead";
 export { leadsAdmin_listIntake, leadsAdmin_setIntakeNotes } from "./leadAdmin";
+export { intake_onNewLead } from "./leadAlertTriggers";
 export const stripe_createCheckoutSession = legacy.stripe_createCheckoutSession;
 export const stripe_webhook = legacy.stripe_webhook;
 export const members_createBillingPortalSession = legacy.members_createBillingPortalSession;
