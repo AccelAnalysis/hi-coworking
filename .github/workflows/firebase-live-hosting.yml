@@ -85,6 +85,7 @@ jobs:
         env:
           SKIP_BOOKSTORE_SYNC: "true"
           NEXT_PUBLIC_USE_FIREBASE_EMULATOR: "false"
+          NEXT_PUBLIC_SAYHI_FLOW: "true"
 
       - name: Deploy Hosting live only
         uses: FirebaseExtended/action-hosting-deploy@v0
