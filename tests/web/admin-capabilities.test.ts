@@ -10,6 +10,9 @@ describe("admin capability flags (audit P1-3)", () => {
     expect(ADMIN_CAPABILITIES.doorAccess.live).toBe(false);
     expect(ADMIN_CAPABILITIES.eventCampaigns.live).toBe(false);
   });
+  it("marks the deployed follow-up queue as live", () => {
+    expect(ADMIN_CAPABILITIES.followUps.live).toBe(true);
+  });
   it("labels tiles and shows the note on each tool page", () => {
     const dashboard = read("app/admin/dashboard/page.tsx");
     expect(dashboard).toContain("Not live yet");
