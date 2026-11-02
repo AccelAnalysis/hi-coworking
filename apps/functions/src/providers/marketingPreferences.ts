@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 /**
- * Marketing email opt-out for event campaign mail.
+ * Marketing email opt-out for event campaign and nurture mail.
  *
  * Marketing email stays opt-out. This module reuses the nurture follow-up
  * suppression model (nurture.ts): an unsubscribe writes
@@ -18,6 +18,8 @@ export const SUPPRESSIONS_COLLECTION = "nurtureSuppressions";
 export const UNSUBSCRIBE_TOKENS_COLLECTION = "marketingUnsubscribeTokens";
 export const UNSUBSCRIBE_FUNCTION_NAME = "marketing_unsubscribe";
 export const ONE_CLICK_POST_VALUE = "List-Unsubscribe=One-Click";
+
+type Db = FirebaseFirestore.Firestore;
 
 /** Same normalization and hash as nurture.ts, so suppressions line up. */
 export function normalizeEmail(value: unknown): string {
@@ -74,6 +76,36 @@ export function listUnsubscribeHeaders(url: string): Record<string, string> {
   };
 }
 
+/**
+ * True when marketing mail to this address must be skipped: the address is in
+ * nurtureSuppressions, or the member (uid) opted out or is do-not-contact.
+ */
+export async function isMarketingSuppressed(db: Db, email: string, uid?: string): Promise<boolean> {
+  const normalized = normalizeEmail(email);
+  if (!isValidEmail(normalized)) return true;
+  if ((await db.collection(SUPPRESSIONS_COLLECTION).doc(emailHash(normalized)).get()).exists) return true;
+  if (uid) {
+    const user = await db.collection("users").doc(uid).get();
+    if (user.exists && userBlocksMarketing(user.data() as MarketingCandidate)) return true;
+  }
+  return false;
+}
+
+/** One-click unsubscribe URL for one address, creating its token if needed. */
+export async function oneClickUnsubscribeUrl(
+  db: Db,
+  recipient: { uid?: string; email: string },
+  now: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const email = normalizeEmail(recipient.email);
+  const hash = emailHash(email);
+  const tokens = await ensureUnsubscribeTokens(db, [{ email, emailHash: hash, ...(recipient.uid ? { uid: recipient.uid } : {}) }], now);
+  const token = tokens.get(hash);
+  if (!token) throw new Error("unsubscribe-token-missing");
+  return unsubscribeUrl(token, env);
+}
+
 export type MarketingCandidate = {
   uid?: string;
   email?: string;
@@ -110,7 +142,6 @@ export function filterMarketingRecipients<T extends MarketingCandidate>(
   return { allowed, skipped };
 }
 
-type Db = FirebaseFirestore.Firestore;
 
 /** Hashes of the given addresses that are in nurtureSuppressions. */
 export async function loadSuppressedHashes(db: Db, hashes: string[]): Promise<Set<string>> {
@@ -178,7 +209,7 @@ export async function applyUnsubscribeToken(db: Db, token: string, now: number):
     emailHash: hash,
     ...(data.email ? { email: data.email } : {}),
     reason: "unsubscribe",
-    source: "event-campaign",
+    source: "unsubscribe-link",
     createdAt: now,
   }, { merge: true });
   const enrollments = await db.collection("nurtureEnrollments").where("emailHash", "==", hash).get();

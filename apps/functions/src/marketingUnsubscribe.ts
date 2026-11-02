@@ -1,4 +1,5 @@
-// One-click unsubscribe endpoint for event campaign email (marketing_unsubscribe).
+// One-click unsubscribe endpoint for event campaign and nurture email
+// (marketing_unsubscribe).
 //
 // Ships in the isolated campaign bundle next to events_processCampaignJobs
 // and in the main source. No secrets. The link in every campaign email and
@@ -13,14 +14,19 @@
 import { onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { EMAIL_BODY_FONT, EMAIL_HEADLINE_FONT, EMAIL_LOGO_URL, EMAIL_NAVY } from "./payments/emailBrand";
 import { applyUnsubscribeToken, isWellFormedToken, type UnsubscribeResult } from "./providers/marketingPreferences";
 
 export type UnsubscribeHttpResult = { status: number; html: string };
 
 const SITE = "https://hi-coworking.com";
 
+const FONTS = "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&family=Fraunces:opsz,wght@9..144,600&display=swap";
+const BUTTON = `padding:12px 24px;background:${EMAIL_NAVY};color:#fff;border:0;border-radius:999px;font:600 16px ${EMAIL_BODY_FONT};cursor:pointer`;
+const LINK = `color:${EMAIL_NAVY};font-weight:600`;
+
 function page(title: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title></head><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:48px auto;padding:0 24px;color:#0f172a;"><h1 style="font-size:22px;">${title}</h1>${body}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title} · Hi Coworking</title><link rel="stylesheet" href="${FONTS}"></head><body style="margin:0;background:#f8fafc;color:${EMAIL_NAVY};font-family:${EMAIL_BODY_FONT}"><main style="max-width:480px;margin:64px auto;padding:40px 32px;background:#fff;border-radius:24px;text-align:center"><img src="${EMAIL_LOGO_URL}" width="56" height="56" alt="Hi Coworking" style="display:inline-block"><h1 style="margin:24px 0 24px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2">${title}</h1>${body}</main></body></html>`;
 }
 
 export async function handleUnsubscribeRequest(
@@ -33,7 +39,7 @@ export async function handleUnsubscribeRequest(
     status: 404,
     html: page(
       "This link isn't valid",
-      `<p>We couldn't find that unsubscribe link. You can manage email from your <a href="${SITE}/my-hi">Hi Coworking account</a>.</p>`,
+      `<p><a href="${SITE}/my-hi" style="${LINK}">Manage email preferences</a></p>`,
     ),
   };
   if (method === "GET" || method === "HEAD") {
@@ -41,8 +47,8 @@ export async function handleUnsubscribeRequest(
     return {
       status: 200,
       html: page(
-        "Unsubscribe from Hi Coworking event emails?",
-        `<p>You'll stop getting event announcements, reminders and follow-ups by email. You can still sign up for events.</p><form method="post" action="?t=${token}"><input type="hidden" name="List-Unsubscribe" value="One-Click"><button type="submit" style="padding:12px 24px;background:#0f172a;color:#fff;border:0;border-radius:8px;font-weight:600;cursor:pointer;">Unsubscribe</button></form>`,
+        "Unsubscribe from Hi Coworking emails?",
+        `<form method="post" action="?t=${token}"><input type="hidden" name="List-Unsubscribe" value="One-Click"><button type="submit" style="${BUTTON}">Unsubscribe</button></form>`,
       ),
     };
   }
@@ -54,7 +60,7 @@ export async function handleUnsubscribeRequest(
     status: 200,
     html: page(
       "You're unsubscribed",
-      `<p>You won't get Hi Coworking marketing emails anymore. Account and booking emails still arrive.</p><p><a href="${SITE}">Back to Hi Coworking</a></p>`,
+      `<p><a href="${SITE}" style="${LINK}">Back to Hi Coworking</a></p>`,
     ),
   };
 }
@@ -77,7 +83,7 @@ export const marketing_unsubscribe = onRequest(
       res.status(result.status).type("html").send(req.method === "HEAD" ? "" : result.html);
     } catch (error) {
       logger.error("marketing_unsubscribe failed", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).type("html").send(page("Something went wrong", "<p>Please try the link again in a minute.</p>"));
+      res.status(500).type("html").send(page("Please try again in a minute", ""));
     }
   },
 );

@@ -7,7 +7,8 @@ import * as logger from "firebase-functions/logger";
 import { ResendEmailProvider } from "./providers/emailProvider";
 import { resendApiKey } from "./providers/emailSecret";
 import { isDeliverableLeadEmail, leadEnrollmentDecision } from "./leadContact";
-import { NURTURE_POSTAL_ADDRESS, campaignHref as resolveCampaignHref } from "./nurtureLinks";
+import { campaignHref as resolveCampaignHref, nurtureFooter } from "./nurtureLinks";
+import { listUnsubscribeHeaders, oneClickUnsubscribeUrl } from "./providers/marketingPreferences";
 import {
   COMP_MEMBERSHIP_SOURCE,
   compEndUpdates,
@@ -319,16 +320,17 @@ async function enrollContact(signal: NurtureSignal, contact: Contact, sourceRefI
   return created;
 }
 
-function renderMessage(enrollment: Enrollment, step: CampaignStep) {
+function renderMessage(enrollment: Enrollment, step: CampaignStep, unsubscribeUrl: string) {
   const href = resolveCampaignHref(SITE_ORIGIN, step.ctaHref);
-  const unsubscribeHref = `${SITE_ORIGIN}/preferences?token=${encodeURIComponent(enrollment.unsubscribeToken)}`;
+  const preferencesUrl = `${SITE_ORIGIN}/preferences?token=${encodeURIComponent(enrollment.unsubscribeToken)}`;
+  const footer = nurtureFooter({ unsubscribeUrl, preferencesUrl });
   const subject = step.subject.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const body = step.body.replace(/\{\{firstName\}\}/g, firstName(enrollment.displayName));
   const cta = href && step.ctaLabel
     ? `<p style="margin:28px 0"><a href="${escapeHtml(href)}" style="${EMAIL_BUTTON_STYLE}">${escapeHtml(step.ctaLabel)}</a></p>`
     : "";
-  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}"><div style="max-width:620px;margin:0 auto;padding:40px 24px">${EMAIL_LOGO_HTML}<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2;color:${EMAIL_NAVY}">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}<p style="margin-top:36px;padding-top:20px;border-top:1px solid #e2e8f0;font-size:11px;line-height:1.6;color:#64748b">You are receiving this because you contacted, booked, or hold an account with Hi Coworking. <a href="${escapeHtml(unsubscribeHref)}" style="color:#475569">Manage follow-up preferences</a>.<br>${escapeHtml(NURTURE_POSTAL_ADDRESS)}</p></div></body></html>`;
-  return { subject, html, text: `${body}\n\n${href || ""}\n\nManage follow-up preferences: ${unsubscribeHref}\n${NURTURE_POSTAL_ADDRESS}`.trim() };
+  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}"><div style="max-width:620px;margin:0 auto;padding:40px 24px">${EMAIL_LOGO_HTML}<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:28px;font-weight:600;line-height:1.2;color:${EMAIL_NAVY}">${escapeHtml(subject)}</h1><p style="margin:0;font-size:16px;line-height:1.7;color:#475569">${escapeHtml(body)}</p>${cta}${footer.html}</div></body></html>`;
+  return { subject, html, text: `${body}\n\n${href || ""}\n\n${footer.text}`.trim() };
 }
 
 async function advanceEnrollment(ref: FirebaseFirestore.DocumentReference, enrollment: Enrollment, campaign: Campaign, deliveredAt: number) {
@@ -390,12 +392,16 @@ async function processEnrollment(ref: FirebaseFirestore.DocumentReference, provi
   }, { merge: true });
 
   try {
-    const message = renderMessage(enrollment, step);
+    // One-click unsubscribe (RFC 8058): the same token and endpoint as event
+    // campaigns, so either link writes the nurtureSuppressions record.
+    const unsubscribeUrl = await oneClickUnsubscribeUrl(db, { email: enrollment.email, uid: enrollment.uid }, now);
+    const message = renderMessage(enrollment, step, unsubscribeUrl);
     const result = await provider.send({
       to: enrollment.email,
       subject: message.subject,
       html: message.html,
       text: message.text,
+      headers: listUnsubscribeHeaders(unsubscribeUrl),
       categories: ["hi-coworking-nurture", campaign.stage.toLowerCase()],
       idempotencyKey: `nurture/${deliveryId}`,
     });

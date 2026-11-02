@@ -2,6 +2,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { ResendEmailProvider } from "../providers/emailProvider";
 import { resendApiKey } from "../providers/emailSecret";
+import { isMarketingSuppressed } from "../providers/marketingPreferences";
 import { db } from "./core";
 import {
   PUBLIC_SITE_URL,
@@ -232,6 +233,12 @@ export const events_v2ProcessNotificationJobs = onSchedule(
             await doc.ref.set({ status: "cancelled", processedAt: Date.now() }, { merge: true });
             continue;
           }
+        }
+        // The post-event follow-up promotes upcoming events, so it honors
+        // marketing opt-outs. Confirmations, reminders and refunds don't.
+        if (type === "EVENT_FOLLOW_UP" && await isMarketingSuppressed(db(), String(job.email || ""))) {
+          await doc.ref.set({ status: "suppressed", processedAt: Date.now(), updatedAt: Date.now() }, { merge: true });
+          continue;
         }
         const copy = notificationCopy(type, event, job);
         await provider.send({
