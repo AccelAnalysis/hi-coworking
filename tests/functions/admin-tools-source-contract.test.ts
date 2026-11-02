@@ -31,7 +31,11 @@ describe("nurture email links", () => {
   it("puts the postal address in both the HTML and text footers", () => {
     const source = read("apps/functions/src/nurture.ts");
     expect(NURTURE_POSTAL_ADDRESS).toContain("Carrollton");
-    expect(source.match(/NURTURE_POSTAL_ADDRESS/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    // The footer helper puts the address in both HTML and text; nurture.ts uses both.
+    expect(source).toContain("${footer.html}");
+    expect(source).toContain("${footer.text}");
+    const links = read("apps/functions/src/nurtureLinks.ts");
+    expect(links.match(/NURTURE_POSTAL_ADDRESS/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(source).toMatch(/nurture_scanLifecycle = onSchedule\(\s*\{\s*schedule: "every day 09:00",\s*timeZone: "America\/New_York"/);
   });
 });

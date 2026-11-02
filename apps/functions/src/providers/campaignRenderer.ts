@@ -5,6 +5,7 @@
  */
 
 import { enforceSmsCompliance } from "./smsCompliance";
+import { NURTURE_POSTAL_ADDRESS } from "../nurtureLinks";
 
 export interface CampaignContext {
   eventTitle?: string;
@@ -48,7 +49,7 @@ export function renderEmailHtml(jobType: string, ctx: CampaignContext): string {
   const unsubscribe = ctx.unsubscribeUrl
     ? ` &middot; <a href="${escapeAttribute(ctx.unsubscribeUrl)}" style="color:#6366f1;">Unsubscribe</a> from Hi Coworking event emails`
     : "";
-  const footer = `<div style="padding:16px 32px;font-size:12px;color:#94a3b8;">You received this because you're part of the Hi Coworking community.<br/><a href="${url}" style="color:#6366f1;">View event</a>${unsubscribe}</div>`;
+  const footer = `<div style="padding:16px 32px;font-size:12px;color:#94a3b8;">You received this because you're part of the Hi Coworking community.<br/><a href="${url}" style="color:#6366f1;">View event</a>${unsubscribe}<br/>${NURTURE_POSTAL_ADDRESS}</div>`;
 
   let body = "";
   switch (jobType) {

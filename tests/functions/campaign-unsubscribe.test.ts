@@ -11,6 +11,8 @@ import {
   emailHash,
   ensureUnsubscribeTokens,
   filterMarketingRecipients,
+  isMarketingSuppressed,
+  oneClickUnsubscribeUrl,
   isWellFormedToken,
   listUnsubscribeHeaders,
   loadSuppressedHashes,
@@ -21,6 +23,7 @@ import { buildCampaignEmailMessages } from "../../apps/functions/src/campaignJob
 import { renderEmailHtml } from "../../apps/functions/src/providers/campaignRenderer";
 import { handleUnsubscribeRequest } from "../../apps/functions/src/marketingUnsubscribe";
 import { ResendEmailProvider } from "../../apps/functions/src/providers/emailProvider";
+import { NURTURE_POSTAL_ADDRESS, nurtureFooter } from "../../apps/functions/src/nurtureLinks";
 
 // Minimal in-memory Firestore with the calls these helpers use.
 type Doc = Record<string, unknown>;
@@ -204,7 +207,7 @@ describe("marketing_unsubscribe endpoint", () => {
       users: { u1: { email: "m@example.com" } },
     });
     expect(await applyUnsubscribeToken(db, token, 99)).toBe("unsubscribed");
-    expect(col(SUPPRESSIONS_COLLECTION).get(hash)).toMatchObject({ reason: "unsubscribe", source: "event-campaign", email: "m@example.com" });
+    expect(col(SUPPRESSIONS_COLLECTION).get(hash)).toMatchObject({ reason: "unsubscribe", source: "unsubscribe-link", email: "m@example.com" });
     expect(col("nurtureEnrollments").get("e1")).toMatchObject({ status: "SUPPRESSED" });
     expect(col("nurtureEnrollments").get("e2")).toMatchObject({ status: "ACTIVE" });
     expect(col("users").get("u1")).toMatchObject({ marketingOptOut: true, updatedAt: 99 });
@@ -219,5 +222,69 @@ describe("marketing_unsubscribe endpoint", () => {
     expect(await applyUnsubscribeToken(db, token, 1)).toBe("unsubscribed");
     expect(col("users").has("gone")).toBe(false);
     expect(col(SUPPRESSIONS_COLLECTION).has(hash)).toBe(true);
+  });
+});
+
+describe("opt-out across Hi Coworking marketing email", () => {
+  const read = (path: string) => readFileSync(new URL(`../../apps/functions/src/${path}`, import.meta.url), "utf8");
+
+  it("nurture mail carries RFC 8058 headers and the one-click link from the shared token", () => {
+    const nurture = read("nurture.ts");
+    expect(nurture).toContain("oneClickUnsubscribeUrl(db, { email: enrollment.email, uid: enrollment.uid }, now)");
+    expect(nurture).toContain("headers: listUnsubscribeHeaders(unsubscribeUrl)");
+    // Suppression is still checked before every nurture send.
+    expect(nurture).toMatch(/if \(await isSuppressed\(enrollment\.emailHash, enrollment\.uid\)\)/);
+  });
+
+  it("nurture footer links unsubscribe and preferences and includes the postal address", () => {
+    const footer = nurtureFooter({ unsubscribeUrl: "https://x/u?t=1&a=2", preferencesUrl: "https://hi/preferences?token=p" });
+    expect(footer.html).toContain('<a href="https://x/u?t=1&amp;a=2" style="color:#475569">Unsubscribe</a>');
+    expect(footer.html).toContain("Manage preferences");
+    expect(footer.html).toContain("15373 Carrollton Blvd, Carrollton, VA 23314");
+    expect(footer.text).toContain("Unsubscribe: https://x/u?t=1&a=2");
+    expect(footer.text).toContain(NURTURE_POSTAL_ADDRESS);
+  });
+
+  it("event campaign mail includes the postal address", () => {
+    expect(renderEmailHtml("announce", { unsubscribeUrl: "https://x/u?t=1" })).toContain("15373 Carrollton Blvd, Carrollton, VA 23314");
+  });
+
+  it("builds a one-click URL and reuses the address's token", async () => {
+    const { db, col } = fakeDb();
+    const env = { GCLOUD_PROJECT: "p" } as NodeJS.ProcessEnv;
+    const first = await oneClickUnsubscribeUrl(db, { email: " New@Example.com ", uid: "u9" }, 5, env);
+    expect(first).toMatch(/^https:\/\/us-central1-p\.cloudfunctions\.net\/marketing_unsubscribe\?t=[0-9a-f]{48}$/);
+    expect(col(UNSUBSCRIBE_TOKENS_COLLECTION).get(emailHash("new@example.com"))).toMatchObject({ uid: "u9" });
+    expect(await oneClickUnsubscribeUrl(db, { email: "new@example.com" }, 6, env)).toBe(first);
+  });
+
+  it("isMarketingSuppressed honors the suppression list and member flags", async () => {
+    const { db } = fakeDb({
+      [SUPPRESSIONS_COLLECTION]: { [emailHash("gone@example.com")]: { reason: "unsubscribe" } },
+      users: { out: { marketingOptOut: true }, dnc: { doNotContact: true }, ok: {} },
+    });
+    expect(await isMarketingSuppressed(db, "Gone@Example.com")).toBe(true);
+    expect(await isMarketingSuppressed(db, "a@example.com", "out")).toBe(true);
+    expect(await isMarketingSuppressed(db, "a@example.com", "dnc")).toBe(true);
+    expect(await isMarketingSuppressed(db, "a@example.com", "ok")).toBe(false);
+    expect(await isMarketingSuppressed(db, "a@example.com")).toBe(false);
+    expect(await isMarketingSuppressed(db, "not-an-email")).toBe(true);
+  });
+
+  it("the post-event follow-up skips opted-out addresses; transactional event mail does not check", () => {
+    const source = read("eventsV2/notifications.ts");
+    expect(source).toMatch(/type === "EVENT_FOLLOW_UP" && await isMarketingSuppressed\(db\(\), String\(job\.email \|\| ""\)\)/);
+    expect(source.match(/isMarketingSuppressed\(/g)).toHaveLength(1);
+  });
+
+  it("the unsubscribe page uses Hi Coworking branding", async () => {
+    const token = "a".repeat(48);
+    const result = await handleUnsubscribeRequest({ method: "GET", token }, async () => "unsubscribed");
+    expect(result.html).toContain("#101D4B");
+    expect(result.html).toContain("Fraunces");
+    expect(result.html).toContain("DM Sans");
+    expect(result.html).toContain("Unsubscribe from Hi Coworking emails?");
+    const done = await handleUnsubscribeRequest({ method: "POST", token }, async () => "unsubscribed");
+    expect(done.html).toContain("You're unsubscribed");
   });
 });
