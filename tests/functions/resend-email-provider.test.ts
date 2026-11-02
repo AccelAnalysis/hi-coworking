@@ -230,6 +230,8 @@ describe("Hi Coworking mail wiring", () => {
 
     const users = walk("apps/functions/src").filter((file) => read(file).includes("providers/emailSecret"));
     expect(users.map((file) => file.replace(/\\/g, "/")).sort()).toEqual([
+      // Access-code-ready mail queue (mail bundle only).
+      "apps/functions/src/accessCodes/mailQueue.ts",
       "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
       "apps/functions/src/index.ts",
