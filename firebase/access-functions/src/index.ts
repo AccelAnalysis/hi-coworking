@@ -9,3 +9,7 @@ export {
   access_adminResendPin,
   access_seamWebhook,
 } from "../../../apps/functions/src/access";
+
+// No-show sweep (Jonathan, Nov 3, 2026): revokes a code only when the member
+// clearly never arrived; it needs only the Seam API key.
+export { access_noShowRevoke } from "../../../apps/functions/src/scheduled/accessCleanup";
