@@ -2152,6 +2152,8 @@ export const accessGrantDocSchema = z.object({
   revokedAt: z.number().optional(),
   revokedBy: z.string().optional(),                   // uid of revoker (admin or system)
   revokeReason: accessRevokeReasonSchema.optional(),
+  firstUsedAt: z.number().optional(),                 // first door unlock with this grant's code (Seam webhook)
+  lastUsedAt: z.number().optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
@@ -2173,6 +2175,8 @@ export const accessCodeDocSchema = z.object({
   status: accessCodeStatusSchema.default("programming"),
   deliveredAt: z.number().optional(),                 // Timestamp of notification send
   failureReason: z.string().optional(),
+  firstUsedAt: z.number().optional(),                 // first door unlock with this code (Seam webhook)
+  lastUsedAt: z.number().optional(),
   createdAt: z.number(),
   updatedAt: z.number().optional(),
 });
@@ -2205,7 +2209,7 @@ export const accessEventDocSchema = z.object({
   userId: z.string().optional(),
   eventType: accessEventTypeSchema,
   provider: z.literal("seam"),
-  providerPayload: z.record(z.string(), z.any()).optional(),  // Raw Seam event payload
+  providerPayload: z.record(z.string(), z.any()).optional(),  // Allow-listed Seam IDs/type/time only; never the PIN or raw payload
   performedBy: z.string().optional(),                         // uid for admin actions
   notes: z.string().optional(),
   createdAt: z.number(),

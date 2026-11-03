@@ -14,6 +14,7 @@ import { accessReadyMail, accessReadyNotification, ownerMaySeeCode } from "./acc
 import { checkInFromDoorUnlock } from "./frontDeskKiosk/functions";
 import { handleSeamWebhookRequest } from "./accessCodes/seamWebhook";
 import { runIdempotentWebhook } from "./payments/idempotency";
+import { internalEventTypeFor, isCodeUnlock, sanitizeSeamEvent, seamCodeStatusFor, unlockTime } from "./accessCodes/noShow";
 
 const db = admin.firestore();
 
@@ -523,6 +524,7 @@ async function handleSeamEvent(event: {
   event_id?: string;
   device_id?: string;
   access_code_id?: string;
+  occurred_at?: string;
   properties?: Record<string, unknown>;
 }, verified = false): Promise<void> {
   let grantUserId: string | undefined;
@@ -533,6 +535,10 @@ async function handleSeamEvent(event: {
   let doorId: string | undefined;
   let grantId: string | undefined;
   let bookingId: string | undefined;
+  let codeRef: FirebaseFirestore.DocumentReference | undefined;
+  let codeData: FirebaseFirestore.DocumentData | undefined;
+  let grantRef: FirebaseFirestore.DocumentReference | undefined;
+  let grantData: FirebaseFirestore.DocumentData | undefined;
 
   if (device_id) {
     const doorSnap = await db
@@ -550,28 +556,27 @@ async function handleSeamEvent(event: {
       .limit(1)
       .get();
     if (!codeSnap.empty) {
-      const codeData = codeSnap.docs[0].data();
+      codeRef = codeSnap.docs[0].ref;
+      codeData = codeSnap.docs[0].data();
       grantId = codeData.grantId;
       doorId = doorId ?? codeData.doorId;
 
-      // Map Seam event types to our internal code statuses
-      let newStatus: string | undefined;
-      if (event_type === "access_code.set") newStatus = "active";
-      else if (event_type === "access_code.removed") newStatus = "revoked";
-      else if (event_type === "access_code.failed") newStatus = "failed";
-
+      // Map Seam event types (real and older names) to our code statuses
+      const newStatus = seamCodeStatusFor(event_type);
       if (newStatus) {
-        await codeSnap.docs[0].ref.update({ status: newStatus, updatedAt: now });
+        await codeRef.update({ status: newStatus, updatedAt: now });
       }
 
       // Get bookingId from grant
       if (grantId) {
         const grantSnap = await db.collection("accessGrants").doc(grantId).get();
         if (grantSnap.exists) {
-          bookingId = grantSnap.data()!.bookingId;
-          grantUserId = grantSnap.data()!.userId;
+          grantRef = grantSnap.ref;
+          grantData = grantSnap.data()!;
+          bookingId = grantData.bookingId;
+          grantUserId = grantData.userId;
           // Update grant status to active when code goes active
-          if (event_type === "access_code.set") {
+          if (newStatus === "active" && grantData.status === "pending") {
             await grantSnap.ref.update({ status: "active", updatedAt: now });
           }
         }
@@ -597,25 +602,42 @@ async function handleSeamEvent(event: {
     }
   }
 
-  // Map Seam event types to internal event types
-  const eventTypeMap: Record<string, string> = {
-    "access_code.set": "code_active",
-    "access_code.removed": "code_revoked",
-    "access_code.failed": "code_failed",
-    "lock.unlocked": "door_unlocked",
-    "device.connected": "device_online",
-    "device.disconnected": "device_offline",
-  };
-
-  const internalEventType = eventTypeMap[event_type];
+  // Seam events can carry the PIN (`code`) and device details, so only an
+  // allow-listed set of IDs, the type, method and time is stored.
+  const payload = sanitizeSeamEvent(event as Record<string, unknown>);
+  const internalEventType = internalEventTypeFor(event_type);
   if (internalEventType && doorId) {
     await logAccessEvent({
       bookingId,
       grantId,
       doorId,
+      ...(grantUserId && { userId: grantUserId }),
       eventType: internalEventType as never,
-      providerPayload: event as Record<string, unknown>,
+      providerPayload: payload,
       notes: `Seam webhook: ${event_type}`,
+    });
+  }
+
+  // A verified unlock with one of our codes is the member using it. Recorded
+  // on the code, the grant and as a code_used event, so the no-show sweep
+  // never revokes a member who got in.
+  if (verified && isCodeUnlock(event) && codeRef && codeData && grantId && doorId) {
+    const usedAt = unlockTime(event.occurred_at, now);
+    const usage = (data: FirebaseFirestore.DocumentData | undefined) => ({
+      ...(data?.firstUsedAt ? {} : { firstUsedAt: usedAt }),
+      lastUsedAt: Math.max(usedAt, Number(data?.lastUsedAt) || 0),
+      updatedAt: now,
+    });
+    await codeRef.update(usage(codeData));
+    if (grantRef) await grantRef.update(usage(grantData));
+    await logAccessEvent({
+      bookingId,
+      grantId,
+      doorId,
+      ...(grantUserId && { userId: grantUserId }),
+      eventType: "code_used",
+      providerPayload: payload,
+      notes: "Member opened the door with their code",
     });
   }
 

@@ -152,6 +152,7 @@ jobs:
           npx vitest run
           tests/functions/home-map-runtime-safety.test.ts
           tests/functions/seam-webhook.test.ts
+          tests/functions/access-no-show.test.ts
           tests/functions/access-ready-email.test.ts
           tests/functions/early-access-lead-capture.test.ts
           tests/functions/member-management-data-compat.test.ts

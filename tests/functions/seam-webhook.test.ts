@@ -136,7 +136,7 @@ describe("Seam webhook (Svix) verification", () => {
     const res = await call(unlock, signed(unlock));
     expect(res).toEqual({ statusCode: 200, body: { ok: true } });
     expect(h.checkIns).toEqual([expect.objectContaining({ uid: "member-1", doorId: "door1", eventKey: "evt_1" })]);
-    expect(accessWrites()).toHaveLength(1); // one door_unlocked access event
+    expect(accessWrites()).toHaveLength(2); // door_unlocked + code_used access events
   });
 
   it("rejects a tampered body", async () => {
@@ -193,7 +193,7 @@ describe("Seam webhook (Svix) verification", () => {
     const replay = await call(unlock, headers);
     expect(replay).toEqual({ statusCode: 200, body: { ok: true, duplicate: true } });
     expect(h.checkIns).toHaveLength(1);
-    expect(accessWrites()).toHaveLength(1);
+    expect(accessWrites()).toHaveLength(2);
   });
 
   it("rejects non-POST and a signed non-JSON body", async () => {
@@ -220,6 +220,77 @@ describe("Seam webhook (Svix) verification", () => {
     expect(verifySeamWebhook({ headers, rawBody: Buffer.from(unlock), secret: SECRET, nowSeconds: now })).toEqual({ ok: true, id: "msg_1" });
     expect(verifySeamWebhook({ headers, rawBody: Buffer.from(`${unlock} `), secret: SECRET, nowSeconds: now }).ok).toBe(false);
     expect(verifySeamWebhook({ headers, rawBody: undefined, secret: SECRET, nowSeconds: now }).ok).toBe(false);
+  });
+});
+
+describe("Seam webhook records code use for the no-show sweep", () => {
+  const events = () => [...h.docs.entries()].filter(([k]) => k.startsWith("accessEvents/")).map(([, v]) => v);
+  const PIN = "482915";
+
+  it("a verified unlock with a member's code writes code_used and marks the code and grant used, without the PIN", async () => {
+    const occurredAt = new Date(Date.now() - 2 * 60_000).toISOString();
+    const body = JSON.stringify({
+      event_type: "lock.unlocked", event_id: "evt_9", device_id: "dev_1", access_code_id: "code_1",
+      method: "keycode", code: PIN, occurred_at: occurredAt, workspace_id: "ws_1",
+      device_custom_metadata: { owner: "someone" },
+    });
+    expect((await call(body, signed(body, { id: "msg_use" }))).statusCode).toBe(200);
+    const used = events().find((e) => e.eventType === "code_used");
+    expect(used).toMatchObject({ grantId: "g1", bookingId: "b1", doorId: "door1", userId: "member-1" });
+    expect(used!.providerPayload).toEqual({
+      seamEventId: "evt_9", seamEventType: "lock.unlocked", seamDeviceId: "dev_1", seamCodeId: "code_1",
+      method: "keycode", occurredAt,
+    });
+    expect(events().find((e) => e.eventType === "door_unlocked")).toMatchObject({ grantId: "g1", userId: "member-1" });
+    const usedAt = Date.parse(occurredAt);
+    expect(h.docs.get("accessGrants/g1")).toMatchObject({ firstUsedAt: usedAt, lastUsedAt: usedAt });
+    expect(h.docs.get("accessCodes/c1")).toMatchObject({ firstUsedAt: usedAt, lastUsedAt: usedAt });
+    const stored = JSON.stringify([...h.docs.values()]);
+    expect(stored).not.toContain(PIN);
+    expect(stored).not.toContain("ws_1");
+    expect(stored).not.toContain("someone");
+  });
+
+  it("a later unlock keeps the first-use time", async () => {
+    h.docs.set("accessGrants/g1", { bookingId: "b1", userId: "member-1", firstUsedAt: 1000, lastUsedAt: 1000 });
+    const body = JSON.stringify({ event_type: "lock.unlocked", event_id: "evt_10", device_id: "dev_1", access_code_id: "code_1" });
+    await call(body, signed(body, { id: "msg_again" }));
+    expect(h.docs.get("accessGrants/g1")!.firstUsedAt).toBe(1000);
+    expect(Number(h.docs.get("accessGrants/g1")!.lastUsedAt)).toBeGreaterThan(1000);
+  });
+
+  it("an unlock without one of our codes records no code use", async () => {
+    const body = JSON.stringify({ event_type: "lock.unlocked", event_id: "evt_11", device_id: "dev_1", method: "manual" });
+    await call(body, signed(body, { id: "msg_manual" }));
+    expect(events().map((e) => e.eventType)).toEqual(["door_unlocked"]);
+    expect(h.docs.get("accessGrants/g1")!.firstUsedAt).toBeUndefined();
+  });
+
+  it("Seam's real code event names update the code, and the PIN they carry is not stored", async () => {
+    h.docs.set("accessGrants/g1", { bookingId: "b1", userId: "member-1", status: "pending" });
+    const body = JSON.stringify({ event_type: "access_code.set_on_device", event_id: "evt_12", device_id: "dev_1", access_code_id: "code_1", code: PIN });
+    await call(body, signed(body, { id: "msg_set" }));
+    expect(h.docs.get("accessCodes/c1")!.status).toBe("active");
+    expect(h.docs.get("accessGrants/g1")!.status).toBe("active");
+    expect(events().map((e) => e.eventType)).toEqual(["code_active"]);
+    expect(JSON.stringify([...h.docs.values()])).not.toContain(PIN);
+
+    const removed = JSON.stringify({ event_type: "access_code.removed_from_device", event_id: "evt_13", device_id: "dev_1", access_code_id: "code_1" });
+    await call(removed, signed(removed, { id: "msg_rm" }));
+    expect(h.docs.get("accessCodes/c1")!.status).toBe("revoked");
+  });
+
+  it("a late 'set' event does not reactivate a revoked grant", async () => {
+    h.docs.set("accessGrants/g1", { bookingId: "b1", userId: "member-1", status: "revoked" });
+    const body = JSON.stringify({ event_type: "access_code.set_on_device", event_id: "evt_14", device_id: "dev_1", access_code_id: "code_1" });
+    await call(body, signed(body, { id: "msg_late" }));
+    expect(h.docs.get("accessGrants/g1")!.status).toBe("revoked");
+  });
+
+  it("source never stores the raw Seam payload", () => {
+    const access = readFileSync("apps/functions/src/access.ts", "utf8");
+    expect(access).not.toMatch(/providerPayload: event\b/);
+    expect(access).toMatch(/providerPayload: payload/);
   });
 });
 

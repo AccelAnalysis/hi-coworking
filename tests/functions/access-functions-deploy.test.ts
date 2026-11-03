@@ -35,7 +35,7 @@ function loadGraph(entry: string): string[] {
   return files;
 }
 
-const ACCESS_IDS = ["access_adminResendPin", "access_getMyGrants", "access_seamWebhook"];
+const ACCESS_IDS = ["access_adminResendPin", "access_getMyGrants", "access_noShowRevoke", "access_seamWebhook"];
 
 describe("isolated access (Seam) functions deploy", () => {
   const config = JSON.parse(readFileSync("firebase.access.json", "utf8"));
@@ -88,6 +88,7 @@ describe("isolated access (Seam) functions deploy", () => {
     expect(parsed.params.sort()).toEqual(["SEAM_API_KEY:secret", "SEAM_WEBHOOK_SECRET:secret"]);
     expect(parsed.bound.access_getMyGrants).toEqual(["SEAM_API_KEY"]);
     expect(parsed.bound.access_adminResendPin).toEqual(["SEAM_API_KEY"]);
+    expect(parsed.bound.access_noShowRevoke).toEqual(["SEAM_API_KEY"]);
     expect(parsed.bound.access_seamWebhook.sort()).toEqual(["SEAM_API_KEY", "SEAM_WEBHOOK_SECRET"]);
     expect(output).not.toMatch(/TWILIO|LINKEDIN|X_CLIENT|STRIPE|RESEND/);
   });
