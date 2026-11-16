@@ -217,6 +217,7 @@ jobs:
           tests/functions/front-desk-kiosk-tasks.test.ts
           tests/web/front-desk-kiosk-ui.test.ts
           tests/web/public-launch-gate.test.ts
+          tests/web/public-site-mode.test.ts
           tests/web/safari15-support.test.ts
           tests/functions/access-code-visibility.test.ts
           tests/functions/follow-up-queue-policy.test.ts

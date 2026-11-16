@@ -34,6 +34,8 @@ import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, M
 export interface PublicSiteSettingsDoc {
   id: "public";
   comingSoonEnabled: boolean;
+  /** Optional opening instant (epoch ms). When omitted, the compiled PUBLIC_LAUNCH_AT is used. */
+  launchAt?: number;
   updatedAt: number;
   updatedBy?: string;
 }
@@ -280,7 +282,7 @@ export async function getPublicSiteSettings(): Promise<PublicSiteSettingsDoc> {
 }
 
 export async function setPublicSiteSettings(
-  data: Pick<PublicSiteSettingsDoc, "comingSoonEnabled" | "updatedBy">
+  data: Pick<PublicSiteSettingsDoc, "comingSoonEnabled" | "updatedBy"> & { launchAt?: number },
 ): Promise<void> {
   await setDoc(
     doc(db, "siteSettings", "public"),
@@ -289,8 +291,9 @@ export async function setPublicSiteSettings(
       comingSoonEnabled: data.comingSoonEnabled,
       updatedAt: Date.now(),
       ...(data.updatedBy ? { updatedBy: data.updatedBy } : {}),
+      ...(typeof data.launchAt === "number" ? { launchAt: data.launchAt } : {}),
     },
-    { merge: true }
+    { merge: true },
   );
 }
 

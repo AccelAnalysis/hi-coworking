@@ -28,9 +28,16 @@ describe("admin capability flags (audit P1-3)", () => {
 describe("Coming Soon toggle (audit P1-15)", () => {
   it("asks for confirmation and labels the action, not the state", () => {
     const dashboard = read("app/admin/dashboard/page.tsx");
-    expect(dashboard).toContain("Open the site to the public?");
-    expect(dashboard).toContain("onClick={() => setConfirmSiteMode(true)}");
+    const mode = read("lib/publicLaunch.ts");
+    expect(dashboard).toContain("publicSiteModeView");
+    expect(dashboard).toContain("onClick={openSiteModeConfirm}");
+    expect(dashboard).toContain("<ConfirmSheet");
+    expect(dashboard).toContain("updatedBy: user.uid");
     expect(dashboard).not.toContain("Coming Soon: ON");
+    expect(mode).toContain("Open the site to the public?");
+    expect(mode).toContain("Return the site to Coming Soon?");
+    expect(mode).toContain("Open site to public…");
+    expect(mode).toContain("Return to Coming Soon…");
   });
 });
 

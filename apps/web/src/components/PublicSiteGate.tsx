@@ -10,7 +10,7 @@ import {
 } from "@/lib/firestore";
 import { ComingSoonExperience } from "@/components/ComingSoonExperience";
 import { LaunchCountdown } from "@/components/LaunchCountdown";
-import { PUBLIC_LAUNCH_AT, isPublicLaunchReached } from "@/lib/publicLaunch";
+import { isComingSoonPubliclyActive, resolvePublicLaunchAt } from "@/lib/publicLaunch";
 import { SAYHI_FLOW, SAYHI_PREVIEW_DEMO } from "@/lib/sayhiFlags";
 
 const DEFAULT_SETTINGS: PublicSiteSettingsDoc = {
@@ -55,7 +55,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
   const { loading: authLoading, role } = useAuth();
   const [settings, setSettings] = useState<PublicSiteSettingsDoc>(DEFAULT_SETTINGS);
   const [settingsLoading, setSettingsLoading] = useState(true);
-  const [launchReached, setLaunchReached] = useState(() => isPublicLaunchReached(Date.now()));
+  const effectiveLaunchAt = resolvePublicLaunchAt(settings.launchAt);
 
   useEffect(() => {
     const unsub = subscribeToPublicSiteSettings((next) => {
@@ -66,26 +66,14 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
+  const [now, setNow] = useState(() => Date.now());
+
   useEffect(() => {
-    if (launchReached) return;
-
-    let timer: number | undefined;
-
-    const checkLaunchTime = () => {
-      const remaining = PUBLIC_LAUNCH_AT - Date.now();
-      if (remaining <= 0) {
-        setLaunchReached(true);
-        return;
-      }
-
-      timer = window.setTimeout(checkLaunchTime, Math.min(remaining, 60_000));
-    };
-
-    checkLaunchTime();
-    return () => {
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [launchReached]);
+    const remaining = effectiveLaunchAt - Date.now();
+    if (remaining <= 0) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(remaining, 60_000));
+    return () => window.clearTimeout(timer);
+  }, [effectiveLaunchAt, now]);
 
   // Staff can preview the live site while Coming Soon is on for visitors.
   // The launch time expires the gate automatically.
@@ -94,7 +82,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
   // pages instead of Coming Soon so reviewers can click through them.
   const previewBypass = SAYHI_FLOW && SAYHI_PREVIEW_DEMO;
   const bypassComingSoon = previewBypass || role === "staff" || role === "admin" || role === "master";
-  const showComingSoon = settings.comingSoonEnabled && !bypassComingSoon && !launchReached;
+  const showComingSoon = isComingSoonPubliclyActive(settings, now) && !bypassComingSoon;
 
   if (authLoading || settingsLoading) {
     return (
@@ -108,7 +96,7 @@ export function PublicSiteGate({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-dvh bg-slate-50">
         <ComingSoonTopbar />
-        <LaunchCountdown />
+        <LaunchCountdown launchAt={effectiveLaunchAt} />
         <div className="[&_nav]:hidden [&_header>div>div:first-child]:hidden">
           <ComingSoonExperience />
         </div>

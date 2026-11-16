@@ -11,8 +11,8 @@ type CountdownValue = {
   seconds: string;
 };
 
-function getCountdownValue(now: number): CountdownValue {
-  const remaining = Math.max(0, PUBLIC_LAUNCH_AT - now);
+function getCountdownValue(now: number, launchAt: number): CountdownValue {
+  const remaining = Math.max(0, launchAt - now);
   const days = Math.floor(remaining / 86_400_000);
   const hours = Math.floor((remaining % 86_400_000) / 3_600_000);
   const minutes = Math.floor((remaining % 3_600_000) / 60_000);
@@ -37,17 +37,17 @@ function PerspectiveUnit({ value, label }: { value: string; label: string }) {
   );
 }
 
-export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
-  const [countdown, setCountdown] = useState<CountdownValue>(() => getCountdownValue(Date.now()));
+export function LaunchCountdown({ onComplete, launchAt = PUBLIC_LAUNCH_AT }: { onComplete?: () => void; launchAt?: number }) {
+  const [countdown, setCountdown] = useState<CountdownValue>(() => getCountdownValue(Date.now(), launchAt));
   const shellRef = useRef<HTMLDivElement>(null);
   const clockRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const tick = () => {
       const now = Date.now();
-      setCountdown(getCountdownValue(now));
+      setCountdown(getCountdownValue(now, launchAt));
 
-      if (isPublicLaunchReached(now)) {
+      if (isPublicLaunchReached(now, launchAt)) {
         onComplete?.();
       }
     };
@@ -55,7 +55,7 @@ export function LaunchCountdown({ onComplete }: { onComplete?: () => void }) {
     tick();
     const timer = window.setInterval(tick, 1_000);
     return () => window.clearInterval(timer);
-  }, [onComplete]);
+  }, [onComplete, launchAt]);
 
   useEffect(() => {
     const shell = shellRef.current;
