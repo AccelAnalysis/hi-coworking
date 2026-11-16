@@ -34,6 +34,11 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { useAuth } from "@/lib/authContext";
 import { db, functions } from "@/lib/firebase";
 import { getPublicSiteSettings, setPublicSiteSettings, type PublicSiteSettingsDoc } from "@/lib/firestore";
+import {
+  nextMondayEightAmEt,
+  publicSiteModeView,
+  zonedDateTimeToUtcMs,
+} from "@/lib/publicLaunch";
 import { ADMIN_CAPABILITIES, type AdminCapability } from "@/lib/adminCapabilities";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { adminKioskOverview } from "@/lib/frontDeskKiosk";
@@ -104,6 +109,9 @@ function AdminDashboardContent() {
   const [savingComingSoon, setSavingComingSoon] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmSiteMode, setConfirmSiteMode] = useState(false);
+  const [launchDate, setLaunchDate] = useState("");
+  const [launchTime, setLaunchTime] = useState("08:00");
+  const [launchAtError, setLaunchAtError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,13 +170,65 @@ function AdminDashboardContent() {
     };
   }, [data]);
 
-  const toggleComingSoon = useCallback(async () => {
+  const siteMode = useMemo(() => publicSiteModeView(siteSettings, Date.now()), [siteSettings, confirmSiteMode, data]);
+
+  const openSiteModeConfirm = useCallback(() => {
+    const view = publicSiteModeView(siteSettings, Date.now());
+    if (view.requiresNewLaunchAt) {
+      const next = nextMondayEightAmEt(Date.now());
+      setLaunchDate(next.date);
+      setLaunchTime(next.time);
+    }
+    setLaunchAtError(null);
+    setConfirmSiteMode(true);
+  }, [siteSettings]);
+
+  const chosenLaunchAt = siteMode.requiresNewLaunchAt ? zonedDateTimeToUtcMs(launchDate, launchTime) : null;
+  const chosenLaunchIsValid = chosenLaunchAt != null && chosenLaunchAt > Date.now();
+
+  const applySiteMode = useCallback(async () => {
     if (!user || savingComingSoon) return;
-    const nextEnabled = !siteSettings.comingSoonEnabled;
+    const view = publicSiteModeView(siteSettings, Date.now());
+    if (view.isGated) {
+      setSavingComingSoon(true);
+      try {
+        await setPublicSiteSettings({ comingSoonEnabled: false, updatedBy: user.uid });
+        setSiteSettings((current) => ({ ...current, comingSoonEnabled: false, updatedAt: Date.now(), updatedBy: user.uid }));
+        setConfirmSiteMode(false);
+      } catch (caught) {
+        console.error(caught);
+        setConfirmSiteMode(false);
+        setError("The public site mode could not be changed. Nothing was switched.");
+      } finally {
+        setSavingComingSoon(false);
+      }
+      return;
+    }
+
+    let launchAt: number | undefined;
+    if (view.requiresNewLaunchAt) {
+      const at = zonedDateTimeToUtcMs(launchDate, launchTime);
+      if (at == null || at <= Date.now()) {
+        setLaunchAtError("Choose an opening date and time that is still in the future, in America/New_York.");
+        return;
+      }
+      launchAt = at;
+    }
+
     setSavingComingSoon(true);
     try {
-      await setPublicSiteSettings({ comingSoonEnabled: nextEnabled, updatedBy: user.uid });
-      setSiteSettings((current) => ({ ...current, comingSoonEnabled: nextEnabled, updatedAt: Date.now(), updatedBy: user.uid }));
+      await setPublicSiteSettings({
+        comingSoonEnabled: true,
+        updatedBy: user.uid,
+        ...(launchAt != null ? { launchAt } : {}),
+      });
+      setSiteSettings((current) => ({
+        ...current,
+        comingSoonEnabled: true,
+        ...(launchAt != null ? { launchAt } : {}),
+        updatedAt: Date.now(),
+        updatedBy: user.uid,
+      }));
       setConfirmSiteMode(false);
     } catch (caught) {
       console.error(caught);
@@ -177,7 +237,7 @@ function AdminDashboardContent() {
     } finally {
       setSavingComingSoon(false);
     }
-  }, [savingComingSoon, siteSettings.comingSoonEnabled, user]);
+  }, [launchDate, launchTime, savingComingSoon, siteSettings, user]);
 
   return (
     <AppShell>
@@ -189,19 +249,43 @@ function AdminDashboardContent() {
           <section className="mt-8 grid gap-px overflow-hidden rounded-3xl bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">{view.metrics.map(([label, value, note]) => <div key={label} className="bg-white p-5"><p className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-500">{label}</p><p className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{value}</p><p className="mt-1 text-xs text-slate-500">{note || "Last 30 days"}</p></div>)}</section>
           <section className="mt-10 grid gap-8 lg:grid-cols-2"><div><div className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Action required</h2></div>{view.actions.length ? <div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.actions.map((item) => <Link key={item.label} href={item.href} className="flex min-h-16 items-center gap-4 py-3"><span className="inline-flex h-9 min-w-9 items-center justify-center rounded-full bg-amber-100 text-sm font-semibold text-amber-900">{item.count}</span><span className="flex-1 text-sm font-semibold text-slate-900">{item.label}</span><ArrowRight className="h-4 w-4 text-slate-400" /></Link>)}</div> : <p className="mt-4 rounded-2xl bg-emerald-50 p-4 text-sm text-emerald-900">No tracked payment, membership, access, or nurture exceptions currently require action.</p>}{data?.nurtureUnavailable ? <p className="mt-3 text-sm text-slate-600" role="status">{"Nurture failures couldn't be checked just now, so they aren't counted here. Open Nurture to see its status."}</p> : null}{data?.frontDeskUnavailable && ADMIN_CAPABILITIES.frontDesk.live ? <p className="mt-3 text-sm text-slate-600" role="status">{"Front-desk alerts couldn't be checked just now, so they aren't counted here. Open Front desk to see them."}</p> : null}</div><div><div className="flex items-center gap-2"><CalendarClock className="h-5 w-5 text-slate-500" /><h2 className="text-xl font-semibold text-slate-950">Next bookings</h2></div><div className="mt-4 divide-y divide-slate-200 border-y border-slate-200">{view.upcoming.map((booking) => <div key={booking.id} className="flex items-center justify-between gap-4 py-3 text-sm"><span><span className="block font-medium text-slate-950">{String(booking.resourceName || booking.resourceId || "Space")}</span><span className="text-xs text-slate-500">{String(booking.userName || booking.guestEmail || "Member")}</span></span><span className="text-right text-xs text-slate-600">{new Date(Number(booking.start)).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" })}</span></div>)}{view.upcoming.length === 0 ? <p className="py-5 text-sm text-slate-500">No confirmed future bookings.</p> : null}</div></div></section>
           <section className="mt-12 border-t border-slate-300 pt-8"><h2 className="text-xl font-semibold text-slate-950">Operating workspaces</h2><div className="mt-5 grid gap-px overflow-hidden rounded-3xl bg-slate-200 sm:grid-cols-2 lg:grid-cols-3">{MODULES.map((module) => { const Icon = module.icon; return <Link key={module.href} href={module.href} className="group min-h-32 bg-white p-5 transition hover:bg-slate-50"><div className="flex items-start justify-between"><Icon className="h-5 w-5 text-slate-500" /><ArrowRight className="h-4 w-4 text-slate-300" /></div><h3 className="mt-4 flex flex-wrap items-center gap-2 font-semibold text-slate-950">{module.label}{module.capability && !ADMIN_CAPABILITIES[module.capability].live ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Not live yet</span> : null}</h3><p className="mt-1 text-sm leading-5 text-slate-600">{module.description}</p></Link>; })}</div></section>
-          <section className="mt-9 flex flex-col gap-4 border-t border-slate-200 pt-7 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="flex items-center gap-2 text-sm font-semibold text-slate-950"><Rocket className="h-4 w-4 text-slate-500" /> Public site mode</h2><p className="mt-1 text-sm text-slate-600" id="site-mode-status">{siteSettings.comingSoonEnabled ? "The public site shows the Coming Soon page. Member and staff pages still work." : "The public site is open to everyone."}</p></div><button type="button" onClick={() => setConfirmSiteMode(true)} disabled={savingComingSoon} aria-describedby="site-mode-status" className={`inline-flex min-h-11 items-center justify-center rounded-full px-5 text-sm font-semibold ${siteSettings.comingSoonEnabled ? "bg-emerald-700 text-white" : "border border-slate-300 text-slate-900"}`}>{siteSettings.comingSoonEnabled ? "Open site to public…" : "Switch to Coming Soon…"}</button></section>
+          <section className="mt-9 flex flex-col gap-4 border-t border-slate-200 pt-7 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="flex items-center gap-2 text-sm font-semibold text-slate-950"><Rocket className="h-4 w-4 text-slate-500" /> Public site mode</h2><p className="mt-1 text-sm text-slate-600" id="site-mode-status">{siteMode.statusText}</p></div><button type="button" onClick={openSiteModeConfirm} disabled={savingComingSoon} aria-describedby="site-mode-status" className={`inline-flex min-h-11 items-center justify-center rounded-full px-5 text-sm font-semibold ${siteMode.isGated ? "bg-emerald-700 text-white" : "border border-slate-300 text-slate-900"}`}>{siteMode.buttonLabel}</button></section>
           <ConfirmSheet
             open={confirmSiteMode}
-            title={siteSettings.comingSoonEnabled ? "Open the site to the public?" : "Switch the site to Coming Soon?"}
-            confirmLabel={siteSettings.comingSoonEnabled ? "Open site" : "Switch to Coming Soon"}
-            destructive={!siteSettings.comingSoonEnabled}
+            title={siteMode.confirmTitle}
+            confirmLabel={siteMode.confirmLabel}
+            destructive={siteMode.destructive}
             busy={savingComingSoon}
-            onConfirm={() => toggleComingSoon()}
+            confirmDisabled={siteMode.requiresNewLaunchAt && !chosenLaunchIsValid}
+            onConfirm={() => applySiteMode()}
             onClose={() => { if (!savingComingSoon) setConfirmSiteMode(false); }}
           >
-            {siteSettings.comingSoonEnabled
-              ? "Visitors will see the full public site right away instead of the Coming Soon page."
-              : "Visitors will see the Coming Soon page right away. Member and staff pages keep working."}
+            <p>{siteMode.confirmBody}</p>
+            {siteMode.requiresNewLaunchAt ? (
+              <div className="space-y-2">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block text-sm font-medium text-slate-800">
+                    Opening date
+                    <input
+                      type="date"
+                      value={launchDate}
+                      onChange={(event) => { setLaunchDate(event.target.value); setLaunchAtError(null); }}
+                      className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-950"
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-slate-800">
+                    Time in America/New_York
+                    <input
+                      type="time"
+                      value={launchTime}
+                      onChange={(event) => { setLaunchTime(event.target.value); setLaunchAtError(null); }}
+                      className="mt-1 min-h-11 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-950"
+                    />
+                  </label>
+                </div>
+                {launchAtError ? <p className="text-sm text-rose-800" role="alert">{launchAtError}</p> : null}
+              </div>
+            ) : null}
           </ConfirmSheet>
         </> : null}
       </main>

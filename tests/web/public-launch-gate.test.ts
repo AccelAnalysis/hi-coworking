@@ -38,13 +38,16 @@ describe("public launch gate (Coming Soon countdown)", () => {
     expect(isPublicLaunchReached(LAUNCH_UTC + 1)).toBe(true);
   });
 
-  it("keeps the countdown and the gate on the shared constant", () => {
+  it("keeps the countdown and the gate on the shared helpers", () => {
     const countdown = read("apps/web/src/components/LaunchCountdown.tsx");
     const gate = read("apps/web/src/components/PublicSiteGate.tsx");
     for (const source of [countdown, gate]) {
       expect(source).toContain('from "@/lib/publicLaunch"');
       expect(source).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
     }
-    expect(gate).toContain("isPublicLaunchReached(Date.now())");
+    expect(gate).toContain("isComingSoonPubliclyActive(settings, now)");
+    expect(gate).toContain("resolvePublicLaunchAt(settings.launchAt)");
+    expect(gate).toContain("<LaunchCountdown launchAt={effectiveLaunchAt} />");
+    expect(countdown).toContain("launchAt = PUBLIC_LAUNCH_AT");
   });
 });

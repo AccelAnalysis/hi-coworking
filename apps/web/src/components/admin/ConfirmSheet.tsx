@@ -17,6 +17,7 @@ export function ConfirmSheet({
   cancelLabel = "Keep as is",
   destructive = false,
   busy = false,
+  confirmDisabled = false,
   onConfirm,
   onClose,
 }: {
@@ -27,6 +28,7 @@ export function ConfirmSheet({
   cancelLabel?: string;
   destructive?: boolean;
   busy?: boolean;
+  confirmDisabled?: boolean;
   onConfirm: () => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -73,7 +75,7 @@ export function ConfirmSheet({
             <button
               type="button"
               onClick={() => void onConfirm()}
-              disabled={busy}
+              disabled={busy || confirmDisabled}
               className={`inline-flex min-h-11 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${destructive ? "bg-rose-700" : "bg-slate-950"}`}
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
