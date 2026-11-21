@@ -96,7 +96,8 @@ export const GUEST_BOOKING_WINDOW_DAYS = 14;
 // --- Conference Room ---
 
 export const CONFERENCE_ROOM_HOURLY_RATE_CENTS = 9900;
-export const CONFERENCE_ROOM_MAX_CAPACITY = 10;
+/** Marketed as 6 seats (permit cap). Was 10 in earlier code. */
+export const CONFERENCE_ROOM_MAX_CAPACITY = 6;
 
 // --- Lookup Helpers ---
 

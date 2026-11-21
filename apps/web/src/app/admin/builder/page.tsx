@@ -8,6 +8,7 @@ import { TextInputSheet } from "@/components/admin/ConfirmSheet";
 import {
   LAYOUT_ELEMENT_TYPES,
   SHELL_ELEMENT_TYPES,
+  displayIdForResource,
   isShellType,
   type FloorDoc,
   type FloorplanElement,
@@ -1120,6 +1121,11 @@ function BuilderContent() {
                         className="mt-0.5 w-full rounded-md border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-900 focus:border-indigo-500 focus:ring-indigo-500"
                         placeholder="seat-1 / mode-conference"
                       />
+                      {selectedEl.resourceId && displayIdForResource(selectedEl.resourceId) !== selectedEl.resourceId ? (
+                        <span className="mt-0.5 block text-[10px] text-slate-500">
+                          Customer map label: {displayIdForResource(selectedEl.resourceId)}
+                        </span>
+                      ) : null}
                     </label>
 
                     <div className="grid grid-cols-2 gap-1.5">

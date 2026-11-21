@@ -32,3 +32,10 @@ Availability and exclusivity remain server-authoritative. The meeting setup and 
 3. **Review** — after selecting a resource, the customer must use an explicit `Continue with …` action. The server-authoritative quote, guest details when needed, membership/credit treatment, and payment action follow.
 
 Checkout, transactional holds, membership included-hours handling, account credit, cancellation, rescheduling, confirmation, and access behavior are unchanged from the corrected booking foundation merged in PR #33.
+
+## Seat map picker (flagged)
+
+`NEXT_PUBLIC_SEAT_MAP_PICKER` defaults off. When off, customers still pick a desk from the card list (now with `aria-pressed`). When on, an accessible SVG map is shown over the published Admin layout (or a built-in schematic of the numbered D1–D7 plan), with the card list as the alternative view.
+
+Customers must choose a specific seat. D7 is shown as staff-only and is not sellable. The private office is omitted. Planned guest seat-tier rates are displayed as badges only; checkout still uses the current hourly path. Seat IDs are not Stripe products.
+

@@ -60,7 +60,7 @@ function SpaceCatalogContent() {
   const [name, setName] = useState("");
   const [serviceType, setServiceType] = useState<"DESK" | "CONFERENCE">("CONFERENCE");
   const [resourceId, setResourceId] = useState("mode-conference");
-  const [capacity, setCapacity] = useState(10);
+  const [capacity, setCapacity] = useState(6);
   const [arrangement, setArrangement] = useState("");
   const [description, setDescription] = useState("");
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
