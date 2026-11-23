@@ -4,22 +4,37 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import {
   ArrowRight,
+  Building2,
   CalendarDays,
   Check,
   Clock3,
   Laptop,
   Loader2,
+  Mail,
+  MessageSquareText,
   MoveRight,
+  Phone,
+  UserRound,
   Users,
 } from "lucide-react";
+import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PublishedSetupDetails } from "@/components/booking/PublishedSetupDetails";
 import { bookingServiceType } from "@/lib/publishedSetups";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
+import {
+  INTENDED_USE_MAX,
+  validateGuestScreening,
+} from "../../../functions/src/providers/guestCheckoutScreening";
+import { INDEPENDENT_LABEL } from "../../../functions/src/providers/businessProfile";
+import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH } from "../../../functions/src/providers/termsCompliance";
 
 const FACILITY_TIME_ZONE = "America/New_York";
 const PUBLIC_DESK_RATE_CENTS = 1750;
+const GUEST_LABEL = "block text-sm font-medium text-slate-700";
+const GUEST_FIELD =
+  "mt-2 w-full min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#101D4B]";
 
 type ResourceIntent = "DESK" | "MEETING";
 
@@ -110,7 +125,16 @@ const beginCheckout = httpsCallable<
     end: number;
     successUrl: string;
     cancelUrl: string;
-    guest?: { name: string; email: string; phone?: string };
+    guest?: {
+      name: string;
+      email: string;
+      phone: string;
+      businessName: string;
+      isIndependent: boolean;
+      intendedUse: string;
+      termsAccepted: boolean;
+      termsVersion: string;
+    };
   },
   | { kind: "confirmed"; bookingId: string; quote: Quote }
   | {
@@ -347,6 +371,12 @@ export default function BookingExperienceWithDeskChange() {
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
+  // Renter screening (guest checkout): business use only, same for everyone.
+  const [guestBusinessName, setGuestBusinessName] = useState("");
+  const [guestIndependent, setGuestIndependent] = useState(false);
+  const [guestIntendedUse, setGuestIntendedUse] = useState("");
+  const [guestTermsAccepted, setGuestTermsAccepted] = useState(false);
+  const [guestInvalidField, setGuestInvalidField] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -571,9 +601,26 @@ export default function BookingExperienceWithDeskChange() {
   async function checkout() {
     if (!selection || !quote) return;
     if (!user && (!guestName.trim() || !guestEmail.trim())) {
+      setGuestInvalidField(!guestName.trim() ? "name" : "email");
       setError("Enter your name and email to continue as a guest.");
       return;
     }
+    if (!user) {
+      const screening = validateGuestScreening({
+        phone: guestPhone,
+        businessName: guestBusinessName,
+        isIndependent: guestIndependent,
+        intendedUse: guestIntendedUse,
+        termsAccepted: guestTermsAccepted,
+        termsVersion: HI_TERMS_VERSION,
+      }, Date.now());
+      if (!screening.ok) {
+        setGuestInvalidField(screening.field);
+        setError(screening.message);
+        return;
+      }
+    }
+    setGuestInvalidField(null);
     setCheckingOut(true);
     setError(null);
     try {
@@ -590,6 +637,11 @@ export default function BookingExperienceWithDeskChange() {
                 name: guestName.trim(),
                 email: guestEmail.trim(),
                 phone: guestPhone.trim(),
+                businessName: guestIndependent ? "" : guestBusinessName.trim(),
+                isIndependent: guestIndependent,
+                intendedUse: guestIntendedUse.trim(),
+                termsAccepted: guestTermsAccepted,
+                termsVersion: HI_TERMS_VERSION,
               },
             }
           : {}),
@@ -974,38 +1026,109 @@ export default function BookingExperienceWithDeskChange() {
                 ) : null}
 
                 {!authLoading && !user ? (
-                  <div className="mt-7">
-                    <h3 className="font-semibold text-slate-950">Your contact information</h3>
-                    <p className="mt-1 text-sm text-slate-600">We&apos;ll use this for the booking confirmation and access details.</p>
+                  <div className="mt-7" data-testid="guest-checkout-details">
+                    <h3 className="font-display text-lg font-semibold text-[#101D4B]">Your details</h3>
+                    <p className="mt-1 text-sm text-slate-600">For your confirmation, access details and our records. Hi Coworking is a workspace for business use.</p>
                     <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <label className="text-sm font-medium text-slate-700">
-                        Name
+                      <label className={GUEST_LABEL}>
+                        <span className="flex items-center gap-2"><UserRound className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Name</span>
                         <input
                           value={guestName}
                           onChange={(event) => setGuestName(event.target.value)}
                           autoComplete="name"
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                          required
+                          aria-invalid={guestInvalidField === "name" ? true : undefined}
+                          className={GUEST_FIELD}
                         />
                       </label>
-                      <label className="text-sm font-medium text-slate-700">
-                        Email
+                      <label className={GUEST_LABEL}>
+                        <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Email</span>
                         <input
                           type="email"
                           value={guestEmail}
                           onChange={(event) => setGuestEmail(event.target.value)}
                           autoComplete="email"
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                          required
+                          aria-invalid={guestInvalidField === "email" ? true : undefined}
+                          className={GUEST_FIELD}
                         />
                       </label>
-                      <label className="text-sm font-medium text-slate-700 sm:col-span-2">
-                        Phone <span className="font-normal text-slate-500">(optional)</span>
+                      <label className={GUEST_LABEL}>
+                        <span className="flex items-center gap-2"><Phone className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Phone</span>
                         <input
                           type="tel"
+                          inputMode="tel"
                           value={guestPhone}
                           onChange={(event) => setGuestPhone(event.target.value)}
                           autoComplete="tel"
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5"
+                          required
+                          aria-invalid={guestInvalidField === "phone" ? true : undefined}
+                          placeholder="(555) 555-5555"
+                          className={GUEST_FIELD}
                         />
+                      </label>
+                      <div>
+                        <label className={GUEST_LABEL} htmlFor="guest-business-name">
+                          <span className="flex items-center gap-2"><Building2 className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Business name</span>
+                        </label>
+                        <input
+                          id="guest-business-name"
+                          value={guestIndependent ? "" : guestBusinessName}
+                          onChange={(event) => setGuestBusinessName(event.target.value)}
+                          autoComplete="organization"
+                          maxLength={120}
+                          required={!guestIndependent}
+                          disabled={guestIndependent}
+                          aria-invalid={guestInvalidField === "businessName" ? true : undefined}
+                          placeholder={guestIndependent ? INDEPENDENT_LABEL : "Your company or organization"}
+                          className={`${GUEST_FIELD} disabled:bg-slate-100 disabled:text-slate-500`}
+                        />
+                        <label className="mt-1 flex min-h-11 cursor-pointer items-center gap-3 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={guestIndependent}
+                            onChange={(event) => setGuestIndependent(event.target.checked)}
+                            className="h-5 w-5 shrink-0 accent-[#101D4B]"
+                          />
+                          {INDEPENDENT_LABEL}
+                        </label>
+                      </div>
+                      <label className={`${GUEST_LABEL} sm:col-span-2`}>
+                        <span className="flex items-center gap-2"><MessageSquareText className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> What will you use the space for?</span>
+                        <input
+                          value={guestIntendedUse}
+                          onChange={(event) => setGuestIntendedUse(event.target.value)}
+                          maxLength={INTENDED_USE_MAX}
+                          required
+                          aria-invalid={guestInvalidField === "intendedUse" ? true : undefined}
+                          aria-describedby="guest-intended-use-hint"
+                          placeholder="e.g. Client calls and focused work"
+                          className={GUEST_FIELD}
+                        />
+                        <span id="guest-intended-use-hint" className="mt-1 block text-xs font-normal text-slate-600">One line is plenty. {guestIntendedUse.length}/{INTENDED_USE_MAX}</span>
+                      </label>
+                    </div>
+                    {/* TODO(jonathan-copy): add the house rules and member agreement here once Jonathan approves the wording; bump the terms version with it. */}
+                    <div className="mt-5 flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-700">
+                      <input
+                        id="guest-terms-acceptance"
+                        type="checkbox"
+                        required
+                        checked={guestTermsAccepted}
+                        onChange={(event) => setGuestTermsAccepted(event.target.checked)}
+                        aria-invalid={guestInvalidField === "terms" ? true : undefined}
+                        className="mt-0.5 h-5 w-5 shrink-0 accent-[#101D4B]"
+                      />
+                      <label htmlFor="guest-terms-acceptance">
+                        I agree to the{" "}
+                        <Link href={TERMS_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                          Terms of Service
+                        </Link>{" "}
+                        and{" "}
+                        <Link href={PRIVACY_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                          Privacy Policy
+                        </Link>
+                        . <span className="text-slate-600">(Required)</span>
                       </label>
                     </div>
                   </div>
@@ -1076,7 +1199,7 @@ export default function BookingExperienceWithDeskChange() {
                 <button
                   type="button"
                   onClick={checkout}
-                  disabled={checkingOut || authLoading}
+                  disabled={checkingOut || authLoading || (!user && !guestTermsAccepted)}
                   className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   {checkingOut ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
