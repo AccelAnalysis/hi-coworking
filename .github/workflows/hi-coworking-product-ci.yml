@@ -160,6 +160,7 @@ jobs:
           tests/functions/payment-ledger-undefined-fields.test.ts
           tests/functions/stripe-subscription-invoices.test.ts
           tests/functions/membership-welcome-email.test.ts
+          tests/functions/booking-confirmation-email.test.ts
           tests/functions/stripe-refund-notices.test.ts
           tests/functions/stripe-webhook-idempotency.test.ts
           tests/functions/quickbooks-webhook.test.ts

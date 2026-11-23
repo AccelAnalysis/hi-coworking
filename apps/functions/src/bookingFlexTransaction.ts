@@ -12,6 +12,8 @@ import {
   getDeskMembershipTierById,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
+import { sendBookingConfirmationEmail } from "./bookingConfirmationEmail";
+import { resendApiKey } from "./providers/emailSecret";
 import {
   FLEX_RESOURCE_ID,
   HOLD_MS,
@@ -181,6 +183,29 @@ async function issueAccessSafely(
     logger.error("Access grant failed after booking confirmation", {
       bookingId,
       error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Booking confirmation email. Transactional, at most once per booking (claimed
+ * on bookings/{id}.confirmationEmail), and never throws: an email outage must
+ * not undo or fail a paid booking. Called on every finalize, so a retry of the
+ * callable also retries a send that failed earlier.
+ */
+async function sendConfirmationEmailSafely(bookingId: string) {
+  let apiKey = "";
+  try {
+    apiKey = resendApiKey.value();
+  } catch {
+    apiKey = "";
+  }
+  try {
+    await sendBookingConfirmationEmail(bookingId, { apiKey });
+  } catch (error) {
+    logger.error("Booking confirmation email threw unexpectedly (non-fatal)", {
+      bookingId,
+      error: error instanceof Error ? error.name : "unknown",
     });
   }
 }
@@ -399,6 +424,14 @@ async function createHoldAtomically(
 }
 
 async function finalizeHeldBooking(
+  ...args: Parameters<typeof finalizeHeldBookingRecord>
+) {
+  const result = await finalizeHeldBookingRecord(...args);
+  await sendConfirmationEmailSafely(result.bookingId);
+  return result;
+}
+
+async function finalizeHeldBookingRecord(
   holdId: string,
   finalUserId: string,
   userName: string,
@@ -566,7 +599,7 @@ async function finalizeHeldBooking(
 }
 
 export const booking_beginCheckout = onCall(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey, resendApiKey] },
   async (request) => {
     const { resourceId, deskChangePlanId, start, end, successUrl, cancelUrl, guest } = request.data as {
       resourceId?: string;
@@ -677,7 +710,7 @@ export const booking_beginCheckout = onCall(
 );
 
 export const booking_finalizeCheckout = onCall(
-  { secrets: [seamApiKey] },
+  { secrets: [seamApiKey, resendApiKey] },
   async (request) => {
     const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
     if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
@@ -705,6 +738,8 @@ export const booking_finalizeCheckout = onCall(
       ) {
         customToken = await admin.auth().createCustomToken(hold.userId, { bookingCheckout: true });
       }
+      // Retries a confirmation email that failed on the first finalize; a no-op once sent.
+      await sendConfirmationEmailSafely(hold.bookingId);
       return {
         success: true,
         bookingId: hold.bookingId,
