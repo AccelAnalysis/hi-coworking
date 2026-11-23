@@ -182,9 +182,23 @@ describe("renderBookingConfirmationEmail", () => {
   });
 
   it("is honest about door access: never promises a code by email", () => {
-    expect(copy.text).toContain("any door access details are on your SayHi page");
+    expect(copy.text).toContain("Everything for your visit is on your SayHi page: your booking, arrival details, and any door access details.");
     expect(copy.text).not.toMatch(/we('| wi)ll email you (your|a) (door|access) code/i);
-    expect(copy.text).toContain("Monday to Friday, 8 AM to 5 PM");
+  });
+
+  it("points the renter to the monitored inbox for help in the arrival section", () => {
+    const arrival = copy.text.slice(copy.text.indexOf("WHEN YOU ARRIVE"), copy.text.indexOf("See you soon"));
+    expect(arrival).toContain("Need a hand? Reply to this email or write to us at hicoworking@accelanalysis.com.");
+    expect(copy.html).toContain('<a href="mailto:hicoworking@accelanalysis.com"');
+  });
+
+  it("never claims staff or team on-site hours, or promises someone at the front desk (Jonathan, Nov 23)", () => {
+    for (const body of [copy.html, copy.text, copy.subject]) {
+      expect(body).not.toMatch(/on site|on-site|onsite|staffed|front desk|our team is|team (is )?(here|available)|staff/i);
+      expect(body).not.toMatch(/Monday to Friday|Mon(day)?\s?[-–]\s?Fri(day)?|weekdays?|\b\d{1,2}\s?(AM|PM) to \d{1,2}\s?(AM|PM)\b|business hours|opening hours|open (from|daily|weekdays)/i);
+    }
+    const source = readFileSync("apps/functions/src/bookingConfirmationEmail.ts", "utf8");
+    expect(source).not.toContain("SPACE_HOURS");
   });
 
   it("escapes HTML in names and space labels", () => {

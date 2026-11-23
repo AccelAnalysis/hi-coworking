@@ -34,7 +34,6 @@ import {
 import {
   CONTACT_EMAIL,
   SPACE_ADDRESS,
-  SPACE_HOURS,
   STALE_CLAIM_MS,
   escapeHtml,
   firstNameOf,
@@ -166,12 +165,9 @@ export function renderBookingConfirmationEmail(input: BookingConfirmationInput):
   const subject = `You're booked: ${clean(deskNameForSubject({ ...input, resourceName }))} on ${date}`;
   const preheader = `${resourceName} · ${date} · ${window}`;
   const intro = "Thanks for booking with Hi Coworking. Your space is reserved, and here are your details.";
-  const arrivalLines = [
-    `Say hello at the front desk when you get here. Our team is on site ${SPACE_HOURS}.`,
-    "Your booking and any door access details are on your SayHi page.",
-  ];
-  const manageLine = "To view or manage your booking, open SayHi.";
-  const helpLine = `Questions? Reply to this email or write to us at ${CONTACT_EMAIL}.`;
+  // Jonathan (Nov 23, 2026): no wording about when the team is on site.
+  const arrivalLine = "Everything for your visit is on your SayHi page: your booking, arrival details, and any door access details. You can manage your booking there too.";
+  const helpLine = `Need a hand? Reply to this email or write to us at ${CONTACT_EMAIL}.`;
   const footerReason = "You're receiving this email because you booked a space at Hi Coworking.";
   const footer = `Hi Coworking · ${COMPANY_NAME} · ${SPACE_ADDRESS}`;
 
@@ -231,9 +227,9 @@ export function renderBookingConfirmationEmail(input: BookingConfirmationInput):
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${paymentRows}</table>`
     + `</td></tr></table>`
     + `<h2 style="${h2}">When you arrive</h2>`
-    + arrivalLines.map((line) => `<p style="${p}">${escapeHtml(line)}</p>`).join("")
+    + `<p style="${p}">${escapeHtml(arrivalLine)}</p>`
     + `<p style="margin:24px 0"><a href="${escapeHtml(accountUrl)}" style="${EMAIL_BUTTON_STYLE}">View booking in SayHi</a></p>`
-    + `<p style="${p}">${escapeHtml(manageLine)} ${helpHtml}</p>`
+    + `<p style="${p}">${helpHtml}</p>`
     + `<p style="${p}">See you soon,<br>The Hi Coworking team</p>`
     + `</td></tr>`
     + `<tr><td style="padding:8px 28px 28px">`
@@ -257,11 +253,10 @@ export function renderBookingConfirmationEmail(input: BookingConfirmationInput):
     ...payments.map((line) => `${line.label}: ${line.value}`),
     "",
     "WHEN YOU ARRIVE",
-    ...arrivalLines,
+    arrivalLine,
     "",
     `View booking in SayHi: ${accountUrl}`,
     "",
-    manageLine,
     helpLine,
     "",
     "See you soon,",
