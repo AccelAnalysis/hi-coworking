@@ -144,6 +144,7 @@ const BUNDLES: Bundle[] = [
       "kiosk_session",
       "members_kioskSummary",
       "members_saveAccountDetails",
+      "staff_setIdCheck",
       "va_submitForm1583",
     ],
     params: [],

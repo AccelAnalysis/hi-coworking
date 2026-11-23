@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { AlertTriangle, Building2, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Building2, IdCard, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
+import { IdCheckSheet } from "@/components/admin/IdCheckSheet";
+import { setIdCheck, type IdCheckView } from "@/lib/idCheck";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { callableErrorMessage } from "@/lib/callableError";
@@ -60,6 +62,7 @@ type MemberRecord = {
     stripeSubscriptionId: string | null;
     membershipCancellationPending: boolean;
     accountCreditCents: number;
+    idCheck: IdCheckView | null;
   };
   business: BusinessProfileView | null;
   consent: {
@@ -155,6 +158,9 @@ function MemberRecordContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<"all" | AuditEntry["source"]>("all");
+  const [idCheckTarget, setIdCheckTarget] = useState<boolean | null>(null);
+  const [idCheckBusy, setIdCheckBusy] = useState(false);
+  const [idCheckNotice, setIdCheckNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("uid");
@@ -242,7 +248,7 @@ function MemberRecordContent() {
         )}
 
         {!loading && member && consent && (
-          <div className="mt-8 grid gap-10">
+          <div className="mt-8 grid grid-cols-[minmax(0,1fr)] gap-10">
             <section aria-labelledby="account-heading">
               <h2 id="account-heading" className="text-xl font-semibold text-slate-950">Account</h2>
               <dl className="mt-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -261,6 +267,61 @@ function MemberRecordContent() {
                 <Field label="Stripe customer">{member.stripeCustomerId ? <code className="text-xs">{member.stripeCustomerId}</code> : "None"}</Field>
                 <Field label="Stripe subscription">{member.stripeSubscriptionId ? <code className="text-xs">{member.stripeSubscriptionId}</code> : "None"}</Field>
               </dl>
+            </section>
+
+            <section aria-labelledby="id-check-heading" className="rounded-2xl border border-slate-200 p-5 sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <IdCard className="mt-0.5 h-6 w-6 shrink-0 text-[#101D4B]" aria-hidden="true" />
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 id="id-check-heading" className="text-xl font-semibold text-slate-950">First-visit ID check</h2>
+                      {member.idCheck?.checked ? <Pill tone="good">Checked</Pill> : <Pill tone="warn">Not checked</Pill>}
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600" data-testid="id-check-detail">
+                      {member.idCheck?.checked
+                        ? `${formatDateTime(member.idCheck.checkedAt)} · ${member.idCheck.staffInitials || "Staff"}`
+                        : member.idCheck?.checkedAt
+                          ? `Cleared ${formatDateTime(member.idCheck.checkedAt)} · ${member.idCheck.staffInitials || "Staff"}`
+                          : "Check a photo ID in person on the first visit. Record yes/no only."}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {member.idCheck?.checked ? (
+                    <button type="button" onClick={() => setIdCheckTarget(false)} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      Clear
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setIdCheckTarget(true)} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-[#101D4B] px-4 text-sm font-semibold text-white hover:bg-[#3A4675]">
+                      <BadgeCheck className="h-4 w-4" aria-hidden="true" /> Mark ID checked
+                    </button>
+                  )}
+                </div>
+              </div>
+              {idCheckNotice ? <p className="mt-3 text-sm text-emerald-700" role="status">{idCheckNotice}</p> : null}
+              <IdCheckSheet
+                open={idCheckTarget !== null}
+                memberLabel={title}
+                checked={idCheckTarget === true}
+                busy={idCheckBusy}
+                onClose={() => setIdCheckTarget(null)}
+                onSubmit={async (staffInitials) => {
+                  if (idCheckTarget === null) return;
+                  setIdCheckBusy(true);
+                  setError(null);
+                  try {
+                    await setIdCheck({ uid: member.uid, checked: idCheckTarget, staffInitials });
+                    setIdCheckNotice(idCheckTarget ? "ID check recorded." : "ID check cleared.");
+                    setIdCheckTarget(null);
+                    await load();
+                  } catch (err) {
+                    setError(callableErrorMessage(err, "Could not save the ID check."));
+                  } finally {
+                    setIdCheckBusy(false);
+                  }
+                }}
+              />
             </section>
 
             <section aria-labelledby="business-heading">

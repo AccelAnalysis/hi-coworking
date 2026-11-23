@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Clock3, Loader2, MonitorSmartphone, RefreshCw, TriangleAlert } from "lucide-react";
+import { AlertCircle, BadgeCheck, CheckCircle2, Clock3, Loader2, MonitorSmartphone, RefreshCw, TriangleAlert } from "lucide-react";
+import { IdCheckSheet } from "@/components/admin/IdCheckSheet";
+import { setIdCheck } from "@/lib/idCheck";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
@@ -56,6 +58,7 @@ function FrontDeskAdminContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [closing, setClosing] = useState<VisitSummary | null>(null);
+  const [idChecking, setIdChecking] = useState<VisitSummary | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -149,7 +152,7 @@ function FrontDeskAdminContent() {
             </Section>
 
             <Section title="Checked in now" icon={Clock3} empty={overview.openVisits.length === 0 ? "Nobody is checked in." : null}>
-              {overview.openVisits.map((visit) => <VisitRow key={visit.visitId} visit={visit} onClose={() => setClosing(visit)} />)}
+              {overview.openVisits.map((visit) => <VisitRow key={visit.visitId} visit={visit} onClose={() => setClosing(visit)} onIdCheck={() => setIdChecking(visit)} />)}
             </Section>
 
             <Section title="Late and no-show today" icon={Clock3} empty={overview.flags.length === 0 ? "No flags today." : null}
@@ -175,6 +178,19 @@ function FrontDeskAdminContent() {
           </>
         ) : null}
 
+        <IdCheckSheet
+          open={Boolean(idChecking)}
+          memberLabel={idChecking?.memberLabel || "member"}
+          checked
+          busy={saving === `id-${idChecking?.uid}`}
+          onClose={() => setIdChecking(null)}
+          onSubmit={async (staffInitials) => {
+            if (!idChecking) return;
+            const target = idChecking;
+            setIdChecking(null);
+            await run(`id-${target.uid}`, () => setIdCheck({ uid: target.uid, checked: true, staffInitials }), "ID check recorded.", "The ID check could not be saved.");
+          }} />
+
         <CloseVisitSheet visit={closing} onClose={() => setClosing(null)}
           onSubmit={async (checkOutAt, reason) => {
             if (!closing) return;
@@ -187,7 +203,7 @@ function FrontDeskAdminContent() {
   );
 }
 
-function VisitRow({ visit, onClose }: { visit: VisitSummary; onClose?: () => void }) {
+function VisitRow({ visit, onClose, onIdCheck }: { visit: VisitSummary; onClose?: () => void; onIdCheck?: () => void }) {
   const allowance = visit.allowanceSource === "booking"
     ? `Booked ${formatWindow(visit.bookedWindow) || ""}`
     : visit.allowanceSource === "monthly"
@@ -214,7 +230,14 @@ function VisitRow({ visit, onClose }: { visit: VisitSummary; onClose?: () => voi
         ) : null}
         {visit.closeReason ? <p className="mt-1 text-sm text-slate-600">Reason: {visit.closeReason}</p> : null}
       </div>
-      {onClose ? <button type="button" className={button} onClick={onClose}>Close visit</button> : null}
+      <div className="flex flex-wrap gap-2">
+        {onIdCheck ? (
+          <button type="button" className={button} onClick={onIdCheck} aria-label={`Record ID check for ${visit.memberLabel}`}>
+            <BadgeCheck className="h-4 w-4" aria-hidden="true" /> ID check
+          </button>
+        ) : null}
+        {onClose ? <button type="button" className={button} onClick={onClose}>Close visit</button> : null}
+      </div>
     </Row>
   );
 }

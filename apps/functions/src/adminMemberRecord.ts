@@ -9,6 +9,7 @@ import {
   type BusinessRole,
   type BusinessType,
 } from "./providers/businessProfile";
+import { idCheckView } from "./memberIdCheck";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -213,6 +214,7 @@ export const admin_memberRecordGet = onCall(async (request) => {
       stripeSubscriptionId: str(user.stripeSubscriptionId),
       membershipCancellationPending: user.membershipCancellationPending === true,
       accountCreditCents: num(user.accountCreditCents) ?? 0,
+      idCheck: idCheckView(user.idCheck),
     },
     business: businessView(detailsSnap.exists ? detailsSnap.data() : null),
     consent: {

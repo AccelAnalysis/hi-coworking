@@ -231,6 +231,7 @@ jobs:
           tests/functions/sayhi-follow-up-emails.test.ts
           tests/functions/business-profile.test.ts
           tests/web/business-profile-forms.test.ts
+          tests/functions/member-id-check.test.ts
 
       - name: Run active transaction integration tests
         run: >-

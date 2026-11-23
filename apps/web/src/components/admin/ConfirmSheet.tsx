@@ -56,7 +56,7 @@ export function ConfirmSheet({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
+      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
     >
       {open && (
         <div className="p-6">
@@ -191,7 +191,7 @@ export function TextInputSheet({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
+      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
     >
       {open && (
         <form
