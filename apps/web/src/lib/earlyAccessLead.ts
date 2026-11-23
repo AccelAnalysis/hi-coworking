@@ -12,6 +12,18 @@ export const LEADS_FUNCTION_REGION = "us-central1";
 
 export type LeadAction = "early_access" | "survey";
 
+/**
+ * Marketing opt-in versions and wording. The server (leadContact.ts) stores its
+ * own canonical copy of this text by version; keep both in step and add a new
+ * version whenever the wording changes.
+ */
+export const EARLY_ACCESS_CONSENT_VERSION = "early-access-updates-2026-11";
+export const EARLY_ACCESS_CONSENT_TEXT =
+  "Email me Hi Coworking launch updates and early booking invitations. I can unsubscribe at any time.";
+export const SURVEY_EMAIL_CONSENT_VERSION = "survey-email-2026-11";
+export const SURVEY_EMAIL_CONSENT_TEXT =
+  "Leave it blank to stay anonymous, or add it to hear about launch updates.";
+
 export type LeadSubmitOutcome =
   | { ok: true }
   | { ok: false; reason: "invalid" | "spam_check" | "server" | "network" };
