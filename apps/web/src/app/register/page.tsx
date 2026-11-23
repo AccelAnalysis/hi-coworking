@@ -12,9 +12,12 @@ import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH, recordTermsAcceptance } fro
 import { HiLogo } from "@/components/HiLogo";
 import { SAYHI_FLOW } from "@/lib/sayhiFlags";
 import { readPlanChoice, saveAccountDetails, startMembershipCheckout } from "@/lib/sayhiAccount";
-
-const FIELD =
-  "w-full min-h-11 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#101D4B] focus:border-transparent text-slate-900 placeholder:text-slate-500 transition-all";
+import {
+  BusinessProfileFields,
+  EMPTY_BUSINESS_PROFILE,
+  type BusinessProfileDraft,
+} from "@/components/account/BusinessProfileFields";
+import { validateBusinessProfile } from "../../../../functions/src/providers/businessProfile";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -22,7 +25,8 @@ export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phone, setPhone] = useState("");
-  const [company, setCompany] = useState("");
+  const [business, setBusiness] = useState<BusinessProfileDraft>(EMPTY_BUSINESS_PROFILE);
+  const [invalidField, setInvalidField] = useState<string | null>(null);
   const [smsConsent, setSmsConsent] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [error, setError] = useState("");
@@ -39,6 +43,14 @@ export default function RegisterPage() {
       setError("Enter a 10-digit phone number.");
       return;
     }
+    // Renter screening: every new account describes its business use.
+    const profile = SAYHI_FLOW ? validateBusinessProfile(business) : null;
+    if (profile && !profile.ok) {
+      setInvalidField(profile.field);
+      setError(profile.message);
+      return;
+    }
+    setInvalidField(null);
     const smsPhone = smsConsent ? normalizeUsMobile(phone) : null;
     if (smsConsent && !smsPhone) {
       setError("To get texts, enter a 10-digit US mobile number, or leave the text box unchecked.");
@@ -53,9 +65,10 @@ export default function RegisterPage() {
       await recordTermsAcceptance(HI_TERMS_VERSION);
       if (SAYHI_FLOW) {
         try {
-          await saveAccountDetails({ company, phone });
+          await saveAccountDetails({ ...business, phone });
         } catch (detailsError) {
-          // The account exists; company and phone can be added later.
+          // The account exists; /preferences asks for the business profile
+          // again until it is saved, so sign-up still finishes.
           console.error(detailsError);
         }
       }
@@ -112,8 +125,8 @@ export default function RegisterPage() {
         </Link>
       )}
 
-      <div className="w-full max-w-md bg-white rounded-xl shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 overflow-hidden">
-        <div className="p-8">
+      <div className={`w-full ${SAYHI_FLOW ? "max-w-3xl" : "max-w-md"} bg-white rounded-xl shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 overflow-hidden`}>
+        <div className="p-6 sm:p-8 lg:p-10">
           {SAYHI_FLOW ? (
             <>
               <h1 className="font-display text-2xl font-semibold text-[#101D4B] text-center mb-2">Create your account</h1>
@@ -137,6 +150,7 @@ export default function RegisterPage() {
               </div>
             )}
 
+            <div className={SAYHI_FLOW ? "grid gap-4 sm:grid-cols-2" : "space-y-4"}>
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700" htmlFor="name">
                 Full Name
@@ -182,22 +196,6 @@ export default function RegisterPage() {
               />
             </div>
 
-            {SAYHI_FLOW ? (
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700" htmlFor="company">
-                  Company name (optional)
-                </label>
-                <input
-                  id="company"
-                  type="text"
-                  autoComplete="organization"
-                  maxLength={120}
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                  className={FIELD}
-                />
-              </div>
-            ) : null}
 
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700" htmlFor="phone">
@@ -221,6 +219,21 @@ export default function RegisterPage() {
                 </p>
               )}
             </div>
+            </div>
+
+            {SAYHI_FLOW ? (
+              <section aria-labelledby="business-heading" className="border-t border-slate-200 pt-6">
+                <h2 id="business-heading" className="font-display text-lg font-semibold text-[#101D4B]">Your business</h2>
+                <p className="mt-1 mb-4 text-sm text-slate-600">Hi Coworking is a workspace for business use. Tell us a little about yours.</p>
+                <BusinessProfileFields
+                  idPrefix="register-business"
+                  value={business}
+                  onChange={setBusiness}
+                  disabled={loading}
+                  invalidField={invalidField}
+                />
+              </section>
+            ) : null}
 
             {SAYHI_FLOW ? (
               <p className="text-sm leading-6 text-slate-600" data-testid="email-notice">

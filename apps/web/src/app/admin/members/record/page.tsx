@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { AlertTriangle, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, Building2, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { callableErrorMessage } from "@/lib/callableError";
@@ -32,6 +32,19 @@ type AuditEntry = {
   summary: Record<string, string | number | boolean>;
 };
 
+type BusinessProfileView = {
+  businessName: string | null;
+  isIndependent: boolean;
+  role: string | null;
+  businessType: string | null;
+  businessDescription: string | null;
+  website: string | null;
+  vaSccNumber: string | null;
+  phone: string | null;
+  complete: boolean;
+  updatedAt: number | null;
+};
+
 type MemberRecord = {
   member: {
     uid: string;
@@ -48,6 +61,7 @@ type MemberRecord = {
     membershipCancellationPending: boolean;
     accountCreditCents: number;
   };
+  business: BusinessProfileView | null;
   consent: {
     sms: SmsConsent | null;
     smsHistory: HistoryRow[];
@@ -174,6 +188,7 @@ function MemberRecordContent() {
 
   const member = record?.member;
   const consent = record?.consent;
+  const business = record?.business ?? null;
   const title = member?.displayName || member?.email || "Member record";
 
   return (
@@ -246,6 +261,36 @@ function MemberRecordContent() {
                 <Field label="Stripe customer">{member.stripeCustomerId ? <code className="text-xs">{member.stripeCustomerId}</code> : "None"}</Field>
                 <Field label="Stripe subscription">{member.stripeSubscriptionId ? <code className="text-xs">{member.stripeSubscriptionId}</code> : "None"}</Field>
               </dl>
+            </section>
+
+            <section aria-labelledby="business-heading">
+              <div className="flex flex-wrap items-center gap-3">
+                <Building2 className="h-5 w-5 text-[#101D4B]" aria-hidden="true" />
+                <h2 id="business-heading" className="text-xl font-semibold text-slate-950">Business</h2>
+                {business?.complete ? <Pill tone="good">Complete</Pill> : <Pill tone="warn">Incomplete</Pill>}
+              </div>
+              {business ? (
+                <dl className="mt-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+                  <Field label="Business name">{business.businessName || "Not set"}</Field>
+                  <Field label="Role">{business.role || "Not set"}</Field>
+                  <Field label="Business type">{business.businessType || "Not set"}</Field>
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <Field label="What they do">{business.businessDescription || "Not set"}</Field>
+                  </div>
+                  <Field label="Website">
+                    {business.website ? (
+                      <a href={business.website} target="_blank" rel="noopener noreferrer nofollow" className="font-medium text-sky-800 underline underline-offset-2">
+                        {business.website.replace(/^https?:\/\//, "")}
+                      </a>
+                    ) : "Not given"}
+                  </Field>
+                  <Field label="Virginia SCC ID">{business.vaSccNumber || "Not given"}</Field>
+                  <Field label="Account phone">{business.phone || "Not set"}</Field>
+                  <Field label="Profile updated">{formatDateTime(business.updatedAt)}</Field>
+                </dl>
+              ) : (
+                <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-600">No business profile yet. The member is asked to finish it on their profile page.</p>
+              )}
             </section>
 
             <section aria-labelledby="consent-heading">
