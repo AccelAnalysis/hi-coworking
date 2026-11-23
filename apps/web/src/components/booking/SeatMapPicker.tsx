@@ -1,13 +1,17 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
+import { Settings } from "lucide-react";
 import {
   SEAT_TIERS,
   accessibleSeatName,
+  seatMapPercentToPoint,
   visibleGuestRates,
   type SeatMapSpot,
 } from "@hi/shared";
 import { AmenityIcons, GuestRateBadges, catalogCopy } from "@/components/booking/DeskOptionList";
+import { ArchitecturalFloorPlan, type PlanSeatState } from "@/components/booking/ArchitecturalFloorPlan";
+import { SEAT_HIT_TARGET_CSS, SEAT_MAP_MIN_WIDTH_PX } from "@/lib/seatMapGeometry";
 
 export type SeatAvailability = {
   resourceId: string;
@@ -15,7 +19,7 @@ export type SeatAvailability = {
   available: boolean;
 };
 
-type SeatVisualState = "available" | "unavailable" | "selected" | "staff";
+type SeatVisualState = PlanSeatState;
 
 function seatState(spot: SeatMapSpot, selectedResourceId?: string, available?: boolean): SeatVisualState {
   if (spot.staffOnly || !spot.bookable) return "staff";
@@ -25,75 +29,22 @@ function seatState(spot: SeatMapSpot, selectedResourceId?: string, available?: b
 }
 
 function stateLabel(state: SeatVisualState) {
-  if (state === "staff") return "Staff only, unavailable";
+  if (state === "staff") return "Staff only, not bookable";
   if (state === "selected") return "Selected";
   if (state === "available") return "Available";
   return "Unavailable";
 }
 
-const STATE_CLASS: Record<SeatVisualState, string> = {
-  available:
-    "bg-white text-[#101D4B] ring-[#101D4B] hover:bg-[#EEF0F6]",
-  selected:
-    "bg-[#101D4B] text-white ring-[#101D4B]",
-  unavailable:
-    "cursor-not-allowed bg-[#EEF0F6] text-[#4A5585] ring-slate-300",
-  staff:
-    "cursor-not-allowed bg-[#EEF0F6] text-[#4A5585] ring-[#4A5585] [ring-style:dashed]",
+/** Visible badge styles for the published-background path (HTML badges over an uploaded image). */
+const IMAGE_BADGE_CLASS: Record<SeatVisualState, string> = {
+  available: "bg-white text-[#101D4B] border-[#101D4B]",
+  selected: "bg-[#101D4B] text-white border-[#101D4B]",
+  unavailable: "bg-slate-100 text-slate-500 border-slate-300",
+  staff: "bg-slate-100 text-slate-600 border-slate-500 border-dashed",
 };
 
-/**
- * Built-in schematic of the Carrollton space, traced from the numbered D1–D7
- * plan (viewBox matches the 1024×709 reference). Used when no published
- * background image is available. The private office is drawn as architecture
- * only — it is not a seat.
- */
-export function FloorPlanSchematic({ titleId }: { titleId: string }) {
-  return (
-    <svg
-      viewBox="70 90 880 540"
-      className="h-auto w-full"
-      role="img"
-      aria-labelledby={titleId}
-    >
-      <title id={titleId}>Hi Coworking floor plan</title>
-      <rect width="1024" height="709" fill="#ffffff" />
-      {/* Main room */}
-      <path
-        d="M142 118 H635 V236 H245 V118 M635 118 H922 V200 H880 V118 M922 200 V500 H700 V430 H635 V570 H142 V430 H90 V330 H142 V118"
-        fill="none"
-      />
-      <rect x="142" y="118" width="493" height="452" fill="#F5F6FA" stroke="#101D4B" strokeWidth="3" />
-      {/* Right-hand private office, not bookable */}
-      <rect x="635" y="118" width="287" height="382" fill="#ffffff" stroke="#101D4B" strokeWidth="3" />
-      {/* Restrooms */}
-      <rect x="245" y="118" width="218" height="118" fill="#ffffff" stroke="#101D4B" strokeWidth="2" />
-      <line x1="354" y1="118" x2="354" y2="236" stroke="#101D4B" strokeWidth="2" />
-      {/* Entry */}
-      <rect x="90" y="330" width="52" height="100" fill="#F5F6FA" stroke="#101D4B" strokeWidth="2" />
-      {/* Conference table */}
-      <rect x="280" y="250" width="220" height="70" rx="12" fill="#ffffff" stroke="#101D4B" strokeWidth="2" />
-      <text x="390" y="292" textAnchor="middle" fill="#101D4B" fontSize="14" fontFamily="DM Sans, sans-serif" fontWeight="650">
-        Conference table
-      </text>
-      {/* Window desks along the south wall */}
-      <rect x="270" y="500" width="80" height="55" rx="6" fill="none" stroke="#101D4B" strokeWidth="1.5" strokeDasharray="5 4" />
-      <rect x="365" y="500" width="80" height="55" rx="6" fill="none" stroke="#101D4B" strokeWidth="1.5" strokeDasharray="5 4" />
-      <rect x="455" y="500" width="80" height="55" rx="6" fill="none" stroke="#101D4B" strokeWidth="1.5" strokeDasharray="5 4" />
-      <rect x="545" y="500" width="80" height="55" rx="6" fill="none" stroke="#101D4B" strokeWidth="1.5" strokeDasharray="5 4" />
-      {/* Reception L-desk */}
-      <path d="M160 400 h90 v90 h-40 v-50 h-50 z" fill="none" stroke="#101D4B" strokeWidth="2" />
-      {/* Lounge along the partition */}
-      <rect x="610" y="390" width="50" height="110" rx="8" fill="#ffffff" stroke="#101D4B" strokeWidth="1.5" />
-      <text x="780" y="300" textAnchor="middle" fill="#4A5585" fontSize="13" fontFamily="DM Sans, sans-serif">
-        Private office
-      </text>
-      <text x="665" y="455" textAnchor="middle" fill="#4A5585" fontSize="11" fontFamily="DM Sans, sans-serif">
-        Lounge
-      </text>
-    </svg>
-  );
-}
+const NAVY_FOCUS =
+  "focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]";
 
 export function SeatMapPicker({
   spots,
@@ -115,28 +66,40 @@ export function SeatMapPicker({
   onSelectSeat: (resourceId: string) => void;
 }) {
   const titleId = useId();
+  const descId = useId();
   const tabMapId = useId();
   const tabListId = useId();
   const panelMapId = useId();
   const panelListId = useId();
   const [view, setView] = useState<"map" | "list">("map");
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
   const availableIds = new Set(
     availability.filter((item) => item.available).map((item) => item.resourceId),
   );
+  const seats = spots.map((spot) => {
+    const point = seatMapPercentToPoint(spot);
+    return {
+      spot,
+      state: seatState(spot, selectedResourceId, availableIds.has(spot.resourceId)),
+      x: point.x,
+      y: point.y,
+    };
+  });
 
   return (
     <div className="text-[#101D4B]">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="max-w-2xl">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-xl">
           <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">3. Choose your desk</h2>
-          <p className="mt-1 text-sm leading-6 text-[#4A5585]">
+          <p className="mt-1 text-sm leading-6 text-slate-600">
             Pick a specific desk for the full stay. Planned seat rates are shown as a guide; checkout still uses the current hourly rate until pricing is updated.
           </p>
         </div>
         <div
           role="tablist"
           aria-label="Desk picker view"
-          className="flex rounded-full bg-[#EEF0F6] p-1"
+          className="inline-flex items-center self-start rounded-full border border-slate-200 bg-slate-100 p-1"
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
             event.preventDefault();
@@ -148,94 +111,131 @@ export function SeatMapPicker({
             target?.focus();
           }}
         >
-          <button
-            type="button"
-            role="tab"
-            id={tabMapId}
-            aria-controls={panelMapId}
-            aria-selected={view === "map"}
-            tabIndex={view === "map" ? 0 : -1}
-            onClick={() => setView("map")}
-            className={`min-h-11 rounded-full px-4 text-sm font-semibold focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] ${
-              view === "map" ? "bg-[#101D4B] text-white" : "text-[#101D4B]"
-            }`}
-          >
-            Map
-          </button>
-          <button
-            type="button"
-            role="tab"
-            id={tabListId}
-            aria-controls={panelListId}
-            aria-selected={view === "list"}
-            tabIndex={view === "list" ? 0 : -1}
-            onClick={() => setView("list")}
-            className={`min-h-11 rounded-full px-4 text-sm font-semibold focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] ${
-              view === "list" ? "bg-[#101D4B] text-white" : "text-[#101D4B]"
-            }`}
-          >
-            List
-          </button>
+          {(["map", "list"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="tab"
+              id={mode === "map" ? tabMapId : tabListId}
+              aria-controls={mode === "map" ? panelMapId : panelListId}
+              aria-selected={view === mode}
+              tabIndex={view === mode ? 0 : -1}
+              onClick={() => setView(mode)}
+              className={`min-h-11 min-w-16 rounded-full px-5 text-sm font-semibold transition-colors ${NAVY_FOCUS} ${
+                view === mode ? "bg-[#101D4B] text-white shadow-xs" : "text-slate-600 hover:text-[#101D4B]"
+              }`}
+            >
+              {mode === "map" ? "Map" : "List"}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-3 text-xs font-medium text-[#4A5585]" aria-hidden="true">
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full bg-white ring-2 ring-[#101D4B]" /> Available</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full bg-[#101D4B]" /> Selected</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full bg-[#EEF0F6] ring-2 ring-slate-300" /> Unavailable</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full border-2 border-dashed border-[#4A5585] bg-[#EEF0F6]" /> Staff only</span>
-      </div>
+      <ul className="mt-5 mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-medium text-slate-600" aria-label="Map legend">
+        <li className="flex items-center gap-2">
+          <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-[#101D4B] bg-white" aria-hidden="true" />
+          Available
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="inline-block h-3.5 w-3.5 rounded-full bg-[#101D4B]" aria-hidden="true" />
+          Selected
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 bg-slate-100" aria-hidden="true" />
+          Unavailable
+        </li>
+        <li className="flex items-center gap-1.5">
+          <Settings className="h-3.5 w-3.5 text-slate-600" aria-hidden="true" />
+          Staff only
+        </li>
+      </ul>
 
-      <div hidden={view !== "map"} id={panelMapId} role="tabpanel" aria-labelledby={tabMapId} className="mt-5">
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.8fr)] lg:items-start">
-          <div className="relative overflow-visible rounded-3xl bg-white px-1 pb-7 pt-2 ring-1 ring-slate-200">
-            {backgroundUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={backgroundUrl}
-                alt=""
-                className="h-auto w-full select-none"
-              />
-            ) : (
-              <FloorPlanSchematic titleId={titleId} />
-            )}
-            {spots.map((spot) => {
-              const state = seatState(spot, selectedResourceId, availableIds.has(spot.resourceId));
-              const selectable = state === "available" && !loadingQuote;
-              const rates = visibleGuestRates(spot.resourceId);
-              const rateHint = rates.day ? `${rates.day} day` : rates.halfDay ? `${rates.halfDay} half day` : "";
-              const label = `${accessibleSeatName(spot.resourceId)}, ${stateLabel(state)}${rateHint ? `, ${rateHint}` : ""}`;
-              return (
-                <button
-                  key={spot.resourceId}
-                  type="button"
-                  disabled={!selectable}
-                  aria-pressed={state === "selected"}
-                  aria-label={label}
-                  onClick={() => onSelectSeat(spot.resourceId)}
-                  data-resource={spot.resourceId}
-                  style={{ left: `${spot.cx}%`, top: `${spot.cy}%` }}
-                  className={`absolute z-10 flex min-h-11 min-w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full px-2.5 text-sm font-semibold ring-2 transition focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] ${STATE_CLASS[state]}`}
-                >
-                  {spot.displayId}
-                </button>
-              );
-            })}
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
+        <div className="min-w-0 lg:col-span-8">
+          <div hidden={view !== "map"} id={panelMapId} role="tabpanel" aria-labelledby={tabMapId}>
+            <div className="w-full overflow-x-auto overflow-y-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-xs sm:p-5">
+              <div className="relative" style={{ minWidth: SEAT_MAP_MIN_WIDTH_PX }} data-seat-map-canvas>
+                {backgroundUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={backgroundUrl} alt="Hi Coworking floor plan" className="block h-auto w-full select-none" />
+                ) : (
+                  <ArchitecturalFloorPlan
+                    titleId={titleId}
+                    descId={descId}
+                    highlightedId={hoveredId ?? focusedId}
+                    seats={seats.map(({ spot, state, x, y }) => ({
+                      resourceId: spot.resourceId,
+                      displayId: spot.displayId,
+                      x,
+                      y,
+                      state,
+                    }))}
+                  />
+                )}
+                {seats.map(({ spot, state }) => {
+                  const selectable = state === "available" && !loadingQuote;
+                  const rates = visibleGuestRates(spot.resourceId);
+                  const rateHint = state === "staff" ? "" : rates.day ? `${rates.day} day` : rates.halfDay ? `${rates.halfDay} half day` : "";
+                  const label = `${accessibleSeatName(spot.resourceId)}, ${stateLabel(state)}${rateHint ? `, ${rateHint}` : ""}`;
+                  return (
+                    <button
+                      key={spot.resourceId}
+                      type="button"
+                      disabled={!selectable}
+                      aria-pressed={state === "selected"}
+                      aria-label={label}
+                      onClick={() => onSelectSeat(spot.resourceId)}
+                      onPointerEnter={() => setHoveredId(spot.resourceId)}
+                      onPointerLeave={() => setHoveredId((current) => (current === spot.resourceId ? null : current))}
+                      onFocus={() => setFocusedId(spot.resourceId)}
+                      onBlur={() => setFocusedId((current) => (current === spot.resourceId ? null : current))}
+                      data-resource={spot.resourceId}
+                      data-seat-hit-target
+                      style={{
+                        left: `${spot.cx}%`,
+                        top: `${spot.cy}%`,
+                        width: SEAT_HIT_TARGET_CSS,
+                        minWidth: 44,
+                        minHeight: 44,
+                      }}
+                      className={`absolute z-10 flex aspect-square min-h-11 min-w-11 -translate-x-1/2 -translate-y-1/2 touch-manipulation items-center justify-center rounded-full bg-transparent ${NAVY_FOCUS} ${
+                        selectable ? "cursor-pointer" : "cursor-not-allowed"
+                      }`}
+                    >
+                      {backgroundUrl ? (
+                        <span
+                          aria-hidden="true"
+                          className={`flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold ${IMAGE_BADGE_CLASS[state]}`}
+                        >
+                          {spot.displayId}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-slate-600 sm:hidden">
+              Swipe the plan sideways to see the lounge and private office. Neither is bookable.
+            </p>
           </div>
-          <div className="rounded-3xl bg-white p-5 ring-1 ring-slate-200">
-            <SeatSummary
-              spots={spots}
-              selectedResourceId={selectedResourceId}
-              availableIds={availableIds}
-              summary={summary}
-            />
+
+          <div hidden={view !== "list"} id={panelListId} role="tabpanel" aria-labelledby={tabListId}>
+            {list}
           </div>
         </div>
-      </div>
 
-      <div hidden={view !== "list"} id={panelListId} role="tabpanel" aria-labelledby={tabListId} className="mt-5">
-        {list}
-        {summary ? <div className="mt-6">{summary}</div> : null}
+        <aside
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs lg:sticky lg:top-6 lg:col-span-4"
+          aria-label="Selected desk"
+        >
+          <SeatSummary
+            spots={spots}
+            selectedResourceId={selectedResourceId}
+            availableIds={availableIds}
+            summary={summary}
+          />
+        </aside>
       </div>
     </div>
   );
@@ -256,11 +256,11 @@ function SeatSummary({
   if (!selected) {
     const availableCount = spots.filter((spot) => spot.bookable && availableIds.has(spot.resourceId)).length;
     return (
-      <div>
-        <p className="text-sm font-medium text-[#4A5585]">Selected desk</p>
-        <h3 className="font-display mt-2 text-xl font-semibold text-[#101D4B]">Choose a desk on the map</h3>
-        <p className="mt-2 text-sm leading-6 text-[#4A5585]">
-          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only.
+      <div aria-live="polite">
+        <p className="text-xs font-medium text-slate-500">Selected desk</p>
+        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">Choose a desk on the map</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only. The private office isn&apos;t bookable.
         </p>
       </div>
     );
@@ -268,19 +268,23 @@ function SeatSummary({
 
   const copy = catalogCopy(selected.resourceId, selected.name);
   const state = seatState(selected, selectedResourceId, availableIds.has(selected.resourceId));
+  const tier = SEAT_TIERS[selected.tierId];
   return (
     <div>
-      <p className="text-sm font-medium text-[#4A5585]">Selected desk</p>
-      <h3 className="font-display mt-2 text-xl font-semibold text-[#101D4B]">{copy.title}</h3>
-      <p className="mt-1 text-sm text-[#4A5585]">{stateLabel(state)}</p>
+      <div aria-live="polite">
+        <p className="text-xs font-medium text-slate-500">Selected desk</p>
+        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">{copy.title}</h3>
+      </div>
+      {tier.shortLabel !== tier.name ? <p className="mt-1 text-sm text-slate-600">{tier.shortLabel}</p> : null}
+      <p className="mt-3 text-xs font-semibold text-slate-800">{stateLabel(state)}</p>
       <GuestRateBadges resourceId={selected.resourceId} />
       {copy.seat ? <AmenityIcons amenities={copy.seat.amenities} /> : null}
-      {SEAT_TIERS[selected.tierId].memberOverageHourlyCents == null && selected.tierId === "equipped" ? (
-        <p className="mt-2 text-xs leading-5 text-[#4A5585]">
-          Member overage for Equipped desks is not set yet, so no member premium is shown.
+      {tier.memberOverageHourlyCents == null && selected.tierId === "equipped" ? (
+        <p className="mt-4 text-xs leading-5 text-slate-500">
+          Member overage for Equipped desks is not set yet, so no member rate is shown.
         </p>
       ) : null}
-      {summary ? <div className="mt-5 border-t border-slate-200 pt-4">{summary}</div> : null}
+      {summary ? <div className="mt-5 border-t border-slate-100 pt-5">{summary}</div> : null}
     </div>
   );
 }

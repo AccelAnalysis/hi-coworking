@@ -184,22 +184,50 @@ export const SEAT_AMENITY_LABELS: Record<SeatAmenity, string> = {
 };
 
 /**
- * Fallback hotspots, as a percentage of the cropped numbered-plan view
- * (viewBox 70 90 880 540 within the 1024×709 reference). Used when a
- * published Admin layout has no matching seat element. Centers were traced
- * from the D1–D7 numbered plan (labels only; the PNG is not committed).
+ * Built-in architectural floor plan coordinate space (42' x 25' plan). The
+ * customer picker draws the plan in this viewBox; seat centers below are in
+ * the same units. Traced from the numbered D1–D7 plan and Jonathan's
+ * reference picker (21 Nov 2026). The PNG is not committed.
  */
-export const SEAT_MAP_VIEWBOX = { x: 70, y: 90, width: 880, height: 540, sourceWidth: 1024, sourceHeight: 709 } as const;
+export const SEAT_MAP_VIEWBOX = { x: -55, y: -55, width: 950, height: 595 } as const;
 
-export const FALLBACK_SEAT_POSITIONS: Record<SeatResourceId, { cx: number; cy: number }> = {
-  "seat-1": { cx: 20.7, cy: 34.8 },
-  "seat-2": { cx: 52.3, cy: 34.8 },
-  "seat-3": { cx: 26.7, cy: 93.0 },
-  "seat-4": { cx: 37.5, cy: 93.0 },
-  "seat-5": { cx: 47.8, cy: 93.0 },
-  "seat-6": { cx: 57.9, cy: 93.0 },
-  "seat-7": { cx: 13.7, cy: 70.4 },
+/** Seat badge centers in SEAT_MAP_VIEWBOX units. */
+export const ARCHITECTURAL_SEAT_POINTS: Record<SeatResourceId, { x: number; y: number }> = {
+  "seat-1": { x: 132, y: 189 },
+  "seat-2": { x: 403, y: 189 },
+  "seat-3": { x: 199, y: 455 },
+  "seat-4": { x: 291, y: 455 },
+  "seat-5": { x: 383, y: 455 },
+  "seat-6": { x: 475, y: 455 },
+  "seat-7": { x: 44, y: 398 },
 };
+
+/** Convert a viewBox point to a percentage of the plan's width and height. */
+export function seatMapPointToPercent(point: { x: number; y: number }): { cx: number; cy: number } {
+  return {
+    cx: ((point.x - SEAT_MAP_VIEWBOX.x) / SEAT_MAP_VIEWBOX.width) * 100,
+    cy: ((point.y - SEAT_MAP_VIEWBOX.y) / SEAT_MAP_VIEWBOX.height) * 100,
+  };
+}
+
+/** Convert a percentage position back to SEAT_MAP_VIEWBOX units. */
+export function seatMapPercentToPoint(spot: { cx: number; cy: number }): { x: number; y: number } {
+  return {
+    x: SEAT_MAP_VIEWBOX.x + (spot.cx / 100) * SEAT_MAP_VIEWBOX.width,
+    y: SEAT_MAP_VIEWBOX.y + (spot.cy / 100) * SEAT_MAP_VIEWBOX.height,
+  };
+}
+
+/**
+ * Fallback hotspots as a percentage of the built-in plan. Used when a
+ * published Admin layout has no matching seat element.
+ */
+export const FALLBACK_SEAT_POSITIONS: Record<SeatResourceId, { cx: number; cy: number }> = Object.fromEntries(
+  (Object.keys(ARCHITECTURAL_SEAT_POINTS) as SeatResourceId[]).map((id) => [
+    id,
+    seatMapPointToPercent(ARCHITECTURAL_SEAT_POINTS[id]),
+  ]),
+) as Record<SeatResourceId, { cx: number; cy: number }>;
 
 export const SEAT_MAP_REFERENCE = {
   width: 1024,

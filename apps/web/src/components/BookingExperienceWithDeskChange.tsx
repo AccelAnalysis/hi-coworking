@@ -855,15 +855,14 @@ export default function BookingExperienceWithDeskChange() {
                 }
                 summary={
                   selection && quote && !reviewOpen ? (
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <p className="font-semibold text-[#101D4B]">{deskLabel(quote.resourceId, quote.resourceName)}</p>
-                        <p className="mt-1 text-sm text-[#4A5585]">{money(quote.totalCents)} due for this stay</p>
-                      </div>
+                    <div>
+                      <p className="text-sm font-bold text-[#101D4B]">{deskLabel(quote.resourceId, quote.resourceName)}</p>
+                      <p className="mt-0.5 text-sm text-slate-600">{money(quote.totalCents)} due for this stay</p>
+                      <p className="mt-0.5 text-xs text-slate-500">Checkout still uses the current hourly rate</p>
                       <button
                         type="button"
                         onClick={continueToReview}
-                        className="inline-flex min-h-12 items-center gap-2 rounded-full bg-[#101D4B] px-5 py-3 font-semibold text-white focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]"
+                        className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#101D4B] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1B2A63] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]"
                       >
                         Review booking <ArrowRight className="h-4 w-4" aria-hidden="true" />
                       </button>

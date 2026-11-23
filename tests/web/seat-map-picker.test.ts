@@ -2,12 +2,14 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ARCHITECTURAL_SEAT_POINTS,
   BOOKABLE_SEAT_RESOURCE_IDS,
   CONFERENCE_ROOM_CONFIG,
   FALLBACK_SEAT_POSITIONS,
   RESOURCE_CATALOG,
   SEAT_CATALOG,
   SEAT_DISPLAY_ORDER,
+  SEAT_MAP_VIEWBOX,
   SEAT_TIERS,
   STAFF_ONLY_SEAT_RESOURCE_ID,
   accessibleSeatName,
@@ -16,10 +18,20 @@ import {
   formatUsdCents,
   isBookableSeatResource,
   resourceIdFromDisplayId,
+  seatMapPercentToPoint,
+  seatMapPointToPercent,
   visibleGuestRates,
   visibleMemberOverage,
 } from "../../packages/shared/src/index.ts";
 import { resolveSeatMapPickerFlag } from "../../apps/web/src/lib/seatMapPickerFlag";
+import {
+  MIN_TOUCH_TARGET_PX,
+  SEAT_MAP_MIN_WIDTH_PX,
+  overlappingSeatTargets,
+  renderedPlanWidthPx,
+  seatBadgeDiameterPx,
+  seatHitTargetPx,
+} from "../../apps/web/src/lib/seatMapGeometry";
 
 const read = (path: string) => readFileSync(path, "utf8");
 
@@ -152,13 +164,104 @@ describe("booking UI wiring", () => {
     expect(list).toMatch(/aria-pressed=\{selected\}/);
     expect(list).toMatch(/focus-visible:outline-\[#101D4B\]/);
     expect(picker).toMatch(/aria-pressed=\{state === "selected"\}/);
-    expect(picker).toMatch(/min-h-11/);
+    expect(picker).toMatch(/min-h-11 min-w-11/);
+    expect(picker).toMatch(/data-seat-hit-target/);
+    expect(picker).toMatch(/focus-visible:outline-\[#101D4B\]/);
     expect(picker).toMatch(/role="tablist"/);
     expect(booking).toMatch(/aria-pressed=\{selected\}/);
   });
 
   it("does not invent a Member equipped overage rate in the picker UI", () => {
     expect(picker).toMatch(/Member overage for Equipped desks is not set yet/);
+    expect(picker).not.toMatch(/Member average/);
     expect(list + picker).not.toMatch(/memberOverageHourlyCents:\s*[0-9]/);
+  });
+});
+
+describe("architectural seat map", () => {
+  const picker = read("apps/web/src/components/booking/SeatMapPicker.tsx");
+  const plan = read("apps/web/src/components/booking/ArchitecturalFloorPlan.tsx");
+
+  it("uses the reference viewBox and seat coordinates", () => {
+    expect(SEAT_MAP_VIEWBOX).toEqual({ x: -55, y: -55, width: 950, height: 595 });
+    expect(ARCHITECTURAL_SEAT_POINTS).toEqual({
+      "seat-1": { x: 132, y: 189 },
+      "seat-2": { x: 403, y: 189 },
+      "seat-3": { x: 199, y: 455 },
+      "seat-4": { x: 291, y: 455 },
+      "seat-5": { x: 383, y: 455 },
+      "seat-6": { x: 475, y: 455 },
+      "seat-7": { x: 44, y: 398 },
+    });
+    for (const [id, point] of Object.entries(ARCHITECTURAL_SEAT_POINTS)) {
+      const percent = FALLBACK_SEAT_POSITIONS[id as keyof typeof FALLBACK_SEAT_POSITIONS];
+      expect(percent).toEqual(seatMapPointToPercent(point));
+      const back = seatMapPercentToPoint(percent);
+      expect(back.x).toBeCloseTo(point.x, 6);
+      expect(back.y).toBeCloseTo(point.y, 6);
+    }
+  });
+
+  it("draws the architectural plan as the built-in default", () => {
+    expect(picker).toMatch(/<ArchitecturalFloorPlan/);
+    expect(picker).not.toMatch(/FloorPlanSchematic/);
+    for (const feature of [
+      "hic-wall-hatch",
+      "CONF TABLE",
+      "LOUNGE",
+      "PRIVATE OFFICE",
+      "Not bookable",
+      "PRINT",
+      "Accessible restroom 5' turning circle",
+      "Acoustic dividers",
+      "Storefront door",
+      "ArchitecturalChair",
+      "16,288 110,288 110,418 74,418 74,324 16,324",
+      "528,10 830,10 830,410 670,410 670,490 528,490",
+    ]) {
+      expect(plan).toContain(feature);
+    }
+    expect(plan).toMatch(/r=\{SEAT_BADGE_RADIUS\}/);
+    expect(read("apps/web/src/lib/seatMapGeometry.ts")).toMatch(/SEAT_BADGE_RADIUS = 17\.5/);
+  });
+
+  it("keeps the published Admin background path", () => {
+    expect(picker).toMatch(/backgroundUrl \? \(/);
+    expect(read("apps/web/src/lib/seatMapLayout.ts")).toMatch(/resolvePublishedLayout/);
+  });
+
+  it("never makes the private office or lounge a selectable node", () => {
+    expect(picker + plan).not.toMatch(/STAFF-PO|Staff only suite/);
+    expect(plan).not.toMatch(/<button|role="button"|onClick/);
+    expect(buildSeatMapSpots(null).every((spot) => /^seat-[1-7]$/.test(spot.resourceId))).toBe(true);
+  });
+
+  it("does not copy the reference sample data, modal, or off-brand colors", () => {
+    const ui = picker + plan + read("apps/web/src/components/booking/DeskOptionList.tsx");
+    expect(ui).not.toMatch(/#0F172A|#FCFCFD/i);
+    expect(ui).not.toMatch(/Confirm seat|reserved|Reception Desk|\$25|\$55|\$89/);
+    expect(ui).toMatch(/#101D4B/);
+    expect(picker).toMatch(/font-display/);
+  });
+
+  it("gives every seat at least a 44 px hit area with no overlap on phones and desktops", () => {
+    for (const viewport of [320, 390, 430, 640, 768, 1024, 1280, 1440, 1920]) {
+      const width = renderedPlanWidthPx(viewport);
+      expect(width).toBeGreaterThanOrEqual(SEAT_MAP_MIN_WIDTH_PX);
+      const hit = seatHitTargetPx(width);
+      expect(hit).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+      expect(hit).toBeGreaterThan(seatBadgeDiameterPx(width));
+      expect(overlappingSeatTargets(width)).toEqual([]);
+    }
+    expect(renderedPlanWidthPx(390)).toBe(SEAT_MAP_MIN_WIDTH_PX);
+    expect(Math.round(seatHitTargetPx(renderedPlanWidthPx(390)))).toBe(44);
+    expect(Math.round(seatHitTargetPx(renderedPlanWidthPx(1440)))).toBe(54);
+  });
+});
+
+describe("staff-only D7 copy", () => {
+  it("never shows D7 with a price in the picker or list", () => {
+    expect(read("apps/web/src/components/booking/SeatMapPicker.tsx")).toMatch(/state === "staff" \? ""/);
+    expect(read("apps/web/src/components/booking/DeskOptionList.tsx")).toMatch(/option\.staffOnly \? \(\s*<p[^>]*>Reception desk\. Not bookable\./);
   });
 });

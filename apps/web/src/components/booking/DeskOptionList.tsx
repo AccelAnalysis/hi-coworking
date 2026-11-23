@@ -112,7 +112,7 @@ export function DeskOptionList({
   onSelect: (option: DeskListOption) => void;
 }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className={`grid gap-3 sm:grid-cols-2 ${showCatalogDetails ? "" : "lg:grid-cols-3"}`}>
       {options.map((option) => {
         const selected = selectedResourceId === option.resourceId;
         const selectable = option.available && !option.staffOnly && !loadingQuote;
@@ -150,7 +150,11 @@ export function DeskOptionList({
             <p className="mt-4 font-semibold">{title}</p>
             {showCatalogDetails && copy.seat ? (
               <>
-                <GuestRateBadges resourceId={option.resourceId} inverted={selected} />
+                {option.staffOnly ? (
+                  <p className="mt-1 text-sm text-slate-500">Reception desk. Not bookable.</p>
+                ) : (
+                  <GuestRateBadges resourceId={option.resourceId} inverted={selected} />
+                )}
                 <AmenityIcons amenities={copy.seat.amenities} inverted={selected} />
               </>
             ) : (
