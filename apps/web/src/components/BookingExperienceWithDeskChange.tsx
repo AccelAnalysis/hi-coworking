@@ -789,7 +789,7 @@ export default function BookingExperienceWithDeskChange() {
             Start with the space you need.
           </h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">
-            Choose a coworking desk, the private office, or the meeting room first. We will show only the booking hours currently open for that date, then check live availability for your full stay.
+            Choose a coworking desk or the meeting room first. We will show only the booking hours currently open for that date, then check live availability for your full stay.
           </p>
         </header>
 

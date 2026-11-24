@@ -38,6 +38,9 @@ describe("Phase 2 booking and pricing UI", () => {
     expect(booking).toContain("AfterHoursConferenceRequest");
     expect(booking).toMatch(/option\.type === "SEAT" \|\| option\.type === "ROOM"/);
     expect(booking).toContain("Show available spaces");
+    expect(booking).toContain("Choose a coworking desk or the meeting room first.");
+    expect(booking).not.toContain("Choose a coworking desk, the private office, or the meeting room first.");
+    expect(plan).not.toMatch(/>\s*LOUNGE\s*</);
     expect(picker).toContain("officeOffered");
     expect(plan).toContain('"unoffered"');
     expect(booking).toContain("useResourceOffering");
