@@ -30,8 +30,10 @@ import {
   MEMBERSHIP_TIERS,
   SEAT_CATALOG,
   STAFF_ONLY_SEAT_RESOURCE_ID,
+  PRIVATE_OFFICE_RESOURCE_ID,
   getSeatByResourceId,
 } from "@hi/shared";
+import { useResourceOffering } from "@/lib/resourceOffering";
 import {
   INTENDED_USE_MAX,
   validateGuestScreening,
@@ -379,6 +381,8 @@ function rangeOpen(schedule: DaySchedule | null, dateValue: string, start: strin
 
 export default function BookingExperienceWithDeskChange() {
   const { user, loading: authLoading } = useAuth();
+  const { isOffered } = useResourceOffering();
+  const officeOffered = isOffered(PRIVATE_OFFICE_RESOURCE_ID);
   const todayAtFacility = useMemo(() => facilityDateValue(), []);
   const requestedStartRef = useRef<string | null>(null);
   const requestedDurationRef = useRef<number | null>(null);
@@ -812,7 +816,9 @@ export default function BookingExperienceWithDeskChange() {
               <span>
                 <span className="block text-lg font-semibold">Coworking desk</span>
                 <span className={`mt-1 block text-sm leading-6 ${intent === "DESK" ? "text-slate-300" : "text-slate-600"}`}>
-                  Book a desk or the private office by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered.
+                  {officeOffered
+                    ? "Book a desk or the private office by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered."
+                    : "Book a desk by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered."}
                 </span>
               </span>
             </button>
@@ -1020,6 +1026,7 @@ export default function BookingExperienceWithDeskChange() {
                 spots={seatMap.spots}
                 backgroundUrl={seatMap.backgroundUrl}
                 availability={options}
+                officeOffered={officeOffered}
                 selectedResourceId={selection?.kind === "single" ? selection.option.resourceId : undefined}
                 loadingQuote={loadingQuote}
                 onSelectSeat={(resourceId) => {

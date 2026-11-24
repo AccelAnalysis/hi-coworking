@@ -358,16 +358,22 @@ function deskSegment(resourceId: string, start: number, end: number): DeskSegmen
   };
 }
 
-export function findDeskChangePlans(start: number, end: number, busy: BusyRecord[]): DeskChangePlan[] {
+export function findDeskChangePlans(
+  start: number,
+  end: number,
+  busy: BusyRecord[],
+  allowedResourceIds: readonly string[] = DESK_RESOURCE_IDS,
+): DeskChangePlan[] {
+  const desks = DESK_RESOURCE_IDS.filter((resourceId) => allowedResourceIds.includes(resourceId));
   const duration = end - start;
   if (duration < 2 * 60 * 60 * 1000) return [];
-  if (DESK_RESOURCE_IDS.some((resourceId) => !resourceConflicts(resourceId, start, end, busy))) return [];
+  if (desks.some((resourceId) => !resourceConflicts(resourceId, start, end, busy))) return [];
 
   const candidates: Array<DeskChangePlan & { minSegmentMs: number; firstSegmentMs: number }> = [];
   for (let changeAt = start + 60 * 60 * 1000; changeAt <= end - 60 * 60 * 1000; changeAt += INCREMENT_MS) {
-    for (const firstResourceId of DESK_RESOURCE_IDS) {
+    for (const firstResourceId of desks) {
       if (resourceConflicts(firstResourceId, start, changeAt, busy)) continue;
-      for (const secondResourceId of DESK_RESOURCE_IDS) {
+      for (const secondResourceId of desks) {
         if (secondResourceId === firstResourceId) continue;
         if (resourceConflicts(secondResourceId, changeAt, end, busy)) continue;
         const firstSegmentMs = changeAt - start;
@@ -415,9 +421,10 @@ export function resolveChoice(
   start: number,
   end: number,
   busy: BusyRecord[],
+  allowedDeskIds?: readonly string[],
 ): BookingChoice {
   if (input.deskChangePlanId) {
-    const plan = findDeskChangePlans(start, end, busy).find(
+    const plan = findDeskChangePlans(start, end, busy, allowedDeskIds).find(
       (candidate) => candidate.planId === input.deskChangePlanId,
     );
     if (!plan) {

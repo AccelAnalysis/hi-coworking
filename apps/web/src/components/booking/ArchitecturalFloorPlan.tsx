@@ -16,6 +16,7 @@ import { SEAT_BADGE_RADIUS, SEAT_HALO_RADIUS } from "@/lib/seatMapGeometry";
  */
 
 export type PlanSeatState = "available" | "unavailable" | "selected" | "staff";
+export type PlanOfficeState = PlanSeatState | "unoffered";
 
 export type PlanSeat = {
   resourceId: string;
@@ -116,7 +117,7 @@ export function ArchitecturalFloorPlan({
   descId: string;
   seats: PlanSeat[];
   highlightedId?: string | null;
-  officeState?: PlanSeatState;
+  officeState?: PlanOfficeState;
 }) {
   return (
     <svg
@@ -303,20 +304,22 @@ export function ArchitecturalFloorPlan({
       </g>
       {/* Private office L-desk */}
       <g data-plan-zone="private-office" data-state={officeState || "available"}>
-        {officeState === "selected" || highlightedId === "private-office" ? (
+        {officeState === "selected" || (officeState !== "unoffered" && highlightedId === "private-office") ? (
           <rect x="628" y="36" width="198" height="368" rx="10" fill={officeState === "selected" ? NAVY : "#334155"} fillOpacity={officeState === "selected" ? 0.10 : 0.06} />
         ) : null}
         {officeState === "unavailable" ? (
           <rect x="628" y="36" width="198" height="368" rx="10" fill="#F1F5F9" fillOpacity="0.85" />
         ) : null}
         <ArchitecturalChair x={755} y={215} angle={90} />
-        <polygon points="668,152 712,152 712,272 814,272 814,316 668,316" fill={officeState === "selected" ? "#EEF0F6" : "#FFFFFF"} stroke={officeState === "unavailable" ? "#CBD5E1" : "#334155"} strokeWidth="1.5" />
-        <text x="741" y="298" textAnchor="middle" fill={officeState === "unavailable" ? "#64748B" : LINE} fontSize="9.5" fontWeight="700" letterSpacing="0.05em">
+        <polygon points="668,152 712,152 712,272 814,272 814,316 668,316" fill={officeState === "selected" ? "#EEF0F6" : "#FFFFFF"} stroke={officeState === "unavailable" || officeState === "unoffered" ? "#CBD5E1" : "#334155"} strokeWidth="1.5" />
+        <text x="741" y="298" textAnchor="middle" fill={officeState === "unavailable" || officeState === "unoffered" ? "#64748B" : LINE} fontSize="9.5" fontWeight="700" letterSpacing="0.05em">
           PRIVATE OFFICE
         </text>
-        <text x="741" y="338" textAnchor="middle" fill={officeState === "selected" ? NAVY : officeState === "unavailable" ? "#94A3B8" : "#64748B"} fontSize="9" fontWeight="600">
-          {officeState === "selected" ? "Selected" : officeState === "unavailable" ? "Unavailable" : "$39/hr · $99 half-day · $149 day"}
-        </text>
+        {officeState === "unoffered" ? null : (
+          <text x="741" y="338" textAnchor="middle" fill={officeState === "selected" ? NAVY : officeState === "unavailable" ? "#94A3B8" : "#64748B"} fontSize="9" fontWeight="600">
+            {officeState === "selected" ? "Selected" : officeState === "unavailable" ? "Unavailable" : "$39/hr · $99 half-day · $149 day"}
+          </text>
+        )}
       </g>
 
       {/* 8. Seat badges (visual only; hit areas are the buttons layered on top) */}

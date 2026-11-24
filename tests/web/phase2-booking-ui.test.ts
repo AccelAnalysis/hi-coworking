@@ -4,6 +4,7 @@ import {
   AFTER_HOURS_CONFERENCE_SLOT_PRICE_CENTS,
   PRIVATE_OFFICE_RATES,
   afterHoursSlotsOverlap,
+  isResourceOffered,
   validateAfterHoursConferenceWindow,
 } from "../../packages/shared/src/index.ts";
 
@@ -21,6 +22,9 @@ describe("Phase 2 booking and pricing UI", () => {
       guestDayCents: 14900,
     });
     expect(pricing).toContain("/book?resource=mode-conference#after-hours");
+    expect(pricing).toContain("officeOffered");
+    expect(pricing).toContain("conferenceOffered");
+    expect(pricing).toContain("useResourceOffering");
   });
 
   it("adds the office to the floor-plan picker and the booking flow", () => {
@@ -34,6 +38,23 @@ describe("Phase 2 booking and pricing UI", () => {
     expect(booking).toContain("AfterHoursConferenceRequest");
     expect(booking).toMatch(/option\.type === "SEAT" \|\| option\.type === "ROOM"/);
     expect(booking).toContain("Show available spaces");
+    expect(picker).toContain("officeOffered");
+    expect(plan).toContain('"unoffered"');
+    expect(booking).toContain("useResourceOffering");
+  });
+
+  it("lets an admin turn the private office off and back on", () => {
+    const offerings = read("apps/web/src/app/admin/spaces/offerings/page.tsx");
+    const dashboard = read("apps/web/src/app/admin/dashboard/page.tsx");
+    const nav = read("apps/web/src/lib/adminNavigation.ts");
+    expect(offerings).toContain('data-testid={`offered-space-${resource.id}`}');
+    expect(offerings).toContain("Offered spaces");
+    expect(offerings).toContain("Private Office stays off");
+    expect(dashboard).toContain('href: "/admin/spaces/offerings"');
+    expect(nav).toContain('"/admin/spaces/offerings"');
+    expect(isResourceOffered("private-office")).toBe(false);
+    expect(isResourceOffered("seat-1")).toBe(true);
+    expect(isResourceOffered("private-office", { "private-office": true })).toBe(true);
   });
 
   it("surfaces evening and weekend requests and the full-day upgrade action", () => {

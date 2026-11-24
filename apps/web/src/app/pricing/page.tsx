@@ -16,10 +16,12 @@ import {
   CONFERENCE_ROOM_CONFIG,
   CONFERENCE_ROOM_SLOTS,
   PRIVATE_OFFICE_RATES,
+  PRIVATE_OFFICE_RESOURCE_ID,
   SEAT_TIERS,
   formatUsdCents,
   type SeatTierId,
 } from "@hi/shared";
+import { useResourceOffering } from "@/lib/resourceOffering";
 
 const DESK_TIER_ROWS: Array<{ id: SeatTierId; seats: string; detail: string }> = [
   { id: "basic", seats: "D1–D2", detail: "Shared conference-table seats" },
@@ -55,6 +57,9 @@ function coworkingOnlyFeatures(features: string[]) {
 
 export default function PricingPage() {
   const { user } = useAuth();
+  const { isOffered } = useResourceOffering();
+  const officeOffered = isOffered(PRIVATE_OFFICE_RESOURCE_ID);
+  const conferenceOffered = isOffered("mode-conference");
   const [loadingTier, setLoadingTier] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Virtual address (built, OFF): the option here and the pop-up on the way to
@@ -279,6 +284,7 @@ export default function PricingPage() {
           </div>
 
 
+{officeOffered ? (
           <section className="mb-10" aria-labelledby="private-office-heading">
             <h2 id="private-office-heading" className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
               <DoorClosed className="h-3.5 w-3.5" aria-hidden="true" /> Private Office
@@ -318,6 +324,8 @@ export default function PricingPage() {
               </div>
             </div>
           </section>
+) : null}
+{conferenceOffered ? (
           <div className="mb-10">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Users className="h-3.5 w-3.5" /> Conference Room
@@ -360,6 +368,7 @@ export default function PricingPage() {
               </div>
             </div>
           </div>
+) : null}
 
           {VIRTUAL_ADDRESS ? (
             <div className="mb-10" data-testid="va-option">

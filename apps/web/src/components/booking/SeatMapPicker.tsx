@@ -15,7 +15,7 @@ import {
   type SeatMapSpot,
 } from "@hi/shared";
 import { AmenityIcons, GuestRateBadges, catalogCopy } from "@/components/booking/DeskOptionList";
-import { ArchitecturalFloorPlan, type PlanSeatState } from "@/components/booking/ArchitecturalFloorPlan";
+import { ArchitecturalFloorPlan, type PlanOfficeState, type PlanSeatState } from "@/components/booking/ArchitecturalFloorPlan";
 import { SEAT_HIT_TARGET_CSS, SEAT_MAP_MIN_WIDTH_PX } from "@/lib/seatMapGeometry";
 
 export type SeatAvailability = {
@@ -60,6 +60,7 @@ export function SeatMapPicker({
   summary,
   list,
   onSelectSeat,
+  officeOffered: officeOfferedHint = false,
 }: {
   spots: SeatMapSpot[];
   backgroundUrl?: string;
@@ -69,6 +70,7 @@ export function SeatMapPicker({
   summary?: ReactNode;
   list: ReactNode;
   onSelectSeat: (resourceId: string) => void;
+  officeOffered?: boolean;
 }) {
   const titleId = useId();
   const descId = useId();
@@ -82,11 +84,15 @@ export function SeatMapPicker({
   const availableIds = new Set(
     availability.filter((item) => item.available).map((item) => item.resourceId),
   );
-  const officeState: SeatVisualState = selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID
-    ? "selected"
-    : availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)
-      ? "available"
-      : "unavailable";
+  const officeInAvailability = availability.some((item) => item.resourceId === PRIVATE_OFFICE_RESOURCE_ID);
+  const officeOffered = officeInAvailability || (availability.length === 0 && officeOfferedHint);
+  const officeState: PlanOfficeState = !officeOffered
+    ? "unoffered"
+    : selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID
+      ? "selected"
+      : availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)
+        ? "available"
+        : "unavailable";
   const seats = spots.map((spot) => {
     const point = seatMapPercentToPoint(spot);
     return {
@@ -101,9 +107,11 @@ export function SeatMapPicker({
     <div className="text-[#101D4B]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-xl">
-          <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">3. Choose a desk or the private office</h2>
+          <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">{officeOffered ? "3. Choose a desk or the private office" : "3. Choose a desk"}</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Pick a desk or the right-hand private office for the full stay. Booking the office leaves D1 unsold; D2–D6 stay available. Up to 4 hours never costs more than the half-day price, and longer stays never more than the day price.
+            {officeOffered
+              ? "Pick a desk or the right-hand private office for the full stay. Booking the office leaves D1 unsold; D2–D6 stay available. Up to 4 hours never costs more than the half-day price, and longer stays never more than the day price."
+              : "Pick a desk for the full stay. Up to 4 hours never costs more than the half-day price, and longer stays never more than the day price."}
           </p>
         </div>
         <div
@@ -183,16 +191,18 @@ export function SeatMapPicker({
                     }))}
                   />
                 )}
-                <PrivateOfficeHitTarget
-                  state={officeState}
-                  available={availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)}
-                  selected={selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID}
-                  loadingQuote={loadingQuote}
-                  blockedReason={officeBlockReason(availability)}
-                  onSelect={() => onSelectSeat(PRIVATE_OFFICE_RESOURCE_ID)}
-                  onHover={setHoveredId}
-                  onFocus={setFocusedId}
-                />
+                {officeOffered ? (
+                  <PrivateOfficeHitTarget
+                    state={officeState === "unoffered" ? "unavailable" : officeState}
+                    available={availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)}
+                    selected={selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID}
+                    loadingQuote={loadingQuote}
+                    blockedReason={officeBlockReason(availability)}
+                    onSelect={() => onSelectSeat(PRIVATE_OFFICE_RESOURCE_ID)}
+                    onHover={setHoveredId}
+                    onFocus={setFocusedId}
+                  />
+                ) : null}
                 {seats.map(({ spot, state }) => {
                   const selectable = state === "available" && !loadingQuote;
                   const rates = visibleGuestRates(spot.resourceId);
@@ -254,6 +264,7 @@ export function SeatMapPicker({
             spots={spots}
             selectedResourceId={selectedResourceId}
             availableIds={availableIds}
+            officeOffered={officeOffered}
             summary={summary}
           />
         </aside>
@@ -266,11 +277,13 @@ function SeatSummary({
   spots,
   selectedResourceId,
   availableIds,
+  officeOffered,
   summary,
 }: {
   spots: SeatMapSpot[];
   selectedResourceId?: string;
   availableIds: Set<string>;
+  officeOffered: boolean;
   summary?: ReactNode;
 }) {
   const selected = spots.find((spot) => spot.resourceId === selectedResourceId);
@@ -298,9 +311,9 @@ function SeatSummary({
     return (
       <div aria-live="polite">
         <p className="text-xs font-medium text-slate-500">Selected space</p>
-        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">Choose a desk or the private office</h3>
+        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">{officeOffered ? "Choose a desk or the private office" : "Choose a desk"}</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only. The private office is booked on its own and leaves D1 unsold.
+          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only.{officeOffered ? " The private office is booked on its own and leaves D1 unsold." : ""}
         </p>
       </div>
     );

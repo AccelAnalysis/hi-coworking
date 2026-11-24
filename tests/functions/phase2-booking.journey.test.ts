@@ -154,6 +154,15 @@ function option(result: Availability, resourceId: string) {
   return result.options.find((item) => item.resourceId === resourceId);
 }
 
+async function offerPrivateOffice() {
+  await db.collection("siteSettings").doc("resources").set({
+    id: "resources",
+    offered: { "private-office": true },
+    updatedAt: Date.now(),
+  });
+}
+
+
 beforeAll(() => {
   adminApp = initializeAdminApp({ projectId: PROJECT_ID }, "phase2-booking-journey-tests");
   db = getAdminFirestore(adminApp);
@@ -175,6 +184,7 @@ describe("Phase 2 booking journeys", () => {
     const date = upcomingWeekdayKey();
     const start = facilityTime(date, "08:00");
     const end = facilityTime(date, "12:00");
+    await offerPrivateOffice();
     await seedBooking("office-am", "private-office", start, end);
     const withOffice = await call<Availability>(functions, "booking_getAvailability", { start, end });
     expect(option(withOffice, "private-office")).toMatchObject({ type: "ROOM", available: false });
@@ -185,17 +195,46 @@ describe("Phase 2 booking journeys", () => {
     expect(option(withOffice, "seat-6")?.available).toBe(true);
 
     await clearFirestore();
+    await offerPrivateOffice();
     await seedBooking("d1-am", "seat-1", start, end);
     const withDesk = await call<Availability>(functions, "booking_getAvailability", { start, end });
     expect(option(withDesk, "private-office")?.available).toBe(false);
     expect(option(withDesk, "seat-2")?.available).toBe(true);
 
     await clearFirestore();
+    await offerPrivateOffice();
     await seedBooking("conf-am", "mode-conference", start, end);
     const withConference = await call<Availability>(functions, "booking_getAvailability", { start, end });
     expect(option(withConference, "private-office")?.available).toBe(false);
     expect(option(withConference, "seat-1")?.available).toBe(false);
     expect(option(withConference, "seat-6")?.available).toBe(false);
+  });
+
+
+  it("hides the private office and refuses quotes while it is not offered", async () => {
+    const functions = client("office-off").functions;
+    const date = upcomingWeekdayKey();
+    const start = facilityTime(date, "08:00");
+    const end = facilityTime(date, "17:00");
+    const hidden = await call<Availability>(functions, "booking_getAvailability", { start, end });
+    expect(option(hidden, "private-office")).toBeUndefined();
+    expect(option(hidden, "seat-2")?.available).toBe(true);
+
+    await expect(call(functions, "booking_createQuote", {
+      resourceId: "private-office",
+      start,
+      end,
+    })).rejects.toThrow(/not currently offered/i);
+
+    await offerPrivateOffice();
+    const shown = await call<Availability>(functions, "booking_getAvailability", { start, end });
+    expect(option(shown, "private-office")).toMatchObject({ type: "ROOM", available: true });
+    const quote = await call<{ totalCents: number }>(functions, "booking_createQuote", {
+      resourceId: "private-office",
+      start,
+      end,
+    });
+    expect(quote.totalCents).toBe(14900);
   });
 
   it("accepts evening and weekend conference requests, blocks overlaps, and lets staff approve a slot", async () => {
