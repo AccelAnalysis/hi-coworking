@@ -87,7 +87,13 @@ function currentWebhookSecret() {
 }
 
 function setWebhookSecret(value) {
-  gcloud(["secrets", "versions", "add", "SEAM_WEBHOOK_SECRET", "--data-file=-", `--project=${PROJECT}`], value);
+  try {
+    gcloud(["secrets", "versions", "add", "SEAM_WEBHOOK_SECRET", "--data-file=-", `--project=${PROJECT}`], value);
+  } catch (error) {
+    // First go-live: the secret may not exist yet, so create it with this value.
+    if (!/NOT_FOUND|not found/i.test(String(error?.stderr ?? error?.message ?? ""))) throw error;
+    gcloud(["secrets", "create", "SEAM_WEBHOOK_SECRET", "--replication-policy=automatic", "--data-file=-", `--project=${PROJECT}`], value);
+  }
 }
 
 async function webhook() {

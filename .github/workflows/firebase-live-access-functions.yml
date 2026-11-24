@@ -78,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node -e "const rc=require('./.firebaserc'); if (rc.projects?.default !== 'hi-coworking-plat') { throw new Error('Refusing: .firebaserc default project is not hi-coworking-plat'); }"
+          node -e "const rc=JSON.parse(require('fs').readFileSync('.firebaserc','utf8')); if (rc.projects?.default !== 'hi-coworking-plat') { throw new Error('Refusing: .firebaserc default project is not hi-coworking-plat'); }"
 
       - name: Load the Seam key from Secret Manager (masked)
         shell: bash
