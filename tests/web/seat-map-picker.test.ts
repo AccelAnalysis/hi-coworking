@@ -79,7 +79,7 @@ describe("seat catalog", () => {
     expect(accessibleSeatName("seat-7")).toMatch(/staff only/i);
   });
 
-  it("omits the private office from the catalog and fallback map", () => {
+  it("keeps the private office out of the desk catalog and fallback seat map", () => {
     const spots = buildSeatMapSpots(null);
     expect(spots.map((spot) => spot.displayId)).toEqual(["D3", "D4", "D5", "D6", "D1", "D2", "D7"]);
     expect(spots.some((spot) => /office/i.test(spot.name))).toBe(false);
@@ -215,7 +215,6 @@ describe("architectural seat map", () => {
       "CONF TABLE",
       "LOUNGE",
       "PRIVATE OFFICE",
-      "Not bookable",
       "PRINT",
       "Accessible restroom 5' turning circle",
       "Acoustic dividers",
@@ -235,9 +234,13 @@ describe("architectural seat map", () => {
     expect(read("apps/web/src/lib/seatMapLayout.ts")).toMatch(/resolvePublishedLayout/);
   });
 
-  it("never makes the private office or lounge a selectable node", () => {
+  it("makes the private office a labeled room target and keeps the lounge unselectable", () => {
     expect(picker + plan).not.toMatch(/STAFF-PO|Staff only suite/);
     expect(plan).not.toMatch(/<button|role="button"|onClick/);
+    expect(plan).toMatch(/data-plan-zone="private-office"/);
+    expect(plan).not.toMatch(/Not bookable/);
+    expect(picker).toMatch(/data-office-hit-target/);
+    expect(picker).toMatch(/PRIVATE_OFFICE_RESOURCE_ID/);
     expect(buildSeatMapSpots(null).every((spot) => /^seat-[1-7]$/.test(spot.resourceId))).toBe(true);
   });
 

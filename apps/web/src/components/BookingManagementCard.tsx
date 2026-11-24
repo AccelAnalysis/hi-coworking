@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { functions } from "@/lib/firebase";
+import { FullDayUpgradeAction } from "@/components/booking/FullDayUpgradeAction";
 
 const previewCancellation = httpsCallable<
   { bookingId: string },
@@ -251,6 +252,13 @@ export function BookingManagementCard({
 
   return (
     <div className="mt-5 border-t border-slate-200 pt-5">
+      <FullDayUpgradeAction
+        bookingId={bookingId}
+        resourceId={resourceId}
+        start={start}
+        end={end}
+      />
+
       <div className="flex flex-wrap gap-x-5 gap-y-3 text-sm">
         <button
           type="button"

@@ -507,6 +507,21 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Evening/weekend conference requests: created and reviewed only through
+    // Cloud Functions. Staff can read pending/approved/declined records.
+    match /conferenceSlotRequests/{requestId} {
+      allow read: if isStaff();
+      allow create, update, delete: if false;
+    }
+
+    // Same-day full-day upgrade records: created and applied only through
+    // Cloud Functions. The booking owner and staff can read them.
+    match /bookingUpgrades/{upgradeId} {
+      allow read: if isSignedIn()
+                  && (resource.data.userId == request.auth.uid || isStaff());
+      allow create, update, delete: if false;
+    }
+
     // --- floorplans/{floorplanId} ---
     // Public read (displayed on spaces page); admin write.
     match /floorplans/{floorplanId} {

@@ -284,7 +284,7 @@ export const floorplanSchema = z.object({
 
 export type Floorplan = z.infer<typeof floorplanSchema>;
 
-export const resourceTypeSchema = z.enum(["MODE", "SEAT"]);
+export const resourceTypeSchema = z.enum(["MODE", "SEAT", "ROOM"]);
 export type ResourceType = z.infer<typeof resourceTypeSchema>;
 
 export const resourceSchema = z.object({
@@ -295,6 +295,8 @@ export const resourceSchema = z.object({
   capacity: z.number().int().nonnegative(),
   /** Guest (non-member) hourly rate in dollars */
   guestRateHourly: z.number().nonnegative(),
+  /** Other resources that cannot overlap this one (in addition to exclusive-group MODE rules). */
+  blocksResourceIds: z.array(z.string()).optional(),
 });
 
 export type Resource = z.infer<typeof resourceSchema>;
@@ -2032,16 +2034,19 @@ export function getMembershipTierByPriceId(priceId: string): MembershipTierDef |
 // Keep in sync with: apps/functions/src/bookingFlexShared.ts → RESOURCE_CONFIG
 // Seat guest rates follow SEAT_TIERS in seatCatalog.ts (D1–D2 Basic,
 // D3–D4 Window, D5–D6 Equipped). The conference room is a flat weekday slot;
-// its hourly figure is the $249 slot spread over 4 hours.
+// its hourly figure is the $249 slot spread over 4 hours. The private office
+// is a room: $39/hr, mutually exclusive with D1 (and therefore with weekday
+// conference setup, which blocks D1–D6).
 
 export const RESOURCE_CATALOG: Record<string, Resource> = {
-  "seat-1": { id: "seat-1", name: "Seat 1", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
+  "seat-1": { id: "seat-1", name: "Seat 1", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5, blocksResourceIds: ["private-office"] },
   "seat-2": { id: "seat-2", name: "Seat 2", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-3": { id: "seat-3", name: "Seat 3", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 19 },
   "seat-4": { id: "seat-4", name: "Seat 4", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 19 },
   "seat-5": { id: "seat-5", name: "Seat 5", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 22 },
   "seat-6": { id: "seat-6", name: "Seat 6", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 22 },
-  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 6, guestRateHourly: 62.25 },
+  "private-office": { id: "private-office", name: "Private Office", type: "ROOM", exclusiveGroupId: "private_office", capacity: 1, guestRateHourly: 39, blocksResourceIds: ["seat-1", "mode-conference"] },
+  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 6, guestRateHourly: 62.25, blocksResourceIds: ["private-office"] },
 };
 
 export function getResourceById(id: string): Resource | undefined {
@@ -2089,7 +2094,7 @@ export const CONFERENCE_ROOM_CONFIG = {
   /** Weekday 4-hour slot (Morning 8–12 or Afternoon 1–5), flat, in cents. */
   slotPriceCents: 24900,
   slotHours: 4,
-  /** Evening / weekend 4-hour slot by appointment (not bookable online yet). */
+  /** Evening / weekend 4-hour slot by appointment. */
   afterHoursSlotPriceCents: 29900,
 } as const;
 

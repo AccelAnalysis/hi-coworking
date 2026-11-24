@@ -11,6 +11,8 @@ on:
       - "apps/functions/src/adminMemberBookingAuthority.ts"
       - "apps/functions/src/adminBookingScheduledAuthority.ts"
       - "apps/functions/src/adminBookingManagement.ts"
+      - "apps/functions/src/conferenceSlotRequests.ts"
+      - "apps/functions/src/bookingFlexShared.ts"
       - "apps/functions/src/bookingManagement.ts"
       - "apps/functions/src/bookingPolicy.ts"
       - "apps/functions/src/bookingOperatingCalendar.ts"

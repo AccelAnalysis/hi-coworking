@@ -17,6 +17,7 @@ import { AppShell } from "@/components/AppShell";
 import { PublishedSetupDetails } from "@/components/booking/PublishedSetupDetails";
 import { DeskOptionList, type DeskListOption } from "@/components/booking/DeskOptionList";
 import { SeatMapPicker } from "@/components/booking/SeatMapPicker";
+import { AfterHoursConferenceRequest } from "@/components/booking/AfterHoursConferenceRequest";
 import { bookingServiceType } from "@/lib/publishedSetups";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
@@ -56,7 +57,7 @@ type DaySchedule = {
 type AvailabilityOption = {
   resourceId: string;
   name: string;
-  type: "SEAT" | "MODE";
+  type: "SEAT" | "MODE" | "ROOM";
   available: boolean;
 };
 
@@ -77,7 +78,7 @@ type DeskChangePlan = {
 type Quote = {
   resourceId: string;
   resourceName: string;
-  resourceType: "SEAT" | "MODE";
+  resourceType: "SEAT" | "MODE" | "ROOM";
   bookingKind: "single" | "desk_change";
   durationHours: number;
   membershipName: string | null;
@@ -736,7 +737,7 @@ export default function BookingExperienceWithDeskChange() {
   const deskListOptions: DeskListOption[] = SEAT_MAP_PICKER
     ? [
         ...options
-          .filter((option) => option.type === "SEAT")
+          .filter((option) => option.type === "SEAT" || option.type === "ROOM")
           .map((option) => ({
             resourceId: option.resourceId,
             name: getSeatByResourceId(option.resourceId)?.name || option.name,
@@ -773,7 +774,7 @@ export default function BookingExperienceWithDeskChange() {
   const memberDiscountPercent = quote?.membershipName && quote.resourceType === "SEAT"
     ? MEMBERSHIP_TIERS.find((tier) => tier.name === quote.membershipName)?.overageDiscountPercent ?? 0
     : 0;
-  const quoteCapLabel = quote && quote.resourceType === "SEAT" ? capLabel(quote.capApplied) : null;
+  const quoteCapLabel = quote && quote.resourceType !== "MODE" ? capLabel(quote.capApplied) : null;
 
   return (
     <AppShell>
@@ -784,7 +785,7 @@ export default function BookingExperienceWithDeskChange() {
             Start with the space you need.
           </h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">
-            Choose a coworking desk or the meeting room first. We will show only the booking hours currently open for that date, then check live availability for your full stay.
+            Choose a coworking desk, the private office, or the meeting room first. We will show only the booking hours currently open for that date, then check live availability for your full stay.
           </p>
         </header>
 
@@ -811,7 +812,7 @@ export default function BookingExperienceWithDeskChange() {
               <span>
                 <span className="block text-lg font-semibold">Coworking desk</span>
                 <span className={`mt-1 block text-sm leading-6 ${intent === "DESK" ? "text-slate-300" : "text-slate-600"}`}>
-                  Book by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered.
+                  Book a desk or the private office by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered.
                 </span>
               </span>
             </button>
@@ -969,7 +970,7 @@ export default function BookingExperienceWithDeskChange() {
                   <p className="mt-2 text-sm text-slate-600">No 4-hour meeting slot is still open on this date. Choose another weekday.</p>
                 ) : (
                   <p className="mt-2 text-xs text-slate-500">
-                    Evenings and weekends by appointment ({money(CONFERENCE_ROOM_CONFIG.afterHoursSlotPriceCents)} per 4-hour slot). <Link href="/contact" className="font-semibold text-[#101D4B] underline underline-offset-2">Contact us</Link>.
+                    Or request an evening or weekend 4-hour slot below.
                   </p>
                 )}
               </fieldset>
@@ -1002,10 +1003,13 @@ export default function BookingExperienceWithDeskChange() {
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-slate-950 px-6 py-3 font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loadingAvailability ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-                  {intent === "MEETING" ? "Check meeting room" : "Show available desks"}
+                  {intent === "MEETING" ? "Check meeting room" : "Show available spaces"}
                 </button>
               </div>
             )}
+          {intent === "MEETING" && dateValue ? (
+            <AfterHoursConferenceRequest date={dateValue} />
+          ) : null}
           </section>
         ) : null}
 

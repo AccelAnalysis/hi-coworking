@@ -3,9 +3,13 @@
 import { useId, useState, type ReactNode } from "react";
 import { Settings } from "lucide-react";
 import {
+  ARCHITECTURAL_PRIVATE_OFFICE,
+  PRIVATE_OFFICE_RESOURCE_ID,
+  SEAT_MAP_VIEWBOX,
   SEAT_TIERS,
   formatUsdCents,
   accessibleSeatName,
+  isPrivateOfficeResource,
   seatMapPercentToPoint,
   visibleGuestRates,
   type SeatMapSpot,
@@ -78,6 +82,11 @@ export function SeatMapPicker({
   const availableIds = new Set(
     availability.filter((item) => item.available).map((item) => item.resourceId),
   );
+  const officeState: SeatVisualState = selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID
+    ? "selected"
+    : availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)
+      ? "available"
+      : "unavailable";
   const seats = spots.map((spot) => {
     const point = seatMapPercentToPoint(spot);
     return {
@@ -92,14 +101,14 @@ export function SeatMapPicker({
     <div className="text-[#101D4B]">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-xl">
-          <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">3. Choose your desk</h2>
+          <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">3. Choose a desk or the private office</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Pick a specific desk for the full stay. Rates vary by desk; up to 4 hours never costs more than the half-day price, and longer stays never more than the day price.
+            Pick a desk or the right-hand private office for the full stay. Booking the office leaves D1 unsold; D2–D6 stay available. Up to 4 hours never costs more than the half-day price, and longer stays never more than the day price.
           </p>
         </div>
         <div
           role="tablist"
-          aria-label="Desk picker view"
+          aria-label="Space picker view"
           className="inline-flex items-center self-start rounded-full border border-slate-200 bg-slate-100 p-1"
           onKeyDown={(event) => {
             if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -164,6 +173,7 @@ export function SeatMapPicker({
                     titleId={titleId}
                     descId={descId}
                     highlightedId={hoveredId ?? focusedId}
+                    officeState={officeState}
                     seats={seats.map(({ spot, state, x, y }) => ({
                       resourceId: spot.resourceId,
                       displayId: spot.displayId,
@@ -173,6 +183,16 @@ export function SeatMapPicker({
                     }))}
                   />
                 )}
+                <PrivateOfficeHitTarget
+                  state={officeState}
+                  available={availableIds.has(PRIVATE_OFFICE_RESOURCE_ID)}
+                  selected={selectedResourceId === PRIVATE_OFFICE_RESOURCE_ID}
+                  loadingQuote={loadingQuote}
+                  blockedReason={officeBlockReason(availability)}
+                  onSelect={() => onSelectSeat(PRIVATE_OFFICE_RESOURCE_ID)}
+                  onHover={setHoveredId}
+                  onFocus={setFocusedId}
+                />
                 {seats.map(({ spot, state }) => {
                   const selectable = state === "available" && !loadingQuote;
                   const rates = visibleGuestRates(spot.resourceId);
@@ -217,7 +237,7 @@ export function SeatMapPicker({
               </div>
             </div>
             <p className="mt-2 text-xs text-slate-600 sm:hidden">
-              Swipe the plan sideways to see the lounge and private office. Neither is bookable.
+              Swipe the plan sideways to see the lounge and the bookable private office.
             </p>
           </div>
 
@@ -228,7 +248,7 @@ export function SeatMapPicker({
 
         <aside
           className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs lg:sticky lg:top-6 lg:col-span-4"
-          aria-label="Selected desk"
+          aria-label="Selected space"
         >
           <SeatSummary
             spots={spots}
@@ -254,14 +274,33 @@ function SeatSummary({
   summary?: ReactNode;
 }) {
   const selected = spots.find((spot) => spot.resourceId === selectedResourceId);
+  if (selectedResourceId && isPrivateOfficeResource(selectedResourceId)) {
+    const available = availableIds.has(PRIVATE_OFFICE_RESOURCE_ID);
+    const rates = visibleGuestRates(PRIVATE_OFFICE_RESOURCE_ID);
+    return (
+      <div>
+        <div aria-live="polite">
+          <p className="text-xs font-medium text-slate-500">Selected room</p>
+          <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">Private Office</h3>
+        </div>
+        <p className="mt-1 text-sm text-slate-600">Right-hand room for signings, notary, and closed-door work.</p>
+        <p className="mt-3 text-xs font-semibold text-slate-800">{available ? "Available" : "Unavailable"}</p>
+        <p className="mt-1 text-sm text-[#4A5585]">{[rates.halfDay ? `${rates.halfDay} half day` : null, rates.day ? `${rates.day} day` : null, rates.hourly ? `${rates.hourly}/hr` : null].filter(Boolean).join(" · ")}</p>
+        <p className="mt-4 text-xs leading-5 text-slate-500">
+          Weekday full days are offered. This room does not use membership desk hours. Booking it leaves D1 unsold; D2–D6 stay available.
+        </p>
+        {summary ? <div className="mt-5 border-t border-slate-100 pt-5">{summary}</div> : null}
+      </div>
+    );
+  }
   if (!selected) {
     const availableCount = spots.filter((spot) => spot.bookable && availableIds.has(spot.resourceId)).length;
     return (
       <div aria-live="polite">
-        <p className="text-xs font-medium text-slate-500">Selected desk</p>
-        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">Choose a desk on the map</h3>
+        <p className="text-xs font-medium text-slate-500">Selected space</p>
+        <h3 className="font-display mt-1 text-xl font-semibold text-[#101D4B]">Choose a desk or the private office</h3>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only. The private office isn&apos;t bookable.
+          {availableCount} available desk{availableCount === 1 ? "" : "s"} for this time. D7 is the reception desk and stays staff-only. The private office is booked on its own and leaves D1 unsold.
         </p>
       </div>
     );
@@ -287,5 +326,79 @@ function SeatSummary({
       </p>
       {summary ? <div className="mt-5 border-t border-slate-100 pt-5">{summary}</div> : null}
     </div>
+  );
+}
+
+function officeBlockReason(availability: SeatAvailability[]) {
+  const office = availability.find((item) => item.resourceId === PRIVATE_OFFICE_RESOURCE_ID);
+  if (!office || office.available) return null;
+  const desk1 = availability.find((item) => item.resourceId === "seat-1");
+  const conference = availability.find((item) => item.resourceId === "mode-conference");
+  if (conference && !conference.available) return "Unavailable because the conference room is in use.";
+  if (desk1 && !desk1.available) return "Unavailable because D1 is booked for this time.";
+  return "Unavailable for this time.";
+}
+
+function privateOfficeBoxPercent() {
+  const { x, y, width, height } = ARCHITECTURAL_PRIVATE_OFFICE;
+  return {
+    left: ((x - SEAT_MAP_VIEWBOX.x) / SEAT_MAP_VIEWBOX.width) * 100,
+    top: ((y - SEAT_MAP_VIEWBOX.y) / SEAT_MAP_VIEWBOX.height) * 100,
+    width: (width / SEAT_MAP_VIEWBOX.width) * 100,
+    height: (height / SEAT_MAP_VIEWBOX.height) * 100,
+  };
+}
+
+function PrivateOfficeHitTarget({
+  state,
+  available,
+  selected,
+  loadingQuote,
+  blockedReason,
+  onSelect,
+  onHover,
+  onFocus,
+}: {
+  state: SeatVisualState;
+  available: boolean;
+  selected: boolean;
+  loadingQuote?: boolean;
+  blockedReason: string | null;
+  onSelect: () => void;
+  onHover: (id: string | null) => void;
+  onFocus: (id: string | null) => void;
+}) {
+  const box = privateOfficeBoxPercent();
+  const selectable = available && !loadingQuote && state !== "staff";
+  const rates = visibleGuestRates(PRIVATE_OFFICE_RESOURCE_ID);
+  const label = [
+    "Private Office",
+    stateLabel(state),
+    rates.hourly && rates.halfDay && rates.day ? `${rates.hourly}/hr, ${rates.halfDay} half day, ${rates.day} day` : "",
+    !available && blockedReason ? blockedReason : "",
+  ].filter(Boolean).join(", ");
+  return (
+    <button
+      type="button"
+      disabled={!selectable}
+      aria-pressed={selected}
+      aria-label={label}
+      onClick={onSelect}
+      onPointerEnter={() => onHover(PRIVATE_OFFICE_RESOURCE_ID)}
+      onPointerLeave={() => onHover(null)}
+      onFocus={() => onFocus(PRIVATE_OFFICE_RESOURCE_ID)}
+      onBlur={() => onFocus(null)}
+      data-resource={PRIVATE_OFFICE_RESOURCE_ID}
+      data-office-hit-target
+      style={{
+        left: `${box.left}%`,
+        top: `${box.top}%`,
+        width: `${box.width}%`,
+        height: `${box.height}%`,
+      }}
+      className={`absolute z-10 min-h-11 min-w-11 touch-manipulation rounded-xl bg-transparent ${NAVY_FOCUS} ${
+        selectable ? "cursor-pointer" : "cursor-not-allowed"
+      }`}
+    />
   );
 }

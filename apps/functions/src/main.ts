@@ -145,6 +145,18 @@ export {
   admin_bookingForMemberBeginCheckout,
 } from "./bookingScheduledAuthority";
 export { booking_onDeskChangeBookingUpdated } from "./bookingJourney";
+export {
+  booking_listAfterHoursConferenceSlots,
+  booking_requestAfterHoursConference,
+  admin_listConferenceSlotRequests,
+  admin_reviewConferenceSlotRequest,
+} from "./conferenceSlotRequests";
+export {
+  booking_previewUpgrade,
+  booking_beginUpgrade,
+  booking_finalizeUpgrade,
+  booking_onUpgradePaymentUpdated,
+} from "./bookingUpgrade";
 // OFF unless BOOKING_HOLD_CLEANUP_MODE is set; deploying needs Jonathan's OK.
 export { booking_cleanupAbandonedHolds } from "./bookingHoldCleanupSweep";
 export {

@@ -15,9 +15,14 @@ import {
   conferenceSlotFor,
   deskPricingPlanFor,
   priceDeskSegments,
+  pricePrivateOffice,
   type DeskCapApplied,
   type DeskPricingSegment,
 } from "./payments/deskPricing";
+import {
+  PRIVATE_OFFICE_RESOURCE_ID,
+  isPrivateOfficeResource,
+} from "./payments/stripeConfig";
 import {
   BOOKING_CLOSE_HOUR,
   BOOKING_HOURS_MESSAGE,
@@ -45,19 +50,35 @@ export const RESCHEDULE_LOCK_END = Date.UTC(2100, 0, 1);
  * conference room is a flat $249 weekday 4-hour slot; its hourly figure is
  * only the slot price spread over 4 hours, for display.
  */
+export type BookableResourceType = "SEAT" | "MODE" | "ROOM";
+
 export const RESOURCE_CONFIG: Record<string, {
   name: string;
-  type: "SEAT" | "MODE";
+  type: BookableResourceType;
   guestRateHourlyCents: number;
   exclusiveGroupId: string;
+  blocksResourceIds?: readonly string[];
 }> = {
-  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space", blocksResourceIds: [PRIVATE_OFFICE_RESOURCE_ID] },
   "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
   "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
   "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
   "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
   "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
-  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: Math.round(CONFERENCE_ROOM_SLOT_PRICE_CENTS / CONFERENCE_ROOM_SLOT_HOURS), exclusiveGroupId: "main_space" },
+  [PRIVATE_OFFICE_RESOURCE_ID]: {
+    name: "Private Office",
+    type: "ROOM",
+    guestRateHourlyCents: 3900,
+    exclusiveGroupId: "private_office",
+    blocksResourceIds: ["seat-1", "mode-conference"],
+  },
+  "mode-conference": {
+    name: "Meeting setup",
+    type: "MODE",
+    guestRateHourlyCents: Math.round(CONFERENCE_ROOM_SLOT_PRICE_CENTS / CONFERENCE_ROOM_SLOT_HOURS),
+    exclusiveGroupId: "main_space",
+    blocksResourceIds: [PRIVATE_OFFICE_RESOURCE_ID],
+  },
 };
 
 export const DESK_RESOURCE_IDS = Object.keys(RESOURCE_CONFIG).filter(
@@ -70,6 +91,8 @@ export type BusyRecord = {
   end: number;
   status?: string;
   expiresAt?: number;
+  /** Evening/weekend conference reservations do not displace weekday desks. */
+  afterHours?: boolean;
 };
 
 export type DeskSegment = {
@@ -87,7 +110,7 @@ export type DeskChangePlan = {
 };
 
 export type BookingChoice =
-  | { kind: "single"; resourceId: string; resourceName: string; resourceType: "SEAT" | "MODE" }
+  | { kind: "single"; resourceId: string; resourceName: string; resourceType: BookableResourceType }
   | { kind: "desk_change"; resourceId: typeof FLEX_RESOURCE_ID; resourceName: string; resourceType: "SEAT"; planId: string; segments: [DeskSegment, DeskSegment] };
 
 export type UsageReservation = { hours: number; expiresAt: number };
@@ -103,7 +126,7 @@ export type MembershipUsage = {
 export type BookingQuote = {
   resourceId: string;
   resourceName: string;
-  resourceType: "SEAT" | "MODE";
+  resourceType: BookableResourceType;
   bookingKind: "single" | "desk_change";
   start: number;
   end: number;
@@ -193,6 +216,48 @@ export function requireConferenceSlot(start: number, end: number): ConferenceSlo
   return slot;
 }
 
+
+/** Convert a facility-local YYYY-MM-DD and HH:MM (or 24:00) to a UTC timestamp. */
+export function facilityWallTimeToTimestamp(dateValue: string, timeValue: string) {
+  const normalized = timeValue === "24:00" ? "00:00" : timeValue;
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hour, minute] = normalized.split(":").map(Number);
+  const dayOffset = timeValue === "24:00" ? 1 : 0;
+  const targetAsUtc = Date.UTC(year, month - 1, day + dayOffset, hour, minute, 0, 0);
+  let guess = targetAsUtc;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const values = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: LOCATION_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date(guess)).map((part) => [part.type, part.value]),
+    );
+    const observedAsUtc = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      0,
+      0,
+    );
+    guess += targetAsUtc - observedAsUtc;
+  }
+  return guess;
+}
+
+export function fullDayWindowForDate(dateValue: string) {
+  return {
+    start: facilityWallTimeToTimestamp(dateValue, "08:00"),
+    end: facilityWallTimeToTimestamp(dateValue, "17:00"),
+  };
+}
+
 export function validateWindow(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
     throw new HttpsError("invalid-argument", "Choose a valid start and end time.");
@@ -237,10 +302,18 @@ export function resourceConflicts(resourceId: string, start: number, end: number
   if (!target) return true;
   return busy.some((record) => {
     if (!overlaps(start, end, record.start, record.end)) return false;
-    if (["CANCELLED", "EXPIRED", "CONSUMED"].includes(String(record.status || ""))) return false;
+    if (["CANCELLED", "EXPIRED", "CONSUMED", "DECLINED"].includes(String(record.status || ""))) return false;
     if (record.resourceId === resourceId) return true;
     const other = RESOURCE_CONFIG[record.resourceId];
-    if (!other || other.exclusiveGroupId !== target.exclusiveGroupId) return false;
+    if (!other) return false;
+    // Evening/weekend conference is by appointment and does not displace desks
+    // or the private office. It only conflicts with other conference use.
+    if (record.afterHours && other.type === "MODE") return false;
+    if (target.type === "MODE" && record.afterHours) return resourceId === "mode-conference" && record.resourceId === "mode-conference";
+    const blocked = (target.blocksResourceIds || []).includes(record.resourceId)
+      || (other.blocksResourceIds || []).includes(resourceId);
+    if (blocked) return true;
+    if (other.exclusiveGroupId !== target.exclusiveGroupId) return false;
     return target.type === "MODE" || other.type === "MODE";
   });
 }
@@ -464,6 +537,19 @@ export function priceChoice(
   end: number,
   options: { membershipTier?: MembershipTier; includedHoursRemaining?: number } = {},
 ): ChoicePricing {
+  if (isPrivateOfficeResource(choice.resourceId) || choice.resourceType === "ROOM") {
+    const priced = pricePrivateOffice((end - start) / 3_600_000);
+    return {
+      membershipName: null,
+      includedHoursRemaining: 0,
+      includedHoursApplied: 0,
+      billableHours: priced.billableHours,
+      hourlyRateCents: priced.hourlyRateCents,
+      subtotalCents: priced.subtotalCents,
+      dailyCapApplied: priced.capApplied !== null,
+      capApplied: priced.capApplied,
+    };
+  }
   if (choice.resourceType === "MODE") {
     const conferenceSlot = requireConferenceSlot(start, end);
     return {
@@ -504,6 +590,12 @@ export function checkoutLineLabel(quote: BookingQuote) {
   if (quote.resourceType === "MODE") {
     const slot = quote.conferenceSlot === "afternoon" ? "Afternoon 1–5 PM" : "Morning 8 AM–12 PM";
     return `Conference room · ${slot} · 4-hour slot`;
+  }
+  if (quote.resourceType === "ROOM" || isPrivateOfficeResource(quote.resourceId)) {
+    const cap = quote.capApplied === "half_day"
+      ? " (half-day price)"
+      : quote.capApplied === "day" ? " (day price)" : "";
+    return `Private Office · ${hours}${cap}`;
   }
   const cap = quote.capApplied === "half_day"
     ? " (half-day price)"

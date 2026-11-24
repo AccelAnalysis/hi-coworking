@@ -99,7 +99,7 @@ export const CREDIT_COSTS = {
 
 export const RESOURCE_CONFIG: Record<string, {
   name: string;
-  type: "SEAT" | "MODE";
+  type: "SEAT" | "MODE" | "ROOM";
   guestRateHourly: number;
   exclusiveGroupId: string;
   capacity: number;
@@ -110,5 +110,6 @@ export const RESOURCE_CONFIG: Record<string, {
   "seat-4": { name: "Seat 4", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-5": { name: "Seat 5", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-6": { name: "Seat 6", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
+  "private-office": { name: "Private Office", type: "ROOM", guestRateHourly: 39, exclusiveGroupId: "private_office", capacity: 1 },
   "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 99, exclusiveGroupId: "main_space", capacity: 6 },
 };

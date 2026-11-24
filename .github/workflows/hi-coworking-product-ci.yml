@@ -172,6 +172,7 @@ jobs:
           tests/web/refund-copy.test.ts
           tests/functions/booking-policy.test.ts
           tests/functions/tiered-pricing.test.ts
+          tests/functions/phase2-booking-logic.test.ts
           tests/functions/booking-hold-cleanup.test.ts
           tests/functions/booking-operating-calendar.test.ts
           tests/functions/booking-operating-calendar-deployment-source.test.ts
@@ -210,6 +211,7 @@ jobs:
           tests/web/event-series-form.test.ts
           tests/web/published-setups.test.ts
           tests/web/seat-map-picker.test.ts
+          tests/web/phase2-booking-ui.test.ts
           tests/web/my-hi-nav.test.ts
           tests/web/admin-member-record-pages.test.ts
           tests/web/public-rfx-quarantine.test.ts
@@ -248,6 +250,7 @@ jobs:
           --only auth,firestore,functions
           "npx vitest run
           tests/functions/booking-journey.test.ts
+          tests/functions/phase2-booking.journey.test.ts
           tests/functions/bookstore-commerce.test.ts
           tests/functions/events-v2.test.ts
           tests/functions/event-interest-sms-optional.test.ts
@@ -262,7 +265,7 @@ jobs:
           npx firebase emulators:exec
           --project demo-hi-coworking
           --only firestore
-          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts tests/rules/staff-follow-ups.rules.test.ts tests/rules/sayhi-account-details.rules.test.ts"
+          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts tests/rules/staff-follow-ups.rules.test.ts tests/rules/sayhi-account-details.rules.test.ts tests/rules/conference-requests.rules.test.ts"
 
       - name: Build production web application
         run: npm run build
@@ -300,6 +303,7 @@ jobs:
             'admin/events',
             'staff',
             'admin/front-desk',
+            'admin/conference-requests',
             'kiosk/front-desk',
           ];
 

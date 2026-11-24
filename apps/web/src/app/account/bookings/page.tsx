@@ -149,6 +149,7 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
   // Renter screening: existing members are asked (never forced) to finish
   // the business profile on /preferences. Sign-in is never blocked.
   const [businessProfileMissing, setBusinessProfileMissing] = useState(false);
+  const [upgradeNotice, setUpgradeNotice] = useState<string | null>(null);
 
   // SayHi billing-address readback: the server copies it from Stripe
   // Checkout into the member's own accountDetails doc.
@@ -168,6 +169,45 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
       active = false;
     };
   }, [user]);
+
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    if (params.get("upgrade") === "cancelled") {
+      setUpgradeNotice("The full-day upgrade checkout was cancelled. Your original booking is unchanged.");
+      return;
+    }
+    const upgradeId = params.get("upgradeId");
+    if (!upgradeId || params.get("upgrade") !== "success") return;
+    let storedSecret: string | undefined;
+    try {
+      const stored = window.sessionStorage.getItem("hi-coworking-booking-upgrade");
+      if (stored) {
+        const parsed = JSON.parse(stored) as { upgradeId?: string; upgradeSecret?: string };
+        if (parsed.upgradeId === upgradeId) storedSecret = parsed.upgradeSecret;
+      }
+    } catch {
+      storedSecret = undefined;
+    }
+    const finalize = httpsCallable<{ upgradeId: string; upgradeSecret?: string }, { success: boolean }>(
+      functions,
+      "booking_finalizeUpgrade",
+    );
+    void finalize({ upgradeId, upgradeSecret: storedSecret })
+      .then(() => {
+        window.sessionStorage.removeItem("hi-coworking-booking-upgrade");
+        setUpgradeNotice("Your booking is now a full day, 8:00 AM–5:00 PM.");
+        if (user) {
+          getUserBookingsFromFirestore(user.uid)
+            .then((records) => setBookings(records as ManagedBooking[]))
+            .catch(() => undefined);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+        setUpgradeNotice("Payment was received, but the full-day update is still settling. Refresh this page in a moment.");
+      });
+  }, [search, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -333,6 +373,12 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
             </span>
             <ChevronRight className="ml-auto h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />
           </Link>
+        ) : null}
+
+        {upgradeNotice ? (
+          <div className="mb-6 rounded-2xl bg-[#EEF0F6] px-4 py-3 text-sm text-[#101D4B]" role="status" data-testid="upgrade-notice">
+            {upgradeNotice}
+          </div>
         ) : null}
 
         {showWelcome && (
