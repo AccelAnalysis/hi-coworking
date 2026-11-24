@@ -6,7 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import { doc, getDoc } from "firebase/firestore";
 import {
   ArrowRight,
-  Building2,
+  ChevronRight,
   Calendar,
   Clock,
   CreditCard,
@@ -325,11 +325,13 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
           <Link
             href="/preferences#business"
             data-testid="business-profile-prompt"
-            className={`mb-8 flex min-h-11 items-center gap-3 rounded-2xl bg-[#EEF0F6] p-4 text-sm font-semibold text-[#101D4B] ring-1 ring-[#C5CADB] hover:bg-[#E3E6F0] ${FOCUS_RING}`}
+            className={`mb-8 flex min-h-11 items-center gap-4 rounded-2xl border border-slate-200/80 bg-white px-5 py-4 transition-colors hover:bg-slate-50 ${FOCUS_RING}`}
           >
-            <Building2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-            <span>Finish your business profile</span>
-            <span aria-hidden="true" className="ml-auto">→</span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold text-[#101D4B]">Finish your business profile</span>
+              <span className="mt-0.5 block text-sm text-slate-600">Add your business details before your next visit.</span>
+            </span>
+            <ChevronRight className="ml-auto h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />
           </Link>
         ) : null}
 

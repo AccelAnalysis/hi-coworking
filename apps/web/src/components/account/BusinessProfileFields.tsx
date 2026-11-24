@@ -1,6 +1,6 @@
 "use client";
 
-import { BriefcaseBusiness, Building2, Globe, Landmark, UserRound } from "lucide-react";
+import { HIG_FIELD, HIG_LABEL, HigSegmented, HigSelect, HigSwitch, NearLimitCount } from "../forms/HigControls";
 import {
   BUSINESS_LIMITS,
   BUSINESS_ROLES,
@@ -49,9 +49,7 @@ export function businessDraftFromStored(stored: Record<string, unknown> | null |
   };
 }
 
-const FIELD =
-  "mt-1.5 w-full min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#101D4B]";
-const LABEL = "flex items-center gap-2 text-sm font-semibold text-slate-700";
+const DESCRIPTION_WARN_AT = BUSINESS_LIMITS.businessDescription - 30;
 
 type Props = {
   idPrefix: string;
@@ -62,19 +60,28 @@ type Props = {
   invalidField?: string | null;
 };
 
+const ROLE_OPTIONS = BUSINESS_ROLES.map((role) => ({ value: role, label: BUSINESS_ROLE_LABELS[role] }));
+
 export function BusinessProfileFields({ idPrefix, value, onChange, disabled, invalidField }: Props) {
   const set = (patch: Partial<BusinessProfileDraft>) => onChange({ ...value, ...patch });
   const id = (name: string) => `${idPrefix}-${name}`;
   const invalid = (name: string) => (invalidField === name ? true : undefined);
 
   return (
-    <fieldset className="grid gap-5 sm:grid-cols-2" disabled={disabled} data-testid="business-profile-fields">
+    <fieldset className="grid gap-5" disabled={disabled} data-testid="business-profile-fields">
       <legend className="sr-only">Your business</legend>
 
-      <div className="sm:col-span-2">
-        <label className={LABEL} htmlFor={id("company")}>
-          <Building2 className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Business name
-        </label>
+      <div>
+        <div className="mb-1.5 flex h-6 items-center justify-between gap-3">
+          <label className={HIG_LABEL} htmlFor={id("company")}>Business name</label>
+          <HigSwitch
+            id={id("independent")}
+            label="Independent"
+            checked={value.isIndependent}
+            disabled={disabled}
+            onChange={(isIndependent) => set({ isIndependent })}
+          />
+        </div>
         <input
           id={id("company")}
           type="text"
@@ -86,72 +93,41 @@ export function BusinessProfileFields({ idPrefix, value, onChange, disabled, inv
           value={value.isIndependent ? "" : value.company}
           onChange={(event) => set({ company: event.target.value })}
           placeholder={value.isIndependent ? INDEPENDENT_LABEL : "Your company or organization"}
-          className={`${FIELD} disabled:bg-slate-100 disabled:text-slate-500`}
+          className={HIG_FIELD}
         />
-        <label className="mt-2 flex min-h-11 cursor-pointer items-center gap-3 text-sm text-slate-700" htmlFor={id("independent")}>
-          <input
-            id={id("independent")}
-            type="checkbox"
-            checked={value.isIndependent}
-            onChange={(event) => set({ isIndependent: event.target.checked })}
-            className="h-5 w-5 shrink-0 accent-[#101D4B]"
-          />
-          {INDEPENDENT_LABEL}
-        </label>
-      </div>
-
-      <div className="sm:col-span-2" role="radiogroup" aria-labelledby={id("role-label")} aria-required="true" aria-invalid={invalid("role")}>
-        <p id={id("role-label")} className={LABEL}>
-          <UserRound className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Your role
-        </p>
-        <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {BUSINESS_ROLES.map((role) => {
-            const selected = value.role === role;
-            return (
-              <label
-                key={role}
-                className={`flex min-h-11 cursor-pointer items-center justify-center rounded-xl border px-3 text-sm font-medium transition-colors focus-within:ring-2 focus-within:ring-[#101D4B] focus-within:ring-offset-2 ${
-                  selected ? "border-[#101D4B] bg-[#101D4B] text-white" : "border-slate-300 bg-white text-slate-800 hover:border-[#101D4B]"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name={id("role")}
-                  value={role}
-                  checked={selected}
-                  onChange={() => set({ role })}
-                  className="sr-only"
-                />
-                {BUSINESS_ROLE_LABELS[role]}
-              </label>
-            );
-          })}
-        </div>
       </div>
 
       <div>
-        <label className={LABEL} htmlFor={id("type")}>
-          <BriefcaseBusiness className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Business type
-        </label>
-        <select
+        <p id={id("role-label")} className={`${HIG_LABEL} mb-1.5`}>Your role</p>
+        <HigSegmented
+          name={id("role")}
+          labelledBy={id("role-label")}
+          options={ROLE_OPTIONS}
+          value={value.role}
+          invalid={invalid("role")}
+          onChange={(role) => set({ role })}
+        />
+      </div>
+
+      <div>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor={id("type")}>Business type</label>
+        <HigSelect
           id={id("type")}
           required
           aria-invalid={invalid("businessType")}
           value={value.businessType}
           onChange={(event) => set({ businessType: event.target.value })}
-          className={FIELD}
+          className={value.businessType ? "" : "text-slate-500"}
         >
           <option value="" disabled>Choose one</option>
           {BUSINESS_TYPES.map((type) => (
             <option key={type} value={type}>{BUSINESS_TYPE_LABELS[type]}</option>
           ))}
-        </select>
+        </HigSelect>
       </div>
 
       <div>
-        <label className={LABEL} htmlFor={id("description")}>
-          What you do
-        </label>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor={id("description")}>What you do</label>
         <input
           id={id("description")}
           type="text"
@@ -162,49 +138,52 @@ export function BusinessProfileFields({ idPrefix, value, onChange, disabled, inv
           value={value.businessDescription}
           onChange={(event) => set({ businessDescription: event.target.value })}
           placeholder="e.g. Bookkeeping for local shops"
-          className={FIELD}
+          className={HIG_FIELD}
         />
-        <p id={id("description-count")} className="mt-1 text-xs text-slate-600">
-          {value.businessDescription.length}/{BUSINESS_LIMITS.businessDescription}
-        </p>
-      </div>
-
-      <div>
-        <label className={LABEL} htmlFor={id("website")}>
-          <Globe className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Website <span className="font-normal text-slate-600">(optional)</span>
-        </label>
-        <input
-          id={id("website")}
-          type="text"
-          inputMode="url"
-          autoComplete="url"
-          maxLength={BUSINESS_LIMITS.website}
-          aria-invalid={invalid("website")}
-          value={value.website}
-          onChange={(event) => set({ website: event.target.value })}
-          placeholder="example.com"
-          className={FIELD}
+        <NearLimitCount
+          id={id("description-count")}
+          length={value.businessDescription.length}
+          max={BUSINESS_LIMITS.businessDescription}
+          warnAt={DESCRIPTION_WARN_AT}
         />
       </div>
 
-      <div>
-        <label className={LABEL} htmlFor={id("scc")}>
-          <Landmark className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Virginia SCC ID <span className="font-normal text-slate-600">(optional)</span>
-        </label>
-        <input
-          id={id("scc")}
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={BUSINESS_LIMITS.vaSccNumber}
-          aria-invalid={invalid("vaSccNumber")}
-          aria-describedby={id("scc-hint")}
-          value={value.vaSccNumber}
-          onChange={(event) => set({ vaSccNumber: event.target.value })}
-          placeholder="S1234567"
-          className={FIELD}
-        />
-        <p id={id("scc-hint")} className="mt-1 text-xs text-slate-600">Business registration number, if you have one.</p>
+      <div className="border-t border-slate-100 pt-4">
+        <p className="mb-3 text-sm font-medium text-slate-600">Optional</p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div>
+            <label className={`${HIG_LABEL} mb-1.5`} htmlFor={id("website")}>Website</label>
+            <input
+              id={id("website")}
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              maxLength={BUSINESS_LIMITS.website}
+              aria-invalid={invalid("website")}
+              value={value.website}
+              onChange={(event) => set({ website: event.target.value })}
+              placeholder="example.com"
+              className={HIG_FIELD}
+            />
+          </div>
+          <div>
+            <label className={`${HIG_LABEL} mb-1.5`} htmlFor={id("scc")}>Virginia SCC ID</label>
+            <input
+              id={id("scc")}
+              type="text"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={BUSINESS_LIMITS.vaSccNumber}
+              aria-invalid={invalid("vaSccNumber")}
+              aria-describedby={id("scc-hint")}
+              value={value.vaSccNumber}
+              onChange={(event) => set({ vaSccNumber: event.target.value })}
+              placeholder="S1234567"
+              className={HIG_FIELD}
+            />
+            <p id={id("scc-hint")} className="mt-1 text-xs text-slate-600">State business registration, if you have one.</p>
+          </div>
+        </div>
       </div>
     </fieldset>
   );

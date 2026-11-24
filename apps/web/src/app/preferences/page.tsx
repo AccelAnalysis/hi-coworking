@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { doc, getDoc } from "firebase/firestore";
-import { Building2, CheckCircle2, Loader2, MailX, MessageSquare, Phone } from "lucide-react";
+import { Building2, CheckCircle2, Loader2, MailX, MessageSquare } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { SmsConsentCheckbox } from "@/components/sms/SmsConsentCheckbox";
 import { useAuth } from "@/lib/authContext";
 import { db, functions } from "@/lib/firebase";
+import { HIG_CARD, HIG_FIELD, HIG_LABEL, HIG_PRIMARY } from "@/components/forms/HigControls";
 import {
   BusinessProfileFields,
   EMPTY_BUSINESS_PROFILE,
@@ -143,7 +144,7 @@ function BusinessProfileSection() {
         ) : null}
       </div>
       {complete === false ? (
-        <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200" role="note" data-testid="business-profile-prompt">
+        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 ring-1 ring-amber-200" role="note" data-testid="business-profile-prompt">
           Finish your business profile so we have it on file before your next visit.
         </p>
       ) : (
@@ -153,41 +154,35 @@ function BusinessProfileSection() {
         <Loader2 className="mt-6 h-6 w-6 animate-spin text-slate-400" aria-label="Loading" />
       ) : (
         <form
-          className="mt-6 space-y-5"
+          className={`${HIG_CARD} mt-6 grid gap-5 p-5 sm:p-6`}
           onSubmit={(event) => {
             event.preventDefault();
             void save();
           }}
         >
-          <div className="grid gap-5 sm:grid-cols-2">
-            <div>
-              <label htmlFor="business-phone" className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <Phone className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Phone number
-              </label>
-              <input
-                id="business-phone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                required
-                aria-invalid={invalidField === "phone" ? true : undefined}
-                value={phone}
-                onChange={(event) => setPhone(event.target.value)}
-                placeholder="(555) 555-5555"
-                className="mt-1.5 w-full min-h-11 rounded-xl border border-slate-300 px-3 py-2 text-slate-900 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#101D4B]"
-              />
-            </div>
+          <div className="sm:max-w-sm">
+            <label htmlFor="business-phone" className={`${HIG_LABEL} mb-1.5`}>Phone number</label>
+            <input
+              id="business-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              required
+              aria-invalid={invalidField === "phone" ? true : undefined}
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="(555) 555-5555"
+              className={HIG_FIELD}
+            />
           </div>
           <BusinessProfileFields idPrefix="profile-business" value={draft} onChange={setDraft} disabled={busy} invalidField={invalidField} />
           {error && <p className="text-sm text-rose-700" role="alert">{error}</p>}
           {status && <p className="text-sm text-emerald-700" role="status">{status}</p>}
-          <button
-            type="submit"
-            disabled={busy}
-            className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#101D4B] px-5 py-2 text-sm font-semibold text-white hover:bg-[#3A4675] disabled:opacity-70"
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" /> : "Save business profile"}
-          </button>
+          <div className="flex justify-end border-t border-slate-100 pt-5">
+            <button type="submit" disabled={busy} className={HIG_PRIMARY}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" /> : "Save business profile"}
+            </button>
+          </div>
         </form>
       )}
     </section>

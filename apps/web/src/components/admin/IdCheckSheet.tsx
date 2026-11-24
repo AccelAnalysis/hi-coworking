@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ConfirmSheet } from "@/components/admin/ConfirmSheet";
 import { cleanInitials } from "@/lib/idCheck";
+import { HIG_FIELD, HIG_LABEL } from "@/components/forms/HigControls";
 
 /**
  * Staff confirm sheet for the first-visit in-person ID check. Records yes/no,
@@ -26,6 +27,7 @@ export function IdCheckSheet({
 }) {
   const [initials, setInitials] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
+  const initialsId = useId();
 
   return (
     <ConfirmSheet
@@ -48,17 +50,16 @@ export function IdCheckSheet({
       }}
     >
       <div className="space-y-4 text-left">
-        {checked ? (
-          <p className="text-sm text-slate-700">
-            Confirm you looked at a photo ID in person and the name matches. Don&apos;t write down or photograph the ID.
-          </p>
-        ) : (
-          <p className="text-sm text-slate-700">The member will need an ID check again on their next visit.</p>
-        )}
-        <label className="block space-y-1 text-sm font-medium text-slate-800">
-          <span className="block">Your initials</span>
+        <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 ring-1 ring-inset ring-slate-200">
+          {checked
+            ? "Look at a photo ID in person and confirm the name matches. Don’t write down or photograph the ID."
+            : "The member will need an ID check again on their next visit."}
+        </p>
+        <div className="w-28">
+          <label htmlFor={initialsId} className={`${HIG_LABEL} mb-1.5`}>Your initials</label>
           <input
-            className="min-h-11 w-32 rounded-xl border border-slate-300 px-3 text-base uppercase tracking-widest text-slate-900"
+            id={initialsId}
+            className={`${HIG_FIELD} text-center font-semibold uppercase tracking-[0.2em]`}
             value={initials}
             onChange={(event) => setInitials(cleanInitials(event.target.value))}
             autoComplete="off"
@@ -66,9 +67,10 @@ export function IdCheckSheet({
             spellCheck={false}
             maxLength={4}
             inputMode="text"
+            placeholder="JD"
             required
           />
-        </label>
+        </div>
         {problem ? <p className="text-sm text-rose-700" role="alert">{problem}</p> : null}
       </div>
     </ConfirmSheet>

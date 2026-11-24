@@ -56,19 +56,21 @@ export function ConfirmSheet({
         event.preventDefault();
         if (!busy) onClose();
       }}
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-3xl bg-white p-0 text-slate-950 shadow-2xl backdrop:bg-slate-950/40"
+      className="m-auto w-[min(30rem,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-white p-0 text-slate-950 shadow-2xl ring-1 ring-slate-900/5 backdrop:bg-slate-950/40"
     >
       {open && (
-        <div className="p-6">
-          <h2 id={titleId} className="text-xl font-semibold tracking-tight">{title}</h2>
-          {children && <div id={bodyId} className="mt-3 space-y-3 text-sm leading-6 text-slate-700">{children}</div>}
-          <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <>
+          <div className="px-6 pb-5 pt-6">
+            <h2 id={titleId} className="font-display text-xl font-semibold text-[#101D4B]">{title}</h2>
+            {children && <div id={bodyId} className="mt-3 space-y-3 text-sm leading-6 text-slate-700">{children}</div>}
+          </div>
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50/70 px-6 py-4 sm:flex-row sm:justify-end">
             <button
               type="button"
               onClick={onClose}
               disabled={busy}
               autoFocus
-              className="min-h-11 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-300 disabled:opacity-50"
+              className="min-h-11 rounded-full bg-white px-5 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#101D4B] disabled:opacity-50"
             >
               {cancelLabel}
             </button>
@@ -76,13 +78,13 @@ export function ConfirmSheet({
               type="button"
               onClick={() => void onConfirm()}
               disabled={busy || confirmDisabled}
-              className={`inline-flex min-h-11 items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 ${destructive ? "bg-rose-700" : "bg-slate-950"}`}
+              className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-5 py-2 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#101D4B] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-600 ${destructive ? "bg-rose-700 hover:bg-rose-800" : "bg-[#101D4B] hover:bg-[#1B2A63]"}`}
             >
               {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               {confirmLabel}
             </button>
           </div>
-        </div>
+        </>
       )}
     </dialog>
   );

@@ -4,17 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import {
   ArrowRight,
-  Building2,
   CalendarDays,
   Check,
   Clock3,
   Laptop,
   Loader2,
-  Mail,
-  MessageSquareText,
   MoveRight,
-  Phone,
-  UserRound,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -29,12 +24,12 @@ import {
 } from "../../../functions/src/providers/guestCheckoutScreening";
 import { INDEPENDENT_LABEL } from "../../../functions/src/providers/businessProfile";
 import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH } from "../../../functions/src/providers/termsCompliance";
+import { HIG_CANVAS, HIG_CARD, HIG_FIELD, HIG_LABEL, HIG_LINK, HIG_PRIMARY, HigSwitch, NearLimitCount } from "@/components/forms/HigControls";
 
 const FACILITY_TIME_ZONE = "America/New_York";
 const PUBLIC_DESK_RATE_CENTS = 1750;
-const GUEST_LABEL = "block text-sm font-medium text-slate-700";
-const GUEST_FIELD =
-  "mt-2 w-full min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-slate-900 placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#101D4B]";
+const GUEST_LABEL = `${HIG_LABEL} mb-1.5`;
+const INTENDED_USE_WARN_AT = INTENDED_USE_MAX - 30;
 
 type ResourceIntent = "DESK" | "MEETING";
 
@@ -958,104 +953,115 @@ export default function BookingExperienceWithDeskChange() {
         ) : null}
 
         {reviewOpen && selection && quote ? (
-          <section id="booking-review" className="scroll-mt-24 mt-10 border-t border-slate-200 pt-8">
-            <p className="text-sm font-medium text-slate-500">Review & checkout</p>
-            <div className="mt-4 grid gap-8 lg:grid-cols-[1fr_390px]">
-              <div>
-                <h2 className="text-2xl font-semibold text-slate-950">{intent === "MEETING" ? "Meeting room" : quote.resourceName}</h2>
-                <p className="mt-2 text-slate-600">
-                  {formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setReviewOpen(false)}
-                  className="mt-3 text-sm font-medium text-slate-700 underline underline-offset-4"
-                >
-                  Change booking
-                </button>
-
-                <PublishedSetupDetails
-                  resourceId={selection.kind === "single" ? selection.option.resourceId : undefined}
-                  serviceType={bookingServiceType(intent)}
-                />
-
-                {quote.bookingKind === "desk_change" && quote.segments ? (
-                  <div className="mt-7 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
-                    <p className="font-semibold text-slate-950">Your one desk change</p>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-                      <div>
-                        <p className="font-medium text-slate-900">{quote.segments[0].resourceName}</p>
-                        <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[0].start)}–{formatFacilityTime(quote.segments[0].end)}</p>
-                      </div>
-                      <MoveRight className="hidden h-5 w-5 text-amber-700 sm:block" />
-                      <div>
-                        <p className="font-medium text-slate-900">{quote.segments[1].resourceName}</p>
-                        <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[1].start)}–{formatFacilityTime(quote.segments[1].end)}</p>
-                      </div>
-                    </div>
-                    <p className="mt-3 text-sm font-medium text-amber-900">Move once at {formatFacilityTime(quote.segments[0].end)}.</p>
-                  </div>
-                ) : null}
-
-                {quote.membershipName && quote.resourceType === "SEAT" ? (
-                  <div className="mt-7 border-y border-slate-200 py-5">
-                    <p className="text-sm font-semibold text-slate-950">Membership hours</p>
-                    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-                      <div>
-                        <p className="text-slate-500">Available before</p>
-                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursRemaining)}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500">Used by this booking</p>
-                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursApplied)}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500">Remaining after</p>
-                        <p className="mt-1 font-semibold text-slate-950">{hoursLabel(remainingAfterBooking)}</p>
-                      </div>
-                    </div>
-                    {quote.billableHours > 0 ? (
-                      <p className="mt-4 text-sm leading-6 text-slate-600">
-                        {quote.includedHoursRemaining === 0
-                          ? "No included desk hours remain for this month."
-                          : `The first ${hoursLabel(quote.includedHoursApplied)} use your remaining monthly allowance.`}{" "}
-                        The additional {hoursLabel(quote.billableHours)} automatically use your {memberDiscountPercent}% member discount at {money(quote.hourlyRateCents)}/hour.
+          <section id="booking-review" className={`scroll-mt-24 mt-10 -mx-4 ${HIG_CANVAS} px-4 py-8 sm:mx-0 sm:rounded-3xl sm:p-8`}>
+            <p className="text-sm font-medium text-slate-600">Review & checkout</p>
+            <div className="mt-4 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
+              <div className="grid gap-6">
+                <div className={`${HIG_CARD} p-5 sm:p-6`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-display text-2xl font-semibold text-[#101D4B]">{intent === "MEETING" ? "Meeting room" : quote.resourceName}</h2>
+                      <p className="mt-1 text-[15px] text-slate-600">
+                        {formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}
                       </p>
-                    ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setReviewOpen(false)}
+                      className="-mx-3 min-h-11 rounded-full px-3 text-sm font-medium text-[#101D4B] hover:bg-[#101D4B]/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#101D4B]"
+                    >
+                      Change booking
+                    </button>
                   </div>
-                ) : null}
+
+                  <PublishedSetupDetails
+                    resourceId={selection.kind === "single" ? selection.option.resourceId : undefined}
+                    serviceType={bookingServiceType(intent)}
+                  />
+
+                  {quote.bookingKind === "desk_change" && quote.segments ? (
+                    <div className="mt-7 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200">
+                      <p className="font-semibold text-slate-950">Your one desk change</p>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                        <div>
+                          <p className="font-medium text-slate-900">{quote.segments[0].resourceName}</p>
+                          <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[0].start)}–{formatFacilityTime(quote.segments[0].end)}</p>
+                        </div>
+                        <MoveRight className="hidden h-5 w-5 text-amber-700 sm:block" />
+                        <div>
+                          <p className="font-medium text-slate-900">{quote.segments[1].resourceName}</p>
+                          <p className="mt-1 text-sm text-slate-600">{formatFacilityTime(quote.segments[1].start)}–{formatFacilityTime(quote.segments[1].end)}</p>
+                        </div>
+                      </div>
+                      <p className="mt-3 text-sm font-medium text-amber-900">Move once at {formatFacilityTime(quote.segments[0].end)}.</p>
+                    </div>
+                  ) : null}
+
+                  {quote.membershipName && quote.resourceType === "SEAT" ? (
+                    <div className="mt-6 border-t border-slate-100 pt-5">
+                      <p className="text-sm font-semibold text-slate-950">Membership hours</p>
+                      <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+                        <div>
+                          <p className="text-slate-500">Available before</p>
+                          <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursRemaining)}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">Used by this booking</p>
+                          <p className="mt-1 font-semibold text-slate-950">{hoursLabel(quote.includedHoursApplied)}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-500">Remaining after</p>
+                          <p className="mt-1 font-semibold text-slate-950">{hoursLabel(remainingAfterBooking)}</p>
+                        </div>
+                      </div>
+                      {quote.billableHours > 0 ? (
+                        <p className="mt-4 text-sm leading-6 text-slate-600">
+                          {quote.includedHoursRemaining === 0
+                            ? "No included desk hours remain for this month."
+                            : `The first ${hoursLabel(quote.includedHoursApplied)} use your remaining monthly allowance.`}{" "}
+                          The additional {hoursLabel(quote.billableHours)} automatically use your {memberDiscountPercent}% member discount at {money(quote.hourlyRateCents)}/hour.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
 
                 {!authLoading && !user ? (
-                  <div className="mt-7" data-testid="guest-checkout-details">
-                    <h3 className="font-display text-lg font-semibold text-[#101D4B]">Your details</h3>
-                    <p className="mt-1 text-sm text-slate-600">For your confirmation, access details and our records. Hi Coworking is a workspace for business use.</p>
-                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                      <label className={GUEST_LABEL}>
-                        <span className="flex items-center gap-2"><UserRound className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Name</span>
+                  <section className={`${HIG_CARD} p-5 sm:p-6`} data-testid="guest-checkout-details" aria-labelledby="guest-details-heading">
+                    <h3 id="guest-details-heading" className="font-display text-lg font-semibold text-[#101D4B]">Your details</h3>
+                    <p className="mt-1 text-sm text-slate-600">For your confirmation and access details. Hi Coworking is a workspace for business use.</p>
+                    <div className="mt-5 grid gap-x-5 gap-y-5 sm:grid-cols-2">
+                      <div>
+                        <label className={GUEST_LABEL} htmlFor="guest-name">Name</label>
                         <input
+                          id="guest-name"
                           value={guestName}
                           onChange={(event) => setGuestName(event.target.value)}
                           autoComplete="name"
                           required
                           aria-invalid={guestInvalidField === "name" ? true : undefined}
-                          className={GUEST_FIELD}
+                          className={HIG_FIELD}
                         />
-                      </label>
-                      <label className={GUEST_LABEL}>
-                        <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Email</span>
+                      </div>
+                      <div>
+                        <label className={GUEST_LABEL} htmlFor="guest-email">Email</label>
                         <input
+                          id="guest-email"
                           type="email"
                           value={guestEmail}
                           onChange={(event) => setGuestEmail(event.target.value)}
                           autoComplete="email"
                           required
                           aria-invalid={guestInvalidField === "email" ? true : undefined}
-                          className={GUEST_FIELD}
+                          className={HIG_FIELD}
                         />
-                      </label>
-                      <label className={GUEST_LABEL}>
-                        <span className="flex items-center gap-2"><Phone className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Phone</span>
+                      </div>
+                      <div>
+                        <div className="mb-1.5 flex h-6 items-center">
+                          <label className={HIG_LABEL} htmlFor="guest-phone">Phone</label>
+                        </div>
                         <input
+                          id="guest-phone"
                           type="tel"
                           inputMode="tel"
                           value={guestPhone}
@@ -1064,13 +1070,14 @@ export default function BookingExperienceWithDeskChange() {
                           required
                           aria-invalid={guestInvalidField === "phone" ? true : undefined}
                           placeholder="(555) 555-5555"
-                          className={GUEST_FIELD}
+                          className={HIG_FIELD}
                         />
-                      </label>
+                      </div>
                       <div>
-                        <label className={GUEST_LABEL} htmlFor="guest-business-name">
-                          <span className="flex items-center gap-2"><Building2 className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> Business name</span>
-                        </label>
+                        <div className="mb-1.5 flex h-6 items-center justify-between gap-3">
+                          <label className={HIG_LABEL} htmlFor="guest-business-name">Business name</label>
+                          <HigSwitch id="guest-independent" label="Independent" checked={guestIndependent} onChange={setGuestIndependent} />
+                        </div>
                         <input
                           id="guest-business-name"
                           value={guestIndependent ? "" : guestBusinessName}
@@ -1081,21 +1088,13 @@ export default function BookingExperienceWithDeskChange() {
                           disabled={guestIndependent}
                           aria-invalid={guestInvalidField === "businessName" ? true : undefined}
                           placeholder={guestIndependent ? INDEPENDENT_LABEL : "Your company or organization"}
-                          className={`${GUEST_FIELD} disabled:bg-slate-100 disabled:text-slate-500`}
+                          className={HIG_FIELD}
                         />
-                        <label className="mt-1 flex min-h-11 cursor-pointer items-center gap-3 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={guestIndependent}
-                            onChange={(event) => setGuestIndependent(event.target.checked)}
-                            className="h-5 w-5 shrink-0 accent-[#101D4B]"
-                          />
-                          {INDEPENDENT_LABEL}
-                        </label>
                       </div>
-                      <label className={`${GUEST_LABEL} sm:col-span-2`}>
-                        <span className="flex items-center gap-2"><MessageSquareText className="h-4 w-4 text-[#101D4B]" aria-hidden="true" /> What will you use the space for?</span>
+                      <div className="sm:col-span-2">
+                        <label className={GUEST_LABEL} htmlFor="guest-intended-use">How you&apos;ll use the space</label>
                         <input
+                          id="guest-intended-use"
                           value={guestIntendedUse}
                           onChange={(event) => setGuestIntendedUse(event.target.value)}
                           maxLength={INTENDED_USE_MAX}
@@ -1103,13 +1102,13 @@ export default function BookingExperienceWithDeskChange() {
                           aria-invalid={guestInvalidField === "intendedUse" ? true : undefined}
                           aria-describedby="guest-intended-use-hint"
                           placeholder="e.g. Client calls and focused work"
-                          className={GUEST_FIELD}
+                          className={HIG_FIELD}
                         />
-                        <span id="guest-intended-use-hint" className="mt-1 block text-xs font-normal text-slate-600">One line is plenty. {guestIntendedUse.length}/{INTENDED_USE_MAX}</span>
-                      </label>
+                        <NearLimitCount id="guest-intended-use-hint" length={guestIntendedUse.length} max={INTENDED_USE_MAX} warnAt={INTENDED_USE_WARN_AT} />
+                      </div>
                     </div>
                     {/* TODO(jonathan-copy): add the house rules and member agreement here once Jonathan approves the wording; bump the terms version with it. */}
-                    <div className="mt-5 flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm leading-6 text-slate-700">
+                    <div className="mt-2 flex items-start gap-3 border-t border-slate-100 pt-5 text-[15px] leading-6 text-slate-700">
                       <input
                         id="guest-terms-acceptance"
                         type="checkbox"
@@ -1121,33 +1120,33 @@ export default function BookingExperienceWithDeskChange() {
                       />
                       <label htmlFor="guest-terms-acceptance">
                         I agree to the{" "}
-                        <Link href={TERMS_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                        <Link href={TERMS_PATH} target="_blank" className={HIG_LINK}>
                           Terms of Service
                         </Link>{" "}
                         and{" "}
-                        <Link href={PRIVACY_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
+                        <Link href={PRIVACY_PATH} target="_blank" className={HIG_LINK}>
                           Privacy Policy
                         </Link>
-                        . <span className="text-slate-600">(Required)</span>
+                        .
                       </label>
                     </div>
-                  </div>
+                  </section>
                 ) : null}
               </div>
 
-              <aside className="rounded-2xl bg-slate-50 p-5">
-                <p className="text-sm font-semibold text-slate-950">Price calculation</p>
-                <div className="mt-4 space-y-3 text-sm">
+              <aside className={`${HIG_CARD} p-5 sm:p-6 lg:sticky lg:top-24`} aria-labelledby="price-summary-heading">
+                <h3 id="price-summary-heading" className="font-display text-lg font-semibold text-[#101D4B]">Summary</h3>
+                <div className="mt-4 space-y-3 text-[15px]">
                   <div className="flex items-start justify-between gap-4">
                     <span className="text-slate-600">Booking length</span>
-                    <span className="font-medium text-slate-950">{hoursLabel(quote.durationHours)}</span>
+                    <span className="font-medium tabular-nums text-slate-950">{hoursLabel(quote.durationHours)}</span>
                   </div>
 
                   {quote.membershipName && quote.resourceType === "SEAT" ? (
                     <>
                       <div className="flex items-start justify-between gap-4">
                         <span className="text-slate-600">Included membership time</span>
-                        <span className="font-medium text-slate-950">{hoursLabel(quote.includedHoursApplied)} · $0.00</span>
+                        <span className="font-medium tabular-nums text-slate-950">{hoursLabel(quote.includedHoursApplied)} · $0.00</span>
                       </div>
                       {quote.billableHours > 0 ? (
                         <div className="flex items-start justify-between gap-4">
@@ -1155,7 +1154,7 @@ export default function BookingExperienceWithDeskChange() {
                             Additional member time<br />
                             <span className="text-xs">{hoursLabel(quote.billableHours)} × {money(quote.hourlyRateCents)} ({memberDiscountPercent}% off)</span>
                           </span>
-                          <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                          <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
                         </div>
                       ) : null}
                     </>
@@ -1165,7 +1164,7 @@ export default function BookingExperienceWithDeskChange() {
                         Desk daily cap<br />
                         <span className="text-xs">Lower than the uncapped hourly total</span>
                       </span>
-                      <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                      <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
                     </div>
                   ) : (
                     <div className="flex items-start justify-between gap-4">
@@ -1173,21 +1172,21 @@ export default function BookingExperienceWithDeskChange() {
                         Space charge<br />
                         <span className="text-xs">{hoursLabel(quote.durationHours)} × {money(quote.hourlyRateCents)}</span>
                       </span>
-                      <span className="font-medium text-slate-950">{money(quote.subtotalCents)}</span>
+                      <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
                     </div>
                   )}
 
                   {quote.accountCreditAppliedCents > 0 ? (
                     <div className="flex items-start justify-between gap-4 border-t border-slate-200 pt-3">
                       <span className="text-slate-600">Account credit</span>
-                      <span className="font-medium text-slate-950">−{money(quote.accountCreditAppliedCents)}</span>
+                      <span className="font-medium tabular-nums text-slate-950">−{money(quote.accountCreditAppliedCents)}</span>
                     </div>
                   ) : null}
                 </div>
 
-                <div className="mt-5 flex items-baseline justify-between border-t border-slate-300 pt-4">
-                  <span className="font-semibold">Amount due</span>
-                  <span className="text-2xl font-semibold text-slate-950">{money(quote.totalCents)}</span>
+                <div className="mt-5 flex items-baseline justify-between border-t border-slate-200 pt-4">
+                  <span className="font-semibold text-slate-950">Amount due</span>
+                  <span className="text-2xl font-semibold tabular-nums text-slate-950">{money(quote.totalCents)}</span>
                 </div>
 
                 {quote.totalCents === 0 ? (
@@ -1200,13 +1199,15 @@ export default function BookingExperienceWithDeskChange() {
                   type="button"
                   onClick={checkout}
                   disabled={checkingOut || authLoading || (!user && !guestTermsAccepted)}
-                  className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                  className={`${HIG_PRIMARY} mt-5 w-full`}
                 >
-                  {checkingOut ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
+                  {checkingOut ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : null}
                   {quote.totalCents === 0 ? "Confirm booking" : `Pay ${money(quote.totalCents)}`}
                 </button>
-                <p className="mt-3 text-center text-xs leading-5 text-slate-500">
-                  Your space is held for 15 minutes when confirmation begins. Membership hours and account credit are committed only when the booking is confirmed.
+                <p className="mt-3 text-center text-xs leading-5 text-slate-600" data-testid="checkout-hold-note">
+                  {user && (quote.includedHoursApplied > 0 || quote.accountCreditAppliedCents > 0)
+                    ? "Your space is held for 15 minutes when confirmation begins. Membership hours and account credit are committed only when the booking is confirmed."
+                    : "Your space is held for 15 minutes while you complete checkout."}
                 </p>
               </aside>
             </div>

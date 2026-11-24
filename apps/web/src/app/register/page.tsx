@@ -18,6 +18,7 @@ import {
   type BusinessProfileDraft,
 } from "@/components/account/BusinessProfileFields";
 import { validateBusinessProfile } from "../../../../functions/src/providers/businessProfile";
+import { HIG_CANVAS, HIG_CARD, HIG_FIELD, HIG_LABEL, HIG_LINK, HIG_PRIMARY, HIG_PRIMARY_MUTED, InsetCard } from "@/components/forms/HigControls";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -112,119 +113,144 @@ export default function RegisterPage() {
     }
   };
 
-  return (
-    <div className="min-h-dvh flex flex-col items-center justify-center bg-slate-50 p-4">
+  const formReady =
+    termsAccepted &&
+    name.trim().length > 0 &&
+    /\S+@\S+\.\S+/.test(email) &&
+    password.length >= 6 &&
+    (!SAYHI_FLOW || (Boolean(normalizeUsMobile(phone)) && validateBusinessProfile(business).ok));
+
+  const accountFields = (
+    <div className="grid gap-5">
+      <div>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor="name">Full name</label>
+        <input id="name" type="text" required autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} className={HIG_FIELD} placeholder="Jane Doe" />
+      </div>
+      <div>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor="email">Email</label>
+        <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className={HIG_FIELD} placeholder="you@company.com" />
+      </div>
+      <div>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor="password">Password</label>
+        <input id="password" type="password" required autoComplete="new-password" minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className={HIG_FIELD} placeholder="At least 6 characters" />
+      </div>
+      <div>
+        <label className={`${HIG_LABEL} mb-1.5`} htmlFor="phone">
+          {SAYHI_FLOW ? "Phone number" : "Mobile number (optional)"}
+        </label>
+        <input
+          id="phone"
+          type="tel"
+          inputMode="tel"
+          autoComplete="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          required={SAYHI_FLOW}
+          aria-describedby={SAYHI_FLOW ? undefined : "phone-hint"}
+          className={HIG_FIELD}
+          placeholder="(555) 555-5555"
+        />
+        {SAYHI_FLOW ? null : (
+          <p id="phone-hint" className="mt-1 text-xs text-slate-600">Only needed if you want event texts.</p>
+        )}
+      </div>
+    </div>
+  );
+
+  const consentRows = (
+    <div className={`${HIG_CARD} divide-y divide-slate-100`}>
       {SAYHI_FLOW ? (
-        <Link href="/" className="mb-8 flex min-h-11 items-center" aria-label="Hi Coworking home">
-          <HiLogo size={40} />
-        </Link>
-      ) : (
-        <Link href="/" className="font-logo flex items-center gap-2 mb-8">
-          <div className="w-10 h-10 bg-slate-900 rounded-2xl rounded-bl-none flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-slate-900/20">Hi</div>
-          <span className="font-bold text-2xl tracking-tight text-slate-900">Coworking</span>
-        </Link>
-      )}
+        <p className="px-5 py-4 text-sm leading-6 text-slate-600" data-testid="email-notice">
+          By creating an account you agree to receive emails from Hi Coworking. You can unsubscribe anytime.
+        </p>
+      ) : null}
+      <div className="px-5 py-4">
+        <SmsConsentCheckbox checked={smsConsent} onChange={setSmsConsent} />
+      </div>
+      <div className="flex items-start gap-3 px-5 py-4 text-sm leading-6 text-slate-700">
+        <input
+          id="terms-acceptance"
+          type="checkbox"
+          required
+          checked={termsAccepted}
+          onChange={(event) => setTermsAccepted(event.target.checked)}
+          className="mt-1 h-5 w-5 shrink-0 accent-[#101D4B]"
+        />
+        <label htmlFor="terms-acceptance">
+          I agree to the{" "}
+          <Link href={TERMS_PATH} target="_blank" className={HIG_LINK}>
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href={PRIVACY_PATH} target="_blank" className={HIG_LINK}>
+            Privacy Policy
+          </Link>
+          .
+        </label>
+      </div>
+    </div>
+  );
 
-      <div className={`w-full ${SAYHI_FLOW ? "max-w-3xl" : "max-w-md"} bg-white rounded-xl shadow-xl shadow-slate-200/50 ring-1 ring-slate-200 overflow-hidden`}>
-        <div className="p-6 sm:p-8 lg:p-10">
+  const submit = (
+    <button
+      type="submit"
+      disabled={loading || !termsAccepted}
+      aria-describedby={formReady ? undefined : "create-account-hint"}
+      className={`${formReady ? HIG_PRIMARY : HIG_PRIMARY_MUTED} w-full`}
+    >
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-label="Creating account" /> : "Create account"}
+    </button>
+  );
+
+  const signIn = (
+    <p className="text-sm text-slate-600">
+      Already have an account?{" "}
+      <Link href="/login" className={HIG_LINK}>Sign in</Link>
+    </p>
+  );
+
+  const errorBox = error ? (
+    <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+      {error}
+    </div>
+  ) : null;
+
+  return (
+    <div className={`min-h-dvh ${HIG_CANVAS} px-4 py-10 sm:py-14`}>
+      <div className={`mx-auto w-full ${SAYHI_FLOW ? "max-w-5xl" : "max-w-md"}`}>
+        <div className="flex flex-col items-center text-center">
           {SAYHI_FLOW ? (
-            <>
-              <h1 className="font-display text-2xl font-semibold text-[#101D4B] text-center mb-2">Create your account</h1>
-              <p className="text-center text-slate-600 text-sm mb-8">
-                Your email is your username.
-              </p>
-            </>
+            <Link href="/" className="mb-6 flex min-h-11 items-center" aria-label="Hi Coworking home">
+              <HiLogo size={40} />
+            </Link>
           ) : (
-            <>
-              <h1 className="text-2xl font-bold text-slate-900 text-center mb-2">Create an account</h1>
-              <p className="text-center text-slate-500 text-sm mb-8">
-                Join Hi Coworking to start booking spaces instantly.
-              </p>
-            </>
+            <Link href="/" className="font-logo mb-6 flex items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl rounded-bl-none bg-slate-900 text-sm font-bold text-white">Hi</div>
+              <span className="text-2xl font-bold tracking-tight text-slate-900">Coworking</span>
+            </Link>
           )}
+          <h1 className="font-display text-3xl font-semibold text-[#101D4B]">
+            {SAYHI_FLOW ? "Create your account" : "Create an account"}
+          </h1>
+          <p className="mt-2 text-[15px] text-slate-600">
+            {SAYHI_FLOW ? "Your email is your username." : "Join Hi Coworking to start booking spaces instantly."}
+          </p>
+        </div>
 
-          <form onSubmit={handleRegister} className="space-y-4">
-            {error && (
-              <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm font-medium border border-red-100">
-                {error}
-              </div>
-            )}
+        <form onSubmit={handleRegister} className="mt-8 space-y-6">
+          {errorBox}
 
-            <div className={SAYHI_FLOW ? "grid gap-4 sm:grid-cols-2" : "space-y-4"}>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="name">
-                Full Name
-              </label>
-              <input
-                id="name"
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
-                placeholder="Jane Doe"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="email">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
-                placeholder="you@company.com"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="password">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 transition-all"
-                placeholder="••••••••"
-              />
-            </div>
-
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700" htmlFor="phone">
-                {SAYHI_FLOW ? "Phone number" : "Mobile number (optional)"}
-              </label>
-              <input
-                id="phone"
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                required={SAYHI_FLOW}
-                aria-describedby={SAYHI_FLOW ? undefined : "phone-hint"}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-slate-900 placeholder:text-slate-400 transition-all"
-                placeholder="(555) 555-5555"
-              />
-              {SAYHI_FLOW ? null : (
-                <p id="phone-hint" className="text-xs text-slate-500">
-                  Only needed if you want event texts.
-                </p>
-              )}
-            </div>
-            </div>
-
-            {SAYHI_FLOW ? (
-              <section aria-labelledby="business-heading" className="border-t border-slate-200 pt-6">
-                <h2 id="business-heading" className="font-display text-lg font-semibold text-[#101D4B]">Your business</h2>
-                <p className="mt-1 mb-4 text-sm text-slate-600">Hi Coworking is a workspace for business use. Tell us a little about yours.</p>
+          {SAYHI_FLOW ? (
+            <div className="grid gap-6 lg:grid-cols-2">
+              <InsetCard title="Account" titleId="account-heading" className="lg:col-start-1 lg:row-start-1">
+                {accountFields}
+              </InsetCard>
+              <InsetCard
+                title="Business"
+                titleId="business-heading"
+                description="Hi Coworking is a workspace for business use. Tell us a little about yours."
+                className="lg:col-start-2 lg:row-span-2 lg:row-start-1"
+              >
                 <BusinessProfileFields
                   idPrefix="register-business"
                   value={business}
@@ -232,56 +258,36 @@ export default function RegisterPage() {
                   disabled={loading}
                   invalidField={invalidField}
                 />
-              </section>
-            ) : null}
-
-            {SAYHI_FLOW ? (
-              <p className="text-sm leading-6 text-slate-600" data-testid="email-notice">
-                By creating an account you agree to receive emails from Hi Coworking. You can unsubscribe anytime.
-              </p>
-            ) : null}
-
-            <SmsConsentCheckbox checked={smsConsent} onChange={setSmsConsent} />
-
-            <div className="flex items-start gap-3 text-sm leading-6 text-slate-600">
-              <input
-                id="terms-acceptance"
-                type="checkbox"
-                required
-                checked={termsAccepted}
-                onChange={(event) => setTermsAccepted(event.target.checked)}
-                className="mt-1 h-5 w-5 shrink-0"
-              />
-              <label htmlFor="terms-acceptance">
-                I agree to the{" "}
-                <Link href={TERMS_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
-                  Terms of Service
-                </Link>{" "}
-                and{" "}
-                <Link href={PRIVACY_PATH} target="_blank" className="font-semibold text-sky-800 underline underline-offset-2">
-                  Privacy Policy
-                </Link>
-                . <span className="text-slate-500">(Required)</span>
-              </label>
+              </InsetCard>
+              <div className="lg:col-start-1 lg:row-start-2 lg:self-end">{consentRows}</div>
             </div>
+          ) : (
+            <>
+              <InsetCard>{accountFields}</InsetCard>
+              {consentRows}
+            </>
+          )}
 
-            <button
-              type="submit"
-              disabled={loading || !termsAccepted}
-              className={SAYHI_FLOW
-                ? "w-full min-h-11 flex items-center justify-center rounded-full bg-[#101D4B] text-white font-semibold hover:bg-[#3A4675] focus:outline-none focus:ring-2 focus:ring-[#101D4B] focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
-                : "w-full h-10 flex items-center justify-center rounded-full bg-slate-900 text-white font-semibold hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:opacity-70 disabled:cursor-not-allowed transition-colors shadow-lg shadow-slate-900/20"}
-            >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create account"}
-            </button>
-          </form>
-        </div>
-        <div className="bg-slate-50 p-4 border-t border-slate-100 text-center text-sm text-slate-600">
-          Already have an account?{" "}
-          <Link href="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">
-            Sign in
-          </Link>
-        </div>
+          {SAYHI_FLOW ? (
+            <div className="flex flex-col-reverse items-center gap-4 sm:flex-row sm:justify-between">
+              {signIn}
+              <div className="w-full sm:w-72">
+                {submit}
+                {formReady ? null : (
+                  <p id="create-account-hint" className="mt-2 text-center text-xs text-slate-600">
+                    Complete the required fields to continue.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 text-center">
+              {submit}
+              {formReady ? null : <p id="create-account-hint" className="sr-only">Complete the required fields to continue.</p>}
+              {signIn}
+            </div>
+          )}
+        </form>
       </div>
     </div>
   );

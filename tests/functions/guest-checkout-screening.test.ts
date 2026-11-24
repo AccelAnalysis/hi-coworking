@@ -125,8 +125,9 @@ describe("/book guest form", () => {
   it("requires phone, business name (or None / independent), intended use and the Terms checkbox", () => {
     expect(form).toMatch(/type="tel"[\s\S]{0,400}required/);
     expect(form).not.toContain("Phone <span className=\"font-normal text-slate-500\">(optional)</span>");
-    expect(form).toContain("{INDEPENDENT_LABEL}");
-    expect(form).toContain("What will you use the space for?");
+    expect(form).toContain("guestIndependent ? INDEPENDENT_LABEL");
+    expect(form).toContain('<HigSwitch id="guest-independent"');
+    expect(form).toContain("How you&apos;ll use the space");
     expect(form).toMatch(/id="guest-terms-acceptance"\s+type="checkbox"\s+required/);
     expect(form).toContain("<Link href={TERMS_PATH}");
     expect(form).toContain("<Link href={PRIVACY_PATH}");
@@ -139,8 +140,19 @@ describe("/book guest form", () => {
     expect(form).toContain("TODO(jonathan-copy)");
   });
 
+  it("shows guests only the hold note, never the membership/credit sentence", () => {
+    expect(form).toContain('"Your space is held for 15 minutes while you complete checkout."');
+    expect(form).toMatch(/user && \(quote\.includedHoursApplied > 0 \|\| quote\.accountCreditAppliedCents > 0\)\s*\?\s*"Your space is held for 15 minutes when confirmation begins\. Membership hours/);
+  });
+
+  it("drops decorative label icons and the (Required) suffix", () => {
+    expect(form).not.toMatch(/<(UserRound|Mail|Phone|Building2|MessageSquareText)\b/);
+    expect(form).not.toContain("(Required)");
+    expect(form).not.toContain("One line is plenty");
+  });
+
   it("keeps 44px targets and labelled inputs", () => {
-    expect(form).toContain("min-h-11");
+    expect(form).toContain("className={HIG_FIELD}");
     expect(form).toContain('htmlFor="guest-business-name"');
     expect(form).toContain('htmlFor="guest-terms-acceptance"');
   });

@@ -18,9 +18,16 @@ describe("business profile on Create your account", () => {
     expect(register).not.toContain("setCompany");
   });
 
-  it("uses the wider two-column layout on desktop", () => {
-    expect(register).toContain('"max-w-3xl"');
-    expect(register).toContain("sm:grid-cols-2");
+  it("uses a two-column Account / Business layout on desktop", () => {
+    expect(register).toContain('"max-w-5xl"');
+    expect(register).toContain("lg:grid-cols-2");
+    expect(register).toContain('title="Account"');
+    expect(register).toContain('title="Business"');
+  });
+
+  it("keeps the Sign in link on brand and drops the (Required) suffix", () => {
+    expect(register).not.toMatch(/indigo-|sky-800/);
+    expect(register).not.toContain("(Required)");
   });
 });
 
@@ -29,16 +36,33 @@ describe("shared business fields component", () => {
 
   it("offers None / independent, required role and type, and optional website and SCC ID", () => {
     expect(fields).toContain("INDEPENDENT_LABEL");
-    expect(fields).toContain('role="radiogroup"');
-    expect(fields).toContain('aria-required="true"');
+    const controls = read("apps/web/src/components/forms/HigControls.tsx");
+    expect(controls).toContain('role="radiogroup"');
+    expect(controls).toContain('aria-required="true"');
     expect(fields).toMatch(/id=\{id\("type"\)\}\s+required/);
     expect(fields).toMatch(/id=\{id\("description"\)\}\s+type="text"\s+required/);
-    expect(fields).toContain("(optional)");
+    expect(fields).toContain(">Optional<");
+  });
+
+  it("uses a segmented role control, an Independent switch and no decorative label icons", () => {
+    expect(fields).toContain("<HigSegmented");
+    expect(fields).toContain("<HigSwitch");
+    expect(fields).not.toContain("lucide-react");
+  });
+
+  it("hides the character count until near the limit", () => {
+    expect(fields).toContain("BUSINESS_LIMITS.businessDescription - 30");
+    expect(fields).toContain("<NearLimitCount");
   });
 
   it("keeps touch targets at 44px and labels every input", () => {
-    expect(fields.match(/min-h-11/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
-    for (const name of ["company", "independent", "type", "description", "website", "scc"]) {
+    const controls = read("apps/web/src/components/forms/HigControls.tsx");
+    expect(controls).toMatch(/HIG_FIELD =\s*"[^"]*\bh-11\b/);
+    expect(controls).toContain('role="switch"');
+    expect(fields.match(/HIG_FIELD/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(fields).toContain('id={id("independent")}');
+    expect(controls).toContain("<label htmlFor={id}");
+    for (const name of ["company", "type", "description", "website", "scc"]) {
       expect(fields).toContain(`htmlFor={id("${name}")}`);
     }
   });
@@ -77,5 +101,11 @@ describe("Admin member record shows the business profile", () => {
       expect(page).toContain(`label="${label}"`);
     }
     expect(page).toContain('rel="noopener noreferrer nofollow"');
+  });
+
+  it("does not repeat the account phone under Business and keeps one solid primary action", () => {
+    expect(page).not.toContain('label="Account phone"');
+    expect(page.match(/HIG_PRIMARY/g)?.length).toBe(2); // import + Member actions
+    expect(page).toMatch(/className=\{HIG_TINTED\}>\s*Mark ID checked/);
   });
 });
