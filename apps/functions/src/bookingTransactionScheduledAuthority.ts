@@ -4,6 +4,7 @@ import { defineSecret } from "firebase-functions/params";
 import * as bookingTransaction from "./bookingFlexTransaction";
 import * as bookingManagement from "./bookingManagement";
 import { seamApiKey } from "./access";
+import { resendApiKey } from "./providers/emailSecret";
 import { assertWindowWithinOperatingCalendar } from "./bookingOperatingCalendar";
 import { cancelBookingsAfterMembershipEnd, chargeOvertimeForVisit } from "./sayhi/billingTriggers";
 
@@ -24,7 +25,8 @@ async function validateRequestedWindow(request: { data?: unknown }) {
 }
 
 export const booking_beginCheckout = onCall(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
+  // resendApiKey: the booking confirmation email for bookings covered by membership hours or credit.
+  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey, resendApiKey] },
   async (request) => {
     await validateRequestedWindow(request);
     return runCallable(bookingTransaction.booking_beginCheckout, request);

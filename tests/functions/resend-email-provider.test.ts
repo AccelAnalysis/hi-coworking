@@ -211,7 +211,7 @@ describe("ResendEmailProvider", () => {
 describe("Hi Coworking mail wiring", () => {
   const read = (path: string) => readFileSync(path, "utf8");
 
-  it("binds the dedicated Resend secret only on the three mail workers and stripe_webhook", () => {
+  it("binds the dedicated Resend secret only on the mail workers, stripe_webhook and the booking callables", () => {
     expect(RESEND_API_KEY_SECRET_NAME).toBe("HI_COWORKING_RESEND_API_KEY");
     const secretModule = read("apps/functions/src/providers/emailSecret.ts");
     expect(secretModule).toContain("defineSecret(RESEND_API_KEY_SECRET_NAME)");
@@ -232,6 +232,9 @@ describe("Hi Coworking mail wiring", () => {
     expect(users.map((file) => file.replace(/\\/g, "/")).sort()).toEqual([
       // Access-code-ready mail queue (mail bundle only).
       "apps/functions/src/accessCodes/mailQueue.ts",
+      // Booking confirmation email (booking-transactions bundle).
+      "apps/functions/src/bookingFlexTransaction.ts",
+      "apps/functions/src/bookingTransactionScheduledAuthority.ts",
       "apps/functions/src/campaignJobs.ts",
       "apps/functions/src/eventsV2/notifications.ts",
       "apps/functions/src/index.ts",

@@ -2,6 +2,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { safeErrorForLog } from "./logRedaction";
 import Stripe from "stripe";
 import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
@@ -238,7 +239,7 @@ async function membershipSubscription(uid: string, stripe: Stripe) {
       logger.warn("Could not retrieve candidate membership subscription", {
         uid,
         subscriptionId,
-        error,
+        error: safeErrorForLog(error),
       });
     }
   }
@@ -262,7 +263,7 @@ async function membershipSubscription(uid: string, stripe: Stripe) {
         logger.warn("Could not list customer subscriptions", {
           uid,
           customerId,
-          error,
+          error: safeErrorForLog(error),
         });
       }
     }
@@ -285,7 +286,7 @@ async function membershipSubscription(uid: string, stripe: Stripe) {
     } catch (error) {
       logger.warn("Could not resolve membership subscription by email", {
         uid,
-        error,
+        error: safeErrorForLog(error),
       });
     }
   }
@@ -506,7 +507,7 @@ export const admin_membershipChangePlan = onCall(
         uid,
         tierId,
         subscriptionId: subscription.id,
-        error,
+        error: safeErrorForLog(error),
       });
       throw new HttpsError(
         "failed-precondition",

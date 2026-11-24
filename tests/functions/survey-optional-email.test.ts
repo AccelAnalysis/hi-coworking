@@ -82,8 +82,9 @@ describe("Nurture skips leads without a deliverable email", () => {
     });
   });
 
-  it("enrolls a real address", () => {
-    expect(leadEnrollmentDecision({ email: " A@B.co " })).toEqual({ enroll: true, email: "a@b.co" });
+  it("enrolls a real address that opted in to marketing", () => {
+    expect(leadEnrollmentDecision({ email: " A@B.co ", marketingConsent: true })).toEqual({ enroll: true, email: "a@b.co" });
+    expect(leadEnrollmentDecision({ email: " A@B.co " })).toEqual({ enroll: false, reason: "no_consent" });
     expect(isDeliverableLeadEmail("someone@hi-coworking.com")).toBe(true);
     expect(isDeliverableLeadEmail("someone@survey.local")).toBe(false);
   });

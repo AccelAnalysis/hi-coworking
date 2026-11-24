@@ -10,6 +10,7 @@
 
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
+import { redactEmails, safeErrorForLog } from "../logRedaction";
 import { getValidAccessToken, isQuickBooksConnected } from "./intuitOAuth";
 import { updatePaymentStatus } from "./ledger";
 import type { PaymentDocData } from "./types";
@@ -78,7 +79,7 @@ export async function syncPaymentToQBO(
     const displayName = userSnap.exists ? (userSnap.data()?.displayName as string) || email : email;
 
     // Find or create QB customer
-    const customerId = await findOrCreateCustomer(baseUrl, accessToken, email, displayName);
+    const customerId = await findOrCreateCustomer(baseUrl, accessToken, email, displayName, payment.id);
 
     // Build description
     const purposeLabel = payment.purpose.charAt(0).toUpperCase() + payment.purpose.slice(1);
@@ -126,7 +127,8 @@ export async function syncPaymentToQBO(
       logger.error("QBO Sales Receipt creation failed", {
         paymentId,
         status: resp.status,
-        body: errBody,
+        // QuickBooks error bodies can echo customer details; log a redacted excerpt.
+        body: redactEmails(errBody),
       });
       return { synced: false };
     }
@@ -148,7 +150,7 @@ export async function syncPaymentToQBO(
 
     return { synced: true, salesReceiptId };
   } catch (err) {
-    logger.error("QBO sync failed", { paymentId, err });
+    logger.error("QBO sync failed", { paymentId, err: safeErrorForLog(err) });
     return { synced: false };
   }
 }
@@ -207,7 +209,8 @@ async function findOrCreateCustomer(
   baseUrl: string,
   accessToken: string,
   email: string,
-  displayName: string
+  displayName: string,
+  paymentId: string,
 ): Promise<string> {
   if (!email) {
     // Use a generic "Walk-in" customer
@@ -250,7 +253,8 @@ async function findOrCreateCustomer(
   });
 
   if (!createResp.ok) {
-    logger.error("QBO customer creation failed", { email, status: createResp.status });
+    // Never log the customer's email; the payment id is enough to trace it.
+    logger.error("QBO customer creation failed", { paymentId, status: createResp.status });
     return "1"; // Fallback to default customer
   }
 

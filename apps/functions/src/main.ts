@@ -145,6 +145,8 @@ export {
   admin_bookingForMemberBeginCheckout,
 } from "./bookingScheduledAuthority";
 export { booking_onDeskChangeBookingUpdated } from "./bookingJourney";
+// OFF unless BOOKING_HOLD_CLEANUP_MODE is set; deploying needs Jonathan's OK.
+export { booking_cleanupAbandonedHolds } from "./bookingHoldCleanupSweep";
 export {
   booking_getDaySchedule,
   booking_adminGetOperatingCalendar,

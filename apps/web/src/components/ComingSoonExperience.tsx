@@ -25,7 +25,11 @@ import {
   X,
 } from "lucide-react";
 import {
+  EARLY_ACCESS_CONSENT_TEXT,
+  EARLY_ACCESS_CONSENT_VERSION,
   LEAD_ERROR_MESSAGES,
+  SURVEY_EMAIL_CONSENT_TEXT,
+  SURVEY_EMAIL_CONSENT_VERSION,
   leadsSubmitUrl,
   submitLeadRequest,
   type LeadSubmitOutcome,
@@ -65,8 +69,10 @@ export function ComingSoonExperience() {
     name: "",
     email: "",
     message: "",
-    intent: "updates",
+    // No pre-selected answer: launch-update email needs an explicit opt-in below.
+    intent: "",
     interests: [] as string[],
+    marketingConsent: false,
   });
 
   const interests = useMemo(
@@ -93,9 +99,12 @@ export function ComingSoonExperience() {
     e.preventDefault();
     setFormStatus("submitting");
     setFormError("");
+    const { marketingConsent, ...fields } = formData;
     const outcome = await submitLead({
       type: "early_access",
-      ...formData,
+      ...fields,
+      // Sent only when the visitor ticked the unchecked-by-default opt-in.
+      ...(marketingConsent ? { marketingConsent: true, consentVersion: EARLY_ACCESS_CONSENT_VERSION } : {}),
       source: "web-coming-soon",
       submission_version: "3.0",
       timestamp: new Date().toISOString(),
@@ -484,6 +493,17 @@ export function ComingSoonExperience() {
                 </label>
               </div>
 
+              <label htmlFor="early-access-consent" className="flex items-start gap-3 text-sm text-slate-700 min-h-11 cursor-pointer">
+                <input
+                  id="early-access-consent"
+                  type="checkbox"
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  checked={formData.marketingConsent}
+                  onChange={(e) => setFormData((p) => ({ ...p, marketingConsent: e.target.checked }))}
+                />
+                <span>{EARLY_ACCESS_CONSENT_TEXT}</span>
+              </label>
+
               <button
                 type="submit"
                 disabled={formStatus === "submitting"}
@@ -610,6 +630,8 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
     const outcome = await submitLead({
       type: "survey",
       ...(email ? { email } : {}),
+      // Adding the optional email is the opt-in described by the hint text.
+      ...(email ? { marketingConsent: true, consentVersion: SURVEY_EMAIL_CONSENT_VERSION } : {}),
       answers,
       source: "web-coming-soon",
       submission_version: "4.0",
@@ -700,7 +722,7 @@ function SurveyModal({ onClose }: { onClose: () => void }) {
                 Email <span className="font-normal text-slate-500">(optional)</span>
               </label>
               <p id="survey-email-hint" className="text-xs text-slate-500 mt-1 mb-2">
-                Leave it blank to stay anonymous, or add it to hear about launch updates.
+                {SURVEY_EMAIL_CONSENT_TEXT}
               </p>
               <input
                 id="survey-email"

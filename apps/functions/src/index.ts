@@ -10,7 +10,7 @@ import * as logger from "firebase-functions/logger";
 import { provisionAuthUser } from "./authProvisioning";
 import { changeUserRole, RoleChangeError } from "./roleAuthority";
 import { leadCaptchaFailureResponse, verifyLeadRecaptcha } from "./leadRecaptcha";
-import { parseLeadSubmission } from "./leadContact";
+import { leadMarketingConsent, parseLeadSubmission } from "./leadContact";
 import { resendApiKey } from "./providers/emailSecret";
 import { buildWebLeadAlert, sendLeadAlert } from "./leadAlerts";
 import { ResendEmailProvider } from "./providers/emailProvider";
@@ -604,6 +604,7 @@ export const leads_submitLead = onRequest(
 
       // --- Write to Firestore ---
       const leadRef = db.collection("leads").doc();
+      const createdAt = Date.now();
       const leadDoc = {
         id: leadRef.id,
         name: parsed.name,
@@ -611,13 +612,15 @@ export const leads_submitLead = onRequest(
         interests,
         message: body.message || "",
         intent: body.intent || "",
+        // Nurture enrolls only on an explicit, versioned opt-in.
+        ...leadMarketingConsent(body, parsed, createdAt),
         source: body.source || "coming-soon-page",
         version: body.submission_version || "2.0",
         interestScore,
         type: parsed.type,  // "early_access" or "survey"
         surveyAnswers: body.answers || null, // Survey data if type === "survey"
         recaptchaScore: captchaResult.score,
-        createdAt: Date.now(),
+        createdAt,
       };
 
       await leadRef.set(leadDoc);
@@ -625,6 +628,7 @@ export const leads_submitLead = onRequest(
       logger.info("Lead created", {
         id: leadRef.id,
         type: leadDoc.type,
+        marketingConsent: leadDoc.marketingConsent,
         provider: captchaResult.provider,
         score: captchaResult.score,
       });
@@ -694,7 +698,7 @@ export const leads_submitContact = onCall(async (request) => {
     uid: request.auth?.uid || null,
   });
 
-  logger.info("Contact form lead created", { id: leadRef.id, email });
+  logger.info("Contact form lead created", { id: leadRef.id });
 
   return { success: true, id: leadRef.id };
 });
