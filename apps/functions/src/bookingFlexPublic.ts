@@ -7,6 +7,7 @@ import {
   OPEN_HOUR,
   RESOURCE_CONFIG,
   enforceBookingHorizon,
+  DESK_RESOURCE_IDS,
   findDeskChangePlans,
   getBusy,
   quoteForChoice,
@@ -34,8 +35,9 @@ export const booking_getAvailability = onCall(async (request) => {
       type: resource.type,
       available: !resourceConflicts(resourceId, start, end, busy),
     }));
-  const continuousDeskAvailable = options.some(
-    (option) => option.type === "SEAT" && option.available,
+  const offeredDeskIds = DESK_RESOURCE_IDS.filter((resourceId) => isResourceOffered(resourceId, offered));
+  const continuousDeskAvailable = offeredDeskIds.some(
+    (resourceId) => !resourceConflicts(resourceId, start, end, busy),
   );
 
   return {
@@ -51,7 +53,7 @@ export const booking_getAvailability = onCall(async (request) => {
     options,
     deskChangeOptions: continuousDeskAvailable
       ? []
-      : findDeskChangePlans(start, end, busy),
+      : findDeskChangePlans(start, end, busy, offeredDeskIds),
   };
 });
 
@@ -67,7 +69,8 @@ export const booking_createQuote = onCall(async (request) => {
   const offered = await loadResourceOfferingMap();
   if (resourceId) assertResourceOffered(resourceId, offered);
   const busy = await getBusy(start, end);
-  const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy);
+  const offeredDeskIds = DESK_RESOURCE_IDS.filter((id) => isResourceOffered(id, offered));
+  const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy, offeredDeskIds);
   if (choice.kind === "desk_change") {
     for (const segment of choice.segments) assertResourceOffered(segment.resourceId, offered);
   } else {

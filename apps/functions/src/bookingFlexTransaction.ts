@@ -20,6 +20,7 @@ import {
   FLEX_RESOURCE_ID,
   HOLD_MS,
   RESCHEDULE_LOCK_END,
+  DESK_RESOURCE_IDS,
   RESOURCE_CONFIG,
   type BookingChoice,
   type BookingQuote,
@@ -44,7 +45,7 @@ import {
   resourceConflicts,
   validateWindow,
 } from "./bookingFlexShared";
-import { assertResourceOffered, loadResourceOfferingMap } from "./resourceOffering";
+import { assertResourceOffered, isResourceOffered, loadResourceOfferingMap } from "./resourceOffering";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -725,7 +726,8 @@ export const booking_beginCheckout = onCall(
     const offered = await loadResourceOfferingMap();
     if (resourceId) assertResourceOffered(resourceId, offered);
     const busy = await getBusy(start, end);
-    const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy);
+    const offeredDeskIds = DESK_RESOURCE_IDS.filter((id) => isResourceOffered(id, offered));
+    const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy, offeredDeskIds);
     if (choice.kind === "desk_change") {
       for (const segment of choice.segments) assertResourceOffered(segment.resourceId, offered);
     } else {

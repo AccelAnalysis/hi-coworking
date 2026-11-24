@@ -23,6 +23,7 @@ describe("Phase 2 booking and pricing UI", () => {
     });
     expect(pricing).toContain("/book?resource=mode-conference#after-hours");
     expect(pricing).toContain("officeOffered");
+    expect(pricing).toContain("conferenceOffered");
     expect(pricing).toContain("useResourceOffering");
   });
 

@@ -59,6 +59,7 @@ export default function PricingPage() {
   const { user } = useAuth();
   const { isOffered } = useResourceOffering();
   const officeOffered = isOffered(PRIVATE_OFFICE_RESOURCE_ID);
+  const conferenceOffered = isOffered("mode-conference");
   const [loadingTier, setLoadingTier] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Virtual address (built, OFF): the option here and the pop-up on the way to
@@ -324,6 +325,7 @@ export default function PricingPage() {
             </div>
           </section>
 ) : null}
+{conferenceOffered ? (
           <div className="mb-10">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Users className="h-3.5 w-3.5" /> Conference Room
@@ -366,6 +368,7 @@ export default function PricingPage() {
               </div>
             </div>
           </div>
+) : null}
 
           {VIRTUAL_ADDRESS ? (
             <div className="mb-10" data-testid="va-option">
