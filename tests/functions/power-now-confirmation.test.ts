@@ -610,12 +610,12 @@ describe("Power NOW confirmation delivery", () => {
     expect(skipped.result.body && JSON.stringify(skipped.result.body)).not.toContain("ada@example.com");
   });
 
-  it("uses the deployed expo-lead test config and emails only jholman@", async () => {
+  it("keeps the deployed expo-lead confirmation flag off and the jholman@ allow-list", async () => {
     const env = parseEnvFile("firebase/expo-lead-functions/.env.hi-coworking-plat");
     env.RESEND_API_KEY = "test-resend-key";
     env.RECAPTCHA_ENTERPRISE_API_KEY = "captcha-key";
-    expect(env.POWER_NOW_CONFIRMATION_EMAIL_ENABLED).toBe("true");
-    expect(confirmationEmailEnabled(env)).toBe(true);
+    expect(env.POWER_NOW_CONFIRMATION_EMAIL_ENABLED).toBe("false");
+    expect(confirmationEmailEnabled(env)).toBe(false);
     expect(confirmationTestRecipients(env)).toEqual(["jholman@accelanalysis.com"]);
 
     const mail = mailRecorder();
@@ -633,8 +633,7 @@ describe("Power NOW confirmation delivery", () => {
     expect(other.result.status).toBe(200);
     expect(jonathan.result.status).toBe(200);
     expect(secondOther.result.status).toBe(200);
-    expect(mail.calls).toHaveLength(1);
-    expect(JSON.parse(mail.calls[0]!.body).to).toEqual(["jholman@accelanalysis.com"]);
+    expect(mail.calls).toHaveLength(0);
     expect(JSON.stringify(other.result.body)).not.toContain("ada@example.com");
     expect(JSON.stringify(secondOther.result.body)).not.toContain("grace@example.com");
   });
@@ -874,7 +873,9 @@ describe("Power NOW confirmation config surface", () => {
     }
 
     const expoLeadEnv = readFileSync("firebase/expo-lead-functions/.env.hi-coworking-plat", "utf8");
-    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true$/m);
+    expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=false$/m);
+    expect(expoLeadEnv).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
+    expect(expoLeadEnv).not.toMatch(/TEMPORARY INBOX TEST/);
     expect(expoLeadEnv).toMatch(/^ATTIO_INTAKE_ENABLED=$/m);
     expect(expoLeadEnv).not.toMatch(/^ATTIO_INTAKE_ENABLED=true$/m);
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);

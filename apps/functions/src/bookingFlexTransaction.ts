@@ -12,6 +12,13 @@ import {
   getDeskMembershipTierById,
 } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
+import { sendBookingConfirmationEmail } from "./bookingConfirmationEmail";
+import { resendApiKey } from "./providers/emailSecret";
+import {
+  validateGuestScreening,
+  type GuestScreening,
+} from "./providers/guestCheckoutScreening";
+import type { TermsAcceptanceRecord } from "./providers/termsCompliance";
 import {
   FLEX_RESOURCE_ID,
   HOLD_MS,
@@ -45,7 +52,17 @@ if (admin.apps.length === 0) admin.initializeApp();
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 
-type GuestDetails = { name?: string; email?: string; phone?: string };
+type GuestDetails = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  // Renter screening (guest checkout): business use only.
+  businessName?: string;
+  isIndependent?: boolean;
+  intendedUse?: string;
+  termsAccepted?: boolean;
+  termsVersion?: string;
+};
 
 type HoldData = {
   id: string;
@@ -70,6 +87,8 @@ type HoldData = {
   paymentId?: string;
   bookingId?: string;
   guestAccountCreated?: boolean;
+  /** Guest checkout clickwrap (source "guest-checkout"); null for signed-in holds. */
+  termsAcceptance?: TermsAcceptanceRecord | null;
 };
 
 function occupancyHoldId(parentHoldId: string, index: number) {
@@ -145,27 +164,110 @@ async function ensureGuestAccount(guest?: GuestDetails) {
   } catch (error: unknown) {
     const coded = error as { code?: string };
     if (coded.code !== "auth/user-not-found") throw error;
-    userRecord = await admin.auth().createUser({
-      email,
-      displayName: guest?.name?.trim() || undefined,
-      emailVerified: false,
-    });
-    created = true;
+    try {
+      userRecord = await admin.auth().createUser({
+        email,
+        displayName: guest?.name?.trim() || undefined,
+        emailVerified: false,
+      });
+      created = true;
+    } catch (createError: unknown) {
+      // Another checkout or signup may create the account after our lookup.
+      if ((createError as { code?: string }).code !== "auth/email-already-exists") {
+        throw createError;
+      }
+      userRecord = await admin.auth().getUserByEmail(email);
+    }
   }
 
+  // An email entered at checkout does not prove ownership of an existing
+  // account. Keep its profile, role, membership, and credits untouched.
+  if (!created) return { uid: userRecord.uid, created: false };
+
   const userRef = db().collection("users").doc(userRecord.uid);
-  await userRef.set({
-    uid: userRecord.uid,
-    email,
-    displayName: guest?.name?.trim() || userRecord.displayName || "",
-    phone: guest?.phone?.trim() || "",
-    role: "member",
-    membershipStatus: "none",
-    ...(created ? { createdAt: Date.now() } : {}),
-    updatedAt: Date.now(),
-  }, { merge: true });
+  await db().runTransaction(async (tx) => {
+    const userSnap = await tx.get(userRef);
+    const now = Date.now();
+    if (userSnap.exists) {
+      // Another workflow (for example the Auth onCreate provisioner) created
+      // the profile first. Never change its role, membership, or credits;
+      // only fill contact details that are still blank.
+      const existing = userSnap.data() || {};
+      const fill: Record<string, unknown> = {};
+      const guestName = guest?.name?.trim();
+      const guestPhone = guest?.phone?.trim();
+      if (guestName && !String(existing.displayName || "").trim()) fill.displayName = guestName;
+      if (guestPhone && !String(existing.phone || "").trim()) fill.phone = guestPhone;
+      if (Object.keys(fill).length > 0) {
+        tx.set(userRef, { ...fill, updatedAt: now }, { merge: true });
+      }
+      return;
+    }
+    tx.create(userRef, {
+      uid: userRecord.uid,
+      email,
+      displayName: guest?.name?.trim() || userRecord.displayName || "",
+      phone: guest?.phone?.trim() || "",
+      role: "member",
+      membershipStatus: "none",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
 
   return { uid: userRecord.uid, created };
+}
+
+/**
+ * Copies the guest's screening answers and Terms acceptance onto the booking,
+ * and onto the account only when checkout just created it. An email typed at
+ * checkout does not prove ownership of an existing account (see PR #66), so
+ * existing users/{uid} and accountDetails/{uid} docs are left untouched.
+ * Best effort: the booking is already paid and confirmed.
+ */
+async function recordGuestScreening(
+  hold: HoldData,
+  bookingId: string,
+  uid: string,
+  accountCreated: boolean,
+) {
+  const terms = hold.termsAcceptance;
+  const guest = hold.guest;
+  if (!terms || !guest) return;
+  try {
+    const batch = db().batch();
+    batch.set(db().collection("bookings").doc(bookingId), {
+      guestScreening: {
+        businessName: guest.businessName || "",
+        isIndependent: guest.isIndependent === true,
+        intendedUse: guest.intendedUse || "",
+      },
+      termsAcceptance: terms,
+    }, { merge: true });
+    if (accountCreated) {
+      batch.set(db().collection("users").doc(uid), {
+        termsAcceptance: terms,
+        termsAcceptanceHistory: admin.firestore.FieldValue.arrayUnion({
+          version: terms.version,
+          source: terms.source,
+          at: terms.acceptedAt,
+        }),
+        updatedAt: Date.now(),
+      }, { merge: true });
+      batch.set(db().collection("accountDetails").doc(uid), {
+        company: guest.businessName || "",
+        isIndependent: guest.isIndependent === true,
+        ...(guest.phone ? { phone: guest.phone } : {}),
+        updatedAt: Date.now(),
+      }, { merge: true });
+    }
+    await batch.commit();
+  } catch (error) {
+    logger.error("Guest screening record failed after booking confirmation", {
+      bookingId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function issueAccessSafely(
@@ -181,6 +283,29 @@ async function issueAccessSafely(
     logger.error("Access grant failed after booking confirmation", {
       bookingId,
       error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Booking confirmation email. Transactional, at most once per booking (claimed
+ * on bookings/{id}.confirmationEmail), and never throws: an email outage must
+ * not undo or fail a paid booking. Called on every finalize, so a retry of the
+ * callable also retries a send that failed earlier.
+ */
+async function sendConfirmationEmailSafely(bookingId: string) {
+  let apiKey = "";
+  try {
+    apiKey = resendApiKey.value();
+  } catch {
+    apiKey = "";
+  }
+  try {
+    await sendBookingConfirmationEmail(bookingId, { apiKey });
+  } catch (error) {
+    logger.error("Booking confirmation email threw unexpectedly (non-fatal)", {
+      bookingId,
+      error: error instanceof Error ? error.name : "unknown",
     });
   }
 }
@@ -203,6 +328,7 @@ async function createHoldAtomically(
   end: number,
   guest: GuestDetails | undefined,
   authenticatedUid?: string,
+  screening?: GuestScreening | null,
 ) {
   return db().runTransaction(async (tx) => {
     const bookingQuery = db().collection("bookings").where("end", ">", start);
@@ -344,8 +470,12 @@ async function createHoldAtomically(
       guest: authenticatedUid ? null : {
         name: guest?.name?.trim(),
         email: guest?.email?.trim().toLowerCase(),
-        phone: guest?.phone?.trim() || "",
+        phone: screening?.phone || guest?.phone?.trim() || "",
+        businessName: screening?.businessName ?? "",
+        isIndependent: screening?.isIndependent === true,
+        intendedUse: screening?.intendedUse ?? "",
       },
+      termsAcceptance: authenticatedUid ? null : screening?.termsAcceptance ?? null,
       quote: adjustedQuote,
       status: "HELD",
       secretHash: createHash("sha256").update(holdSecret).digest("hex"),
@@ -399,6 +529,14 @@ async function createHoldAtomically(
 }
 
 async function finalizeHeldBooking(
+  ...args: Parameters<typeof finalizeHeldBookingRecord>
+) {
+  const result = await finalizeHeldBookingRecord(...args);
+  await sendConfirmationEmailSafely(result.bookingId);
+  return result;
+}
+
+async function finalizeHeldBookingRecord(
   holdId: string,
   finalUserId: string,
   userName: string,
@@ -566,7 +704,7 @@ async function finalizeHeldBooking(
 }
 
 export const booking_beginCheckout = onCall(
-  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey] },
+  { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey, resendApiKey] },
   async (request) => {
     const { resourceId, deskChangePlanId, start, end, successUrl, cancelUrl, guest } = request.data as {
       resourceId?: string;
@@ -582,6 +720,20 @@ export const booking_beginCheckout = onCall(
     }
     if (!request.auth && (!guest?.name?.trim() || !guest?.email?.trim())) {
       throw new HttpsError("invalid-argument", "Name and email are required for guest checkout.");
+    }
+    // Renter screening: signed-out guests give phone, business name (or None /
+    // independent), a one-line intended use, and tick the Terms checkbox.
+    let screening: GuestScreening | null = null;
+    if (!request.auth) {
+      const checked = validateGuestScreening(guest, Date.now());
+      if (!checked.ok) {
+        throw new HttpsError(
+          checked.code === "stale-terms" ? "failed-precondition" : "invalid-argument",
+          checked.message,
+          { field: checked.field },
+        );
+      }
+      screening = checked.value;
     }
 
     validateWindow(start, end);
@@ -600,6 +752,7 @@ export const booking_beginCheckout = onCall(
       end,
       guest,
       request.auth?.uid,
+      screening,
     );
     const quote = held.quote;
 
@@ -677,7 +830,7 @@ export const booking_beginCheckout = onCall(
 );
 
 export const booking_finalizeCheckout = onCall(
-  { secrets: [seamApiKey] },
+  { secrets: [seamApiKey, resendApiKey] },
   async (request) => {
     const { holdId, holdSecret } = request.data as { holdId: string; holdSecret?: string };
     if (!holdId) throw new HttpsError("invalid-argument", "holdId is required.");
@@ -705,6 +858,8 @@ export const booking_finalizeCheckout = onCall(
       ) {
         customToken = await admin.auth().createCustomToken(hold.userId, { bookingCheckout: true });
       }
+      // Retries a confirmation email that failed on the first finalize; a no-op once sent.
+      await sendConfirmationEmailSafely(hold.bookingId);
       return {
         success: true,
         bookingId: hold.bookingId,
@@ -725,17 +880,28 @@ export const booking_finalizeCheckout = onCall(
       throw new HttpsError("failed-precondition", "Payment has not been confirmed yet.");
     }
 
-    const guestAccount = request.auth
-      ? { uid: request.auth.uid, created: false }
-      : await ensureGuestAccount(hold.guest || undefined);
+    // Resolve ownership from the hold, not from whichever account happens to
+    // be signed in when a guest returns from Stripe with the hold secret.
+    const isGuestHold = hold.userId.startsWith("guest:");
+    const guestAccount = isGuestHold
+      ? await ensureGuestAccount(hold.guest || undefined)
+      : { uid: hold.userId, created: false };
     const finalUserId = guestAccount.uid;
+    // A guest hold keeps the name entered at checkout, even if some other
+    // account is signed in on the browser that returns from Stripe.
+    const bookingName = isGuestHold
+      ? hold.guest?.name || "Guest"
+      : request.auth?.token.name || request.auth?.token.email || hold.guest?.name || "Guest";
     const result = await finalizeHeldBooking(
       holdId,
       finalUserId,
-      String(request.auth?.token.name || request.auth?.token.email || hold.guest?.name || "Guest"),
+      String(bookingName),
       guestAccount.created,
       "STRIPE",
     );
+    if (hold.guest && hold.termsAcceptance) {
+      await recordGuestScreening(hold, result.bookingId, guestAccount.uid, guestAccount.created);
+    }
 
     const customToken = !request.auth && guestAccount.created
       ? await admin.auth().createCustomToken(finalUserId, { bookingCheckout: true })

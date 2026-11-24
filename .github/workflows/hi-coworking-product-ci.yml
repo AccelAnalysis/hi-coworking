@@ -155,18 +155,23 @@ jobs:
           tests/functions/access-no-show.test.ts
           tests/functions/access-ready-email.test.ts
           tests/functions/early-access-lead-capture.test.ts
+          tests/functions/survey-optional-email.test.ts
+          tests/functions/lead-marketing-consent.test.ts
           tests/functions/member-management-data-compat.test.ts
           tests/functions/payment-ledger-authority.test.ts
           tests/functions/payment-ledger-undefined-fields.test.ts
           tests/functions/stripe-subscription-invoices.test.ts
           tests/functions/membership-welcome-email.test.ts
+          tests/functions/booking-confirmation-email.test.ts
           tests/functions/stripe-refund-notices.test.ts
           tests/functions/stripe-webhook-idempotency.test.ts
           tests/functions/quickbooks-webhook.test.ts
           tests/functions/qb-invoice-admin-only.test.ts
+          tests/functions/log-redaction.test.ts
           tests/functions/member-notifications.test.ts
           tests/web/refund-copy.test.ts
           tests/functions/booking-policy.test.ts
+          tests/functions/booking-hold-cleanup.test.ts
           tests/functions/booking-operating-calendar.test.ts
           tests/functions/booking-operating-calendar-deployment-source.test.ts
           tests/functions/event-policy-v2.test.ts
@@ -230,6 +235,10 @@ jobs:
           tests/functions/sayhi-membership-end.test.ts
           tests/functions/sayhi-billing-address.test.ts
           tests/functions/sayhi-follow-up-emails.test.ts
+          tests/functions/business-profile.test.ts
+          tests/web/business-profile-forms.test.ts
+          tests/functions/member-id-check.test.ts
+          tests/functions/guest-checkout-screening.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -243,7 +252,9 @@ jobs:
           tests/functions/event-interest-sms-optional.test.ts
           tests/functions/admin-member-credit.test.ts
           tests/functions/admin-booking-management.test.ts
-          tests/functions/front-desk-kiosk.test.ts"
+          tests/functions/front-desk-kiosk.test.ts
+          tests/functions/booking-hold-cleanup-firestore.test.ts
+          tests/functions/guest-checkout-screening.journey.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-

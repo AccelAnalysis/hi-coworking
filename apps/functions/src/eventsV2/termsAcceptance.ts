@@ -5,7 +5,7 @@ import { db } from "./core";
 import {
   HI_TERMS_TEXT,
   HI_TERMS_VERSION,
-  TERMS_ACCEPTANCE_SOURCES,
+  CALLABLE_TERMS_SOURCES,
   type TermsAcceptanceRecord,
   type TermsAcceptanceSource,
 } from "../providers/termsCompliance";
@@ -31,7 +31,9 @@ export function buildTermsAcceptance(
     throw new HttpsError("invalid-argument", "Please accept the Terms of Service and Privacy Policy.");
   }
   const source = String(input.source || "") as TermsAcceptanceSource;
-  if (!TERMS_ACCEPTANCE_SOURCES.includes(source)) {
+  // Members can only record sign-up acceptance here. Guest-checkout
+  // acceptance is written server-side by booking_beginCheckout.
+  if (!CALLABLE_TERMS_SOURCES.includes(source)) {
     throw new HttpsError("invalid-argument", "Unknown acceptance source.");
   }
   if (input.version !== HI_TERMS_VERSION) {

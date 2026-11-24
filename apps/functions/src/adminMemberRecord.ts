@@ -1,6 +1,15 @@
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import { emailHash } from "./providers/marketingPreferences";
+import {
+  BUSINESS_ROLE_LABELS,
+  BUSINESS_TYPE_LABELS,
+  businessNameLabel,
+  isBusinessProfileComplete,
+  type BusinessRole,
+  type BusinessType,
+} from "./providers/businessProfile";
+import { idCheckView } from "./memberIdCheck";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -84,6 +93,29 @@ export function termsView(raw: unknown) {
   return { version: str(t.version), source: str(t.source), acceptedAt: num(t.acceptedAt) };
 }
 
+/**
+ * Business profile from accountDetails/{uid} (renter screening). Labels only;
+ * the billing address and anything else in that doc stay out of the view.
+ */
+export function businessView(raw: unknown) {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Doc;
+  const role = str(d.role);
+  const businessType = str(d.businessType);
+  return {
+    businessName: businessNameLabel(d as { company?: unknown; isIndependent?: unknown }),
+    isIndependent: d.isIndependent === true,
+    role: role && role in BUSINESS_ROLE_LABELS ? BUSINESS_ROLE_LABELS[role as BusinessRole] : null,
+    businessType: businessType && businessType in BUSINESS_TYPE_LABELS ? BUSINESS_TYPE_LABELS[businessType as BusinessType] : null,
+    businessDescription: str(d.businessDescription),
+    website: str(d.website),
+    vaSccNumber: str(d.vaSccNumber),
+    phone: str(d.phone),
+    complete: isBusinessProfileComplete(d),
+    updatedAt: num(d.businessProfileUpdatedAt) ?? num(d.updatedAt),
+  };
+}
+
 function historyView(raw: unknown, keys: string[]) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -131,7 +163,10 @@ export const admin_memberRecordGet = onCall(async (request) => {
   const uid = str((request.data as Doc | undefined)?.uid);
   if (!uid || uid.length > 128 || uid.includes("/")) throw new HttpsError("invalid-argument", "A member id is required.");
   const db = admin.firestore();
-  const snap = await db.collection("users").doc(uid).get();
+  const [snap, detailsSnap] = await Promise.all([
+    db.collection("users").doc(uid).get(),
+    db.collection("accountDetails").doc(uid).get(),
+  ]);
   if (!snap.exists) throw new HttpsError("not-found", "No member has that id.");
   const user = snap.data() as Doc;
 
@@ -179,7 +214,9 @@ export const admin_memberRecordGet = onCall(async (request) => {
       stripeSubscriptionId: str(user.stripeSubscriptionId),
       membershipCancellationPending: user.membershipCancellationPending === true,
       accountCreditCents: num(user.accountCreditCents) ?? 0,
+      idCheck: idCheckView(user.idCheck),
     },
+    business: businessView(detailsSnap.exists ? detailsSnap.data() : null),
     consent: {
       sms: smsConsentView(user.smsConsent),
       smsHistory: historyView(user.smsConsentHistory, ["optIn", "source", "textVersion", "at"]),

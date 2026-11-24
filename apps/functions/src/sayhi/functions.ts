@@ -2,34 +2,61 @@ import * as admin from "firebase-admin";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { queueFollowUp } from "../followUps/store";
 import { virtualAddressEnabled } from "./config";
+import {
+  hasBusinessProfileInput,
+  validateBusinessProfile,
+  type BusinessProfile,
+  type BusinessProfileInput,
+} from "../providers/businessProfile";
 
 /**
- * Create your account (step 3): company name and phone. Stored server-side
- * in accountDetails/{uid} so the users doc keeps its existing provisioning
- * transaction and client write rules. Owner and staff can read it; clients
- * can't write it directly.
+ * Create your account (step 3) and the profile page: phone plus the business
+ * profile (renter screening). Stored server-side in accountDetails/{uid} so
+ * the users doc keeps its existing provisioning transaction and client write
+ * rules. Owner and staff can read it; clients can't write it directly.
+ *
+ * The business name reuses the existing `company` field. A legacy save that
+ * only sends {company, phone} still works (company stays optional there), so
+ * older web builds and existing members are not broken. Any save that carries
+ * the new business fields must send the full, valid profile.
  */
 export const ACCOUNT_DETAILS_COLLECTION = "accountDetails";
 
-export function normalizeAccountDetails(data: unknown): { company: string; phone: string } {
-  const input = (data || {}) as { company?: unknown; phone?: unknown };
-  const company = typeof input.company === "string" ? input.company.replace(/\s+/g, " ").trim() : "";
-  const rawPhone = typeof input.phone === "string" ? input.phone.trim() : "";
+export type AccountDetailsUpdate = { company: string; phone: string } | ({ phone: string } & BusinessProfile);
+
+function normalizePhone(raw: unknown): string {
+  const rawPhone = typeof raw === "string" ? raw.trim() : "";
   const digits = rawPhone.replace(/\D/g, "");
-  if (company.length > 120) throw new HttpsError("invalid-argument", "Use a shorter company name.");
   const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
   if (national.length !== 10) throw new HttpsError("invalid-argument", "Enter a 10-digit phone number.");
-  return { company, phone: `+1${national}` };
+  return `+1${national}`;
+}
+
+export function normalizeAccountDetails(data: unknown): AccountDetailsUpdate {
+  const input = (data || {}) as Record<string, unknown>;
+  if (hasBusinessProfileInput(input)) {
+    const profile = validateBusinessProfile(input as BusinessProfileInput);
+    if (!profile.ok) throw new HttpsError("invalid-argument", profile.message, { field: profile.field });
+    return { ...profile.value, phone: normalizePhone(input.phone) };
+  }
+  const company = typeof input.company === "string" ? input.company.replace(/\s+/g, " ").trim() : "";
+  if (company.length > 120) throw new HttpsError("invalid-argument", "Use a shorter company name.");
+  return { company, phone: normalizePhone(input.phone) };
 }
 
 export const members_saveAccountDetails = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
   const details = normalizeAccountDetails(request.data);
+  const now = Date.now();
   await admin.firestore().collection(ACCOUNT_DETAILS_COLLECTION).doc(request.auth.uid).set(
-    { ...details, updatedAt: Date.now() },
+    {
+      ...details,
+      ...("role" in details ? { businessProfileUpdatedAt: now } : {}),
+      updatedAt: now,
+    },
     { merge: true },
   );
-  return { ok: true };
+  return { ok: true, businessProfileComplete: "role" in details };
 });
 
 /**

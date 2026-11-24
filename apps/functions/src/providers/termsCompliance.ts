@@ -11,8 +11,15 @@ export const HI_TERMS_TEXT = "I agree to the Terms of Service and Privacy Policy
 export const TERMS_PATH = "/terms";
 export const PRIVACY_PATH = "/privacy";
 
-export const TERMS_ACCEPTANCE_SOURCES = ["member-signup"] as const;
+/**
+ * Where an acceptance was recorded. "guest-checkout" is written only by the
+ * server in booking_beginCheckout (signed-out /book checkbox); the
+ * members_acceptTerms callable accepts CALLABLE_TERMS_SOURCES only.
+ */
+export const GUEST_CHECKOUT_TERMS_SOURCE = "guest-checkout" as const;
+export const TERMS_ACCEPTANCE_SOURCES = ["member-signup", GUEST_CHECKOUT_TERMS_SOURCE] as const;
 export type TermsAcceptanceSource = (typeof TERMS_ACCEPTANCE_SOURCES)[number];
+export const CALLABLE_TERMS_SOURCES: readonly TermsAcceptanceSource[] = ["member-signup"];
 
 export type TermsAcceptanceRecord = {
   version: string;

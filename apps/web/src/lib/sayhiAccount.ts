@@ -9,12 +9,22 @@ import { VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
 
 const VA_CHOICE_KEY = "hi-sayhi-virtual-address";
 
-export const saveAccountDetailsCallable = httpsCallable<{ company: string; phone: string }, { ok: boolean }>(
+export type AccountDetailsInput = { company: string; phone: string } & Partial<{
+  isIndependent: boolean;
+  role: string;
+  businessType: string;
+  businessDescription: string;
+  website: string;
+  vaSccNumber: string;
+}>;
+
+export const saveAccountDetailsCallable = httpsCallable<AccountDetailsInput, { ok: boolean; businessProfileComplete?: boolean }>(
   functions,
   "members_saveAccountDetails",
 );
 
-export async function saveAccountDetails(input: { company: string; phone: string }) {
+/** Saves phone plus, when given, the full business profile (renter screening). */
+export async function saveAccountDetails(input: AccountDetailsInput) {
   await saveAccountDetailsCallable(input);
 }
 

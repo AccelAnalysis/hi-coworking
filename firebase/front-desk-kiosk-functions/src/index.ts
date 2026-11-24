@@ -29,3 +29,7 @@ export {
 // your account, and the Form 1583 paperwork callable, which refuses every
 // call while VIRTUAL_ADDRESS_ENABLED is not "true" (unset here, so off).
 export { members_saveAccountDetails, va_submitForm1583 } from "../../../apps/functions/src/sayhi/functions";
+
+// Renter screening (Nov 2026): staff/admin record the first-visit in-person ID
+// check (checked yes/no, date, staff initials only; never an image or number).
+export { staff_setIdCheck } from "../../../apps/functions/src/memberIdCheck";
