@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_SAYHI_FLOW: process.env.NEXT_PUBLIC_SAYHI_FLOW || "",
     NEXT_PUBLIC_VIRTUAL_ADDRESS: process.env.NEXT_PUBLIC_VIRTUAL_ADDRESS || "",
     NEXT_PUBLIC_SAYHI_PREVIEW_DEMO: process.env.NEXT_PUBLIC_SAYHI_PREVIEW_DEMO || "",
+    NEXT_PUBLIC_SEAT_MAP_PICKER: process.env.NEXT_PUBLIC_SEAT_MAP_PICKER || "",
   },
   transpilePackages: ["@hi/shared"],
   images: {
