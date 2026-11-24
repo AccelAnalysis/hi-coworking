@@ -15,6 +15,14 @@ on:
         description: 'Type deploy access functions to run the door access go-live steps and deploy'
         required: true
         type: string
+      steps:
+        description: 'full = Seam key check + webhook + deploy + door + smoke. deploy-door = deploy + door + smoke only (no Secret Manager reads, no Seam changes).'
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - deploy-door
 
 permissions:
   contents: read
@@ -81,6 +89,7 @@ jobs:
           node -e "const rc=JSON.parse(require('fs').readFileSync('.firebaserc','utf8')); if (rc.projects?.default !== 'hi-coworking-plat') { throw new Error('Refusing: .firebaserc default project is not hi-coworking-plat'); }"
 
       - name: Load the Seam key from Secret Manager (masked)
+        if: inputs.steps == 'full'
         shell: bash
         run: |
           set -euo pipefail
@@ -89,9 +98,11 @@ jobs:
           echo "SEAM_API_KEY=${key}" >> "${GITHUB_ENV}"
 
       - name: Confirm the Seam key is for the production workspace
+        if: inputs.steps == 'full'
         run: node scripts/door-access-go-live.mjs verify
 
       - name: Point the Seam webhook at access_seamWebhook and sync its secret
+        if: inputs.steps == 'full'
         run: node scripts/door-access-go-live.mjs webhook
 
       # firebase.access.json's predeploy builds the isolated bundle first.
