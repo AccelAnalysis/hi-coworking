@@ -21,6 +21,7 @@ no SDK dependency.
 | `events_processCampaignJobs` | Event marketing campaign email | `POST /emails/batch` in chunks of 100, one rendered copy per recipient |
 | `stripe_webhook` (core bundle) | Membership welcome email on `checkout.session.completed` with `purpose=membership` | `POST /emails`, tags `membership_welcome` + `transactional`, idempotency key `membership-welcome/<checkoutSessionId>/<payload hash>` |
 | `stripe_webhook` (core bundle) | Membership refund confirmation (`charge.refunded`, `refund.updated`), cancellation scheduled (`customer.subscription.updated` with a cancel date), membership ended (`customer.subscription.deleted`) | `POST /emails`, tags `refund_confirmation` / `membership_cancellation_scheduled` / `membership_ended` + `transactional`, idempotency key `<tag>/<sentEmails key>` |
+| `booking_finalizeCheckout`, `booking_beginCheckout` (booking-transactions bundle) | Desk and meeting-room booking confirmation, once per booking | `POST /emails`, tags `booking_confirmation` + `transactional`, idempotency key `booking-confirmation/<bookingId>/<payload hash>` |
 
 The Power NOW confirmation sent by `expo_submitNasaLead` is separate. It has
 its own Resend client in `apps/functions/src/expo/powerNowConfirmation.ts`,
@@ -109,6 +110,38 @@ A refund never changes the membership itself; cancelling the subscription does.
 
 The live webhook endpoint must subscribe to `charge.refunded`,
 `refund.updated` and `refund.failed` for the refund notices to work.
+
+### Booking confirmation
+
+`booking_finalizeCheckout` (paid Stripe checkout) and `booking_beginCheckout`
+(bookings fully covered by membership hours or account credit) send a
+transactional confirmation right after the booking is confirmed
+(`apps/functions/src/bookingConfirmationEmail.ts`). It shows the renter's first
+name, date, time window in ET, the desk or room (both desks for a desk change),
+the address, and a payment summary. It never contains a door code; it points to
+SayHi for access details. It ignores the marketing opt-out and has no
+unsubscribe link.
+
+Once only: the send is claimed in a transaction on the booking itself,
+`bookings/<id>.confirmationEmail` (`status` `sending`, `sent` or `failed`,
+`attempts`, `messageId`, `errorCode`), and a sent email sets
+`bookings/<id>.confirmationEmailSentAt` (epoch ms). Every finalize call, including
+the success page calling `booking_finalizeCheckout` again for a finalized hold,
+retries a failed send; a sent one is never repeated. After 5 failed attempts it
+stops. A failure is logged and recorded, but never fails the callable or rolls
+back the paid booking. Set the env var `BOOKING_CONFIRMATION_EMAIL_DISABLED=true`
+to turn it off.
+
+Both callables bind `HI_COWORKING_RESEND_API_KEY`, so they deploy with the
+booking-transactions bundle:
+
+```bash
+npm run deploy:booking:transactions
+```
+
+`confirmationEmailSentAt` is also the seam for a later post-attendance
+follow-up: `postAttendanceFollowUpCandidate()` describes which bookings such a
+job may pick up. Nothing sends a follow-up yet.
 
 `events_processCampaignJobs` is not in this bundle. It binds the Twilio
 secrets, so it deploys from its own bundle, `firebase/campaign-functions`
