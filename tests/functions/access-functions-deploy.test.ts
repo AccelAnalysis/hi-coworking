@@ -35,7 +35,19 @@ function loadGraph(entry: string): string[] {
   return files;
 }
 
-const ACCESS_IDS = ["access_adminResendPin", "access_getMyGrants", "access_noShowRevoke", "access_seamWebhook"];
+const ACCESS_IDS = [
+  "access_adminGetDoorStatus",
+  "access_adminResendPin",
+  "access_adminResolveAlert",
+  "access_adminRetryCode",
+  "access_adminRevoke",
+  "access_adminUnlock",
+  "access_expireGrants",
+  "access_getMyGrants",
+  "access_noShowRevoke",
+  "access_onRevokeRequested",
+  "access_seamWebhook",
+];
 
 describe("isolated access (Seam) functions deploy", () => {
   const config = JSON.parse(readFileSync("firebase.access.json", "utf8"));
@@ -93,9 +105,18 @@ describe("isolated access (Seam) functions deploy", () => {
     expect(output).not.toMatch(/TWILIO|LINKEDIN|X_CLIENT|STRIPE|RESEND/);
   });
 
-  it("adds no root package.json script and no deploy workflow", () => {
+  it("adds no root package.json script; the deploy workflow is manual with a typed confirmation", () => {
     const root = JSON.parse(readFileSync("package.json", "utf8"));
     expect(JSON.stringify(root.scripts)).not.toContain("access-functions");
-    expect(existsSync(".github/workflows/firebase-live-access-functions.yml")).toBe(false);
+    const workflow = readFileSync(".github/workflows/firebase-live-access-functions.yml", "utf8");
+    expect(workflow).toMatch(/on:\n  workflow_dispatch:/);
+    expect(workflow).not.toMatch(/^\s+push:/m);
+    expect(workflow).toContain('"${DEPLOY_CONFIRMATION}" != "deploy access functions"');
+    expect(workflow).toContain("--config firebase.access.json");
+    expect(workflow).not.toContain("--force");
+    for (const id of ACCESS_IDS) expect(workflow).toContain(`functions:${id}`);
+    // The go-live script never touches access codes on the lock.
+    const script = readFileSync("scripts/door-access-go-live.mjs", "utf8");
+    expect(script).not.toMatch(/access_codes\//);
   });
 });

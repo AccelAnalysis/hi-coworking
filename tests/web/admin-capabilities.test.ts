@@ -7,11 +7,12 @@ const read = (p: string) => readFileSync(resolve(__dirname, "../../apps/web/src"
 
 describe("admin capability flags (audit P1-3)", () => {
   it("marks undeployed tools as not live", () => {
-    expect(ADMIN_CAPABILITIES.doorAccess.live).toBe(false);
     expect(ADMIN_CAPABILITIES.eventCampaigns.live).toBe(false);
   });
-  it("marks the deployed follow-up queue as live", () => {
+  it("marks the deployed follow-up queue and door access as live", () => {
     expect(ADMIN_CAPABILITIES.followUps.live).toBe(true);
+    // Door access switched on Nov 24, 2026 (Jonathan).
+    expect(ADMIN_CAPABILITIES.doorAccess.live).toBe(true);
   });
   it("labels tiles and shows the note on each tool page", () => {
     const dashboard = read("app/admin/dashboard/page.tsx");

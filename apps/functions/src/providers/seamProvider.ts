@@ -3,14 +3,37 @@ import * as crypto from "crypto";
 
 const SEAM_API_BASE = "https://connect.getseam.com";
 
+/** Door codes are 6 digits (Jonathan, Nov 24, 2026). Seam picks the digits. */
+export const DOOR_CODE_LENGTH = 6;
+
 export interface SeamCreateCodeResult {
   seamCodeId: string;
-  /** Plain PIN — returned once for delivery, do NOT persist */
-  plainPin: string;
-  /** SHA-256 hex hash of PIN */
-  codeHash: string;
-  /** Last 2 digits */
-  codeLast2: string;
+  /**
+   * Plain PIN — returned once, do NOT persist. Null when Seam has not
+   * assigned the digits yet (is_waiting_for_code_assignment); the owner's
+   * page reads it from Seam later.
+   */
+  plainPin: string | null;
+  /** SHA-256 hex hash of PIN, when known */
+  codeHash: string | null;
+  /** Last 2 digits, staff-only support hint, when known */
+  codeLast2: string | null;
+}
+
+/**
+ * The access_codes/create body for one booking. `type` is not a request
+ * parameter in Seam's API (it is a read-only response field); a code with
+ * starts_at and ends_at is time-bound. Seam generates the digits at the
+ * preferred length and avoids clashes with codes already on the lock.
+ */
+export function timeBoundCodeRequest(deviceId: string, startsAt: Date, endsAt: Date, codeName: string) {
+  return {
+    device_id: deviceId,
+    name: codeName,
+    starts_at: startsAt.toISOString(),
+    ends_at: endsAt.toISOString(),
+    preferred_code_length: DOOR_CODE_LENGTH,
+  };
 }
 
 export interface SeamDeviceStatus {
@@ -79,22 +102,23 @@ export async function createTimeBoundCode(
   endsAt: Date,
   codeName: string
 ): Promise<SeamCreateCodeResult> {
-  const data = await seamRequest(seamApiKey, "POST", "/access_codes/create", {
-    device_id: deviceId,
-    name: codeName,
-    starts_at: startsAt.toISOString(),
-    ends_at: endsAt.toISOString(),
-    type: "time_bound",
-  }) as { access_code: { access_code_id: string; code: string } };
+  const data = await seamRequest(
+    seamApiKey,
+    "POST",
+    "/access_codes/create",
+    timeBoundCodeRequest(deviceId, startsAt, endsAt, codeName),
+  ) as { access_code?: { access_code_id?: unknown; code?: unknown } };
 
-  const plainPin = data.access_code.code;
-  const seamCodeId = data.access_code.access_code_id;
+  const seamCodeId = data.access_code?.access_code_id;
+  if (typeof seamCodeId !== "string" || !seamCodeId) throw new Error("Seam API returned no access code id");
+  const raw = data.access_code?.code;
+  const plainPin = typeof raw === "string" && /^[0-9]{4,12}$/.test(raw) ? raw : null;
 
   return {
     seamCodeId,
     plainPin,
-    codeHash: hashPin(plainPin),
-    codeLast2: plainPin.slice(-2),
+    codeHash: plainPin ? hashPin(plainPin) : null,
+    codeLast2: plainPin ? plainPin.slice(-2) : null,
   };
 }
 

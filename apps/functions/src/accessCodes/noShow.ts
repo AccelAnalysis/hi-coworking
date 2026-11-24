@@ -19,6 +19,7 @@ export function seamCodeStatusFor(eventType: string): "active" | "revoked" | "fa
       return "active";
     case "access_code.removed_from_device":
     case "access_code.removed":
+    case "access_code.deleted_external_to_seam": // gone from the lock; Retry makes a new one
       return "revoked";
     case "access_code.failed_to_set_on_device":
     case "access_code.failed":
@@ -32,7 +33,43 @@ const INTERNAL_EVENT_TYPES: Record<string, string> = {
   "lock.unlocked": "door_unlocked",
   "device.connected": "device_online",
   "device.disconnected": "device_offline",
+  "access_code.delay_in_setting_on_device": "code_delayed",
+  "access_code.failed_to_remove_from_device": "code_remove_failed",
+  "access_code.delay_in_removing_from_device": "code_remove_failed",
+  "access_code.deleted_external_to_seam": "code_external_change",
+  "access_code.modified_external_to_seam": "code_external_change",
+  "device.low_battery": "low_battery",
+  "device.battery_status_changed": "battery_changed",
 };
+
+/**
+ * Which staff alert a Seam event raises, if any. Code alerts only ever fire
+ * for codes this system made (the handler looks the code up first); events
+ * about the lock's own unmanaged codes (access_code.unmanaged.*) are
+ * ignored, so the existing permanent codes are never touched or reported.
+ */
+export function staffAlertKindForSeamEvent(eventType: string):
+  | "code_failed" | "code_delayed" | "code_remove_failed" | "code_changed_outside" | "lock_offline" | "low_battery" | undefined {
+  switch (eventType) {
+    case "access_code.failed_to_set_on_device":
+    case "access_code.failed":
+      return "code_failed";
+    case "access_code.delay_in_setting_on_device":
+      return "code_delayed";
+    case "access_code.failed_to_remove_from_device":
+    case "access_code.delay_in_removing_from_device":
+      return "code_remove_failed";
+    case "access_code.deleted_external_to_seam":
+    case "access_code.modified_external_to_seam":
+      return "code_changed_outside";
+    case "device.disconnected":
+      return "lock_offline";
+    case "device.low_battery":
+      return "low_battery";
+    default:
+      return undefined;
+  }
+}
 
 /** Our accessEvents type for a Seam event, if we log it. */
 export function internalEventTypeFor(eventType: string): string | undefined {
@@ -57,6 +94,7 @@ export function sanitizeSeamEvent(event: Record<string, unknown>): Record<string
     ["access_code_id", "seamCodeId"],
     ["method", "method"],
     ["occurred_at", "occurredAt"],
+    ["battery_status", "batteryStatus"],
   ];
   for (const [from, to] of keep) {
     const value = event[from];

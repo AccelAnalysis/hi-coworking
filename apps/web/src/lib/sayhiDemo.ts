@@ -100,7 +100,6 @@ export function demoData(kind: DemoKind, now: number) {
     endsAt: booking.end,
     grantStatus: index === 2 ? "pending" : "active",
     codeStatus: index === 2 ? "programming" : "active",
-    codeLast2: null,
     codeId: null,
     code: index === 2 ? null : codes[index],
   }));

@@ -8,6 +8,9 @@ import {
   getActiveAccessGrants,
   getAccessCodesForGrant,
   getAccessEvents,
+  getOpenDoorAlerts,
+  getDoorAccessBufferMinutes,
+  setDoorAccessBufferMinutes,
   subscribeToAccessGrants,
 } from "@/lib/firestore";
 import {
@@ -15,10 +18,13 @@ import {
   accessAdminUnlockFn,
   accessAdminResendPinFn,
   accessAdminGetDoorStatusFn,
+  accessAdminRetryCodeFn,
+  accessAdminResolveAlertFn,
 } from "@/lib/functions";
 import { callableErrorMessage } from "@/lib/callableError";
 import { ADMIN_CAPABILITIES } from "@/lib/adminCapabilities";
 import { useConfirmSheet } from "@/components/admin/ConfirmSheet";
+import { DEFAULT_DOOR_BUFFER_MINUTES, MAX_DOOR_BUFFER_MINUTES } from "@hi/shared";
 import type { DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 import {
   DoorOpen,
@@ -36,6 +42,12 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  RotateCw,
+  Timer,
+  Check,
+  Minus,
+  Plus,
+  BellRing,
 } from "lucide-react";
 
 // ---------- Types ----------
@@ -52,6 +64,22 @@ type DoorStatusLive = {
 };
 
 // ---------- Status helpers ----------
+
+const ALERT_ICONS: Record<string, React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>> = {
+  code_failed: ShieldAlert,
+  code_delayed: Loader2,
+  code_remove_failed: KeyRound,
+  code_changed_outside: KeyRound,
+  lock_offline: WifiOff,
+  low_battery: BatteryLow,
+};
+
+/** A live booking whose code failed, was removed, or was never made can get a new code. */
+function canRetry(grant: GrantWithCode, now: number): boolean {
+  if (grant.status !== "pending" && grant.status !== "active") return false;
+  if (!(grant.endsAt > now)) return false;
+  return !grant.code || (grant.code.status !== "active" && grant.code.status !== "programming");
+}
 
 function codeStatusBadge(status: string | undefined) {
   if (!status) return null;
@@ -124,6 +152,9 @@ function AdminAccessContent() {
   const [error, setError] = useState<string | null>(null);
   const [showEventLog, setShowEventLog] = useState(false);
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<AccessEventDoc[]>([]);
+  const [bufferMinutes, setBufferMinutes] = useState<number>(DEFAULT_DOOR_BUFFER_MINUTES);
+  const [bufferDraft, setBufferDraft] = useState<number>(DEFAULT_DOOR_BUFFER_MINUTES);
 
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -131,21 +162,26 @@ function AdminAccessContent() {
     setLoading(true);
     setError(null);
     try {
-      const [doorsData, activeGrants, recentEvents] = await Promise.all([
+      const [doorsData, activeGrants, recentEvents, openAlerts, buffer] = await Promise.all([
         getDoors(),
         getActiveAccessGrants(100),
         getAccessEvents({ limitCount: 50 }),
+        getOpenDoorAlerts().catch(() => [] as AccessEventDoc[]),
+        getDoorAccessBufferMinutes().catch(() => DEFAULT_DOOR_BUFFER_MINUTES),
       ]);
 
       setDoors(doorsData);
       setEvents(recentEvents);
+      setAlerts(openAlerts);
+      setBufferMinutes(buffer);
+      setBufferDraft(buffer);
 
       // Load codes for each grant
       const grantsWithCodes: GrantWithCode[] = await Promise.all(
         activeGrants.map(async (grant) => {
           const codes = await getAccessCodesForGrant(grant.id);
-          const activeCode = codes.find((c) => c.status === "active" || c.status === "programming");
-          return { ...grant, code: activeCode };
+          // Newest code, so a failed or removed code shows and can be retried.
+          return { ...grant, code: codes[0] };
         })
       );
       setGrants(grantsWithCodes);
@@ -165,8 +201,8 @@ function AdminAccessContent() {
       const grantsWithCodes: GrantWithCode[] = await Promise.all(
         liveGrants.map(async (grant) => {
           const codes = await getAccessCodesForGrant(grant.id);
-          const activeCode = codes.find((c) => c.status === "active" || c.status === "programming");
-          return { ...grant, code: activeCode };
+          // Newest code, so a failed or removed code shows and can be retried.
+          return { ...grant, code: codes[0] };
         })
       );
       setGrants(grantsWithCodes);
@@ -230,13 +266,55 @@ function AdminAccessContent() {
     }
   }, [confirm]);
 
+  const handleRetryCode = useCallback(async (grantId: string) => {
+    setActionLoading(`retry-${grantId}`);
+    setError(null);
+    try {
+      const result = await accessAdminRetryCodeFn({ grantId });
+      if (!result.data.success) setError("The lock didn't take the new code. Try again, or unlock remotely.");
+      const [codes, openAlerts] = await Promise.all([getAccessCodesForGrant(grantId), getOpenDoorAlerts()]);
+      setGrants((prev) => prev.map((g) => (g.id === grantId ? { ...g, code: codes[0] } : g)));
+      setAlerts(openAlerts);
+    } catch (err: unknown) {
+      setError(callableErrorMessage(err, "A new code couldn't be made."));
+    } finally {
+      setActionLoading(null);
+    }
+  }, []);
+
+  const handleResolveAlert = useCallback(async (alertId: string) => {
+    setActionLoading(`alert-${alertId}`);
+    setError(null);
+    try {
+      await accessAdminResolveAlertFn({ alertId });
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+    } catch (err: unknown) {
+      setError(callableErrorMessage(err, "The alert couldn't be cleared."));
+    } finally {
+      setActionLoading(null);
+    }
+  }, []);
+
+  const handleSaveBuffer = useCallback(async () => {
+    setActionLoading("buffer");
+    setError(null);
+    try {
+      await setDoorAccessBufferMinutes(bufferDraft);
+      setBufferMinutes(bufferDraft);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "The code window couldn't be saved.");
+    } finally {
+      setActionLoading(null);
+    }
+  }, [bufferDraft]);
+
   const handleResendPin = useCallback(async (grantId: string) => {
     setActionLoading(`resend-${grantId}`);
     setError(null);
     try {
       await accessAdminResendPinFn({ grantId });
     } catch (err: unknown) {
-      setError(callableErrorMessage(err, "The PIN couldn't be resent."));
+      setError(callableErrorMessage(err, "The reminder couldn't be sent."));
     } finally {
       setActionLoading(null);
     }
@@ -252,6 +330,7 @@ function AdminAccessContent() {
     );
   }
 
+  const nowMs = Date.now();
   const failedCodes = grants.filter((g) => g.code?.status === "failed");
   const programmingCodes = grants.filter((g) => g.code?.status === "programming");
 
@@ -304,22 +383,117 @@ function AdminAccessContent() {
                   {g.code?.failureReason && <span className="ml-1 text-red-600">({g.code.failureReason})</span>}
                 </span>
                 <button
-                  onClick={() => handleResendPin(g.id)}
-                  disabled={actionLoading === `resend-${g.id}`}
-                  className="ml-auto shrink-0 px-3 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-800 text-xs font-medium disabled:opacity-50"
+                  onClick={() => handleRetryCode(g.id)}
+                  disabled={!!actionLoading || !canRetry(g, nowMs)}
+                  aria-label="Retry code"
+                  title="Retry code"
+                  className="ml-auto shrink-0 inline-flex h-11 w-11 items-center justify-center rounded-lg bg-red-100 hover:bg-red-200 text-red-800 disabled:opacity-50"
                 >
-                  {actionLoading === `resend-${g.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : "Retry"}
+                  {actionLoading === `retry-${g.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
                 </button>
               </div>
             ))}
             {programmingCodes.length > 0 && (
               <div className="flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
                 <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
-                <span><strong>{programmingCodes.length} code(s)</strong> still programming — waiting for Seam confirmation.</span>
+                <span><strong>{programmingCodes.length} code(s)</strong> still programming — waiting for the lock to confirm.</span>
               </div>
             )}
           </div>
         )}
+
+        {/* Staff alerts: code failed, lock offline, low battery */}
+        {alerts.length > 0 && (
+          <section aria-label="Door alerts">
+            <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-3 flex items-center gap-2">
+              <BellRing className="h-4 w-4 text-red-500" aria-hidden="true" /> Alerts
+              <span className="text-xs font-normal text-slate-500">({alerts.length})</span>
+            </h2>
+            <ul className="space-y-2">
+              {alerts.map((alert) => {
+                const Icon = ALERT_ICONS[alert.alertKind ?? ""] ?? AlertTriangle;
+                const grant = alert.grantId ? grants.find((g) => g.id === alert.grantId) : undefined;
+                return (
+                  <li key={alert.id} className="flex items-center gap-3 p-3 rounded-xl bg-white ring-1 ring-red-200 text-sm text-slate-800">
+                    <Icon className="h-5 w-5 shrink-0 text-red-500" aria-hidden={true} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium">{alert.notes}</div>
+                      <div className="text-xs text-slate-500">
+                        {fmt(alert.createdAt)}
+                        {alert.bookingId && <> · #{alert.bookingId.slice(-6)}</>}
+                        {typeof alert.batteryLevel === "number" && <> · {Math.round(alert.batteryLevel * 100)}%</>}
+                      </div>
+                    </div>
+                    {grant && canRetry(grant, nowMs) && (
+                      <button
+                        onClick={() => handleRetryCode(grant.id)}
+                        disabled={!!actionLoading}
+                        aria-label="Retry code"
+                        title="Retry code"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {actionLoading === `retry-${grant.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleResolveAlert(alert.id)}
+                      disabled={!!actionLoading}
+                      aria-label="Mark handled"
+                      title="Mark handled"
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {actionLoading === `alert-${alert.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Code window setting */}
+        <section aria-label="Code window">
+          <div className="flex flex-wrap items-center gap-3 p-4 rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
+            <Timer className="h-5 w-5 text-slate-400" aria-hidden="true" />
+            <div className="flex-1 min-w-[12rem]">
+              <div className="font-semibold text-slate-900 text-sm">Code window</div>
+              <div className="text-xs text-slate-500">Minutes before and after each booking. New codes only.</div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setBufferDraft((v) => Math.max(0, v - 5))}
+                disabled={bufferDraft <= 0}
+                aria-label="Five minutes less"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <output className="w-16 text-center text-lg font-semibold tabular-nums text-slate-900" aria-live="polite">
+                {bufferDraft}<span className="text-xs font-normal text-slate-500"> min</span>
+              </output>
+              <button
+                type="button"
+                onClick={() => setBufferDraft((v) => Math.min(MAX_DOOR_BUFFER_MINUTES, v + 5))}
+                disabled={bufferDraft >= MAX_DOOR_BUFFER_MINUTES}
+                aria-label="Five minutes more"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveBuffer}
+                disabled={bufferDraft === bufferMinutes || !!actionLoading}
+                aria-label="Save code window"
+                title="Save"
+                className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-lg bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-40"
+              >
+                {actionLoading === "buffer" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+        </section>
 
         {/* Door Status Panel */}
         <section>
@@ -468,10 +642,22 @@ function AdminAccessContent() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1 justify-end">
+                              {canRetry(grant, nowMs) && (
+                                <button
+                                  onClick={() => handleRetryCode(grant.id)}
+                                  disabled={!!actionLoading}
+                                  aria-label="Retry code"
+                                  title="Retry code"
+                                  className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-800 disabled:opacity-40 transition-colors"
+                                >
+                                  {actionLoading === `retry-${grant.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleResendPin(grant.id)}
-                                disabled={!!actionLoading || grant.status === "revoked"}
-                                title="Resend PIN notification"
+                                disabled={!!actionLoading || grant.status === "revoked" || !grant.code || (grant.code.status !== "active" && grant.code.status !== "programming")}
+                                title="Send SayHi code reminder"
+                                aria-label="Send SayHi code reminder"
                                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 disabled:opacity-40 transition-colors"
                               >
                                 {isResendPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

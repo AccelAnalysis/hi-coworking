@@ -2188,6 +2188,11 @@ export type BookAffiliateClickDoc = z.infer<typeof bookAffiliateClickDocSchema>;
 
 // --- Smart Access Integration (Seam / Yale) ---
 
+// Door access settings: siteSettings/doorAccess (staff edit in Admin > Access).
+export const DOOR_ACCESS_SETTINGS_ID = "doorAccess";
+export const DEFAULT_DOOR_BUFFER_MINUTES = 15;
+export const MAX_DOOR_BUFFER_MINUTES = 60;
+
 export const doorStatusSchema = z.enum(["online", "offline", "unknown"]);
 export type DoorStatus = z.infer<typeof doorStatusSchema>;
 
@@ -2210,7 +2215,7 @@ export type DoorDoc = z.infer<typeof doorDocSchema>;
 export const accessGrantStatusSchema = z.enum(["pending", "active", "expired", "revoked"]);
 export type AccessGrantStatus = z.infer<typeof accessGrantStatusSchema>;
 
-export const accessRevokeReasonSchema = z.enum(["cancellation", "no_show", "admin", "expired"]);
+export const accessRevokeReasonSchema = z.enum(["cancellation", "no_show", "admin", "expired", "refund"]);
 export type AccessRevokeReason = z.infer<typeof accessRevokeReasonSchema>;
 
 export const accessGrantDocSchema = z.object({
@@ -2220,11 +2225,14 @@ export const accessGrantDocSchema = z.object({
   userId: z.string(),
   startsAt: z.number(),                               // booking.start − gracePeriodMinutes
   endsAt: z.number(),                                 // booking.end + gracePeriodMinutes
-  gracePeriodMinutes: z.number().int().nonnegative().default(5),
+  gracePeriodMinutes: z.number().int().nonnegative().default(15), // buffer before start and after end (siteSettings/doorAccess)
   status: accessGrantStatusSchema.default("pending"),
   revokedAt: z.number().optional(),
   revokedBy: z.string().optional(),                   // uid of revoker (admin or system)
   revokeReason: accessRevokeReasonSchema.optional(),
+  /** Set by flows without the lock key (e.g. a refund); access_onRevokeRequested removes the code. */
+  revokeRequestedAt: z.number().nullable().optional(),
+  revokeRequestReason: accessRevokeReasonSchema.optional(),
   firstUsedAt: z.number().optional(),                 // first door unlock with this grant's code (Seam webhook)
   lastUsedAt: z.number().optional(),
   createdAt: z.number(),
@@ -2271,6 +2279,14 @@ export const accessEventTypeSchema = z.enum([
   "no_show_revoke",
   "device_online",
   "device_offline",
+  "code_retry",
+  "code_reminder",
+  "code_delayed",
+  "code_remove_failed",
+  "code_external_change",
+  "low_battery",
+  "battery_changed",
+  "staff_alert",
 ]);
 export type AccessEventType = z.infer<typeof accessEventTypeSchema>;
 
@@ -2285,6 +2301,12 @@ export const accessEventDocSchema = z.object({
   providerPayload: z.record(z.string(), z.any()).optional(),  // Allow-listed Seam IDs/type/time only; never the PIN or raw payload
   performedBy: z.string().optional(),                         // uid for admin actions
   notes: z.string().optional(),
+  /** staff_alert only: what happened, and whether staff have dealt with it. */
+  alertKind: z.enum(["code_failed", "code_delayed", "code_remove_failed", "code_changed_outside", "lock_offline", "low_battery"]).optional(),
+  alertStatus: z.enum(["open", "resolved"]).optional(),
+  batteryLevel: z.number().min(0).max(1).optional(),
+  resolvedAt: z.number().optional(),
+  resolvedBy: z.string().optional(),
   createdAt: z.number(),
 });
 export type AccessEventDoc = z.infer<typeof accessEventDocSchema>;

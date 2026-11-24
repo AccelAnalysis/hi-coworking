@@ -12,7 +12,6 @@ export type AccessGrantSummary = {
   endsAt: number;
   grantStatus: string;
   codeStatus: string | null;
-  codeLast2: string | null;
   codeId: string | null;
   /** Full per-booking code. Null until it is ready, or after the booking ends. */
   code?: string | null;
