@@ -114,23 +114,29 @@ describe("membership welcome email copy", () => {
     }
   });
 
-  it("states Virtual Office pricing exactly and never claims included desk hours", () => {
+  it("states SayHi Connect pricing exactly and never claims included desk hours", () => {
     const tier = getTierById("virtual")!;
     const copy = renderMembershipWelcomeEmail({ planId: "virtual", origin: ORIGIN })!;
-    expect(copy.text).toContain("A coworking desk whenever you need one, at $17.50/hr");
+    expect(copy.subject).toContain("SayHi Connect");
+    expect(copy.text).toContain("($69/month)");
+    expect(copy.text).toContain("Book any open desk at guest rates, from $17.50/hr");
+    expect(copy.text).toContain("Accel Procurement Founders access is included");
     expect(copy.text).not.toMatch(/hours included/i);
     expect(copy.text).not.toMatch(/included hours/i);
+    expect(copy.text).not.toMatch(/Virtual Office|Virtual Plus/);
     expect(copy.text).toContain("Hi there,");
-    expect(planHighlights(tier)).toHaveLength(3);
+    expect(planHighlights(tier)).toHaveLength(4);
   });
 
   it("states included hours and the member rate for coworking plans", () => {
-    expect(renderMembershipWelcomeEmail({ planId: "coworking", origin: ORIGIN })!.text)
-      .toContain("10 coworking desk hours included every month");
-    expect(renderMembershipWelcomeEmail({ planId: "coworking", origin: ORIGIN })!.text)
-      .toContain("member rate of $14/hr");
-    expect(renderMembershipWelcomeEmail({ planId: "coworking_plus", origin: ORIGIN })!.text)
-      .toContain("member rate of $12.25/hr");
+    const member = renderMembershipWelcomeEmail({ planId: "coworking", origin: ORIGIN })!.text;
+    expect(member).toContain("($159/month)");
+    expect(member).toContain("36 desk hours included every month on Basic and Window desks (D1–D4)");
+    expect(member).toContain("Extra desk time at 20% off guest rates, never more than the half-day or day price");
+    const plus = renderMembershipWelcomeEmail({ planId: "coworking_plus", origin: ORIGIN })!.text;
+    expect(plus).toContain("($289/month)");
+    expect(plus).toContain("54 desk hours included every month on Basic, Window, and Equipped desks (D1–D6)");
+    expect(plus).toContain("Extra desk time at 30% off guest rates");
   });
 
   it("has no unsubscribe link or marketing footer, because it is transactional", () => {
@@ -164,7 +170,7 @@ describe("sendMembershipWelcomeEmail", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       to: "member@example.com",
-      subject: "Welcome to Hi Coworking. Your Virtual Office plan is active",
+      subject: "Welcome to Hi Coworking. Your SayHi Connect plan is active",
       idempotencyKey: "membership-welcome/cs_test_1",
       categories: ["membership_welcome", "transactional"],
     });
@@ -260,7 +266,7 @@ describe("sendMembershipWelcomeEmail", () => {
     expect(payload.reply_to).toBe("hicoworking@accelanalysis.com");
     expect(payload.to).toEqual(["member@example.com"]);
     expect(payload.html).toContain("Welcome to Hi Coworking");
-    expect(payload.text).toContain("Virtual Office");
+    expect(payload.text).toContain("SayHi Connect");
     expect((calls[0].init.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/^membership-welcome\/cs_test_1/);
     expect(JSON.stringify([...logs.info, ...logs.warn, ...logs.error])).not.toContain("member@example.com");
   });

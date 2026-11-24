@@ -3,7 +3,7 @@ import type { MembershipTierDef } from "@hi/shared";
 type TierFacts = Pick<
   MembershipTierDef,
   "id" | "name" | "includedHoursPerMonth" | "extraHourlyRateCents" | "bookingWindowDays"
->;
+> & Partial<Pick<MembershipTierDef, "includedSeatTiers" | "overageDiscountPercent">>;
 
 export function hourlyRate(cents: number): string {
   const dollars = cents / 100;
@@ -14,9 +14,13 @@ export function hourlyRate(cents: number): string {
 export function membershipSummary(tier: TierFacts): string {
   const window = `Book up to ${tier.bookingWindowDays} days ahead.`;
   if (tier.includedHoursPerMonth > 0) {
-    return `${tier.includedHoursPerMonth} coworking desk hours included each month, then ${hourlyRate(tier.extraHourlyRateCents)}. ${window}`;
+    const seats = tier.includedSeatTiers?.includes("equipped") ? "D1–D6" : "D1–D4";
+    const extra = tier.overageDiscountPercent
+      ? `then ${tier.overageDiscountPercent}% off guest rates`
+      : `then from ${hourlyRate(tier.extraHourlyRateCents)}`;
+    return `${tier.includedHoursPerMonth} desk hours included each month on ${seats}, ${extra}. ${window}`;
   }
-  return `Book a coworking desk whenever you need one, at ${hourlyRate(tier.extraHourlyRateCents)}. ${window}`;
+  return `Book any open desk at guest rates, from ${hourlyRate(tier.extraHourlyRateCents)}. ${window}`;
 }
 
 export type WelcomeBannerCopy = {

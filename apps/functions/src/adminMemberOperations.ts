@@ -8,15 +8,18 @@ import Stripe from "stripe";
 import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import {
-  CONFERENCE_ROOM_HOURLY_RATE_CENTS,
+  CONFERENCE_ROOM_SLOT_HOURS,
+  CONFERENCE_ROOM_SLOT_PRICE_CENTS,
+  CONFERENCE_SLOT_MESSAGE,
+  DESK_SEAT_TIERS,
   GUEST_BOOKING_WINDOW_DAYS,
-  GUEST_DAILY_CAP_CENTS,
-  GUEST_HOURLY_RATE_CENTS,
   MEMBERSHIP_TIERS,
+  type MembershipTier,
   getDeskMembershipTierById,
   getTierById,
   getTierByPriceId,
 } from "./payments/stripeConfig";
+import { conferenceSlotFor, deskPricingPlanFor, priceDeskSegments } from "./payments/deskPricing";
 import { createAccessGrant, seamApiKey } from "./access";
 import { bookingHoursViolation } from "./bookingOperatingCalendar";
 
@@ -36,13 +39,13 @@ const RESOURCE_CONFIG: Record<string, {
   guestRateHourlyCents: number;
   exclusiveGroupId: string;
 }> = {
-  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: CONFERENCE_ROOM_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: Math.round(CONFERENCE_ROOM_SLOT_PRICE_CENTS / CONFERENCE_ROOM_SLOT_HOURS), exclusiveGroupId: "main_space" },
 };
 
 type UsageReservation = { hours: number; expiresAt: number };
@@ -546,6 +549,45 @@ function validateWindow(start: number, end: number) {
   if (start < Date.now() - 60_000) throw new HttpsError("failed-precondition", "That time has already passed.");
 }
 
+/**
+ * Tiered desk pricing (payments/deskPricing) or the flat $249 weekday
+ * conference slot. `tier` is the member's active desk plan, if any.
+ */
+function adminPricing(resourceId: string, start: number, end: number, tier: MembershipTier | undefined, includedHoursRemaining: number) {
+  const resource = RESOURCE_CONFIG[resourceId];
+  const durationHours = (end - start) / 3_600_000;
+  if (resource.type === "MODE") {
+    const startClock = localClock(start);
+    const endClock = localClock(end);
+    const slot = conferenceSlotFor(startClock.hour * 60 + startClock.minute, endClock.hour * 60 + endClock.minute);
+    if (!slot) throw new HttpsError("invalid-argument", CONFERENCE_SLOT_MESSAGE);
+    return {
+      membershipName: null as string | null,
+      includedHoursRemaining: 0,
+      includedHoursApplied: 0,
+      billableHours: durationHours,
+      hourlyRateCents: resource.guestRateHourlyCents,
+      subtotalCents: CONFERENCE_ROOM_SLOT_PRICE_CENTS,
+      dailyCapApplied: false,
+    };
+  }
+  const remaining = tier ? Math.max(0, includedHoursRemaining) : 0;
+  const priced = priceDeskSegments({
+    plan: deskPricingPlanFor(tier?.id),
+    segments: [{ resourceId, hours: durationHours }],
+    includedHoursRemaining: remaining,
+  });
+  return {
+    membershipName: tier?.name ?? null,
+    includedHoursRemaining: remaining,
+    includedHoursApplied: priced.includedHoursApplied,
+    billableHours: priced.billableHours,
+    hourlyRateCents: priced.hourlyRateCents,
+    subtotalCents: priced.subtotalCents,
+    dailyCapApplied: priced.capApplied !== null,
+  };
+}
+
 function resourceConflicts(resourceId: string, start: number, end: number, busy: BusyRecord[]) {
   const target = RESOURCE_CONFIG[resourceId];
   if (!target) return true;
@@ -606,18 +648,11 @@ async function memberQuote(uid: string, resourceId: string, start: number, end: 
   if (resourceConflicts(resourceId, start, end, busy)) throw new HttpsError("failed-precondition", "That space is no longer available.");
   const { data: user } = await requireMember(uid);
   const durationHours = (end - start) / 3_600_000;
-  let membershipName: string | null = null;
-  let includedHoursRemaining = 0;
-  let includedHoursApplied = 0;
-  let billableHours = durationHours;
-  let hourlyRateCents = resource.guestRateHourlyCents;
-  let subtotalCents = resource.type === "SEAT"
-    ? Math.min(Math.round(durationHours * GUEST_HOURLY_RATE_CENTS), GUEST_DAILY_CAP_CENTS)
-    : Math.round(durationHours * resource.guestRateHourlyCents);
-  let dailyCapApplied = resource.type === "SEAT" && Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= GUEST_DAILY_CAP_CENTS;
+  let tier: MembershipTier | undefined;
+  let remainingHours = 0;
 
   if (resource.type === "SEAT" && user.membershipStatus === "active" && user.plan) {
-    const tier = getDeskMembershipTierById(String(user.plan));
+    tier = getDeskMembershipTierById(String(user.plan));
     if (tier) {
       const key = localMonthKey(start);
       const usageSnap = await db().collection("membershipUsage").doc(`${uid}_${key}`).get();
@@ -631,15 +666,13 @@ async function memberQuote(uid: string, resourceId: string, start: number, end: 
         const memberBookings = await db().collection("bookings").where("userId", "==", uid).get();
         usedHours = usedHoursFromBookings(memberBookings.docs, key);
       }
-      includedHoursRemaining = Math.max(0, tier.includedHoursPerMonth - usedHours - reservedHours(reservations));
-      includedHoursApplied = Math.min(durationHours, includedHoursRemaining);
-      billableHours = Math.max(0, durationHours - includedHoursApplied);
-      membershipName = tier.name;
-      hourlyRateCents = tier.extraHourlyRateCents;
-      subtotalCents = Math.round(billableHours * hourlyRateCents);
-      dailyCapApplied = false;
+      remainingHours = Math.max(0, tier.includedHoursPerMonth - usedHours - reservedHours(reservations));
     }
   }
+  const {
+    membershipName, includedHoursRemaining, includedHoursApplied, billableHours,
+    hourlyRateCents, subtotalCents, dailyCapApplied,
+  } = adminPricing(resourceId, start, end, tier, remainingHours);
 
   const creditReservations = activeCreditReservations(user.accountCreditReservations as Record<string, CreditReservation> | undefined);
   const accountCreditAvailableCents = Math.max(0, Math.round(Number(user.accountCreditCents || 0)) - reservedCreditCents(creditReservations));
@@ -727,19 +760,14 @@ async function createAdminMemberHold(adminUid: string, uid: string, resourceId: 
 
     const user = userSnap.data() || {};
     const durationHours = (end - start) / 3_600_000;
-    let membershipName: string | null = null;
-    let includedHoursRemaining = 0;
-    let includedHoursApplied = 0;
-    let billableHours = durationHours;
-    let hourlyRateCents = resource.guestRateHourlyCents;
-    let subtotalCents = resource.type === "SEAT" ? Math.min(Math.round(durationHours * GUEST_HOURLY_RATE_CENTS), GUEST_DAILY_CAP_CENTS) : Math.round(durationHours * resource.guestRateHourlyCents);
-    let dailyCapApplied = resource.type === "SEAT" && Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= GUEST_DAILY_CAP_CENTS;
     let reservations: Record<string, UsageReservation> = {};
     let usedHours = 0;
     let useUsage = false;
+    let tier: MembershipTier | undefined;
+    let remainingHours = 0;
 
     if (resource.type === "SEAT" && user.membershipStatus === "active" && user.plan) {
-      const tier = getDeskMembershipTierById(String(user.plan));
+      tier = getDeskMembershipTierById(String(user.plan));
       if (tier) {
         useUsage = true;
         if (usageSnap.exists) {
@@ -749,16 +777,14 @@ async function createAdminMemberHold(adminUid: string, uid: string, resourceId: 
         } else {
           usedHours = usedHoursFromBookings(memberBookings.docs, key);
         }
-        includedHoursRemaining = Math.max(0, tier.includedHoursPerMonth - usedHours - reservedHours(reservations));
-        includedHoursApplied = Math.min(durationHours, includedHoursRemaining);
-        billableHours = Math.max(0, durationHours - includedHoursApplied);
-        membershipName = tier.name;
-        hourlyRateCents = tier.extraHourlyRateCents;
-        subtotalCents = Math.round(billableHours * hourlyRateCents);
-        dailyCapApplied = false;
-        if (includedHoursApplied > 0) reservations[holdRef.id] = { hours: includedHoursApplied, expiresAt: now + HOLD_MS };
+        remainingHours = Math.max(0, tier.includedHoursPerMonth - usedHours - reservedHours(reservations));
       }
     }
+    const {
+      membershipName, includedHoursRemaining, includedHoursApplied, billableHours,
+      hourlyRateCents, subtotalCents, dailyCapApplied,
+    } = adminPricing(resourceId, start, end, tier, remainingHours);
+    if (useUsage && includedHoursApplied > 0) reservations[holdRef.id] = { hours: includedHoursApplied, expiresAt: now + HOLD_MS };
 
     const creditReservations = activeCreditReservations(user.accountCreditReservations as Record<string, CreditReservation> | undefined);
     const accountCreditAvailableCents = Math.max(0, Math.round(Number(user.accountCreditCents || 0)) - reservedCreditCents(creditReservations));

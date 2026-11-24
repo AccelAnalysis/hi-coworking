@@ -242,7 +242,7 @@ describe("member notice email copy", () => {
 
   it("confirms the membership ended", () => {
     expect(all[2].subject).toBe("Your Hi Coworking membership has ended");
-    expect(all[2].text).toContain("Your Virtual Office membership ended on October 24, 2026");
+    expect(all[2].text).toContain("Your SayHi Connect membership ended on October 24, 2026");
     expect(all[2].text).toContain("Hi there,");
   });
 

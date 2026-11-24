@@ -1873,6 +1873,8 @@ export type PlatformFeeDoc = z.infer<typeof platformFeeDocSchema>;
 export const membershipTierIdSchema = z.enum(["virtual", "coworking", "coworking_plus"]);
 export type MembershipTierId = z.infer<typeof membershipTierIdSchema>;
 
+export type DeskSeatTierId = "basic" | "window" | "equipped";
+
 export interface MembershipTierDef {
   id: MembershipTierId;
   name: string;
@@ -1881,14 +1883,27 @@ export interface MembershipTierDef {
   interval: "month";
   currency: string;
   features: string[];
-  /** Stripe price ID placeholder — replace with real IDs after Stripe setup */
+  /** Live Stripe price ID for the current plan price. */
   stripePriceId: string;
+  /** Earlier live Stripe prices that still map to this plan (webhooks, history). */
+  legacyStripePriceIds: string[];
+  /** Stripe lookup key for the current price. */
+  stripeLookupKey: string;
   /** Included desk hours per month */
   includedHoursPerMonth: number;
-  /** Extra desk-hour rate in cents (beyond included hours) */
+  /** Seat tiers included hours cover (empty for SayHi Connect). */
+  includedSeatTiers: DeskSeatTierId[];
+  /** Discount off the seat's guest hourly rate on overage hours. */
+  overageDiscountPercent: number;
+  /**
+   * Lowest overage rate in cents per hour (Basic seats). Per-seat rates are in
+   * SEAT_TIERS (seatCatalog.ts).
+   */
   extraHourlyRateCents: number;
   /** Booking window: max days ahead */
   bookingWindowDays: number;
+  /** Bundles Accel Procurement Founders access. */
+  includesFoundersAccess?: boolean;
   
   /** Included credits per month */
   includedCreditsPerMonth: number;
@@ -1904,17 +1919,27 @@ export interface MembershipTierDef {
   };
 }
 
+/**
+ * Hi Coworking memberships (decided 21 Nov 2026; live Stripe prices created
+ * 24 Nov 2026). `virtual` stays the internal id for SayHi Connect so stored
+ * user plans, webhooks and history keep working.
+ */
 export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
   {
     id: "virtual",
-    name: "Virtual Office",
-    amountCents: 4900,
+    name: "SayHi Connect",
+    amountCents: 6900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J0xAHu8lEXCs8UHv7AAiz",
+    stripePriceId: "price_1UfCfpAHu8lEXCs8Xw0ruygi",
+    legacyStripePriceIds: ["price_1U9J0xAHu8lEXCs8UHv7AAiz"],
+    stripeLookupKey: "hic_sayhi_connect_monthly",
     includedHoursPerMonth: 0,
+    includedSeatTiers: [],
+    overageDiscountPercent: 0,
     extraHourlyRateCents: 1750,
     bookingWindowDays: 14,
+    includesFoundersAccess: true,
     includedCreditsPerMonth: 3,
     limits: {
       rfxActivePosts: 0,
@@ -1925,19 +1950,25 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 3
     },
     features: [
-      "Virtual Office membership",
-      "Coworking desk access at the public rate",
-      "Desk use: $17.50/hr"
+      "Book any open desk at guest rates, from $17.50/hr",
+      "Half-day and full-day desk caps apply automatically",
+      "Accel Procurement Founders access included",
+      "Book up to 14 days ahead",
+      "No mail service (mail plan coming soon)",
     ],
   },
   {
     id: "coworking",
     name: "Coworking Member",
-    amountCents: 12900,
+    amountCents: 15900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J1CAHu8lEXCs8X1o0O5hG",
-    includedHoursPerMonth: 10,
+    stripePriceId: "price_1UfCfvAHu8lEXCs85BgcHiJy",
+    legacyStripePriceIds: ["price_1U9J1CAHu8lEXCs8X1o0O5hG"],
+    stripeLookupKey: "hic_coworking_member_monthly",
+    includedHoursPerMonth: 36,
+    includedSeatTiers: ["basic", "window"],
+    overageDiscountPercent: 20,
     extraHourlyRateCents: 1400,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 10,
@@ -1950,20 +1981,24 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 15
     },
     features: [
-      "10 desk hours/month included",
-      "20% off additional desk hours ($14/hr)",
+      "36 desk hours/month on Basic and Window seats (D1–D4)",
+      "20% off extra hours and Equipped seats (D5–D6)",
+      "Extra time capped at the half-day and day price",
       "Book up to 90 days ahead",
-      "Wi-Fi and shared amenities"
     ],
   },
   {
     id: "coworking_plus",
     name: "Coworking Plus",
-    amountCents: 19900,
+    amountCents: 28900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J1KAHu8lEXCs8xZETzk7F",
-    includedHoursPerMonth: 15,
+    stripePriceId: "price_1UfCfxAHu8lEXCs8ueNs9jAk",
+    legacyStripePriceIds: ["price_1U9J1KAHu8lEXCs8xZETzk7F"],
+    stripeLookupKey: "hic_coworking_plus_monthly",
+    includedHoursPerMonth: 54,
+    includedSeatTiers: ["basic", "window", "equipped"],
+    overageDiscountPercent: 30,
     extraHourlyRateCents: 1225,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 25,
@@ -1976,26 +2011,37 @@ export const MEMBERSHIP_TIERS: MembershipTierDef[] = [
       referralActiveOpen: 50
     },
     features: [
-      "15 desk hours/month included",
-      "30% off additional desk hours ($12.25/hr)",
+      "54 desk hours/month on Basic, Window, and Equipped seats (D1–D6)",
+      "30% off extra hours",
+      "Extra time capped at the half-day and day price",
       "Book up to 90 days ahead",
-      "Wi-Fi and shared amenities"
     ],
   },
 ];
 
+/** Current or legacy live Stripe price → plan. */
+export function getMembershipTierByPriceId(priceId: string): MembershipTierDef | undefined {
+  if (!priceId) return undefined;
+  return MEMBERSHIP_TIERS.find(
+    (tier) => tier.stripePriceId === priceId || tier.legacyStripePriceIds.includes(priceId),
+  );
+}
+
 // --- Resource Catalog (Canonical) ---
 // All bookable resources in the space. The backend mirrors this config.
-// Keep in sync with: apps/functions/src/index.ts → RESOURCE_CONFIG
+// Keep in sync with: apps/functions/src/bookingFlexShared.ts → RESOURCE_CONFIG
+// Seat guest rates follow SEAT_TIERS in seatCatalog.ts (D1–D2 Basic,
+// D3–D4 Window, D5–D6 Equipped). The conference room is a flat weekday slot;
+// its hourly figure is the $249 slot spread over 4 hours.
 
 export const RESOURCE_CATALOG: Record<string, Resource> = {
   "seat-1": { id: "seat-1", name: "Seat 1", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
   "seat-2": { id: "seat-2", name: "Seat 2", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-3": { id: "seat-3", name: "Seat 3", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-4": { id: "seat-4", name: "Seat 4", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-5": { id: "seat-5", name: "Seat 5", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "seat-6": { id: "seat-6", name: "Seat 6", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 17.5 },
-  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 6, guestRateHourly: 99 },
+  "seat-3": { id: "seat-3", name: "Seat 3", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 19 },
+  "seat-4": { id: "seat-4", name: "Seat 4", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 19 },
+  "seat-5": { id: "seat-5", name: "Seat 5", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 22 },
+  "seat-6": { id: "seat-6", name: "Seat 6", type: "SEAT", exclusiveGroupId: "main_space", capacity: 1, guestRateHourly: 22 },
+  "mode-conference": { id: "mode-conference", name: "Conference Room", type: "MODE", exclusiveGroupId: "main_space", capacity: 6, guestRateHourly: 62.25 },
 };
 
 export function getResourceById(id: string): Resource | undefined {
@@ -2009,10 +2055,12 @@ export function getResourcesByType(type: ResourceType): Resource[] {
 // --- Guest (Public / Walk-In) Rates ---
 
 export const GUEST_PRICING = {
-  /** Per hour per seat, in cents */
+  /** Lowest guest hourly rate (Basic D1–D2), in cents. Per-tier rates: SEAT_TIERS. */
   hourlyRateCents: 1750,
-  /** Daily cap per seat, in cents */
-  dailyCapCents: 11500,
+  /** Half-day block length (and cap threshold), in hours. */
+  halfDayHours: 4,
+  /** Full-day block length, in hours. */
+  fullDayHours: 9,
   /** Booking window: max days ahead */
   bookingWindowDays: 14,
 } as const;
@@ -2020,13 +2068,33 @@ export const GUEST_PRICING = {
 /** @deprecated Use GUEST_PRICING instead */
 export const NON_MEMBER_PRICING = GUEST_PRICING;
 
+/** Desk quick-select presets (facility-local 24h times). */
+export const DESK_DURATION_PRESETS = [
+  { id: "morning", label: "Morning", detail: "8–12", start: "08:00", end: "12:00", hours: 4 },
+  { id: "afternoon", label: "Afternoon", detail: "1–5", start: "13:00", end: "17:00", hours: 4 },
+  { id: "full_day", label: "Full day", detail: "8–5", start: "08:00", end: "17:00", hours: 9 },
+] as const;
+
 // --- Conference Room ---
 
+export const CONFERENCE_ROOM_SLOTS = [
+  { id: "morning", label: "Morning", timeLabel: "8:00 AM–12:00 PM", start: "08:00", end: "12:00" },
+  { id: "afternoon", label: "Afternoon", timeLabel: "1:00 PM–5:00 PM", start: "13:00", end: "17:00" },
+] as const;
+export type ConferenceRoomSlotId = (typeof CONFERENCE_ROOM_SLOTS)[number]["id"];
+
 export const CONFERENCE_ROOM_CONFIG = {
+  /** Marketed as 6 seats (permit cap). */
   maxCapacity: 6,
-  /** Per hour in cents */
-  hourlyRateCents: 9900,
+  /** Weekday 4-hour slot (Morning 8–12 or Afternoon 1–5), flat, in cents. */
+  slotPriceCents: 24900,
+  slotHours: 4,
+  /** Evening / weekend 4-hour slot by appointment (not bookable online yet). */
+  afterHoursSlotPriceCents: 29900,
 } as const;
+
+/** Same value as CONFERENCE_ROOM_CONFIG.maxCapacity, mirrored in apps/functions. */
+export const CONFERENCE_ROOM_MAX_CAPACITY = CONFERENCE_ROOM_CONFIG.maxCapacity;
 
 // --- Space Inventory ---
 
@@ -2217,3 +2285,5 @@ export const accessEventDocSchema = z.object({
 export type AccessEventDoc = z.infer<typeof accessEventDocSchema>;
 
 export * from "./seatCatalog";
+
+export * from "./deskPricing";

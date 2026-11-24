@@ -1,13 +1,23 @@
 import { HttpsError } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import {
-  CONFERENCE_ROOM_HOURLY_RATE_CENTS,
+  CONFERENCE_ROOM_SLOT_HOURS,
+  CONFERENCE_ROOM_SLOT_PRICE_CENTS,
+  CONFERENCE_SLOT_MESSAGE,
+  DESK_SEAT_TIERS,
   GUEST_BOOKING_WINDOW_DAYS,
-  GUEST_DAILY_CAP_CENTS,
-  GUEST_HOURLY_RATE_CENTS,
+  type ConferenceSlotId,
+  type MembershipTier,
   getDeskMembershipTierById,
   getTierById,
 } from "./payments/stripeConfig";
+import {
+  conferenceSlotFor,
+  deskPricingPlanFor,
+  priceDeskSegments,
+  type DeskCapApplied,
+  type DeskPricingSegment,
+} from "./payments/deskPricing";
 import {
   BOOKING_CLOSE_HOUR,
   BOOKING_HOURS_MESSAGE,
@@ -30,19 +40,24 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 export const FLEX_RESOURCE_ID = "seat-flex";
 export const RESCHEDULE_LOCK_END = Date.UTC(2100, 0, 1);
 
+/**
+ * Seat guest rates follow the D1–D6 tier ladder (DESK_SEAT_TIERS). The
+ * conference room is a flat $249 weekday 4-hour slot; its hourly figure is
+ * only the slot price spread over 4 hours, for display.
+ */
 export const RESOURCE_CONFIG: Record<string, {
   name: string;
   type: "SEAT" | "MODE";
   guestRateHourlyCents: number;
   exclusiveGroupId: string;
 }> = {
-  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: GUEST_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
-  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: CONFERENCE_ROOM_HOURLY_RATE_CENTS, exclusiveGroupId: "main_space" },
+  "seat-1": { name: "Desk 1", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-2": { name: "Desk 2", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.basic.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-3": { name: "Desk 3", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-4": { name: "Desk 4", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.window.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-5": { name: "Desk 5", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "seat-6": { name: "Desk 6", type: "SEAT", guestRateHourlyCents: DESK_SEAT_TIERS.equipped.guestHourlyCents, exclusiveGroupId: "main_space" },
+  "mode-conference": { name: "Meeting setup", type: "MODE", guestRateHourlyCents: Math.round(CONFERENCE_ROOM_SLOT_PRICE_CENTS / CONFERENCE_ROOM_SLOT_HOURS), exclusiveGroupId: "main_space" },
 };
 
 export const DESK_RESOURCE_IDS = Object.keys(RESOURCE_CONFIG).filter(
@@ -102,11 +117,32 @@ export type BookingQuote = {
   accountCreditAvailableCents: number;
   accountCreditAppliedCents: number;
   totalCents: number;
+  /** True when a half-day or day cap lowered the price. */
   dailyCapApplied: boolean;
+  /** Which cap applied, if any. */
+  capApplied?: DeskCapApplied;
+  /** Per-segment desk pricing (one entry, or two for a desk change). */
+  segmentPricing?: DeskPricingSegment[];
+  /** Weekday conference slot, for meeting-room bookings. */
+  conferenceSlot?: ConferenceSlotId;
   currency: string;
   deskChangePlanId?: string;
   segments?: [DeskSegment, DeskSegment];
 };
+
+export type ChoicePricing = Pick<
+  BookingQuote,
+  | "membershipName"
+  | "includedHoursRemaining"
+  | "includedHoursApplied"
+  | "billableHours"
+  | "hourlyRateCents"
+  | "subtotalCents"
+  | "dailyCapApplied"
+  | "capApplied"
+  | "segmentPricing"
+  | "conferenceSlot"
+>;
 
 export function db() {
   return admin.firestore();
@@ -141,6 +177,20 @@ export function localDayKey(timestamp: number) {
 export function localMonthKey(timestamp: number) {
   const value = localClock(timestamp);
   return `${value.year}-${String(value.month).padStart(2, "0")}`;
+}
+
+/** Facility-local minutes after midnight. */
+export function localMinutes(timestamp: number) {
+  const value = localClock(timestamp);
+  return value.hour * 60 + value.minute;
+}
+
+/** Weekday conference slot for this window, or a clear error for anything else. */
+export function requireConferenceSlot(start: number, end: number): ConferenceSlotId {
+  const endMinutes = localMinutes(end) || 24 * 60;
+  const slot = conferenceSlotFor(localMinutes(start), endMinutes);
+  if (!slot) throw new HttpsError("invalid-argument", CONFERENCE_SLOT_MESSAGE);
+  return slot;
 }
 
 export function validateWindow(start: number, end: number) {
@@ -391,11 +441,74 @@ export async function getMembershipUsageState(uid: string, monthKey: string) {
   };
 }
 
-export function guestSeatSubtotal(durationHours: number) {
-  return Math.min(
-    Math.round(durationHours * GUEST_HOURLY_RATE_CENTS),
-    GUEST_DAILY_CAP_CENTS,
-  );
+/** Desk segments a choice occupies, with hours, for pricing. */
+export function pricingSegmentsForChoice(choice: BookingChoice, start: number, end: number) {
+  if (choice.kind === "desk_change") {
+    return choice.segments.map((segment) => ({
+      resourceId: segment.resourceId,
+      hours: (segment.end - segment.start) / 3_600_000,
+    }));
+  }
+  return [{ resourceId: choice.resourceId, hours: (end - start) / 3_600_000 }];
+}
+
+/**
+ * Price a resolved choice. Desk tiers, included-hour eligibility and the
+ * half-day / day caps come from payments/deskPricing; the conference room is a
+ * flat weekday slot. `membershipTier` is the active desk plan (Member / Plus),
+ * or undefined for guests and SayHi Connect.
+ */
+export function priceChoice(
+  choice: BookingChoice,
+  start: number,
+  end: number,
+  options: { membershipTier?: MembershipTier; includedHoursRemaining?: number } = {},
+): ChoicePricing {
+  if (choice.resourceType === "MODE") {
+    const conferenceSlot = requireConferenceSlot(start, end);
+    return {
+      membershipName: null,
+      includedHoursRemaining: 0,
+      includedHoursApplied: 0,
+      billableHours: (end - start) / 3_600_000,
+      hourlyRateCents: RESOURCE_CONFIG[choice.resourceId]?.guestRateHourlyCents ?? 0,
+      subtotalCents: CONFERENCE_ROOM_SLOT_PRICE_CENTS,
+      dailyCapApplied: false,
+      capApplied: null,
+      conferenceSlot,
+    };
+  }
+  const tier = options.membershipTier;
+  const includedHoursRemaining = tier ? Math.max(0, options.includedHoursRemaining || 0) : 0;
+  const priced = priceDeskSegments({
+    plan: deskPricingPlanFor(tier?.id),
+    segments: pricingSegmentsForChoice(choice, start, end),
+    includedHoursRemaining,
+  });
+  return {
+    membershipName: tier?.name ?? null,
+    includedHoursRemaining,
+    includedHoursApplied: priced.includedHoursApplied,
+    billableHours: priced.billableHours,
+    hourlyRateCents: priced.hourlyRateCents,
+    subtotalCents: priced.subtotalCents,
+    dailyCapApplied: priced.capApplied !== null,
+    capApplied: priced.capApplied,
+    segmentPricing: priced.segments,
+  };
+}
+
+/** Checkout line description, e.g. "D3 · Window sit-stand · 4 hours (half-day price)". */
+export function checkoutLineLabel(quote: BookingQuote) {
+  const hours = `${quote.durationHours} hour${quote.durationHours === 1 ? "" : "s"}`;
+  if (quote.resourceType === "MODE") {
+    const slot = quote.conferenceSlot === "afternoon" ? "Afternoon 1–5 PM" : "Morning 8 AM–12 PM";
+    return `Conference room · ${slot} · 4-hour slot`;
+  }
+  const cap = quote.capApplied === "half_day"
+    ? " (half-day price)"
+    : quote.capApplied === "day" ? " (day price)" : "";
+  return `${quote.resourceName} · ${hours}${cap}`;
 }
 
 export async function quoteForChoice(
@@ -408,46 +521,29 @@ export async function quoteForChoice(
   await enforceBookingHorizon(start, uid);
 
   const durationHours = (end - start) / 3_600_000;
-  let includedHoursRemaining = 0;
-  let includedHoursApplied = 0;
-  let billableHours = durationHours;
   const pricingResourceId = choice.kind === "desk_change"
     ? choice.segments[0].resourceId
     : choice.resourceId;
-  const pricingResource = RESOURCE_CONFIG[pricingResourceId];
-  if (!pricingResource) throw new HttpsError("not-found", "Space not found.");
+  if (!RESOURCE_CONFIG[pricingResourceId]) throw new HttpsError("not-found", "Space not found.");
 
-  let hourlyRateCents = pricingResource.guestRateHourlyCents;
-  let membershipName: string | null = null;
   let user: FirebaseFirestore.DocumentData | undefined;
   if (uid) user = (await db().collection("users").doc(uid).get()).data();
 
+  let membershipTier: MembershipTier | undefined;
+  let includedHoursRemaining = 0;
   if (uid && user && choice.resourceType === "SEAT" && user.membershipStatus === "active" && user.plan) {
-    const tier = getDeskMembershipTierById(user.plan);
-    if (tier) {
-      membershipName = tier.name;
-      hourlyRateCents = tier.extraHourlyRateCents;
-      const monthKey = localMonthKey(start);
-      const usage = await getMembershipUsageState(uid, monthKey);
-      const remaining = Math.max(
+    membershipTier = getDeskMembershipTierById(user.plan);
+    if (membershipTier) {
+      const usage = await getMembershipUsageState(uid, localMonthKey(start));
+      includedHoursRemaining = Math.max(
         0,
-        tier.includedHoursPerMonth - usage.usedHours - reservedHours(usage.reservations),
+        membershipTier.includedHoursPerMonth - usage.usedHours - reservedHours(usage.reservations),
       );
-      includedHoursRemaining = remaining;
-      includedHoursApplied = Math.min(durationHours, remaining);
-      billableHours = Math.max(0, durationHours - includedHoursApplied);
     }
   }
 
-  let subtotalCents = Math.round(billableHours * hourlyRateCents);
-  let dailyCapApplied = false;
-  if (choice.resourceType === "SEAT" && !membershipName) {
-    const uncapped = Math.round(durationHours * GUEST_HOURLY_RATE_CENTS);
-    subtotalCents = Math.min(uncapped, GUEST_DAILY_CAP_CENTS);
-    hourlyRateCents = GUEST_HOURLY_RATE_CENTS;
-    billableHours = durationHours;
-    dailyCapApplied = uncapped >= GUEST_DAILY_CAP_CENTS;
-  }
+  const pricing = priceChoice(choice, start, end, { membershipTier, includedHoursRemaining });
+  const subtotalCents = pricing.subtotalCents;
 
   const creditReservations = activeCreditReservations(user?.accountCreditReservations);
   const accountCreditAvailableCents = uid
@@ -463,16 +559,10 @@ export async function quoteForChoice(
     start,
     end,
     durationHours,
-    membershipName,
-    includedHoursRemaining,
-    includedHoursApplied,
-    billableHours,
-    hourlyRateCents,
-    subtotalCents,
+    ...pricing,
     accountCreditAvailableCents,
     accountCreditAppliedCents,
     totalCents: Math.max(0, subtotalCents - accountCreditAppliedCents),
-    dailyCapApplied,
     currency: "usd",
     ...(choice.kind === "desk_change" ? {
       deskChangePlanId: choice.planId,

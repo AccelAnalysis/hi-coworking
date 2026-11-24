@@ -98,7 +98,7 @@ describe("membership notification copy", () => {
       id: "membership_ended_sub_test_1",
       type: "membership_ended",
       title: "Your membership has ended",
-      body: "Your Virtual Office membership ended on October 24, 2026, and you won't be charged for it again.",
+      body: "Your SayHi Connect membership ended on October 24, 2026, and you won't be charged for it again.",
     });
   });
 
@@ -173,7 +173,7 @@ describe("membership notification writing", () => {
     expect(await notifyMembershipEnded(input, opts)).toBe("created");
     expect(await notifyMembershipEnded(input, opts)).toBe("already_exists");
     expect(docs.size).toBe(1);
-    expect([...docs.values()][0].body).toContain("Virtual Office membership ended on October 24, 2026");
+    expect([...docs.values()][0].body).toContain("SayHi Connect membership ended on October 24, 2026");
   });
 });
 

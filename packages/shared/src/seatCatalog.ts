@@ -2,13 +2,14 @@
  * Canonical customer-facing seat catalog for the Hi Coworking floor map.
  *
  * Display IDs D1–D7 map to booking resource IDs seat-1–seat-7.
- * Guest tier prices are the decided ladder from 21 November 2026, 9:33 AM ET
- * (Lance revenue model). They are config data for the seat picker to display
- * and badge. They are not charged at checkout until site-wide pricing is
- * rewired; do not invent a Stripe product per seat.
+ * Tier prices are the decided ladder from 21 November 2026, 9:33 AM ET
+ * (Lance revenue model), confirmed by Jonathan 24 Nov 2026. Checkout charges
+ * them (see deskPricing.ts and the functions mirror). Desk bookings use
+ * dynamic Stripe Checkout line items; there is no Stripe product per seat.
  *
- * Member overage for Equipped seats (D5/D6, and D7 once sellable) on the
- * $159 Member plan is not decided. Leave it unset and do not invent a rate.
+ * Overage: Coworking Member pays 20% off the seat's guest hourly rate and
+ * Coworking Plus 30% off; all billable time is capped at the tier's half-day
+ * (up to 4 billable hours) or day (over 4) price.
  *
  * D7 is the equipped-tier reception L-desk and is staff-only / not sellable.
  * The private office is omitted: it is not bookable in this slice.
@@ -35,20 +36,15 @@ export type SeatTierRates = {
   name: string;
   shortLabel: string;
   /** Guest hourly rate, in cents. */
-  guestHourlyCents?: number;
-  /** Guest half-day (4 hours), in cents. */
-  guestHalfDayCents?: number;
-  /**
-   * Guest full day (9 hours) and the daily cap for this tier, in cents.
-   * When set, the daily cap equals this day price.
-   */
-  guestDayCents?: number;
-  /**
-   * Member-plan overage, in cents per hour.
-   * Leave undefined when the rate is not decided — callers must not invent one
-   * and must not show a premium overage amount.
-   */
-  memberOverageHourlyCents?: number;
+  guestHourlyCents: number;
+  /** Guest half-day (4 hours), in cents. Also the cap for up to 4 billable hours. */
+  guestHalfDayCents: number;
+  /** Guest full day (9 hours), in cents. Also the cap for over 4 billable hours. */
+  guestDayCents: number;
+  /** Coworking Member ($159) overage, in cents per hour (20% off guest). */
+  memberOverageHourlyCents: number;
+  /** Coworking Plus ($289) overage, in cents per hour (30% off guest). */
+  plusOverageHourlyCents: number;
 };
 
 export const SEAT_TIERS: Record<SeatTierId, SeatTierRates> = {
@@ -59,6 +55,8 @@ export const SEAT_TIERS: Record<SeatTierId, SeatTierRates> = {
     guestHourlyCents: 1750,
     guestHalfDayCents: 2900,
     guestDayCents: 4900,
+    memberOverageHourlyCents: 1400,
+    plusOverageHourlyCents: 1225,
   },
   window: {
     id: "window",
@@ -67,6 +65,8 @@ export const SEAT_TIERS: Record<SeatTierId, SeatTierRates> = {
     guestHourlyCents: 1900,
     guestHalfDayCents: 3900,
     guestDayCents: 6500,
+    memberOverageHourlyCents: 1520,
+    plusOverageHourlyCents: 1330,
   },
   equipped: {
     id: "equipped",
@@ -75,8 +75,9 @@ export const SEAT_TIERS: Record<SeatTierId, SeatTierRates> = {
     guestHourlyCents: 2200,
     guestHalfDayCents: 4900,
     guestDayCents: 7900,
-    // Not decided for the $159 Member plan. Do not invent a rate.
-    memberOverageHourlyCents: undefined,
+    // Member includes 0 hours on Equipped; every hour bills at this rate.
+    memberOverageHourlyCents: 1760,
+    plusOverageHourlyCents: 1540,
   },
 };
 
@@ -296,13 +297,16 @@ export function visibleGuestRates(resourceId: string): {
   };
 }
 
-/**
- * Member overage label, or null when the rate is unset.
- * Equipped seats on the Member plan currently return null.
- */
+/** Coworking Member overage label for a seat (null for unknown seats). */
 export function visibleMemberOverage(resourceId: string): string | null {
   const tier = tierRatesForSeat(resourceId);
   return formatUsdCents(tier?.memberOverageHourlyCents);
+}
+
+/** Coworking Plus overage label for a seat (null for unknown seats). */
+export function visiblePlusOverage(resourceId: string): string | null {
+  const tier = tierRatesForSeat(resourceId);
+  return formatUsdCents(tier?.plusOverageHourlyCents);
 }
 
 export function isBookableSeatResource(resourceId: string): boolean {

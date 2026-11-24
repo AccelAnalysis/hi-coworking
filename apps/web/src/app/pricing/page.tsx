@@ -14,7 +14,21 @@ import {
   MEMBERSHIP_TIERS,
   GUEST_PRICING,
   CONFERENCE_ROOM_CONFIG,
+  CONFERENCE_ROOM_SLOTS,
+  SEAT_TIERS,
+  formatUsdCents,
+  type SeatTierId,
 } from "@hi/shared";
+
+const DESK_TIER_ROWS: Array<{ id: SeatTierId; seats: string; detail: string }> = [
+  { id: "basic", seats: "D1–D2", detail: "Shared conference-table seats" },
+  { id: "window", seats: "D3–D4", detail: "Window sit-stand desks" },
+  { id: "equipped", seats: "D5–D6", detail: "Window sit-stand, curved monitor, and dock" },
+];
+
+function usd(cents: number) {
+  return formatUsdCents(cents) ?? "";
+}
 
 const createCheckout = httpsCallable<
   { tierId: string; successUrl: string; cancelUrl: string; virtualAddress?: boolean },
@@ -93,7 +107,7 @@ export default function PricingPage() {
               Simple pricing for how you use the space
             </h1>
             <p className="text-lg text-slate-600 max-w-2xl mx-auto leading-relaxed">
-              Book by the hour, become a coworking member for included time and lower rates, or choose Virtual Office when you do not need regular desk access.
+              Book a desk by the hour, half-day, or full day, become a member for included hours and lower rates, or choose SayHi Connect to book at guest rates whenever you need a desk.
             </p>
           </div>
 
@@ -103,30 +117,53 @@ export default function PricingPage() {
             </div>
           )}
 
-          <div className="mb-10">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Clock className="h-3.5 w-3.5" /> Guest / Walk-In
+          <section className="mb-10" aria-labelledby="desk-rates-heading">
+            <h2 id="desk-rates-heading" className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5" aria-hidden="true" /> Desks by the hour, half-day, or day
             </h2>
             <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-                <div>
-                  <h3 className="text-2xl font-bold text-slate-900">
-                    ${(GUEST_PRICING.hourlyRateCents / 100).toFixed(2)}
-                    <span className="text-base font-normal text-slate-500">/hr per seat</span>
-                  </h3>
-                  <p className="text-sm text-slate-500 mt-1">
-                    Daily cap: ${(GUEST_PRICING.dailyCapCents / 100).toFixed(0)}/day per seat · Book up to {GUEST_PRICING.bookingWindowDays} days ahead
-                  </p>
-                </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-left text-sm" data-testid="desk-rate-table">
+                  <caption className="sr-only">Guest desk rates by seat tier</caption>
+                  <thead>
+                    <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                      <th scope="col" className="py-3 pr-4 font-semibold">Seat</th>
+                      <th scope="col" className="py-3 pr-4 font-semibold">Hourly</th>
+                      <th scope="col" className="py-3 pr-4 font-semibold">Half-day (4 hrs)</th>
+                      <th scope="col" className="py-3 font-semibold">Full day (9 hrs)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {DESK_TIER_ROWS.map((row) => {
+                      const tier = SEAT_TIERS[row.id];
+                      return (
+                        <tr key={row.id}>
+                          <th scope="row" className="py-4 pr-4 font-normal">
+                            <span className="block font-semibold text-[#101D4B]">{tier.name} · {row.seats}</span>
+                            <span className="block text-xs text-slate-500">{row.detail}</span>
+                          </th>
+                          <td className="py-4 pr-4 font-semibold tabular-nums text-slate-900">{usd(tier.guestHourlyCents)}/hr</td>
+                          <td className="py-4 pr-4 font-semibold tabular-nums text-slate-900">{usd(tier.guestHalfDayCents)}</td>
+                          <td className="py-4 font-semibold tabular-nums text-slate-900">{usd(tier.guestDayCents)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <p className="text-sm leading-6 text-slate-600">
+                  Choose Morning (8–12), Afternoon (1–5), Full day (8–5), or custom hours. Hourly time never costs more than the half-day price for up to {GUEST_PRICING.halfDayHours} hours, or the day price for longer. Book up to {GUEST_PRICING.bookingWindowDays} days ahead.
+                </p>
                 <Link
                   href="/book"
-                  className="inline-flex items-center justify-center px-6 py-3 rounded-full font-medium bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-sm transition-all"
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center px-6 py-3 rounded-full font-medium bg-white text-[#101D4B] border border-[#C5CADB] hover:bg-[#EEF0F6] shadow-sm transition-all"
                 >
-                  Book Hourly
+                  Book a desk
                 </Link>
               </div>
             </div>
-          </div>
+          </section>
 
           <div className="mb-10">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -135,7 +172,7 @@ export default function PricingPage() {
             <div className="grid md:grid-cols-3 gap-6">
               {MEMBERSHIP_TIERS.map((tier) => {
                 const isPopular = tier.id === "coworking";
-                const isVirtualOffice = tier.id === "virtual";
+                const isSayHiConnect = tier.id === "virtual";
                 const visibleFeatures = coworkingOnlyFeatures(tier.features);
                 return (
                   <div
@@ -161,18 +198,18 @@ export default function PricingPage() {
                     </p>
 
                     <div className="mt-4 p-3 rounded-xl bg-[#EEF0F6] border border-[#C5CADB]">
-                      {isVirtualOffice ? (
+                      {isSayHiConnect ? (
                         <>
-                          <p className="text-sm font-semibold text-[#101D4B]">No desk hours included</p>
-                          <p className="text-xs text-[#3A4675] mt-0.5">Coworking desk use: $17.50/hr</p>
+                          <p className="text-sm font-semibold text-[#101D4B]">Desks at guest rates</p>
+                          <p className="text-xs text-[#3A4675] mt-0.5">From {usd(SEAT_TIERS.basic.guestHourlyCents)}/hr · Accel Procurement Founders access included</p>
                         </>
                       ) : (
                         <>
                           <p className="text-sm font-semibold text-[#101D4B]">
-                            {tier.includedHoursPerMonth} desk {tier.includedHoursPerMonth === 1 ? "hour" : "hours"}/month included
+                            {tier.includedHoursPerMonth} desk hours/month included
                           </p>
                           <p className="text-xs text-[#3A4675] mt-0.5">
-                            Additional hours: {tier.id === "coworking" ? "20%" : "30%"} off the regular hourly price
+                            {tier.id === "coworking" ? "Basic and Window seats (D1–D4)" : "Basic, Window, and Equipped seats (D1–D6)"} · {tier.overageDiscountPercent}% off extra time
                           </p>
                         </>
                       )}
@@ -204,14 +241,14 @@ export default function PricingPage() {
                             <Loader2 className="h-4 w-4 animate-spin" /> Redirecting...
                           </span>
                         ) : (
-                          isVirtualOffice ? "Choose Virtual Office" : "Become a Member"
+                          isSayHiConnect ? "Choose SayHi Connect" : "Become a Member"
                         )}
                       </button>
                     ) : SAYHI_FLOW ? (
                       <button
                         type="button"
                         onClick={() => {
-                          if (VIRTUAL_ADDRESS && !isVirtualOffice && !vaChosen) setVaOfferFor(tier.id);
+                          if (VIRTUAL_ADDRESS && !isSayHiConnect && !vaChosen) setVaOfferFor(tier.id);
                           else goToCreateAccount(tier.id);
                         }}
                         className={`mt-8 w-full min-h-11 py-3 rounded-full font-medium transition-all duration-300 shadow-lg ${
@@ -220,7 +257,7 @@ export default function PricingPage() {
                             : "bg-white text-[#101D4B] border border-[#C5CADB] hover:bg-[#EEF0F6] shadow-slate-200/50"
                         }`}
                       >
-                        {isVirtualOffice ? "Choose Virtual Office" : "Become a Member"}
+                        {isSayHiConnect ? "Choose SayHi Connect" : "Become a Member"}
                       </button>
                     ) : (
                       <Link
@@ -231,7 +268,7 @@ export default function PricingPage() {
                             : "bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 shadow-slate-200/50"
                         }`}
                       >
-                        {isVirtualOffice ? "Choose Virtual Office" : "Become a Member"}
+                        {isSayHiConnect ? "Choose SayHi Connect" : "Become a Member"}
                       </Link>
                     )}
                   </div>
@@ -245,18 +282,31 @@ export default function PricingPage() {
               <Users className="h-3.5 w-3.5" /> Conference Room
             </h2>
             <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
                 <div>
                   <h3 className="text-xl font-bold text-slate-900">Conference Room</h3>
                   <p className="text-sm text-slate-500 mt-1">
-                    Private use for meetings, presentations, interviews, and small team sessions · Up to {CONFERENCE_ROOM_CONFIG.maxCapacity} people
+                    Private use for meetings, presentations, interviews, and small team sessions · Seats {CONFERENCE_ROOM_CONFIG.maxCapacity}
+                  </p>
+                  <ul className="mt-4 space-y-2" data-testid="conference-slots">
+                    {CONFERENCE_ROOM_SLOTS.map((slot) => (
+                      <li key={slot.id} className="flex items-center gap-3 text-sm text-slate-700">
+                        <span className="w-5 h-5 rounded-full bg-[#EEF0F6] flex items-center justify-center text-[#101D4B] shrink-0">
+                          <Check size={12} strokeWidth={3} aria-hidden="true" />
+                        </span>
+                        <span><span className="font-semibold text-[#101D4B]">{slot.label}</span> · {slot.timeLabel}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-4 text-xs leading-5 text-slate-500">
+                    Weekdays, booked in 4-hour slots. Evenings and weekends are available by appointment at {usd(CONFERENCE_ROOM_CONFIG.afterHoursSlotPriceCents)} per 4-hour slot. <Link href="/contact" className="font-semibold text-[#101D4B] underline underline-offset-2">Contact us</Link> to arrange one.
                   </p>
                 </div>
-                <div className="text-right">
+                <div className="md:text-right">
                   <span className="text-3xl font-bold text-slate-900">
-                    ${(CONFERENCE_ROOM_CONFIG.hourlyRateCents / 100).toFixed(0)}
+                    {usd(CONFERENCE_ROOM_CONFIG.slotPriceCents)}
                   </span>
-                  <span className="text-base text-slate-500">/hr</span>
+                  <span className="text-base text-slate-500"> per 4-hour slot</span>
                   {SAYHI_FLOW ? (
                     <Link
                       href="/book?resource=mode-conference"
@@ -269,7 +319,6 @@ export default function PricingPage() {
               </div>
             </div>
           </div>
-
 
           {VIRTUAL_ADDRESS ? (
             <div className="mb-10" data-testid="va-option">
@@ -304,7 +353,7 @@ export default function PricingPage() {
           ) : null}
 
           <p className="text-center text-sm text-slate-500 mt-8">
-            Physical coworking bookings include Wi-Fi and shared amenities. Memberships renew monthly. Cancel anytime.
+            Desk and room bookings include Wi-Fi and shared amenities. Memberships renew monthly. Cancel anytime.
           </p>
         </div>
       </AppShell>

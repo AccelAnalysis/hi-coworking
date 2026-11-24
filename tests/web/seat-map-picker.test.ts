@@ -86,15 +86,18 @@ describe("seat catalog", () => {
     expect(Object.keys(SEAT_CATALOG)).not.toEqual(expect.arrayContaining(["private-office", "office"]));
   });
 
-  it("uses the decided guest tier rates and leaves Member equipped overage unset", () => {
+  it("uses the decided guest tier rates and the confirmed member and plus overage", () => {
     expect(visibleGuestRates("seat-1")).toEqual({ hourly: "$17.50", halfDay: "$29", day: "$49" });
     expect(visibleGuestRates("seat-3")).toEqual({ hourly: "$19", halfDay: "$39", day: "$65" });
     expect(visibleGuestRates("seat-5")).toEqual({ hourly: "$22", halfDay: "$49", day: "$79" });
     expect(visibleGuestRates("seat-6")).toEqual(visibleGuestRates("seat-5"));
     expect(visibleGuestRates("seat-7")).toEqual(visibleGuestRates("seat-5"));
-    expect(SEAT_TIERS.equipped.memberOverageHourlyCents).toBeUndefined();
-    expect(visibleMemberOverage("seat-5")).toBeNull();
-    expect(visibleMemberOverage("seat-6")).toBeNull();
+    expect(SEAT_TIERS.basic).toMatchObject({ memberOverageHourlyCents: 1400, plusOverageHourlyCents: 1225 });
+    expect(SEAT_TIERS.window).toMatchObject({ memberOverageHourlyCents: 1520, plusOverageHourlyCents: 1330 });
+    expect(SEAT_TIERS.equipped).toMatchObject({ memberOverageHourlyCents: 1760, plusOverageHourlyCents: 1540 });
+    expect(visibleMemberOverage("seat-5")).toBe("$17.60");
+    expect(visibleMemberOverage("seat-1")).toBe("$14");
+    expect(visibleMemberOverage("unknown")).toBeNull();
     expect(formatUsdCents(undefined)).toBeNull();
   });
 
@@ -171,8 +174,10 @@ describe("booking UI wiring", () => {
     expect(booking).toMatch(/aria-pressed=\{selected\}/);
   });
 
-  it("does not invent a Member equipped overage rate in the picker UI", () => {
-    expect(picker).toMatch(/Member overage for Equipped desks is not set yet/);
+  it("explains membership coverage per desk tier from the catalog, not hardcoded rates", () => {
+    expect(picker).toMatch(/data-testid="seat-membership-coverage"/);
+    expect(picker).toMatch(/Included in Coworking Plus hours/);
+    expect(picker).not.toMatch(/checkout still uses the current hourly rate/i);
     expect(picker).not.toMatch(/Member average/);
     expect(list + picker).not.toMatch(/memberOverageHourlyCents:\s*[0-9]/);
   });

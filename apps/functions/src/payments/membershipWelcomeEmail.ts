@@ -55,11 +55,15 @@ function money(cents: number): string {
 export function planHighlights(tier: MembershipTier): string[] {
   const lines: string[] = [];
   if (tier.includedHoursPerMonth > 0) {
-    lines.push(`${tier.includedHoursPerMonth} coworking desk hours included every month`);
-    lines.push(`Extra desk hours at the member rate of ${money(tier.extraHourlyRateCents)}/hr`);
+    const seats = tier.includedSeatTiers.includes("equipped")
+      ? "Basic, Window, and Equipped desks (D1–D6)"
+      : "Basic and Window desks (D1–D4)";
+    lines.push(`${tier.includedHoursPerMonth} desk hours included every month on ${seats}`);
+    lines.push(`Extra desk time at ${tier.overageDiscountPercent}% off guest rates, never more than the half-day or day price`);
     lines.push("Wi-Fi and shared amenities when you work from the space");
   } else {
-    lines.push(`A coworking desk whenever you need one, at ${money(tier.extraHourlyRateCents)}/hr. You pay only for the time you book`);
+    lines.push(`Book any open desk at guest rates, from ${money(tier.extraHourlyRateCents)}/hr. Half-day and full-day caps apply automatically`);
+    lines.push("Accel Procurement Founders access is included with your plan");
     lines.push("Wi-Fi and shared amenities whenever you book a desk");
   }
   lines.push(`Book up to ${tier.bookingWindowDays} days ahead`);

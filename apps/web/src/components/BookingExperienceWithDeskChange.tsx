@@ -23,6 +23,10 @@ import { useAuth } from "@/lib/authContext";
 import { fallbackSeatMap, loadPublishedSeatMap, type SeatMapLayoutView } from "@/lib/seatMapLayout";
 import { SEAT_MAP_PICKER } from "@/lib/seatMapPickerFlag";
 import {
+  CONFERENCE_ROOM_CONFIG,
+  CONFERENCE_ROOM_SLOTS,
+  DESK_DURATION_PRESETS,
+  MEMBERSHIP_TIERS,
   SEAT_CATALOG,
   STAFF_ONLY_SEAT_RESOURCE_ID,
   getSeatByResourceId,
@@ -36,7 +40,6 @@ import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH } from "../../../functions/s
 import { HIG_CANVAS, HIG_CARD, HIG_FIELD, HIG_LABEL, HIG_LINK, HIG_PRIMARY, HigSwitch, NearLimitCount } from "@/components/forms/HigControls";
 
 const FACILITY_TIME_ZONE = "America/New_York";
-const PUBLIC_DESK_RATE_CENTS = 1750;
 const GUEST_LABEL = `${HIG_LABEL} mb-1.5`;
 const INTENDED_USE_WARN_AT = INTENDED_USE_MAX - 30;
 
@@ -87,10 +90,29 @@ type Quote = {
   accountCreditAppliedCents: number;
   totalCents: number;
   dailyCapApplied: boolean;
+  capApplied?: "half_day" | "day" | null;
+  segmentPricing?: Array<{
+    resourceId: string;
+    tierId: "basic" | "window" | "equipped";
+    hours: number;
+    includedHoursApplied: number;
+    billableHours: number;
+    hourlyRateCents: number;
+    subtotalCents: number;
+    capApplied: "half_day" | "day" | null;
+  }>;
+  conferenceSlot?: "morning" | "afternoon";
   currency: string;
   deskChangePlanId?: string;
   segments?: [DeskSegment, DeskSegment];
 };
+
+/** Plain-language label for the cap the server applied, if any. */
+function capLabel(cap: Quote["capApplied"]) {
+  if (cap === "half_day") return "Half-day price";
+  if (cap === "day") return "Day price";
+  return null;
+}
 
 type Selection =
   | { kind: "single"; option: AvailabilityOption }
@@ -348,6 +370,12 @@ function errorMessage(caught: unknown, fallback: string) {
   return split[split.length - 1] || fallback;
 }
 
+function rangeOpen(schedule: DaySchedule | null, dateValue: string, start: string, end: string) {
+  if (!schedule) return false;
+  return intervalStartValues(schedule, dateValue).includes(start)
+    && endValuesForStart(schedule, start).includes(end);
+}
+
 export default function BookingExperienceWithDeskChange() {
   const { user, loading: authLoading } = useAuth();
   const todayAtFacility = useMemo(() => facilityDateValue(), []);
@@ -475,6 +503,16 @@ export default function BookingExperienceWithDeskChange() {
     };
   }, [dateValue, hydrated, intent]);
 
+  // Meeting room: weekday 4-hour slots only. Snap to the first open slot.
+  useEffect(() => {
+    if (intent !== "MEETING" || !schedule) return;
+    const current = CONFERENCE_ROOM_SLOTS.find((slot) => slot.start === startValue && slot.end === endValue);
+    if (current && rangeOpen(schedule, dateValue, current.start, current.end)) return;
+    const firstOpen = CONFERENCE_ROOM_SLOTS.find((slot) => rangeOpen(schedule, dateValue, slot.start, slot.end));
+    setStartValue(firstOpen?.start ?? "");
+    setEndValue(firstOpen?.end ?? "");
+  }, [intent, schedule, dateValue, startValue, endValue]);
+
   useEffect(() => {
     setOptions([]);
     setDeskChangeOptions([]);
@@ -499,6 +537,16 @@ export default function BookingExperienceWithDeskChange() {
     ? (bookingWindow.end - bookingWindow.start) / 3_600_000
     : 0;
   const validRange = Boolean(intent && startValue && endValue && bookingWindow.end > bookingWindow.start);
+
+  const activeDeskPreset = DESK_DURATION_PRESETS.find(
+    (preset) => preset.start === startValue && preset.end === endValue,
+  );
+  const meetingSlotOpen = CONFERENCE_ROOM_SLOTS.some((slot) => rangeOpen(schedule, dateValue, slot.start, slot.end));
+
+  function applyRange(start: string, end: string) {
+    setStartValue(start);
+    setEndValue(end);
+  }
 
   function chooseIntent(nextIntent: ResourceIntent) {
     setIntent(nextIntent);
@@ -723,8 +771,9 @@ export default function BookingExperienceWithDeskChange() {
     ? Math.max(0, quote.includedHoursRemaining - quote.includedHoursApplied)
     : 0;
   const memberDiscountPercent = quote?.membershipName && quote.resourceType === "SEAT"
-    ? Math.max(0, Math.round((1 - quote.hourlyRateCents / PUBLIC_DESK_RATE_CENTS) * 100))
+    ? MEMBERSHIP_TIERS.find((tier) => tier.name === quote.membershipName)?.overageDiscountPercent ?? 0
     : 0;
+  const quoteCapLabel = quote && quote.resourceType === "SEAT" ? capLabel(quote.capApplied) : null;
 
   return (
     <AppShell>
@@ -762,7 +811,7 @@ export default function BookingExperienceWithDeskChange() {
               <span>
                 <span className="block text-lg font-semibold">Coworking desk</span>
                 <span className={`mt-1 block text-sm leading-6 ${intent === "DESK" ? "text-slate-300" : "text-slate-600"}`}>
-                  Pick an available desk. If no single desk covers the whole stay, an optional one-change plan can still be offered.
+                  Book by the hour, half-day, or full day. If no single desk covers the whole stay, an optional one-change plan can still be offered.
                 </span>
               </span>
             </button>
@@ -779,7 +828,7 @@ export default function BookingExperienceWithDeskChange() {
               <span>
                 <span className="block text-lg font-semibold">Meeting room</span>
                 <span className={`mt-1 block text-sm leading-6 ${intent === "MEETING" ? "text-slate-300" : "text-slate-600"}`}>
-                  Check the meeting room directly for the exact time you need.
+                  Weekday 4-hour slots, {money(CONFERENCE_ROOM_CONFIG.slotPriceCents)} each. Seats {CONFERENCE_ROOM_CONFIG.maxCapacity}.
                 </span>
               </span>
             </button>
@@ -798,7 +847,7 @@ export default function BookingExperienceWithDeskChange() {
               {schedule ? <p className="text-sm font-medium text-slate-700">{scheduleSummary(schedule)}</p> : null}
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+            <div className={`mt-5 grid gap-4 ${intent === "MEETING" ? "sm:grid-cols-1 sm:max-w-xs" : "sm:grid-cols-3"}`}>
               <label className="text-sm font-medium text-slate-800">
                 <span className="mb-2 flex items-center gap-2"><CalendarDays className="h-4 w-4" /> Date</span>
                 <input
@@ -812,6 +861,7 @@ export default function BookingExperienceWithDeskChange() {
                 />
               </label>
 
+              {intent === "DESK" ? (<>
               <label className="text-sm font-medium text-slate-800">
                 <span className="mb-2 flex items-center gap-2"><Clock3 className="h-4 w-4" /> Start</span>
                 <select
@@ -837,7 +887,93 @@ export default function BookingExperienceWithDeskChange() {
                   {endOptions.map((value) => <option key={value} value={value}>{formatClockValue(value)}</option>)}
                 </select>
               </label>
+              </>) : null}
             </div>
+
+            {intent === "DESK" && !loadingSchedule && startOptions.length > 0 ? (
+              <fieldset className="mt-5" data-testid="desk-duration-presets">
+                <legend className="text-sm font-medium text-slate-800">Quick select</legend>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {DESK_DURATION_PRESETS.map((preset) => {
+                    const open = rangeOpen(schedule, dateValue, preset.start, preset.end);
+                    const active = activeDeskPreset?.id === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        aria-pressed={active}
+                        disabled={!open}
+                        onClick={() => applyRange(preset.start, preset.end)}
+                        className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-sm font-semibold transition focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] disabled:cursor-not-allowed disabled:opacity-40 ${
+                          active
+                            ? "border-[#101D4B] bg-[#101D4B] text-white"
+                            : "border-[#C5CADB] bg-white text-[#101D4B] hover:bg-[#EEF0F6]"
+                        }`}
+                      >
+                        {preset.label}
+                        <span className={`font-normal ${active ? "text-white/80" : "text-slate-500"}`}>({preset.detail})</span>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    aria-pressed={!activeDeskPreset}
+                    onClick={() => {
+                      if (activeDeskPreset) changeStart(startValue);
+                    }}
+                    className={`inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold transition focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] ${
+                      !activeDeskPreset
+                        ? "border-[#101D4B] bg-[#101D4B] text-white"
+                        : "border-[#C5CADB] bg-white text-[#101D4B] hover:bg-[#EEF0F6]"
+                    }`}
+                  >
+                    Custom hours
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Up to 4 hours never costs more than the half-day price; longer stays never more than the day price.
+                </p>
+              </fieldset>
+            ) : null}
+
+            {intent === "MEETING" && !loadingSchedule && schedule?.isOpen ? (
+              <fieldset className="mt-5" data-testid="conference-slot-picker">
+                <legend className="text-sm font-medium text-slate-800">Choose a 4-hour slot</legend>
+                <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                  {CONFERENCE_ROOM_SLOTS.map((slot) => {
+                    const open = rangeOpen(schedule, dateValue, slot.start, slot.end);
+                    const active = startValue === slot.start && endValue === slot.end;
+                    return (
+                      <button
+                        key={slot.id}
+                        type="button"
+                        aria-pressed={active}
+                        disabled={!open}
+                        onClick={() => applyRange(slot.start, slot.end)}
+                        className={`flex min-h-16 items-center justify-between gap-3 rounded-2xl border p-4 text-left transition focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] disabled:cursor-not-allowed disabled:opacity-40 ${
+                          active
+                            ? "border-[#101D4B] bg-[#101D4B] text-white"
+                            : "border-[#C5CADB] bg-white text-[#101D4B] hover:bg-[#EEF0F6]"
+                        }`}
+                      >
+                        <span>
+                          <span className="block font-semibold">{slot.label}</span>
+                          <span className={`block text-sm ${active ? "text-white/80" : "text-slate-600"}`}>{slot.timeLabel}</span>
+                        </span>
+                        <span className="font-semibold tabular-nums">{money(CONFERENCE_ROOM_CONFIG.slotPriceCents)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {!meetingSlotOpen ? (
+                  <p className="mt-2 text-sm text-slate-600">No 4-hour meeting slot is still open on this date. Choose another weekday.</p>
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Evenings and weekends by appointment ({money(CONFERENCE_ROOM_CONFIG.afterHoursSlotPriceCents)} per 4-hour slot). <Link href="/contact" className="font-semibold text-[#101D4B] underline underline-offset-2">Contact us</Link>.
+                  </p>
+                )}
+              </fieldset>
+            ) : null}
 
             {loadingSchedule ? (
               <p className="mt-4 flex items-center gap-2 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading available hours…</p>
@@ -905,7 +1041,9 @@ export default function BookingExperienceWithDeskChange() {
                     <div>
                       <p className="text-sm font-bold text-[#101D4B]">{deskLabel(quote.resourceId, quote.resourceName)}</p>
                       <p className="mt-0.5 text-sm text-slate-600">{money(quote.totalCents)} due for this stay</p>
-                      <p className="mt-0.5 text-xs text-slate-500">Checkout still uses the current hourly rate</p>
+                      {quoteCapLabel ? (
+                        <p className="mt-0.5 text-xs text-slate-500">{quoteCapLabel} applied</p>
+                      ) : null}
                       <button
                         type="button"
                         onClick={continueToReview}
@@ -1099,7 +1237,10 @@ export default function BookingExperienceWithDeskChange() {
                           {quote.includedHoursRemaining === 0
                             ? "No included desk hours remain for this month."
                             : `The first ${hoursLabel(quote.includedHoursApplied)} use your remaining monthly allowance.`}{" "}
-                          The additional {hoursLabel(quote.billableHours)} automatically use your {memberDiscountPercent}% member discount at {money(quote.hourlyRateCents)}/hour.
+                          The additional {hoursLabel(quote.billableHours)} automatically use your {memberDiscountPercent}% member discount at {money(quote.hourlyRateCents)}/hour{quoteCapLabel ? `, capped at the ${quoteCapLabel.toLowerCase()}` : ""}.
+                          {quote.membershipName === "Coworking Member" && quote.segmentPricing?.some((segment) => segment.tierId === "equipped") ? (
+                            <> Equipped seats (D5–D6) are not covered by Coworking Member hours.</>
+                          ) : null}
                         </p>
                       ) : null}
                     </div>
@@ -1232,17 +1373,31 @@ export default function BookingExperienceWithDeskChange() {
                         <div className="flex items-start justify-between gap-4">
                           <span className="text-slate-600">
                             Additional member time<br />
-                            <span className="text-xs">{hoursLabel(quote.billableHours)} × {money(quote.hourlyRateCents)} ({memberDiscountPercent}% off)</span>
+                            <span className="text-xs">
+                              {quoteCapLabel
+                                ? `${hoursLabel(quote.billableHours)} · ${quoteCapLabel}`
+                                : `${hoursLabel(quote.billableHours)} × ${money(quote.hourlyRateCents)} (${memberDiscountPercent}% off)`}
+                            </span>
                           </span>
                           <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
                         </div>
                       ) : null}
                     </>
-                  ) : quote.dailyCapApplied && quote.resourceType === "SEAT" ? (
+                  ) : quoteCapLabel ? (
                     <div className="flex items-start justify-between gap-4">
                       <span className="text-slate-600">
-                        Desk daily cap<br />
-                        <span className="text-xs">Lower than the uncapped hourly total</span>
+                        {quoteCapLabel}<br />
+                        <span className="text-xs">Lower than {hoursLabel(quote.durationHours)} at the hourly rate</span>
+                      </span>
+                      <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
+                    </div>
+                  ) : quote.resourceType === "MODE" ? (
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-600">
+                        Meeting room<br />
+                        <span className="text-xs">
+                          {quote.conferenceSlot === "afternoon" ? "Afternoon 1:00 PM–5:00 PM" : "Morning 8:00 AM–12:00 PM"} · 4-hour slot
+                        </span>
                       </span>
                       <span className="font-medium tabular-nums text-slate-950">{money(quote.subtotalCents)}</span>
                     </div>
