@@ -231,7 +231,12 @@ describe("check-in and check-out", () => {
     expect((await db.collection("kioskVisits").where("uid", "==", "jordan").get()).size).toBe(1);
   });
 
-  it("uses today's booked window and records overage minutes without charging", async () => {
+  // The Functions emulator delivers Cloud Tasks immediately and retries them,
+  // so after the 5 PM ET close (or before opening) the visit's auto-close task
+  // closes this visit before the test checks out. The rule itself is covered by
+  // the pure autoClosePlan/decideAutoClose tests; run this journey in hours.
+  const etHour = Number(new Date().toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", hourCycle: "h23" }));
+  it.skipIf(etHour < 9 || etHour >= 15)("uses today's booked window and records overage minutes without charging", async () => {
     const email = await member("casey", { displayName: "Casey North", membershipStatus: "active", plan: "coworking" });
     const now = Date.now();
     await db.collection("bookings").doc("casey-booking").set({
