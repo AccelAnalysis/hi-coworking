@@ -6,6 +6,7 @@ import { httpsCallable } from "firebase/functions";
 import { doc, getDoc } from "firebase/firestore";
 import {
   ArrowRight,
+  ChevronRight,
   Calendar,
   Clock,
   CreditCard,
@@ -43,6 +44,7 @@ import { BillingAddressCard } from "@/components/sayhi/BillingAddressCard";
 import { readBillingAddress, type BillingAddress } from "@/lib/billingAddressView";
 import { demoData, demoKind, isEmailPreview, type DemoKind } from "@/lib/sayhiDemo";
 import dynamic from "next/dynamic";
+import { isBusinessProfileComplete } from "../../../../../functions/src/providers/businessProfile";
 
 // Private preview only. The check reads process.env directly so the bundler
 // drops the import (and the draft email copy) from production builds.
@@ -144,6 +146,9 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
   const [now, setNow] = useState(0);
   const [loadedBillingAddress, setBillingAddress] = useState<BillingAddress | null>(null);
   const billingAddress = sample ? sample.billingAddress : loadedBillingAddress;
+  // Renter screening: existing members are asked (never forced) to finish
+  // the business profile on /preferences. Sign-in is never blocked.
+  const [businessProfileMissing, setBusinessProfileMissing] = useState(false);
 
   // SayHi billing-address readback: the server copies it from Stripe
   // Checkout into the member's own accountDetails doc.
@@ -152,7 +157,9 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
     let active = true;
     getDoc(doc(db, "accountDetails", user.uid))
       .then((snap) => {
-        if (active) setBillingAddress(readBillingAddress(snap.data()?.billingAddress));
+        if (!active) return;
+        setBillingAddress(readBillingAddress(snap.data()?.billingAddress));
+        setBusinessProfileMissing(!isBusinessProfileComplete(snap.data()));
       })
       .catch(() => {
         if (active) setBillingAddress(null);
@@ -313,6 +320,20 @@ function AccountBookingsContent({ demo = null }: { demo?: DemoKind | null }) {
             </Link>
           </div>
         </div>
+
+        {businessProfileMissing && !sample ? (
+          <Link
+            href="/preferences#business"
+            data-testid="business-profile-prompt"
+            className={`mb-8 flex min-h-11 items-center gap-4 rounded-2xl border border-slate-200/80 bg-white px-5 py-4 transition-colors hover:bg-slate-50 ${FOCUS_RING}`}
+          >
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold text-[#101D4B]">Finish your business profile</span>
+              <span className="mt-0.5 block text-sm text-slate-600">Add your business details before your next visit.</span>
+            </span>
+            <ChevronRight className="ml-auto h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />
+          </Link>
+        ) : null}
 
         {showWelcome && (
           <MembershipWelcomeBanner copy={welcomeCopy} onDismiss={dismissWelcome} />

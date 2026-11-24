@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { httpsCallable } from "firebase/functions";
-import { AlertTriangle, Loader2, RefreshCw, ShieldCheck, WalletCards } from "lucide-react";
+import { AlertTriangle, ChevronRight, Loader2, RefreshCw } from "lucide-react";
+import { HIG_CANVAS, HIG_CARD, HIG_LINK, HIG_PRIMARY, HIG_TINTED } from "@/components/forms/HigControls";
+import { IdCheckSheet } from "@/components/admin/IdCheckSheet";
+import { setIdCheck, type IdCheckView } from "@/lib/idCheck";
 import { AppShell } from "@/components/AppShell";
 import { RequireAuth } from "@/components/RequireAuth";
 import { callableErrorMessage } from "@/lib/callableError";
@@ -32,6 +35,19 @@ type AuditEntry = {
   summary: Record<string, string | number | boolean>;
 };
 
+type BusinessProfileView = {
+  businessName: string | null;
+  isIndependent: boolean;
+  role: string | null;
+  businessType: string | null;
+  businessDescription: string | null;
+  website: string | null;
+  vaSccNumber: string | null;
+  phone: string | null;
+  complete: boolean;
+  updatedAt: number | null;
+};
+
 type MemberRecord = {
   member: {
     uid: string;
@@ -47,7 +63,9 @@ type MemberRecord = {
     stripeSubscriptionId: string | null;
     membershipCancellationPending: boolean;
     accountCreditCents: number;
+    idCheck: IdCheckView | null;
   };
+  business: BusinessProfileView | null;
   consent: {
     sms: SmsConsent | null;
     smsHistory: HistoryRow[];
@@ -100,7 +118,11 @@ function money(cents: number) {
 
 function words(value?: string | null) {
   if (!value) return "Not set";
-  return value.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/^./, (c) => c.toUpperCase())
+    .replace(/\bid\b/gi, "ID");
 }
 
 function summaryValue(key: string, value: string | number | boolean) {
@@ -118,12 +140,44 @@ export default function MemberRecordPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div>
-      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="mt-1 break-words text-sm text-slate-900">{children}</dd>
+    <div className={`flex min-h-11 items-baseline justify-between gap-6 py-2.5 ${wide ? "sm:col-span-2" : ""}`}>
+      <dt className="shrink-0 text-sm text-slate-600">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-sm font-medium text-slate-900">{children}</dd>
     </div>
+  );
+}
+
+/** Two-column key/value rows with hairline dividers (one column on phones). */
+const KV_LIST =
+  "grid gap-x-10 sm:grid-cols-2 [&>div]:border-t [&>div]:border-slate-100 [&>div:first-child]:border-t-0 sm:[&>div:nth-child(2)]:border-t-0";
+
+function Card({ labelledBy, title, badge, accessory, children, className = "" }: { labelledBy: string; title: string; badge?: ReactNode; accessory?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section aria-labelledby={labelledBy} className={`${HIG_CARD} p-5 sm:p-6 ${className}`}>
+      <div className="mb-3 flex min-h-11 flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id={labelledBy} className="font-display text-lg font-semibold text-[#101D4B]">{title}</h2>
+          {badge}
+        </div>
+        {accessory}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SubDetails({ rows }: { rows: Array<[string, ReactNode]> }) {
+  return (
+    <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs leading-5">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <dt className="text-slate-600">{label}</dt>
+          <dd className="break-words text-slate-900">{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -141,6 +195,9 @@ function MemberRecordContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<"all" | AuditEntry["source"]>("all");
+  const [idCheckTarget, setIdCheckTarget] = useState<boolean | null>(null);
+  const [idCheckBusy, setIdCheckBusy] = useState(false);
+  const [idCheckNotice, setIdCheckNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("uid");
@@ -174,34 +231,33 @@ function MemberRecordContent() {
 
   const member = record?.member;
   const consent = record?.consent;
+  const business = record?.business ?? null;
   const title = member?.displayName || member?.email || "Member record";
 
   return (
-    <AppShell>
+    <AppShell fullWidth>
+      <div className={`${HIG_CANVAS} min-h-full`}>
       <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6">
 
-        <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Member record</p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{title}</h1>
-            {member && <p className="mt-2 text-sm text-slate-600">{words(member.plan)} · {words(member.membershipStatus)}</p>}
+            <p className="text-sm font-medium text-slate-600">Member record</p>
+            <h1 className="mt-1 font-display text-3xl font-semibold text-[#101D4B]">{title}</h1>
+            {member && <p className="mt-1 text-[15px] text-slate-600">{words(member.plan)} · {words(member.membershipStatus)}</p>}
           </div>
           {uid && (
             <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/admin/members/actions?uid=${encodeURIComponent(uid)}`}
-                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
-              >
-                <WalletCards className="h-4 w-4" aria-hidden="true" /> Member actions
-              </Link>
               <button
                 type="button"
                 onClick={() => void load()}
                 disabled={loading}
-                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-white px-4 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#101D4B] disabled:opacity-50"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" /> Refresh
               </button>
+              <Link href={`/admin/members/actions?uid=${encodeURIComponent(uid)}`} className={`${HIG_PRIMARY} px-5 text-sm`}>
+                Member actions
+              </Link>
             </div>
           )}
         </div>
@@ -227,10 +283,9 @@ function MemberRecordContent() {
         )}
 
         {!loading && member && consent && (
-          <div className="mt-8 grid gap-10">
-            <section aria-labelledby="account-heading">
-              <h2 id="account-heading" className="text-xl font-semibold text-slate-950">Account</h2>
-              <dl className="mt-4 grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-8 grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-3">
+            <Card labelledBy="account-heading" title="Account" className="lg:col-span-2">
+              <dl className={KV_LIST}>
                 <Field label="Email">{member.email || "Not set"}</Field>
                 <Field label="Phone">{member.phone || "Not set"}</Field>
                 <Field label="Role">{words(member.role)}</Field>
@@ -241,24 +296,101 @@ function MemberRecordContent() {
                 </Field>
                 <Field label="Paid through">{formatDateTime(member.expiresAt)}</Field>
                 <Field label="Member since">{formatDateTime(member.createdAt)}</Field>
-                <Field label="Account credit">{money(member.accountCreditCents)}</Field>
+                <Field label="Account credit"><span className="tabular-nums">{money(member.accountCreditCents)}</span></Field>
                 <Field label="Member ID"><code className="text-xs">{member.uid}</code></Field>
                 <Field label="Stripe customer">{member.stripeCustomerId ? <code className="text-xs">{member.stripeCustomerId}</code> : "None"}</Field>
                 <Field label="Stripe subscription">{member.stripeSubscriptionId ? <code className="text-xs">{member.stripeSubscriptionId}</code> : "None"}</Field>
               </dl>
-            </section>
+            </Card>
 
-            <section aria-labelledby="consent-heading">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 id="consent-heading" className="text-xl font-semibold text-slate-950">Consent</h2>
-                <Link href="/admin/members/consent" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-sky-800 hover:underline">
-                  <ShieldCheck className="h-4 w-4" aria-hidden="true" /> All consent and suppressions
-                </Link>
+            <Card
+              labelledBy="id-check-heading"
+              title="First-visit ID check"
+              badge={member.idCheck?.checked ? <Pill tone="good">Checked</Pill> : <Pill tone="warn">Not checked</Pill>}
+            >
+              <p className="text-sm leading-6 text-slate-600" data-testid="id-check-detail">
+                {member.idCheck?.checked
+                  ? `${formatDateTime(member.idCheck.checkedAt)} · ${member.idCheck.staffInitials || "Staff"}`
+                  : member.idCheck?.checkedAt
+                    ? `Cleared ${formatDateTime(member.idCheck.checkedAt)} · ${member.idCheck.staffInitials || "Staff"}`
+                    : "Check a photo ID in person on the first visit. Record yes/no only."}
+              </p>
+              <div className="mt-4 border-t border-slate-100 pt-4">
+                {member.idCheck?.checked ? (
+                  <button type="button" onClick={() => setIdCheckTarget(false)} className="inline-flex min-h-11 items-center rounded-full bg-white px-4 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#101D4B]">
+                    Clear ID check
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setIdCheckTarget(true)} className={HIG_TINTED}>
+                    Mark ID checked
+                  </button>
+                )}
               </div>
-              <div className="mt-4 grid gap-6 lg:grid-cols-3">
-                <div className="rounded-2xl border border-slate-200 p-5">
-                  <h3 className="text-base font-semibold text-slate-950">Text messages</h3>
-                  <div className="mt-2">
+              {idCheckNotice ? <p className="mt-3 text-sm text-emerald-700" role="status">{idCheckNotice}</p> : null}
+              <IdCheckSheet
+                open={idCheckTarget !== null}
+                memberLabel={title}
+                checked={idCheckTarget === true}
+                busy={idCheckBusy}
+                onClose={() => setIdCheckTarget(null)}
+                onSubmit={async (staffInitials) => {
+                  if (idCheckTarget === null) return;
+                  setIdCheckBusy(true);
+                  setError(null);
+                  try {
+                    await setIdCheck({ uid: member.uid, checked: idCheckTarget, staffInitials });
+                    setIdCheckNotice(idCheckTarget ? "ID check recorded." : "ID check cleared.");
+                    setIdCheckTarget(null);
+                    await load();
+                  } catch (err) {
+                    setError(callableErrorMessage(err, "Could not save the ID check."));
+                  } finally {
+                    setIdCheckBusy(false);
+                  }
+                }}
+              />
+            </Card>
+
+            <Card
+              labelledBy="business-heading"
+              title="Business"
+              badge={business?.complete ? <Pill tone="good">Complete</Pill> : <Pill tone="warn">Incomplete</Pill>}
+              className="lg:col-span-2"
+            >
+              {business ? (
+                <dl className={KV_LIST}>
+                  <Field label="Business name">{business.businessName || "Not set"}</Field>
+                  <Field label="Role">{business.role || "Not set"}</Field>
+                  <Field label="Business type">{business.businessType || "Not set"}</Field>
+                  <Field label="Website">
+                    {business.website ? (
+                      <a href={business.website} target="_blank" rel="noopener noreferrer nofollow" className={HIG_LINK}>
+                        {business.website.replace(/^https?:\/\//, "")}
+                      </a>
+                    ) : "Not given"}
+                  </Field>
+                  <Field label="Virginia SCC ID">{business.vaSccNumber || "Not given"}</Field>
+                  <Field label="Profile updated">{formatDateTime(business.updatedAt)}</Field>
+                  <Field label="What they do" wide>{business.businessDescription || "Not set"}</Field>
+                </dl>
+              ) : (
+                <p className="rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-600">No business profile yet. The member is asked to finish it on their profile page.</p>
+              )}
+            </Card>
+
+            <Card
+              labelledBy="consent-heading"
+              title="Consent"
+              accessory={
+                <Link href="/admin/members/consent" className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-[#101D4B] hover:underline">
+                  All consent <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              }
+            >
+              <ul className="divide-y divide-slate-100">
+                <li className="py-3 first:pt-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">Text messages</h3>
                     {consent.sms ? (
                       consent.sms.optIn ? <Pill tone="good">Opted in</Pill> : <Pill tone="warn">Opted out</Pill>
                     ) : (
@@ -266,81 +398,88 @@ function MemberRecordContent() {
                     )}
                   </div>
                   {consent.sms && (
-                    <dl className="mt-4 grid gap-3">
-                      <Field label="Consented number">{consent.sms.phone || "Not recorded"}</Field>
-                      <Field label="Source">{words(consent.sms.source)}</Field>
-                      <Field label="Wording version">{consent.sms.textVersion || "Not recorded"}</Field>
-                      <Field label="Opted in">{formatDateTime(consent.sms.consentedAt)}</Field>
-                      {!consent.sms.optIn && <Field label="Opted out">{formatDateTime(consent.sms.optedOutAt)}</Field>}
-                      {!consent.sms.optIn && <Field label="Opt-out reason">{words(consent.sms.optOutReason)}</Field>}
-                    </dl>
+                    <SubDetails
+                      rows={[
+                        ["Number", consent.sms.phone || "Not recorded"],
+                        ["Source", words(consent.sms.source)],
+                        ["Wording", consent.sms.textVersion || "Not recorded"],
+                        ["Opted in", formatDateTime(consent.sms.consentedAt)],
+                        ...(!consent.sms.optIn
+                          ? ([["Opted out", formatDateTime(consent.sms.optedOutAt)], ["Reason", words(consent.sms.optOutReason)]] as Array<[string, ReactNode]>)
+                          : []),
+                      ]}
+                    />
                   )}
                   {consent.smsHistory.length > 0 && (
-                    <details className="mt-4 text-sm">
-                      <summary className="min-h-11 cursor-pointer py-2 font-semibold text-slate-700">History ({consent.smsHistory.length})</summary>
-                      <ul className="mt-2 grid gap-1 text-slate-700">
+                    <details className="mt-1 text-xs">
+                      <summary className="flex min-h-11 cursor-pointer items-center font-medium text-[#101D4B]">History ({consent.smsHistory.length})</summary>
+                      <ul className="grid gap-1 text-slate-700">
                         {consent.smsHistory.map((row, i) => (
                           <li key={i}>{row.optIn ? "Opted in" : "Opted out"} · {words(String(row.source || ""))} · {formatDateTime(Number(row.at) || null)}</li>
                         ))}
                       </ul>
                     </details>
                   )}
-                </div>
+                </li>
 
-                <div className="rounded-2xl border border-slate-200 p-5">
-                  <h3 className="text-base font-semibold text-slate-950">Terms of service</h3>
-                  <div className="mt-2">
+                <li className="py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">Terms of service</h3>
                     {consent.terms?.acceptedAt ? <Pill tone="good">Accepted</Pill> : <Pill tone="warn">Not accepted</Pill>}
                   </div>
                   {consent.terms && (
-                    <dl className="mt-4 grid gap-3">
-                      <Field label="Version">{consent.terms.version || "Not recorded"}</Field>
-                      <Field label="Source">{words(consent.terms.source)}</Field>
-                      <Field label="Accepted">{formatDateTime(consent.terms.acceptedAt)}</Field>
-                    </dl>
+                    <SubDetails
+                      rows={[
+                        ["Version", consent.terms.version || "Not recorded"],
+                        ["Source", words(consent.terms.source)],
+                        ["Accepted", formatDateTime(consent.terms.acceptedAt)],
+                      ]}
+                    />
                   )}
                   {consent.termsHistory.length > 0 && (
-                    <details className="mt-4 text-sm">
-                      <summary className="min-h-11 cursor-pointer py-2 font-semibold text-slate-700">History ({consent.termsHistory.length})</summary>
-                      <ul className="mt-2 grid gap-1 text-slate-700">
+                    <details className="mt-1 text-xs">
+                      <summary className="flex min-h-11 cursor-pointer items-center font-medium text-[#101D4B]">History ({consent.termsHistory.length})</summary>
+                      <ul className="grid gap-1 text-slate-700">
                         {consent.termsHistory.map((row, i) => (
                           <li key={i}>{String(row.version || "Unknown version")} · {words(String(row.source || ""))} · {formatDateTime(Number(row.at) || null)}</li>
                         ))}
                       </ul>
                     </details>
                   )}
-                </div>
+                </li>
 
-                <div className="rounded-2xl border border-slate-200 p-5">
-                  <h3 className="text-base font-semibold text-slate-950">Marketing email</h3>
-                  <div className="mt-2">
+                <li className="py-3 last:pb-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">Marketing email</h3>
                     {consent.email.marketingOptOut || consent.email.doNotContact || consent.email.suppressed ? (
                       <Pill tone="warn">Not sent</Pill>
                     ) : (
                       <Pill tone="good">Can be sent</Pill>
                     )}
                   </div>
-                  <dl className="mt-4 grid gap-3">
-                    <Field label="Unsubscribed">{consent.email.marketingOptOut ? "Yes" : "No"}</Field>
-                    <Field label="Do not contact">{consent.email.doNotContact ? "Yes" : "No"}</Field>
-                    <Field label="Suppression list">
-                      {consent.email.suppressed ? `${words(consent.email.suppressionReason)}, ${formatDateTime(consent.email.suppressedAt)}` : "Not listed"}
-                    </Field>
-                  </dl>
-                  <p className="mt-4 text-xs leading-5 text-slate-600">Account and booking email is always sent.</p>
-                </div>
-              </div>
-            </section>
+                  <SubDetails
+                    rows={[
+                      ["Unsubscribed", consent.email.marketingOptOut ? "Yes" : "No"],
+                      ["Do not contact", consent.email.doNotContact ? "Yes" : "No"],
+                      ["Suppression", consent.email.suppressed ? `${words(consent.email.suppressionReason)}, ${formatDateTime(consent.email.suppressedAt)}` : "Not listed"],
+                    ]}
+                  />
+                  <p className="mt-2 text-xs leading-5 text-slate-600">Account and booking email is always sent.</p>
+                </li>
+              </ul>
+            </Card>
 
-            <section aria-labelledby="audit-heading">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <h2 id="audit-heading" className="text-xl font-semibold text-slate-950">Admin audit trail</h2>
-                <label className="grid gap-1 text-sm font-semibold text-slate-700">
+            <Card
+              labelledBy="audit-heading"
+              title="Admin audit trail"
+              className="lg:col-span-3"
+              accessory={
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                   Show
                   <select
                     value={sourceFilter}
                     onChange={(event) => setSourceFilter(event.target.value as typeof sourceFilter)}
-                    className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 text-sm font-normal text-slate-900"
+                    className="min-h-11 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#101D4B]/30"
                   >
                     <option value="all">All changes</option>
                     {Object.entries(SOURCE_LABELS).map(([value, label]) => (
@@ -348,30 +487,31 @@ function MemberRecordContent() {
                     ))}
                   </select>
                 </label>
-              </div>
+              }
+            >
               <p className="sr-only" role="status">{auditRows.length} audit entries shown</p>
               {auditRows.length === 0 ? (
-                <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-6 text-sm text-slate-600">No admin changes recorded for this filter.</p>
+                <p className="rounded-xl bg-slate-50 px-4 py-4 text-sm text-slate-600">No admin changes recorded for this filter.</p>
               ) : (
-                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
-                  <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                <div className="-mx-5 overflow-x-auto border-t border-slate-100 sm:-mx-6">
+                  <table className="min-w-full divide-y divide-slate-100 text-left text-sm">
                     <caption className="sr-only">Admin changes to this member, newest first</caption>
-                    <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
+                    <thead className="text-xs font-medium text-slate-600">
                       <tr>
-                        <th scope="col" className="px-4 py-3 font-semibold">When</th>
-                        <th scope="col" className="px-4 py-3 font-semibold">Area</th>
-                        <th scope="col" className="px-4 py-3 font-semibold">Change</th>
-                        <th scope="col" className="px-4 py-3 font-semibold">Details</th>
-                        <th scope="col" className="px-4 py-3 font-semibold">By</th>
+                        <th scope="col" className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-semibold">When</th>
+                        <th scope="col" className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-semibold">Area</th>
+                        <th scope="col" className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-semibold">Change</th>
+                        <th scope="col" className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-semibold">Details</th>
+                        <th scope="col" className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-semibold">By</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {auditRows.map((row) => (
                         <tr key={`${row.source}-${row.id}`}>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatDateTime(row.createdAt)}</td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">{SOURCE_LABELS[row.source]}</td>
-                          <td className="px-4 py-3 font-medium text-slate-900">{words(row.action)}</td>
-                          <td className="px-4 py-3 text-slate-700">
+                          <td className="whitespace-nowrap px-5 py-3 sm:first:pl-6 sm:last:pr-6 text-slate-700">{formatDateTime(row.createdAt)}</td>
+                          <td className="whitespace-nowrap px-5 py-3 sm:first:pl-6 sm:last:pr-6 text-slate-700">{SOURCE_LABELS[row.source]}</td>
+                          <td className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 font-medium text-slate-900">{words(row.action)}</td>
+                          <td className="px-5 py-3 sm:first:pl-6 sm:last:pr-6 text-slate-700">
                             {Object.keys(row.summary).length === 0
                               ? "—"
                               : Object.entries(row.summary).map(([key, value]) => (
@@ -380,7 +520,7 @@ function MemberRecordContent() {
                                   </span>
                                 ))}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.actorName || (row.actorUid ? "Admin" : "System")}</td>
+                          <td className="whitespace-nowrap px-5 py-3 sm:first:pl-6 sm:last:pr-6 text-slate-700">{row.actorName || (row.actorUid ? "Admin" : "System")}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -388,9 +528,10 @@ function MemberRecordContent() {
                 </div>
               )}
               <p className="mt-3 text-xs text-slate-600">Shows the latest 100 entries across membership, payment, credit and role changes.</p>
-            </section>
+            </Card>
           </div>
         )}
+      </div>
       </div>
     </AppShell>
   );

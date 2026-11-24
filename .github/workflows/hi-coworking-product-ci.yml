@@ -234,6 +234,10 @@ jobs:
           tests/functions/sayhi-membership-end.test.ts
           tests/functions/sayhi-billing-address.test.ts
           tests/functions/sayhi-follow-up-emails.test.ts
+          tests/functions/business-profile.test.ts
+          tests/web/business-profile-forms.test.ts
+          tests/functions/member-id-check.test.ts
+          tests/functions/guest-checkout-screening.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -248,7 +252,8 @@ jobs:
           tests/functions/admin-member-credit.test.ts
           tests/functions/admin-booking-management.test.ts
           tests/functions/front-desk-kiosk.test.ts
-          tests/functions/booking-hold-cleanup-firestore.test.ts"
+          tests/functions/booking-hold-cleanup-firestore.test.ts
+          tests/functions/guest-checkout-screening.journey.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-

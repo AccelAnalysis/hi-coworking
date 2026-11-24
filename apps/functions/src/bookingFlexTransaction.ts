@@ -15,6 +15,11 @@ import { createAccessGrant, seamApiKey } from "./access";
 import { sendBookingConfirmationEmail } from "./bookingConfirmationEmail";
 import { resendApiKey } from "./providers/emailSecret";
 import {
+  validateGuestScreening,
+  type GuestScreening,
+} from "./providers/guestCheckoutScreening";
+import type { TermsAcceptanceRecord } from "./providers/termsCompliance";
+import {
   FLEX_RESOURCE_ID,
   HOLD_MS,
   RESCHEDULE_LOCK_END,
@@ -47,7 +52,17 @@ if (admin.apps.length === 0) admin.initializeApp();
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
 
-type GuestDetails = { name?: string; email?: string; phone?: string };
+type GuestDetails = {
+  name?: string;
+  email?: string;
+  phone?: string;
+  // Renter screening (guest checkout): business use only.
+  businessName?: string;
+  isIndependent?: boolean;
+  intendedUse?: string;
+  termsAccepted?: boolean;
+  termsVersion?: string;
+};
 
 type HoldData = {
   id: string;
@@ -72,6 +87,8 @@ type HoldData = {
   paymentId?: string;
   bookingId?: string;
   guestAccountCreated?: boolean;
+  /** Guest checkout clickwrap (source "guest-checkout"); null for signed-in holds. */
+  termsAcceptance?: TermsAcceptanceRecord | null;
 };
 
 function occupancyHoldId(parentHoldId: string, index: number) {
@@ -201,6 +218,58 @@ async function ensureGuestAccount(guest?: GuestDetails) {
   return { uid: userRecord.uid, created };
 }
 
+/**
+ * Copies the guest's screening answers and Terms acceptance onto the booking,
+ * and onto the account only when checkout just created it. An email typed at
+ * checkout does not prove ownership of an existing account (see PR #66), so
+ * existing users/{uid} and accountDetails/{uid} docs are left untouched.
+ * Best effort: the booking is already paid and confirmed.
+ */
+async function recordGuestScreening(
+  hold: HoldData,
+  bookingId: string,
+  uid: string,
+  accountCreated: boolean,
+) {
+  const terms = hold.termsAcceptance;
+  const guest = hold.guest;
+  if (!terms || !guest) return;
+  try {
+    const batch = db().batch();
+    batch.set(db().collection("bookings").doc(bookingId), {
+      guestScreening: {
+        businessName: guest.businessName || "",
+        isIndependent: guest.isIndependent === true,
+        intendedUse: guest.intendedUse || "",
+      },
+      termsAcceptance: terms,
+    }, { merge: true });
+    if (accountCreated) {
+      batch.set(db().collection("users").doc(uid), {
+        termsAcceptance: terms,
+        termsAcceptanceHistory: admin.firestore.FieldValue.arrayUnion({
+          version: terms.version,
+          source: terms.source,
+          at: terms.acceptedAt,
+        }),
+        updatedAt: Date.now(),
+      }, { merge: true });
+      batch.set(db().collection("accountDetails").doc(uid), {
+        company: guest.businessName || "",
+        isIndependent: guest.isIndependent === true,
+        ...(guest.phone ? { phone: guest.phone } : {}),
+        updatedAt: Date.now(),
+      }, { merge: true });
+    }
+    await batch.commit();
+  } catch (error) {
+    logger.error("Guest screening record failed after booking confirmation", {
+      bookingId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function issueAccessSafely(
   bookingId: string,
   resourceId: string,
@@ -259,6 +328,7 @@ async function createHoldAtomically(
   end: number,
   guest: GuestDetails | undefined,
   authenticatedUid?: string,
+  screening?: GuestScreening | null,
 ) {
   return db().runTransaction(async (tx) => {
     const bookingQuery = db().collection("bookings").where("end", ">", start);
@@ -400,8 +470,12 @@ async function createHoldAtomically(
       guest: authenticatedUid ? null : {
         name: guest?.name?.trim(),
         email: guest?.email?.trim().toLowerCase(),
-        phone: guest?.phone?.trim() || "",
+        phone: screening?.phone || guest?.phone?.trim() || "",
+        businessName: screening?.businessName ?? "",
+        isIndependent: screening?.isIndependent === true,
+        intendedUse: screening?.intendedUse ?? "",
       },
+      termsAcceptance: authenticatedUid ? null : screening?.termsAcceptance ?? null,
       quote: adjustedQuote,
       status: "HELD",
       secretHash: createHash("sha256").update(holdSecret).digest("hex"),
@@ -647,6 +721,20 @@ export const booking_beginCheckout = onCall(
     if (!request.auth && (!guest?.name?.trim() || !guest?.email?.trim())) {
       throw new HttpsError("invalid-argument", "Name and email are required for guest checkout.");
     }
+    // Renter screening: signed-out guests give phone, business name (or None /
+    // independent), a one-line intended use, and tick the Terms checkbox.
+    let screening: GuestScreening | null = null;
+    if (!request.auth) {
+      const checked = validateGuestScreening(guest, Date.now());
+      if (!checked.ok) {
+        throw new HttpsError(
+          checked.code === "stale-terms" ? "failed-precondition" : "invalid-argument",
+          checked.message,
+          { field: checked.field },
+        );
+      }
+      screening = checked.value;
+    }
 
     validateWindow(start, end);
     await enforceBookingHorizon(start, request.auth?.uid);
@@ -664,6 +752,7 @@ export const booking_beginCheckout = onCall(
       end,
       guest,
       request.auth?.uid,
+      screening,
     );
     const quote = held.quote;
 
@@ -810,6 +899,9 @@ export const booking_finalizeCheckout = onCall(
       guestAccount.created,
       "STRIPE",
     );
+    if (hold.guest && hold.termsAcceptance) {
+      await recordGuestScreening(hold, result.bookingId, guestAccount.uid, guestAccount.created);
+    }
 
     const customToken = !request.auth && guestAccount.created
       ? await admin.auth().createCustomToken(finalUserId, { bookingCheckout: true })

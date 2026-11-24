@@ -235,3 +235,4 @@ export {
   admin_followUpSetStatus,
 } from "./frontDeskKiosk";
 export { members_saveAccountDetails, va_submitForm1583 } from "./sayhi/functions";
+export { staff_setIdCheck } from "./memberIdCheck";
