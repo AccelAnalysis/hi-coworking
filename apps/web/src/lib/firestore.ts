@@ -30,6 +30,11 @@ import {
   prepareRfxResponseDownloadFn,
 } from "./functions";
 import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, MembershipTrack, PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose, ProductDoc, PaymentAuditEntry, EventDoc, EventRegistrationDoc, EventFormat, EventStatus, ReferralDoc, RfxTeamInviteDoc, OrgDoc, OrgMemberDoc, NotificationDoc, BookDoc, BookPurchaseDoc, BookAffiliateClickDoc, ReferralPolicyDoc, LocationDoc, FloorDoc, ShellDoc, LayoutVariant, EventCampaignDoc, CampaignJobDoc, EventShareKitDoc, SocialPostDoc, EventMediaImage, EventSeriesDoc, DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
+import {
+  RESOURCE_OFFERING_SETTINGS_ID,
+  parseResourceOffering,
+  type ResourceOfferingMap,
+} from "@hi/shared";
 
 export interface PublicSiteSettingsDoc {
   id: "public";
@@ -321,6 +326,50 @@ export function subscribeToPublicSiteSettings(
         updatedAt: 0,
       });
     }
+  );
+}
+
+// --- Resource offering (siteSettings/resources) ---
+
+export async function getResourceOffering(): Promise<ResourceOfferingMap> {
+  const snap = await getDoc(doc(db, "siteSettings", RESOURCE_OFFERING_SETTINGS_ID));
+  return parseResourceOffering(snap.exists() ? snap.data() : undefined);
+}
+
+export async function setResourceOffered(
+  resourceId: string,
+  offered: boolean,
+  updatedBy?: string,
+): Promise<void> {
+  const ref = doc(db, "siteSettings", RESOURCE_OFFERING_SETTINGS_ID);
+  await setDoc(
+    ref,
+    {
+      id: RESOURCE_OFFERING_SETTINGS_ID,
+      updatedAt: Date.now(),
+      ...(updatedBy ? { updatedBy } : {}),
+    },
+    { merge: true },
+  );
+  await updateDoc(ref, {
+    [`offered.${resourceId}`]: offered,
+    updatedAt: Date.now(),
+    ...(updatedBy ? { updatedBy } : {}),
+  });
+}
+
+export function subscribeToResourceOffering(
+  callback: (offered: ResourceOfferingMap) => void,
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "siteSettings", RESOURCE_OFFERING_SETTINGS_ID),
+    (snap) => {
+      callback(parseResourceOffering(snap.exists() ? snap.data() : undefined));
+    },
+    (err) => {
+      console.error("subscribeToResourceOffering error:", err);
+      callback({});
+    },
   );
 }
 

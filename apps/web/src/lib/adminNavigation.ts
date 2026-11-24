@@ -16,6 +16,7 @@ export const ADMIN_ROUTES: Record<string, AdminRoute> = {
   "/admin/members/record": { label: "Member record", parent: "/admin/members" },
   "/admin/spaces": { label: "Hours & closures" },
   "/admin/spaces/catalog": { label: "Published setups" },
+  "/admin/spaces/offerings": { label: "Offered spaces" },
   "/admin/builder": { label: "Visual designer" },
   "/admin/access": { label: "Door access" },
   "/admin/front-desk": { label: "Front desk" },

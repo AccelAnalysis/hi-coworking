@@ -17,6 +17,7 @@ import {
   localDayKey,
   resourceConflicts,
 } from "./bookingFlexShared";
+import { assertResourceOffered, isResourceOffered, loadResourceOfferingMap } from "./resourceOffering";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -175,11 +176,13 @@ export const booking_listAfterHoursConferenceSlots = onCall(async (request) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new HttpsError("invalid-argument", "Choose a valid date.");
   }
+  const offered = isResourceOffered(CONFERENCE_RESOURCE_ID, await loadResourceOfferingMap());
   const slots = afterHoursSlotsForDate(date);
   const snap = await db().collection(CONFERENCE_SLOT_REQUESTS_COLLECTION).where("date", "==", date).get();
   const records = snap.docs.map((doc) => asRequestRecord(doc));
   return {
     date,
+    offered,
     priceCents: AFTER_HOURS_CONFERENCE_SLOT_PRICE_CENTS,
     capacity: CONFERENCE_ROOM_MAX_CAPACITY,
     slots: slots.map((slot) => {
@@ -188,7 +191,7 @@ export const booking_listAfterHoursConferenceSlots = onCall(async (request) => {
       const endMs = facilityWallTimeToTimestamp(date, slot.end);
       return {
         ...slot,
-        available: !taken && startMs >= Date.now() - 60_000,
+        available: offered && !taken && startMs >= Date.now() - 60_000,
         startMs,
         endMs,
       };
@@ -197,6 +200,7 @@ export const booking_listAfterHoursConferenceSlots = onCall(async (request) => {
 });
 
 export const booking_requestAfterHoursConference = onCall(async (request) => {
+  assertResourceOffered(CONFERENCE_RESOURCE_ID, await loadResourceOfferingMap());
   const input = parseRequestInput(request.data as Parameters<typeof parseRequestInput>[0]);
   const conflicts = await overlappingRequests(input.date, input.slot);
   if (conflicts.length > 0) {

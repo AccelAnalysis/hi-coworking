@@ -13,7 +13,7 @@ type AvailabilityResult = {
   options: Array<{
     resourceId: string;
     name: string;
-    type: "SEAT" | "MODE";
+    type: "SEAT" | "MODE" | "ROOM";
     available: boolean;
   }>;
   deskChangeOptions?: unknown[];
@@ -34,11 +34,15 @@ export const booking_getAvailability = onCall(async (request) => {
     bookingPublic.booking_getAvailability,
     request,
   ) as AvailabilityResult;
-  const resourceType = (request.data as { resourceType?: "SEAT" | "MODE" }).resourceType;
+  const resourceType = (request.data as { resourceType?: "SEAT" | "MODE" | "ROOM" }).resourceType;
   return {
     ...result,
     options: resourceType
-      ? result.options.filter((option) => option.type === resourceType)
+      ? result.options.filter((option) =>
+          resourceType === "SEAT"
+            ? option.type === "SEAT" || option.type === "ROOM"
+            : option.type === resourceType,
+        )
       : result.options,
     deskChangeOptions: resourceType === "MODE"
       ? []

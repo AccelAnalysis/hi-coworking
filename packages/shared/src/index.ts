@@ -2290,5 +2290,6 @@ export const accessEventDocSchema = z.object({
 export type AccessEventDoc = z.infer<typeof accessEventDocSchema>;
 
 export * from "./seatCatalog";
+export * from "./resourceOffering";
 
 export * from "./deskPricing";

@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "apps/functions/src/bookingJourney.ts"
+      - "apps/functions/src/resourceOffering.ts"
       - "apps/functions/src/bookingFlexShared.ts"
       - "apps/functions/src/bookingFlexPublic.ts"
       - "apps/functions/src/bookingFlexTransaction.ts"

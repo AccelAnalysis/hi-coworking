@@ -44,6 +44,7 @@ import {
   resourceConflicts,
   validateWindow,
 } from "./bookingFlexShared";
+import { assertResourceOffered, loadResourceOfferingMap } from "./resourceOffering";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -721,8 +722,15 @@ export const booking_beginCheckout = onCall(
 
     validateWindow(start, end);
     await enforceBookingHorizon(start, request.auth?.uid);
+    const offered = await loadResourceOfferingMap();
+    if (resourceId) assertResourceOffered(resourceId, offered);
     const busy = await getBusy(start, end);
     const choice = resolveChoice({ resourceId, deskChangePlanId }, start, end, busy);
+    if (choice.kind === "desk_change") {
+      for (const segment of choice.segments) assertResourceOffered(segment.resourceId, offered);
+    } else {
+      assertResourceOffered(choice.resourceId, offered);
+    }
     const baseQuote = await quoteForChoice(choice, start, end, request.auth?.uid);
     const holdRef = db().collection("bookingHolds").doc();
     const holdSecret = randomBytes(24).toString("hex");
