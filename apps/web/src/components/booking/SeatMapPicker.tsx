@@ -247,7 +247,9 @@ export function SeatMapPicker({
               </div>
             </div>
             <p className="mt-2 text-xs text-slate-600 sm:hidden">
-              Swipe the plan sideways to see the lounge and the bookable private office.
+              {officeOffered
+                ? "Swipe the plan sideways to see the lounge and the bookable private office."
+                : "Swipe the plan sideways to see the rest of the floor."}
             </p>
           </div>
 

@@ -213,7 +213,6 @@ describe("architectural seat map", () => {
     for (const feature of [
       "hic-wall-hatch",
       "CONF TABLE",
-      "LOUNGE",
       "PRIVATE OFFICE",
       "PRINT",
       "Accessible restroom 5' turning circle",
@@ -238,9 +237,13 @@ describe("architectural seat map", () => {
     expect(picker + plan).not.toMatch(/STAFF-PO|Staff only suite/);
     expect(plan).not.toMatch(/<button|role="button"|onClick/);
     expect(plan).toMatch(/data-plan-zone="private-office"/);
+    expect(plan).toMatch(/data-plan-zone="lounge"/);
+    expect(plan).not.toMatch(/>\s*LOUNGE\s*</);
     expect(plan).not.toMatch(/Not bookable/);
     expect(picker).toMatch(/data-office-hit-target/);
     expect(picker).toMatch(/PRIVATE_OFFICE_RESOURCE_ID/);
+    expect(picker).toMatch(/officeOffered\s*\?\s*"Swipe the plan sideways to see the lounge and the bookable private office."/);
+    expect(picker).toContain("Swipe the plan sideways to see the rest of the floor.");
     expect(buildSeatMapSpots(null).every((spot) => /^seat-[1-7]$/.test(spot.resourceId))).toBe(true);
   });
 

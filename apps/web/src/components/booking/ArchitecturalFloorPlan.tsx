@@ -130,8 +130,11 @@ export function ArchitecturalFloorPlan({
       <title id={titleId}>Hi Coworking floor plan</title>
       <desc id={descId}>
         Main room with desks D1 to D7. D1 and D2 sit at the ends of the conference table, D3 to D6 are window desks along
-        the south wall, and D7 is the staff-only reception desk by the west door. The lounge is on the right. The private office is the
-        bookable right-hand room; booking it leaves D1 unsold. Use the seat and room buttons or the List view to choose a space.
+        the south wall, and D7 is the staff-only reception desk by the west door. The lounge is on the right.
+        {officeState && officeState !== "unoffered"
+          ? " The private office is the bookable right-hand room; booking it leaves D1 unsold."
+          : ""}
+        {" "}Use the seat and room buttons or the List view to choose a space.
       </desc>
       <defs>
         <pattern id="hic-wall-hatch" width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
@@ -297,10 +300,6 @@ export function ArchitecturalFloorPlan({
         <line x1="548" y1="312" x2="548" y2="424" stroke={LINE} strokeWidth="1.2" />
         <line x1="548" y1="368" x2="590" y2="368" stroke={LINE} strokeWidth="1.2" />
         <rect x="538" y="432" width="34" height="34" rx="2" fill="#FFFFFF" stroke={LINE} strokeWidth="1.3" />
-        <rect x="530" y="358" width="68" height="20" rx="10" fill={NAVY} />
-        <text x="564" y="371" textAnchor="middle" fill="#FFFFFF" fontSize="9" fontWeight="700" letterSpacing="0.06em">
-          LOUNGE
-        </text>
       </g>
       {/* Private office L-desk */}
       <g data-plan-zone="private-office" data-state={officeState || "available"}>
