@@ -234,6 +234,7 @@ jobs:
           tests/functions/sayhi-email-brand.test.ts
           tests/web/sayhi-flow.test.ts
           tests/functions/access-functions-deploy.test.ts
+          tests/functions/door-access.test.ts
           tests/functions/sayhi-overtime.test.ts
           tests/functions/sayhi-membership-end.test.ts
           tests/functions/sayhi-billing-address.test.ts

@@ -1,13 +1,16 @@
 /**
  * Door access code rules (Jonathan, Oct 30, 2026, 6:40 PM and 8:44 PM).
  *
- * - One code per booking, time-limited to that booking (Seam time_bound code).
+ * - One code per booking, time-limited to that booking (a Seam code with starts_at/ends_at).
  * - The code is shown only to its owner on the signed-in SayHi page (/my-hi)
  *   and the booking page, stacked one per booking.
  * - The code is never emailed and never put in a notification. The email and
  *   in-app notice only say the code is ready and link to SayHi.
- * - Firestore keeps only the SHA-256 hash and the last two digits; the full
- *   code is read from Seam when its owner opens SayHi.
+ * - Firestore keeps only the SHA-256 hash and the last two digits (a
+ *   staff-only support hint that never leaves Admin); the full code is read
+ *   from Seam when its owner opens SayHi.
+ * - 6 digits, a new code per booking, active from the buffer before the
+ *   booking to the buffer after it (Jonathan, Nov 24, 2026; doorSettings.ts).
  *
  * Pure helpers (no Firebase imports) so the rules are unit-tested.
  */
@@ -80,4 +83,23 @@ export function accessReadyMail(input: AccessReadyInput & { origin: string }) {
 export function containsDoorCode(value: unknown, code: string): boolean {
   if (!code) return false;
   return JSON.stringify(value ?? null).includes(code);
+}
+
+export type RetryDecision = "retry" | "ended" | "working";
+
+/**
+ * Staff "Retry code": allowed for a live booking whose newest code failed,
+ * was removed outside Hi Coworking, or was never made. A working code is
+ * never replaced, and an ended booking never gets a new one.
+ */
+export function retryDecision(input: {
+  grant: { status?: unknown; endsAt?: unknown };
+  latestCodeStatus?: unknown;
+  now: number;
+}): RetryDecision {
+  const status = String(input.grant.status);
+  if (status !== "pending" && status !== "active") return "ended";
+  if (!(Number(input.grant.endsAt) > input.now)) return "ended";
+  if (input.latestCodeStatus === "programming" || input.latestCodeStatus === "active") return "working";
+  return "retry";
 }

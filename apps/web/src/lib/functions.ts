@@ -647,7 +647,6 @@ export interface AccessGrantSummary {
   endsAt: number;
   grantStatus: "pending" | "active" | "expired" | "revoked";
   codeStatus: "programming" | "active" | "failed" | "expired" | "revoked" | null;
-  codeLast2: string | null;
   codeId: string | null;
 }
 
@@ -675,3 +674,13 @@ export const accessAdminGetDoorStatusFn = httpsCallable<
   { doorId: string },
   { doorId: string; online: boolean; batteryLevel?: number; locked?: boolean }
 >(functions, "access_adminGetDoorStatus");
+
+export const accessAdminRetryCodeFn = httpsCallable<
+  { grantId: string },
+  { success: boolean; grantId: string; codeStatus: "programming" | "failed" }
+>(functions, "access_adminRetryCode");
+
+export const accessAdminResolveAlertFn = httpsCallable<
+  { alertId: string },
+  { success: boolean; alertId: string }
+>(functions, "access_adminResolveAlert");

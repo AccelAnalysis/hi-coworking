@@ -31,6 +31,9 @@ import {
 } from "./functions";
 import type { Floorplan, Booking, ProfileDoc, RfxDoc, RfxResponseDoc, UserDoc, MembershipTrack, PaymentDoc, PaymentProvider, PaymentStatus, PaymentPurpose, ProductDoc, PaymentAuditEntry, EventDoc, EventRegistrationDoc, EventFormat, EventStatus, ReferralDoc, RfxTeamInviteDoc, OrgDoc, OrgMemberDoc, NotificationDoc, BookDoc, BookPurchaseDoc, BookAffiliateClickDoc, ReferralPolicyDoc, LocationDoc, FloorDoc, ShellDoc, LayoutVariant, EventCampaignDoc, CampaignJobDoc, EventShareKitDoc, SocialPostDoc, EventMediaImage, EventSeriesDoc, DoorDoc, AccessGrantDoc, AccessCodeDoc, AccessEventDoc } from "@hi/shared";
 import {
+  DEFAULT_DOOR_BUFFER_MINUTES,
+  DOOR_ACCESS_SETTINGS_ID,
+  MAX_DOOR_BUFFER_MINUTES,
   RESOURCE_OFFERING_SETTINGS_ID,
   parseResourceOffering,
   type ResourceOfferingMap,
@@ -1606,55 +1609,96 @@ export async function getAccessGrantsForUser(
   return snap.docs.map((d) => d.data() as AccessGrantDoc);
 }
 
+// Door access queries use single-field filters and sort here, so they need
+// no composite Firestore indexes.
+
+function liveGrants(docs: AccessGrantDoc[], now: number, limitCount: number): AccessGrantDoc[] {
+  return docs
+    .filter((g) => Number(g.endsAt) > now)
+    .sort((a, b) => Number(a.endsAt) - Number(b.endsAt))
+    .slice(0, limitCount);
+}
+
 export async function getActiveAccessGrants(limitCount = 100): Promise<AccessGrantDoc[]> {
-  const now = Date.now();
   const q = query(
     collection(db, "accessGrants"),
-    where("endsAt", ">", now),
     where("status", "in", ["pending", "active"]),
-    orderBy("endsAt", "asc"),
-    limit(limitCount)
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as AccessGrantDoc);
+  return liveGrants(snap.docs.map((d) => d.data() as AccessGrantDoc), Date.now(), limitCount);
 }
 
 export async function getAccessCodesForGrant(grantId: string): Promise<AccessCodeDoc[]> {
   const q = query(
     collection(db, "accessCodes"),
     where("grantId", "==", grantId),
-    orderBy("createdAt", "desc")
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as AccessCodeDoc);
+  return snap.docs
+    .map((d) => d.data() as AccessCodeDoc)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 }
 
 export async function getAccessEvents(
   filters: { doorId?: string; grantId?: string; limitCount?: number } = {}
 ): Promise<AccessEventDoc[]> {
-  const constraints = [
-    ...(filters.doorId ? [where("doorId", "==", filters.doorId)] : []),
-    ...(filters.grantId ? [where("grantId", "==", filters.grantId)] : []),
-    orderBy("createdAt", "desc"),
-    limit(filters.limitCount ?? 100),
-  ];
-  const q = query(collection(db, "accessEvents"), ...constraints);
+  const max = filters.limitCount ?? 100;
+  const byField = filters.grantId
+    ? where("grantId", "==", filters.grantId)
+    : filters.doorId
+      ? where("doorId", "==", filters.doorId)
+      : null;
+  const q = byField
+    ? query(collection(db, "accessEvents"), byField)
+    : query(collection(db, "accessEvents"), orderBy("createdAt", "desc"), limit(max));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => d.data() as AccessEventDoc);
+  return snap.docs
+    .map((d) => d.data() as AccessEventDoc)
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, max);
+}
+
+/** Open door staff alerts (code failed, lock offline, low battery), newest first. */
+export async function getOpenDoorAlerts(): Promise<AccessEventDoc[]> {
+  const q = query(collection(db, "accessEvents"), where("eventType", "==", "staff_alert"));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ ...(d.data() as AccessEventDoc), id: d.id }))
+    .filter((e) => e.alertStatus !== "resolved")
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+    .slice(0, 50);
 }
 
 export function subscribeToAccessGrants(
   callback: (grants: AccessGrantDoc[]) => void
 ): Unsubscribe {
-  const now = Date.now();
   const q = query(
     collection(db, "accessGrants"),
-    where("endsAt", ">", now),
     where("status", "in", ["pending", "active"]),
-    orderBy("endsAt", "asc"),
-    limit(100)
   );
   return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => d.data() as AccessGrantDoc));
+    callback(liveGrants(snap.docs.map((d) => d.data() as AccessGrantDoc), Date.now(), 100));
   });
+}
+
+// --- Door access settings (siteSettings/doorAccess) ---
+
+export async function getDoorAccessBufferMinutes(): Promise<number> {
+  const snap = await getDoc(doc(db, "siteSettings", DOOR_ACCESS_SETTINGS_ID));
+  const raw = snap.exists() ? (snap.data() as { bufferMinutes?: unknown }).bufferMinutes : undefined;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= MAX_DOOR_BUFFER_MINUTES
+    ? Math.round(raw)
+    : DEFAULT_DOOR_BUFFER_MINUTES;
+}
+
+export async function setDoorAccessBufferMinutes(minutes: number, updatedBy?: string): Promise<void> {
+  const value = Math.round(minutes);
+  if (!Number.isFinite(value) || value < 0 || value > MAX_DOOR_BUFFER_MINUTES) {
+    throw new Error(`Choose 0 to ${MAX_DOOR_BUFFER_MINUTES} minutes.`);
+  }
+  await setDoc(
+    doc(db, "siteSettings", DOOR_ACCESS_SETTINGS_ID),
+    { id: DOOR_ACCESS_SETTINGS_ID, bufferMinutes: value, updatedAt: Date.now(), ...(updatedBy ? { updatedBy } : {}) },
+    { merge: true },
+  );
 }

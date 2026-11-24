@@ -9,7 +9,8 @@ export type AdminCapability = "doorAccess" | "eventCampaigns" | "frontDesk" | "f
 
 export const ADMIN_CAPABILITIES: Record<AdminCapability, { live: boolean; note: string }> = {
   doorAccess: {
-    live: false,
+    // Switched on Nov 24, 2026 (Jonathan): door codes for every confirmed booking.
+    live: true,
     note: "Door access isn't switched on yet. You can view doors and codes, but unlock, resend and revoke won't work until the door access functions are deployed.",
   },
   eventCampaigns: {

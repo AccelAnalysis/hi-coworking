@@ -14,22 +14,30 @@ export const access_expireGrants = onSchedule(
   { schedule: "every 15 minutes", secrets: [seamApiKey] },
   async () => {
     const now = Date.now();
+    // Single-field query (no composite index needed); filtered here.
     const snap = await db
       .collection("accessGrants")
-      .where("endsAt", "<", now)
       .where("status", "in", ["pending", "active"])
-      .limit(50)
       .get();
+    const expired = snap.docs.filter((doc) => Number(doc.data().endsAt) < now).slice(0, 50);
+    // Revokes another flow asked for (e.g. a refund) that the trigger missed.
+    const requested = snap.docs
+      .filter((doc) => Number(doc.data().endsAt) >= now && doc.data().revokeRequestedAt)
+      .slice(0, 50);
 
-    if (snap.empty) {
+    if (expired.length === 0 && requested.length === 0) {
       logger.info("access_expireGrants: no expired grants found");
       return;
     }
 
-    logger.info(`access_expireGrants: revoking ${snap.size} expired grants`);
-    await Promise.allSettled(
-      snap.docs.map((doc) => revokeAccessGrant(doc.id, "expired", "system"))
-    );
+    logger.info("access_expireGrants: revoking grants", { expired: expired.length, requested: requested.length });
+    await Promise.allSettled([
+      ...expired.map((doc) => revokeAccessGrant(doc.id, "expired", "system")),
+      ...requested.map((doc) => {
+        const reason = doc.data().revokeRequestReason === "refund" ? "refund" : "cancellation";
+        return revokeAccessGrant(doc.id, reason, String(doc.data().revokeRequestedBy || "system"));
+      }),
+    ]);
   }
 );
 

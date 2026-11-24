@@ -21,7 +21,7 @@ const NOW = Date.UTC(2026, 10, 20, 15);
 const HOUR = 3_600_000;
 const grant = {
   grantId: "g1", bookingId: "b1", doorName: "Front door", startsAt: NOW - HOUR, endsAt: NOW + HOUR,
-  grantStatus: "active", codeStatus: "active", codeLast2: "34", codeId: "c1",
+  grantStatus: "active", codeStatus: "active", codeId: "c1",
 };
 
 describe("SayHi flags", () => {

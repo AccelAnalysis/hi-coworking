@@ -11,6 +11,7 @@
 import { EMAIL_BODY_FONT, EMAIL_BUTTON_STYLE, EMAIL_HEADLINE_FONT, EMAIL_LOGO_HTML, EMAIL_NAVY } from "../payments/emailBrand";
 import { EmailSendError, type EmailProvider } from "../providers/emailProvider";
 import { ACCESS_CODE_READY_TEMPLATE } from "./policy";
+import { STAFF_ALERT_TEMPLATE, staffAlertRecipients } from "./staffAlerts";
 
 export const POSTAL_ADDRESS = "Hi Coworking · 15373 Carrollton Blvd, Carrollton, VA 23314";
 export const ACCESS_READY_CATEGORY = "access_code_ready";
@@ -50,11 +51,32 @@ export function renderAccessReadyEmail(data: AccessReadyData) {
   return { subject, html, text: plain };
 }
 
+export type StaffAlertData = {
+  title?: unknown;
+  action?: unknown;
+  rows?: unknown;
+  adminUrl?: unknown;
+};
+
+/** Staff door alert email. Staff only; never contains a door code. */
+export function renderStaffAlertEmail(data: StaffAlertData) {
+  const title = text(data.title, "Door alert");
+  const action = text(data.action, "");
+  const rows = Array.isArray(data.rows) ? data.rows.filter((r): r is string => typeof r === "string").slice(0, 8).map((r) => r.slice(0, 200)) : [];
+  const rawUrl = text(data.adminUrl, "https://hi-coworking.com/admin/access");
+  const url = /^https:\/\/hi-coworking\.com\//.test(rawUrl) ? rawUrl : "https://hi-coworking.com/admin/access";
+  const subject = `Door alert: ${title}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f8fafc;color:#0f172a;font-family:${EMAIL_BODY_FONT}"><div style="max-width:620px;margin:0 auto;padding:32px 24px">${EMAIL_LOGO_HTML}<h1 style="margin:24px 0 12px;font-family:${EMAIL_HEADLINE_FONT};font-size:24px;font-weight:600;line-height:1.25;color:${EMAIL_NAVY}">${escapeHtml(title)}</h1>${rows.map((r) => `<p style="margin:0 0 4px;font-size:15px;line-height:1.6;color:#334155">${escapeHtml(r)}</p>`).join("")}${action ? `<p style="margin:16px 0 0;font-size:15px;line-height:1.6;color:#475569">${escapeHtml(action)}</p>` : ""}<p style="margin:24px 0"><a href="${escapeHtml(url)}" style="${EMAIL_BUTTON_STYLE}">Open Admin &gt; Access</a></p></div></body></html>`;
+  const plain = [title, "", ...rows, "", action, "", `Open Admin > Access: ${url}`].filter((line, i, all) => line || all[i - 1]).join("\n");
+  return { subject, html, text: plain };
+}
+
 export type MailDoc = {
   template?: unknown;
+  toStaff?: unknown;
   to?: unknown;
   resolveEmail?: unknown;
-  data?: AccessReadyData;
+  data?: AccessReadyData | StaffAlertData;
   createdAt?: unknown;
   endsAt?: unknown;
   status?: unknown;
@@ -75,7 +97,7 @@ export function claimDecision(doc: MailDoc, now: number): ClaimDecision {
 
 /** Reason a doc must not be sent at all, or null when it may go out. */
 export function skipReason(doc: MailDoc, now: number): string | null {
-  if (doc.template !== ACCESS_CODE_READY_TEMPLATE) return "unknown_template";
+  if (doc.template !== ACCESS_CODE_READY_TEMPLATE && doc.template !== STAFF_ALERT_TEMPLATE) return "unknown_template";
   // Defense in depth: the queue must never carry a door code.
   const keys = Object.keys(doc.data || {}).map((k) => k.toLowerCase());
   if (keys.some((k) => k === "code" || k === "pin" || k.includes("accesscode") || k.includes("doorcode"))) return "contains_code";
@@ -117,6 +139,35 @@ export async function processMailDoc(
     await store.finish(id, { status, skipReason: reason, processedAt: now() }).catch(() => undefined);
     return status;
   }
+  if (doc.template === STAFF_ALERT_TEMPLATE) {
+    try {
+      // Recipients are fixed in the sender, never taken from the queue doc.
+      const to = staffAlertRecipients();
+      if (doc.toStaff !== true || to.length === 0) {
+        await store.finish(id, { status: "skipped", skipReason: "no_recipient", processedAt: now() });
+        return "skipped";
+      }
+      const copy = renderStaffAlertEmail((doc.data || {}) as StaffAlertData);
+      const messageIds: string[] = [];
+      for (const [index, address] of to.entries()) {
+        const { messageId } = await provider.send({
+          to: address,
+          subject: copy.subject,
+          html: copy.html,
+          text: copy.text,
+          categories: ["door_staff_alert", "transactional"],
+          idempotencyKey: `mail/${id}/${index}`,
+        });
+        messageIds.push(messageId);
+      }
+      await store.finish(id, { status: "sent", messageIds, recipients: to.length, sentAt: now(), errorCode: null });
+      return "sent";
+    } catch (error) {
+      const code = error instanceof EmailSendError ? `${error.status ?? "network"}_${error.code}` : "unexpected_error";
+      await store.finish(id, { status: "failed", errorCode: code, failedAt: now() }).catch(() => undefined);
+      return "failed";
+    }
+  }
   try {
     const uid = typeof doc.to === "string" ? doc.to : "";
     const resolved = doc.resolveEmail === true && uid ? await store.resolveEmail(uid) : null;
@@ -125,7 +176,7 @@ export async function processMailDoc(
       await store.finish(id, { status: "skipped", skipReason: "no_recipient", processedAt: now() });
       return "skipped";
     }
-    const copy = renderAccessReadyEmail(doc.data || {});
+    const copy = renderAccessReadyEmail((doc.data || {}) as AccessReadyData);
     const { messageId } = await provider.send({
       to,
       subject: copy.subject,

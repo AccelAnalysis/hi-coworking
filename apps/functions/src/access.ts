@@ -1,4 +1,5 @@
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { defineSecret } from "firebase-functions/params";
 import * as admin from "firebase-admin";
 import * as logger from "firebase-functions/logger";
@@ -10,19 +11,54 @@ import {
   getCodePin,
   hashPin,
 } from "./providers/seamProvider";
-import { accessReadyMail, accessReadyNotification, ownerMaySeeCode } from "./accessCodes/policy";
+import { accessReadyMail, accessReadyNotification, ownerMaySeeCode, retryDecision, type RetryDecision } from "./accessCodes/policy";
 import { checkInFromDoorUnlock } from "./frontDeskKiosk/functions";
 import { handleSeamWebhookRequest } from "./accessCodes/seamWebhook";
 import { runIdempotentWebhook } from "./payments/idempotency";
-import { internalEventTypeFor, isCodeUnlock, sanitizeSeamEvent, seamCodeStatusFor, unlockTime } from "./accessCodes/noShow";
+import {
+  internalEventTypeFor,
+  isCodeUnlock,
+  sanitizeSeamEvent,
+  seamCodeStatusFor,
+  staffAlertKindForSeamEvent,
+  unlockTime,
+} from "./accessCodes/noShow";
+import { DOOR_ACCESS_SETTINGS_ID, codeWindow, parseDoorAccessSettings, pickDoor } from "./accessCodes/doorSettings";
+import {
+  buildStaffAlertEvent,
+  buildStaffAlertMail,
+  isLowBattery,
+  STAFF_ALERT_EVENT_TYPE,
+  type StaffAlertInput,
+} from "./accessCodes/staffAlerts";
 
 const db = admin.firestore();
 
 export const seamApiKey = defineSecret("SEAM_API_KEY");
 export const seamWebhookSecret = defineSecret("SEAM_WEBHOOK_SECRET");
 
-const GRACE_PERIOD_MINUTES = 5;
 const NO_SHOW_GRACE_MINUTES = 30;
+
+export type AccessRevokeReason = "cancellation" | "no_show" | "admin" | "expired" | "refund";
+const REVOKE_REASONS: readonly AccessRevokeReason[] = ["cancellation", "no_show", "admin", "expired", "refund"];
+
+/** siteSettings/doorAccess, with the 15-minute default when unset. */
+async function loadDoorAccessSettings() {
+  try {
+    const snap = await db.collection("siteSettings").doc(DOOR_ACCESS_SETTINGS_ID).get();
+    return parseDoorAccessSettings(snap.exists ? snap.data() : undefined);
+  } catch (err: unknown) {
+    logger.warn("Door access settings unavailable; using the default buffer", { error: err instanceof Error ? err.message : String(err) });
+    return parseDoorAccessSettings(undefined);
+  }
+}
+
+function requireAdmin(auth: { uid: string; token: Record<string, unknown> } | undefined): string {
+  if (!auth) throw new HttpsError("unauthenticated", "Must be logged in");
+  const role = auth.token.role as string | undefined;
+  if (role !== "admin" && role !== "master") throw new HttpsError("permission-denied", "Admin or master required");
+  return auth.uid;
+}
 
 // --- Internal: Create Access Grant ---
 
@@ -39,38 +75,24 @@ export async function createAccessGrant(
   start: number,
   end: number
 ): Promise<void> {
-  const apiKey = seamApiKey.value();
-
-  // 1. Find the door that gates this resource
+  // 1. Find the door that gates this resource (single-field query; no composite index needed)
   const doorsSnap = await db
     .collection("doors")
     .where("resourceIds", "array-contains", resourceId)
-    .where("status", "!=", "archived")
-    .limit(1)
     .get();
+  const picked = pickDoor(doorsSnap.docs.map((d) => ({ id: d.id, data: d.data() })));
 
-  if (doorsSnap.empty) {
+  if (!picked) {
     logger.warn("No door configured for resource — skipping access grant", { resourceId, bookingId });
     return;
   }
 
-  const doorDoc = doorsSnap.docs[0];
-  const door = doorDoc.data();
-  const doorId = doorDoc.id;
+  const door = picked.data;
+  const doorId = picked.id;
 
-  // 2. Check for overlapping active grants on the same door to prevent duplicate code programming
-  const gracedStart = start - GRACE_PERIOD_MINUTES * 60 * 1000;
-  const gracedEnd = end + GRACE_PERIOD_MINUTES * 60 * 1000;
-
-  const overlappingGrants = await db
-    .collection("accessGrants")
-    .where("doorId", "==", doorId)
-    .where("endsAt", ">", gracedStart)
-    .where("status", "in", ["pending", "active"])
-    .get();
-
-  // Log overlap info for debugging — multiple grants per door are allowed (different users)
-  logger.info("Existing grants on door", { doorId, count: overlappingGrants.size, bookingId });
+  // 2. Code window: the booking plus the staff-set buffer on each side (default 15 min)
+  const { bufferMinutes } = await loadDoorAccessSettings();
+  const { startsAt: gracedStart, endsAt: gracedEnd } = codeWindow(start, end, bufferMinutes);
 
   // 3. Create AccessGrant doc
   const grantRef = db.collection("accessGrants").doc();
@@ -82,7 +104,7 @@ export async function createAccessGrant(
     userId,
     startsAt: gracedStart,
     endsAt: gracedEnd,
-    gracePeriodMinutes: GRACE_PERIOD_MINUTES,
+    gracePeriodMinutes: bufferMinutes,
     status: "pending",
     createdAt: now,
     updatedAt: now,
@@ -99,11 +121,32 @@ export async function createAccessGrant(
     notes: `Grant created for booking ${bookingId}`,
   });
 
-  // 5. Program PIN via Seam
+  // 5. Program a new 6-digit code for this booking
+  await programCodeForGrant({ grantRef, grant, doorId, door, notify: true });
+}
+
+/**
+ * Asks Seam for a new time-bound 6-digit code for one grant, writes the
+ * accessCodes doc (hash only), and either tells the member it is ready on
+ * SayHi or raises a staff alert. Used for new bookings and the staff Retry.
+ */
+async function programCodeForGrant(input: {
+  grantRef: FirebaseFirestore.DocumentReference;
+  grant: { bookingId: string; userId: string; startsAt: number; endsAt: number };
+  doorId: string;
+  door: FirebaseFirestore.DocumentData;
+  notify: boolean;
+  performedBy?: string;
+}): Promise<{ status: "programming" | "failed"; codeId: string }> {
+  const { grantRef, grant, doorId, door } = input;
+  const { bookingId, userId, startsAt, endsAt } = grant;
+  const apiKey = seamApiKey.value();
+  const now = Date.now();
+
   let seamCodeId: string | undefined;
-  let codeHash: string | undefined;
-  let codeLast2: string | undefined;
-  let codeStatus: string = "programming";
+  let codeHash: string | null = null;
+  let codeLast2: string | null = null;
+  let codeStatus: "programming" | "failed" = "programming";
   let failureReason: string | undefined;
 
   const codeRef = db.collection("accessCodes").doc();
@@ -112,8 +155,8 @@ export async function createAccessGrant(
     const result = await createTimeBoundCode(
       apiKey,
       door.seamDeviceId,
-      new Date(gracedStart),
-      new Date(gracedEnd),
+      new Date(Math.max(startsAt, now)),
+      new Date(endsAt),
       `HiCo-${bookingId.slice(-6)}` // booking reference only; no member name sent to Seam
     );
     seamCodeId = result.seamCodeId;
@@ -129,7 +172,7 @@ export async function createAccessGrant(
     failureReason = msg;
   }
 
-  // 7. Write AccessCode doc (hash only — no plain PIN stored)
+  // Write AccessCode doc (hash only — no plain PIN stored)
   const codeDoc = {
     id: codeRef.id,
     grantId: grantRef.id,
@@ -145,39 +188,50 @@ export async function createAccessGrant(
   };
   await codeRef.set(codeDoc);
 
-  // 8. Update grant status to active (or failed)
-  await grantRef.update({
-    status: codeStatus === "failed" ? "pending" : "active",
-    updatedAt: Date.now(),
-  });
+  if (codeStatus !== "failed") {
+    await grantRef.update({ status: "active", updatedAt: Date.now() });
+  }
 
-  // 9. Log code_issued event
   await logAccessEvent({
     bookingId,
     grantId: grantRef.id,
     doorId,
     userId,
-    eventType: codeStatus === "failed" ? "code_failed" : "code_issued",
-    notes: codeStatus === "failed" ? failureReason : `Code programmed, last2: ${codeLast2}`,
+    eventType: codeStatus === "failed" ? "code_failed" : input.performedBy ? "code_retry" : "code_issued",
+    ...(input.performedBy ? { performedBy: input.performedBy } : {}),
+    notes: codeStatus === "failed" ? failureReason : input.performedBy ? "Staff retried the code" : "Code requested",
   });
 
-  // 10. Tell the member the code is ready on SayHi (no code in the notice).
-  if (codeStatus !== "failed") {
+  if (codeStatus === "failed") {
+    await raiseStaffAlert({
+      kind: "code_failed",
+      doorId,
+      doorName: door.name,
+      bookingId,
+      grantId: grantRef.id,
+      reason: failureReason,
+      startsAt,
+      endsAt,
+      now: Date.now(),
+    }, { reopen: Boolean(input.performedBy) });
+  } else if (input.notify) {
+    // Tell the member the code is ready on SayHi (no code in the notice).
     await sendAccessReadyNotice(userId, {
       bookingId,
       doorName: door.name,
-      startsAt: gracedStart,
-      endsAt: gracedEnd,
+      startsAt,
+      endsAt,
     });
     await codeRef.update({ deliveredAt: Date.now(), updatedAt: Date.now() });
   }
+  return { status: codeStatus, codeId: codeRef.id };
 }
 
 // --- Internal: Revoke Access Grant ---
 
 export async function revokeAccessGrant(
   grantId: string,
-  reason: "cancellation" | "no_show" | "admin" | "expired",
+  reason: AccessRevokeReason,
   revokedBy: string = "system"
 ): Promise<void> {
   const apiKey = seamApiKey.value();
@@ -194,12 +248,12 @@ export async function revokeAccessGrant(
     return;
   }
 
-  // Find associated access code
+  // Only codes this system made for this grant (never the lock's own codes)
   const codesSnap = await db
     .collection("accessCodes")
     .where("grantId", "==", grantId)
-    .where("status", "in", ["programming", "active"])
     .get();
+  const liveCodes = codesSnap.docs.filter((d) => ["programming", "active"].includes(String(d.data().status)));
 
   const doorSnap = await db.collection("doors").doc(grant.doorId).get();
   const door = doorSnap.data();
@@ -207,18 +261,29 @@ export async function revokeAccessGrant(
   const now = Date.now();
 
   // Revoke each active code via Seam
-  for (const codeDoc of codesSnap.docs) {
+  for (const codeDoc of liveCodes) {
     const code = codeDoc.data();
     if (code.seamCodeId && door?.seamDeviceId) {
       try {
         await deleteCode(apiKey, door.seamDeviceId, code.seamCodeId);
         logger.info("Seam code deleted on revoke", { seamCodeId: code.seamCodeId, grantId, reason });
       } catch (err: unknown) {
-        logger.error("Failed to delete Seam code on revoke", {
-          seamCodeId: code.seamCodeId,
-          grantId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error("Failed to delete Seam code on revoke", { seamCodeId: code.seamCodeId, grantId, error: message });
+        // An ended booking's time-bound code expires on its own; anything else may still open the door.
+        if (reason !== "expired") {
+          await raiseStaffAlert({
+            kind: "code_remove_failed",
+            doorId: grant.doorId,
+            doorName: door?.name,
+            bookingId: grant.bookingId,
+            grantId,
+            reason: message,
+            startsAt: grant.startsAt,
+            endsAt: grant.endsAt,
+            now: Date.now(),
+          });
+        }
       }
     }
     await codeDoc.ref.update({ status: "revoked", updatedAt: now });
@@ -230,6 +295,7 @@ export async function revokeAccessGrant(
     revokedAt: now,
     revokedBy,
     revokeReason: reason,
+    revokeRequestedAt: null,
     updatedAt: now,
   });
 
@@ -258,30 +324,25 @@ export const access_getMyGrants = onCall(
     const uid = request.auth.uid;
     const now = Date.now();
 
-    // Return active + upcoming grants (endsAt > now - 1hr)
+    // Return active + upcoming grants (endsAt > now - 1hr). Single-field
+    // query, filtered and sorted here, so no composite index is needed.
     const grantsSnap = await db
       .collection("accessGrants")
       .where("userId", "==", uid)
-      .where("endsAt", ">", now - 60 * 60 * 1000)
-      .orderBy("endsAt", "asc")
-      .limit(20)
       .get();
+    const recent = grantsSnap.docs
+      .filter((d) => Number(d.data().endsAt) > now - 60 * 60 * 1000)
+      .sort((a, b) => Number(a.data().endsAt) - Number(b.data().endsAt))
+      .slice(0, 20);
 
     const grants = await Promise.all(
-      grantsSnap.docs.map(async (gDoc) => {
+      recent.map(async (gDoc) => {
         const grant = gDoc.data();
-        // Get code for this grant
-        const codesSnap = await db
-          .collection("accessCodes")
-          .where("grantId", "==", gDoc.id)
-          .orderBy("createdAt", "desc")
-          .limit(1)
-          .get();
-
-        const code = codesSnap.empty ? null : codesSnap.docs[0].data();
+        const latest = await latestCodeForGrant(gDoc.id);
+        const code = latest ? latest.data : null;
         const doorSnap = await db.collection("doors").doc(grant.doorId).get();
         const door = doorSnap.data();
-        const fullCode = await ownerCode({ uid, grant, code, now });
+        const fullCode = await ownerCode({ uid, grant, code, codeRef: latest?.ref, now });
 
         return {
           grantId: gDoc.id,
@@ -291,8 +352,7 @@ export const access_getMyGrants = onCall(
           endsAt: grant.endsAt,
           grantStatus: grant.status,
           codeStatus: code?.status ?? null,
-          codeLast2: code?.codeLast2 ?? null,
-          codeId: code ? codesSnap.docs[0].id : null,
+          codeId: latest ? latest.id : null,
           // Full code for the owner's live booking only (SayHi and booking page).
           code: fullCode,
         };
@@ -311,6 +371,7 @@ async function ownerCode(input: {
   uid: string;
   grant: FirebaseFirestore.DocumentData;
   code: FirebaseFirestore.DocumentData | null;
+  codeRef?: FirebaseFirestore.DocumentReference;
   now: number;
 }): Promise<string | null> {
   if (!ownerMaySeeCode({ requesterUid: input.uid, grant: input.grant, code: input.code, now: input.now })) return null;
@@ -319,6 +380,11 @@ async function ownerCode(input: {
   try {
     const pin = await getCodePin(seamApiKey.value(), seamCodeId);
     if (!pin || (input.code?.codeHash && hashPin(pin) !== input.code.codeHash)) return null;
+    // Seam can assign the digits after create; keep the hash (front-desk
+    // check-in looks codes up by hash) without ever storing the code.
+    if (!input.code?.codeHash && input.codeRef) {
+      await input.codeRef.update({ codeHash: hashPin(pin), codeLast2: pin.slice(-2), updatedAt: Date.now() }).catch(() => undefined);
+    }
     return pin;
   } catch {
     logger.warn("Access code lookup failed", { grantBooking: input.grant.bookingId });
@@ -341,9 +407,10 @@ export const access_adminRevoke = onCall(
 
     const { grantId, reason = "admin" } = request.data as {
       grantId: string;
-      reason?: "cancellation" | "no_show" | "admin" | "expired";
+      reason?: AccessRevokeReason;
     };
     if (!grantId) throw new HttpsError("invalid-argument", "grantId required");
+    if (!REVOKE_REASONS.includes(reason)) throw new HttpsError("invalid-argument", "Unknown reason");
 
     await revokeAccessGrant(grantId, reason, request.auth.uid);
     return { success: true, grantId };
@@ -404,35 +471,20 @@ export const access_adminResendPin = onCall(
     if (!grantSnap.exists) throw new HttpsError("not-found", "Grant not found");
     const grant = grantSnap.data()!;
 
-    const codeSnap = await db
-      .collection("accessCodes")
-      .where("grantId", "==", grantId)
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
-
-    if (codeSnap.empty) throw new HttpsError("not-found", "No code found for grant");
-    const code = codeSnap.docs[0].data();
-
-    const doorSnap = await db.collection("doors").doc(grant.doorId).get();
-    const door = doorSnap.data();
-
-    const userSnap = await db.collection("users").doc(grant.userId).get();
-    const user = userSnap.data();
-
-    if (!code.codeLast2) {
-      throw new HttpsError("failed-precondition", "Code details unavailable — PIN cannot be resent");
+    if (grant.status !== "pending" && grant.status !== "active") {
+      throw new HttpsError("failed-precondition", "This booking's access has ended.");
+    }
+    const latest = await latestCodeForGrant(grantId);
+    if (!latest) throw new HttpsError("not-found", "No code found for grant");
+    if (latest.data.status !== "programming" && latest.data.status !== "active") {
+      throw new HttpsError("failed-precondition", "This code isn't working. Use Retry to make a new one.");
     }
 
-    // We can only resend the last2 hint (we do not store the plain PIN)
+    // A reminder only: it points the member to SayHi and carries no code
+    // and no digits of it (the full code is never stored).
     await sendResendNotification(grant.userId, {
       bookingId: grant.bookingId,
-      grantId,
-      doorName: door?.name ?? "Door",
-      codeLast2: code.codeLast2,
       startsAt: grant.startsAt,
-      endsAt: grant.endsAt,
-      userName: user?.displayName || user?.email || grant.userId,
     });
 
     await logAccessEvent({
@@ -440,9 +492,9 @@ export const access_adminResendPin = onCall(
       grantId,
       doorId: grant.doorId,
       userId: grant.userId,
-      eventType: "code_issued",
+      eventType: "code_reminder",
       performedBy: request.auth.uid,
-      notes: "Admin resent PIN reminder",
+      notes: "Admin sent a SayHi code reminder",
     });
 
     return { success: true, grantId };
@@ -478,6 +530,12 @@ export const access_adminGetDoorStatus = onCall(
       lastSeenAt: Date.now(),
       updatedAt: Date.now(),
     });
+    if (!status.online) {
+      await raiseStaffAlert({ kind: "lock_offline", doorId, doorName: door.name, now: Date.now() });
+    }
+    if (isLowBattery(status.batteryLevel)) {
+      await raiseStaffAlert({ kind: "low_battery", doorId, doorName: door.name, batteryLevel: status.batteryLevel, now: Date.now() });
+    }
 
     return { doorId, ...status };
   }
@@ -584,21 +642,60 @@ async function handleSeamEvent(event: {
     }
   }
 
-  // Handle device online/offline
-  if (device_id && (event_type === "device.connected" || event_type === "device.disconnected")) {
+  // Lock events: online/offline and battery
+  const isDeviceEvent = event_type === "device.connected" || event_type === "device.disconnected"
+    || event_type === "device.low_battery" || event_type === "device.battery_status_changed";
+  let doorData: FirebaseFirestore.DocumentData | undefined;
+  let batteryLevel: number | undefined;
+  if (device_id && isDeviceEvent) {
     const doorSnap = await db
       .collection("doors")
       .where("seamDeviceId", "==", device_id)
       .limit(1)
       .get();
     if (!doorSnap.empty) {
-      const isOnline = event_type === "device.connected";
       doorId = doorSnap.docs[0].id;
+      doorData = doorSnap.docs[0].data();
+      const rawLevel = (event as Record<string, unknown>).battery_level;
+      batteryLevel = typeof rawLevel === "number" && Number.isFinite(rawLevel) && rawLevel >= 0 && rawLevel <= 1 ? rawLevel : undefined;
       await doorSnap.docs[0].ref.update({
-        status: isOnline ? "online" : "offline",
+        ...(event_type === "device.connected" ? { status: "online" } : {}),
+        ...(event_type === "device.disconnected" ? { status: "offline" } : {}),
+        ...(batteryLevel !== undefined ? { batteryLevel } : {}),
         lastSeenAt: now,
         updatedAt: now,
       });
+    }
+  }
+
+  // Staff alerts (verified events only). Code alerts fire only for codes
+  // this system made (codeRef found above); the lock's own codes are ignored.
+  if (verified && doorId) {
+    let kind = staffAlertKindForSeamEvent(event_type);
+    if (event_type === "device.battery_status_changed"
+      && isLowBattery(batteryLevel, (event as Record<string, unknown>).battery_status)) {
+      kind = "low_battery";
+    }
+    const isCodeAlert = kind === "code_failed" || kind === "code_delayed" || kind === "code_remove_failed" || kind === "code_changed_outside";
+    // A failed removal after the booking ended needs no action: the code's window is over.
+    const endedRemoval = kind === "code_remove_failed" && grantData && Number(grantData.endsAt) <= now;
+    if (kind && (!isCodeAlert || codeRef) && !endedRemoval) {
+      if (!doorData) {
+        const doorDoc = await db.collection("doors").doc(doorId).get();
+        doorData = doorDoc.data();
+      }
+      await raiseStaffAlert({
+        kind,
+        doorId,
+        doorName: doorData?.name,
+        ...(isCodeAlert ? { bookingId, grantId, startsAt: grantData?.startsAt, endsAt: grantData?.endsAt } : {}),
+        ...(kind === "low_battery" && batteryLevel !== undefined ? { batteryLevel } : {}),
+        reason: event_type,
+        now,
+      });
+    }
+    if (kind === "code_failed" && codeRef) {
+      await codeRef.update({ failureReason: "The lock did not accept the code", updatedAt: now });
     }
   }
 
@@ -658,7 +755,143 @@ async function handleSeamEvent(event: {
   }
 }
 
+// --- Callable: Admin Retry Code ---
+
+/**
+ * Staff "Retry code": makes a new 6-digit code for a live booking whose code
+ * failed, was removed outside Hi Coworking, or was never made. A working
+ * code is never replaced. The member is told it's ready on SayHi; the code
+ * itself is never sent.
+ */
+export const access_adminRetryCode = onCall(
+  { secrets: [seamApiKey] },
+  async (request) => {
+    const uid = requireAdmin(request.auth as never);
+    const { grantId } = (request.data || {}) as { grantId?: string };
+    if (!grantId || typeof grantId !== "string") throw new HttpsError("invalid-argument", "grantId required");
+
+    const grantRef = db.collection("accessGrants").doc(grantId);
+    const grantSnap = await grantRef.get();
+    if (!grantSnap.exists) throw new HttpsError("not-found", "Grant not found");
+    const grant = grantSnap.data()!;
+    const decision = retryDecision({ grant, latestCodeStatus: (await latestCodeForGrant(grantId))?.data.status, now: Date.now() });
+    if (decision !== "retry") throw new HttpsError("failed-precondition", RETRY_REFUSALS[decision]);
+
+    const doorSnap = await db.collection("doors").doc(String(grant.doorId)).get();
+    const door = doorSnap.data();
+    if (!door?.seamDeviceId) throw new HttpsError("failed-precondition", "This booking's door isn't set up.");
+
+    const result = await programCodeForGrant({
+      grantRef,
+      grant: { bookingId: grant.bookingId, userId: grant.userId, startsAt: grant.startsAt, endsAt: grant.endsAt },
+      doorId: doorSnap.id,
+      door,
+      notify: true,
+      performedBy: uid,
+    });
+    if (result.status === "programming") {
+      await resolveStaffAlertsForGrant(grantId, uid);
+    }
+    return { success: result.status !== "failed", grantId, codeStatus: result.status };
+  }
+);
+
+const RETRY_REFUSALS: Record<Exclude<RetryDecision, "retry">, string> = {
+  ended: "This booking's access has ended.",
+  working: "This booking already has a working code.",
+};
+
+// --- Callable: Admin Resolve Staff Alert ---
+
+export const access_adminResolveAlert = onCall(
+  async (request) => {
+    const uid = requireAdmin(request.auth as never);
+    const { alertId } = (request.data || {}) as { alertId?: string };
+    if (!alertId || typeof alertId !== "string" || !/^alert_[A-Za-z0-9_-]{1,200}$/.test(alertId)) {
+      throw new HttpsError("invalid-argument", "alertId required");
+    }
+    const ref = db.collection("accessEvents").doc(alertId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data()?.eventType !== STAFF_ALERT_EVENT_TYPE) throw new HttpsError("not-found", "Alert not found");
+    await ref.update({ alertStatus: "resolved", resolvedAt: Date.now(), resolvedBy: uid });
+    return { success: true, alertId };
+  }
+);
+
+// --- Trigger: revoke requested by another flow (e.g. a booking refund) ---
+
+/**
+ * Flows that don't hold the Seam key (the Stripe refund webhook) set
+ * accessGrants/{id}.revokeRequestedAt and revokeRequestReason. This removes
+ * the code from the lock straight away. access_expireGrants also picks up
+ * any request this missed.
+ */
+export const access_onRevokeRequested = onDocumentWritten(
+  { document: "accessGrants/{grantId}", secrets: [seamApiKey], retry: false },
+  async (event) => {
+    const after = event.data?.after?.data();
+    if (!after || !after.revokeRequestedAt) return;
+    if (after.status !== "pending" && after.status !== "active") return;
+    const before = event.data?.before?.data();
+    if (before?.revokeRequestedAt === after.revokeRequestedAt) return;
+    const reason = REVOKE_REASONS.includes(after.revokeRequestReason) ? after.revokeRequestReason as AccessRevokeReason : "cancellation";
+    await revokeAccessGrant(event.params.grantId, reason, String(after.revokeRequestedBy || "system"));
+  }
+);
+
 // --- Helpers ---
+
+/** Newest code doc for a grant (single-field query; sorted here). */
+async function latestCodeForGrant(grantId: string): Promise<{ id: string; ref: FirebaseFirestore.DocumentReference; data: FirebaseFirestore.DocumentData } | null> {
+  const snap = await db.collection("accessCodes").where("grantId", "==", grantId).get();
+  if (snap.empty) return null;
+  const docs = [...snap.docs].sort((a, b) => Number(b.data().createdAt || 0) - Number(a.data().createdAt || 0));
+  return { id: docs[0].id, ref: docs[0].ref, data: docs[0].data() };
+}
+
+/**
+ * Raises one staff alert: an open item on Admin > Access and one email to
+ * the staff alert list through the mail queue. Deterministic id, so the same
+ * alert is never raised twice (staff Retry may reopen a resolved code alert).
+ * Never throws: an alert must not break a booking or a webhook.
+ */
+async function raiseStaffAlert(input: StaffAlertInput, options: { reopen?: boolean } = {}): Promise<void> {
+  try {
+    const alert = buildStaffAlertEvent(input);
+    const ref = db.collection("accessEvents").doc(alert.id);
+    const created = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (snap.exists) {
+        if (options.reopen && snap.data()?.alertStatus === "resolved") {
+          tx.update(ref, { alertStatus: "open", notes: alert.notes, reopenedAt: input.now });
+          return true;
+        }
+        return false;
+      }
+      tx.create(ref, alert);
+      return true;
+    });
+    if (!created) return;
+    const mailRef = db.collection("mail").doc(`${alert.id}_${input.now}`);
+    await mailRef.set({
+      id: mailRef.id,
+      ...buildStaffAlertMail(input),
+      status: "pending",
+      attempts: 0,
+      createdAt: Date.now(),
+    });
+    logger.warn("Door staff alert raised", { kind: input.kind, alertId: alert.id });
+  } catch (err: unknown) {
+    logger.error("Door staff alert failed", { kind: input.kind, error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+async function resolveStaffAlertsForGrant(grantId: string, uid: string): Promise<void> {
+  for (const kind of ["code_failed", "code_changed_outside", "code_delayed"]) {
+    const ref = db.collection("accessEvents").doc(`alert_${kind}_${grantId}`);
+    await ref.update({ alertStatus: "resolved", resolvedAt: Date.now(), resolvedBy: uid }).catch(() => undefined);
+  }
+}
 
 async function logAccessEvent(params: {
   bookingId?: string;
@@ -718,15 +951,7 @@ async function sendAccessReadyNotice(
 
 async function sendResendNotification(
   userId: string,
-  params: {
-    bookingId: string;
-    grantId: string;
-    doorName: string;
-    codeLast2: string;
-    startsAt: number;
-    endsAt: number;
-    userName: string;
-  }
+  params: { bookingId: string; startsAt: number }
 ): Promise<void> {
   const { startsAt } = params;
   const startStr = new Date(startsAt).toLocaleString("en-US", {

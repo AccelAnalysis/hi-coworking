@@ -12,6 +12,9 @@
  *    gets a "didn't go through" notification. Event, booking and
  *    bookstore refunds keep the notices their own refund flows send.
  *
+ * 3. Booking refunds: a fully refunded booking payment removes that
+ *    booking's door codes (accessCodes/refundRevoke.ts).
+ *
  * Membership status is never changed here (see stripeRefund.ts).
  * Notification and email failures are logged and never fail the webhook.
  */
@@ -31,6 +34,7 @@ import {
   type MemberRefundSummary,
 } from "./stripeRefund";
 import type { StripeRefundLine, StripeRefundSnapshot, WebhookResult } from "./types";
+import { firestoreRefundRevokeStore, requestRefundRevokes, shouldRevokeForRefund } from "../accessCodes/refundRevoke";
 
 function getDb() { return admin.firestore(); }
 
@@ -114,6 +118,7 @@ export async function handleStripeRefund(
   // 1. Ledger
   let paymentUid = "";
   let purpose = "";
+  let refundStatus: unknown = "";
   const paymentRef = await findRefundedPayment(db, snapshot);
   if (paymentRef) {
     const outcome = await db.runTransaction(async (tx) => {
@@ -130,6 +135,7 @@ export async function handleStripeRefund(
     });
     paymentUid = outcome.uid;
     purpose = outcome.purpose;
+    refundStatus = outcome.status;
     logger.info("Refund recorded on payment", {
       ...logContext,
       paymentId: paymentRef.id,
@@ -145,7 +151,17 @@ export async function handleStripeRefund(
     });
   }
 
-  // 2. Membership refund notices
+  // 2. Booking refunds: remove the door codes of a fully refunded booking.
+  if (paymentRef && shouldRevokeForRefund({ purpose, status: String(refundStatus) })) {
+    try {
+      const count = await requestRefundRevokes(firestoreRefundRevokeStore(db), paymentRef.id, Date.now());
+      logger.info("Booking refund: door code removal requested", { ...logContext, paymentId: paymentRef.id, grants: count });
+    } catch (error) {
+      logger.error("Booking refund: door code removal request failed", { ...logContext, error: String(error) });
+    }
+  }
+
+  // 3. Membership refund notices
   const isMembership = purpose === "membership" || Boolean(snapshot.subscriptionId);
   if (!isMembership) return;
   const uid = await resolveMember(db, snapshot, paymentUid);
