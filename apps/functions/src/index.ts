@@ -43,11 +43,12 @@ const RESOURCE_CONFIG: Record<string, {
 }> = {
   "seat-1": { name: "Seat 1", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
   "seat-2": { name: "Seat 2", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-3": { name: "Seat 3", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-4": { name: "Seat 4", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-5": { name: "Seat 5", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "seat-6": { name: "Seat 6", type: "SEAT", guestRateHourly: 17.5, exclusiveGroupId: "main_space", capacity: 1 },
-  "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 75, exclusiveGroupId: "main_space", capacity: 6 },
+  "seat-3": { name: "Seat 3", type: "SEAT", guestRateHourly: 19, exclusiveGroupId: "main_space", capacity: 1 },
+  "seat-4": { name: "Seat 4", type: "SEAT", guestRateHourly: 19, exclusiveGroupId: "main_space", capacity: 1 },
+  "seat-5": { name: "Seat 5", type: "SEAT", guestRateHourly: 22, exclusiveGroupId: "main_space", capacity: 1 },
+  "seat-6": { name: "Seat 6", type: "SEAT", guestRateHourly: 22, exclusiveGroupId: "main_space", capacity: 1 },
+  // Flat $249 per weekday 4-hour slot; hourly figure is the slot spread over 4 hours.
+  "mode-conference": { name: "Conference Room", type: "MODE", guestRateHourly: 62.25, exclusiveGroupId: "main_space", capacity: 6 },
 };
 
 interface CreateBookingInput {

@@ -72,6 +72,8 @@ export type BookingConfirmationInput = {
   subtotalCents?: number;
   accountCreditAppliedCents?: number;
   includedHoursApplied?: number;
+  /** Half-day or day price applied to desk time. */
+  capApplied?: "half_day" | "day" | null;
   currency?: string;
   origin?: string;
 };
@@ -124,6 +126,8 @@ export function paymentLines(input: BookingConfirmationInput): Array<{ label: st
   const hours = Math.max(0, Number(input.includedHoursApplied || 0));
   const lines: Array<{ label: string; value: string; strong?: boolean }> = [];
   if (hours > 0) lines.push({ label: "Membership hours used", value: hoursLabel(hours) });
+  if (input.capApplied === "half_day") lines.push({ label: "Desk price", value: "Half-day price" });
+  if (input.capApplied === "day") lines.push({ label: "Desk price", value: "Day price" });
   if (credit > 0) lines.push({ label: "Account credit applied", value: formatMoney(credit, currency) });
   if (total > 0) {
     lines.push({ label: "Paid by card", value: formatMoney(total, currency), strong: true });
@@ -287,6 +291,7 @@ export type ConfirmableBooking = {
   subtotalCents?: number;
   accountCreditAppliedCents?: number;
   includedHoursApplied?: number;
+  capApplied?: "half_day" | "day" | null;
   confirmationEmailSentAt?: number | null;
 };
 
@@ -346,6 +351,7 @@ function toBooking(id: string, data: Record<string, unknown>): ConfirmableBookin
     subtotalCents: num(data.subtotalCents),
     accountCreditAppliedCents: num(data.accountCreditAppliedCents),
     includedHoursApplied: num(data.includedHoursApplied),
+    capApplied: data.capApplied === "half_day" || data.capApplied === "day" ? data.capApplied : null,
     confirmationEmailSentAt: num(data.confirmationEmailSentAt) ?? null,
   };
 }
@@ -502,6 +508,7 @@ export async function sendBookingConfirmationEmail(
       subtotalCents: booking.subtotalCents,
       accountCreditAppliedCents: booking.accountCreditAppliedCents,
       includedHoursApplied: booking.includedHoursApplied,
+      capApplied: booking.capApplied,
       origin: options.origin,
     });
 

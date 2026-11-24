@@ -657,7 +657,7 @@ describe("booking journey", () => {
     );
 
     expect(quote.membershipName).toBe("Coworking Member");
-    expect(quote.includedHoursRemaining).toBe(8);
+    expect(quote.includedHoursRemaining).toBe(34);
     expect(quote.includedHoursApplied).toBe(3);
     expect(quote.billableHours).toBe(0);
     expect(quote.totalCents).toBe(0);
@@ -687,7 +687,7 @@ describe("booking journey", () => {
     ).set({
       uid: "booking-credit-member",
       monthKey: `${monthParts.year}-${monthParts.month}`,
-      usedHours: 10,
+      usedHours: 36,
       reservations: {},
       updatedAt: Date.now(),
     });

@@ -4,6 +4,7 @@ import { useId, useState, type ReactNode } from "react";
 import { Settings } from "lucide-react";
 import {
   SEAT_TIERS,
+  formatUsdCents,
   accessibleSeatName,
   seatMapPercentToPoint,
   visibleGuestRates,
@@ -93,7 +94,7 @@ export function SeatMapPicker({
         <div className="max-w-xl">
           <h2 className="font-display text-xl font-semibold text-[#101D4B] sm:text-2xl">3. Choose your desk</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Pick a specific desk for the full stay. Planned seat rates are shown as a guide; checkout still uses the current hourly rate until pricing is updated.
+            Pick a specific desk for the full stay. Rates vary by desk; up to 4 hours never costs more than the half-day price, and longer stays never more than the day price.
           </p>
         </div>
         <div
@@ -279,11 +280,11 @@ function SeatSummary({
       <p className="mt-3 text-xs font-semibold text-slate-800">{stateLabel(state)}</p>
       <GuestRateBadges resourceId={selected.resourceId} />
       {copy.seat ? <AmenityIcons amenities={copy.seat.amenities} /> : null}
-      {tier.memberOverageHourlyCents == null && selected.tierId === "equipped" ? (
-        <p className="mt-4 text-xs leading-5 text-slate-500">
-          Member overage for Equipped desks is not set yet, so no member rate is shown.
-        </p>
-      ) : null}
+      <p className="mt-4 text-xs leading-5 text-slate-500" data-testid="seat-membership-coverage">
+        {selected.tierId === "equipped"
+          ? `Included in Coworking Plus hours. Coworking Member pays ${formatUsdCents(tier.memberOverageHourlyCents)}/hr here.`
+          : "Included in Coworking Member and Coworking Plus hours."}
+      </p>
       {summary ? <div className="mt-5 border-t border-slate-100 pt-5">{summary}</div> : null}
     </div>
   );

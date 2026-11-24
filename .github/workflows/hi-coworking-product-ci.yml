@@ -171,6 +171,7 @@ jobs:
           tests/functions/member-notifications.test.ts
           tests/web/refund-copy.test.ts
           tests/functions/booking-policy.test.ts
+          tests/functions/tiered-pricing.test.ts
           tests/functions/booking-hold-cleanup.test.ts
           tests/functions/booking-operating-calendar.test.ts
           tests/functions/booking-operating-calendar-deployment-source.test.ts

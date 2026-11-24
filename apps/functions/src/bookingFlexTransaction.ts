@@ -7,10 +7,7 @@ import * as logger from "firebase-functions/logger";
 import { createPayment, updatePaymentStatus } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
 import { sayhiFlowEnabled } from "./sayhi/config";
-import {
-  GUEST_HOURLY_RATE_CENTS,
-  getDeskMembershipTierById,
-} from "./payments/stripeConfig";
+import { getDeskMembershipTierById } from "./payments/stripeConfig";
 import { createAccessGrant, seamApiKey } from "./access";
 import { sendBookingConfirmationEmail } from "./bookingConfirmationEmail";
 import { resendApiKey } from "./providers/emailSecret";
@@ -33,12 +30,13 @@ import {
   activeCreditReservations,
   activeUsageReservations,
   busyFromSnapshots,
+  checkoutLineLabel,
   db,
   enforceBookingHorizon,
-  guestSeatSubtotal,
   getBusy,
   hoursFromBookingDocs,
   localMonthKey,
+  priceChoice,
   quoteForChoice,
   reservedCreditCents,
   reservedHours,
@@ -356,7 +354,6 @@ async function createHoldAtomically(
 
     const now = Date.now();
     const expiresAt = now + HOLD_MS;
-    const durationHours = baseQuote.durationHours;
     const user = userSnap?.data();
     let adjustedQuote: BookingQuote = { ...baseQuote };
     let usageRef: FirebaseFirestore.DocumentReference | null = null;
@@ -386,20 +383,14 @@ async function createHoldAtomically(
           0,
           tier.includedHoursPerMonth - usedHours - reservedHours(reservations),
         );
-        const includedHoursApplied = Math.min(durationHours, remaining);
-        const billableHours = Math.max(0, durationHours - includedHoursApplied);
-        adjustedQuote = {
-          ...adjustedQuote,
-          membershipName: tier.name,
+        // Same tier, eligibility and cap rules as the public quote.
+        const pricing = priceChoice(choice, start, end, {
+          membershipTier: tier,
           includedHoursRemaining: remaining,
-          includedHoursApplied,
-          billableHours,
-          hourlyRateCents: tier.extraHourlyRateCents,
-          subtotalCents: Math.round(billableHours * tier.extraHourlyRateCents),
-          dailyCapApplied: false,
-        };
-        if (includedHoursApplied > 0) {
-          reservations[holdRef.id] = { hours: includedHoursApplied, expiresAt };
+        });
+        adjustedQuote = { ...adjustedQuote, ...pricing };
+        if (pricing.includedHoursApplied > 0) {
+          reservations[holdRef.id] = { hours: pricing.includedHoursApplied, expiresAt };
         }
         usageData = {
           uid: authenticatedUid,
@@ -409,17 +400,7 @@ async function createHoldAtomically(
           updatedAt: now,
         };
       } else {
-        const subtotalCents = guestSeatSubtotal(durationHours);
-        adjustedQuote = {
-          ...adjustedQuote,
-          membershipName: null,
-          includedHoursRemaining: 0,
-          includedHoursApplied: 0,
-          billableHours: durationHours,
-          hourlyRateCents: GUEST_HOURLY_RATE_CENTS,
-          subtotalCents,
-          dailyCapApplied: Math.round(durationHours * GUEST_HOURLY_RATE_CENTS) >= subtotalCents,
-        };
+        adjustedQuote = { ...adjustedQuote, ...priceChoice(choice, start, end) };
       }
     }
 
@@ -634,6 +615,8 @@ async function finalizeHeldBookingRecord(
       paymentMethod,
       paymentId: hold.paymentId || null,
       includedHoursApplied: quote.includedHoursApplied || 0,
+      capApplied: quote.capApplied ?? null,
+      ...(quote.conferenceSlot ? { conferenceSlot: quote.conferenceSlot } : {}),
       bookingKind: hold.bookingKind,
       deskChange: hold.bookingKind === "desk_change",
       ...(hold.bookingKind === "desk_change" ? {
@@ -796,7 +779,7 @@ export const booking_beginCheckout = onCall(
       collectBillingAddress: true,
       // SayHi overtime: keep the card for extra time past the booking.
       saveCardForLaterCharges: sayhiFlowEnabled(),
-      lineItemLabel: `${quote.resourceName} · ${quote.durationHours} hour${quote.durationHours === 1 ? "" : "s"}`,
+      lineItemLabel: checkoutLineLabel(quote),
       metadata: {
         paymentId: payment.id,
         holdId: holdRef.id,

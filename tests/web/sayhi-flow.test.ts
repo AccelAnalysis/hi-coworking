@@ -132,7 +132,7 @@ describe("virtual address stays hidden while off", () => {
   it("gates the pricing option, pop-up, register redirect and Form 1583 page on the flag", () => {
     const pricing = read("apps/web/src/app/pricing/page.tsx");
     expect(pricing).toContain("{VIRTUAL_ADDRESS ? (");
-    expect(pricing).toContain("if (VIRTUAL_ADDRESS && !isVirtualOffice && !vaChosen) setVaOfferFor(tier.id);");
+    expect(pricing).toContain("if (VIRTUAL_ADDRESS && !isSayHiConnect && !vaChosen) setVaOfferFor(tier.id);");
     expect(read("apps/web/src/app/virtual-address/page.tsx")).toContain("if (!VIRTUAL_ADDRESS) {");
     expect(read("apps/web/src/lib/sayhiAccount.ts")).toContain("VIRTUAL_ADDRESS && virtualAddressChoice() === true");
     const sayhi = read("apps/web/src/app/account/bookings/page.tsx");

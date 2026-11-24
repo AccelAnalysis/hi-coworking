@@ -1,12 +1,15 @@
 
+// Credits and feature limits per plan. Prices and desk hours MIRROR
+// payments/stripeConfig.ts (the source for billing and booking).
 export const MEMBERSHIP_TIERS = [
   {
     id: "virtual",
-    name: "Virtual Office",
-    amountCents: 4900,
+    name: "SayHi Connect",
+    amountCents: 6900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J0xAHu8lEXCs8UHv7AAiz",
+    stripePriceId: "price_1UfCfpAHu8lEXCs8Xw0ruygi",
+    legacyStripePriceIds: ["price_1U9J0xAHu8lEXCs8UHv7AAiz"],
     includedHoursPerMonth: 0,
     extraHourlyRateCents: 1750,
     bookingWindowDays: 14,
@@ -23,11 +26,12 @@ export const MEMBERSHIP_TIERS = [
   {
     id: "coworking",
     name: "Coworking Member",
-    amountCents: 12900,
+    amountCents: 15900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J1CAHu8lEXCs8X1o0O5hG",
-    includedHoursPerMonth: 10,
+    stripePriceId: "price_1UfCfvAHu8lEXCs85BgcHiJy",
+    legacyStripePriceIds: ["price_1U9J1CAHu8lEXCs8X1o0O5hG"],
+    includedHoursPerMonth: 36,
     extraHourlyRateCents: 1400,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 10,
@@ -43,11 +47,12 @@ export const MEMBERSHIP_TIERS = [
   {
     id: "coworking_plus",
     name: "Coworking Plus",
-    amountCents: 19900,
+    amountCents: 28900,
     interval: "month",
     currency: "usd",
-    stripePriceId: "price_1U9J1KAHu8lEXCs8xZETzk7F",
-    includedHoursPerMonth: 15,
+    stripePriceId: "price_1UfCfxAHu8lEXCs8ueNs9jAk",
+    legacyStripePriceIds: ["price_1U9J1KAHu8lEXCs8xZETzk7F"],
+    includedHoursPerMonth: 54,
     extraHourlyRateCents: 1225,
     bookingWindowDays: 90,
     includedCreditsPerMonth: 25,

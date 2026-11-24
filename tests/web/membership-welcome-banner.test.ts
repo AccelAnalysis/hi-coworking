@@ -15,13 +15,13 @@ const tier = (id: string) => MEMBERSHIP_TIERS.find((t) => t.id === id)!;
 describe("membership copy on /my-hi", () => {
   it("summarizes every plan from the plan definitions", () => {
     expect(membershipSummary(tier("virtual"))).toBe(
-      "Book a coworking desk whenever you need one, at $17.50/hr. Book up to 14 days ahead.",
+      "Book any open desk at guest rates, from $17.50/hr. Book up to 14 days ahead.",
     );
     expect(membershipSummary(tier("coworking"))).toBe(
-      "10 coworking desk hours included each month, then $14/hr. Book up to 90 days ahead.",
+      "36 desk hours included each month on D1–D4, then 20% off guest rates. Book up to 90 days ahead.",
     );
     expect(membershipSummary(tier("coworking_plus"))).toBe(
-      "15 coworking desk hours included each month, then $12.25/hr. Book up to 90 days ahead.",
+      "54 desk hours included each month on D1–D6, then 30% off guest rates. Book up to 90 days ahead.",
     );
     for (const t of MEMBERSHIP_TIERS) expect(membershipSummary(t)).not.toMatch(/undefined|NaN|\b0 coworking/);
     expect(hourlyRate(1750)).toBe("$17.50/hr");
@@ -30,7 +30,7 @@ describe("membership copy on /my-hi", () => {
   it("names the active plan once the webhook has activated it", () => {
     const copy = welcomeBannerCopy({ membershipActive: true, activeTier: tier("virtual"), returnedTier: tier("virtual") });
     expect(copy.state).toBe("active");
-    expect(copy.title).toBe("Welcome to Hi Coworking. Your Virtual Office plan is active.");
+    expect(copy.title).toBe("Welcome to Hi Coworking. Your SayHi Connect plan is active.");
   });
 
   it("shows an activating state, naming the plan from the return URL when known", () => {

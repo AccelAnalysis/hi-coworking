@@ -88,7 +88,7 @@ export function demoData(kind: DemoKind, now: number) {
     ]
     : [
       { id: "demo-member-1", resourceId: "desk-1", resourceName: "Coworking desk", start: nextWeekdayAt(base, 1, 9), end: nextWeekdayAt(base, 1, 13), status: "CONFIRMED", totalCents: 0, subtotalCents: 0, paymentMethod: "STRIPE" },
-      { id: "demo-member-2", resourceId: "mode-conference", resourceName: "Conference room", start: nextWeekdayAt(base, 2, 14), end: nextWeekdayAt(base, 2, 15), status: "CONFIRMED", totalCents: 9900, subtotalCents: 9900, paymentMethod: "STRIPE" },
+      { id: "demo-member-2", resourceId: "mode-conference", resourceName: "Conference room", start: nextWeekdayAt(base, 2, 13), end: nextWeekdayAt(base, 2, 17), status: "CONFIRMED", totalCents: 24900, subtotalCents: 24900, paymentMethod: "STRIPE" },
       { id: "demo-member-3", resourceId: "desk-2", resourceName: "Coworking desk", start: nextWeekdayAt(base, 4, 8), end: nextWeekdayAt(base, 4, 12), status: "CONFIRMED", totalCents: 0, subtotalCents: 0, paymentMethod: "STRIPE" },
     ];
   const codes = ["204816", "731590", "558203"];
