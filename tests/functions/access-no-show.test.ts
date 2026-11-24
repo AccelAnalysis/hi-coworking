@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // In-memory Firestore so the real no-show sweep runs; revoke is a spy.
 const h = vi.hoisted(() => {
@@ -80,7 +80,13 @@ function seed() {
   h.docs.set("accessEvents/e0", { grantId: "g1", bookingId: "b1", doorId: "door1", eventType: "code_issued" });
 }
 
-const sweep = (now = NOW) => runNoShowSweep(now, { revoke: async (id) => { h.hooks.beforeRevoke?.(); h.revoked.push(id); } });
+// The sweep rechecks with Math.max(now, Date.now()). Pin Date.now to the same
+// test clock so a later calendar date cannot turn a revoke into booking_ended.
+const sweep = (now = NOW) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(now);
+  return runNoShowSweep(now, { revoke: async (id) => { h.hooks.beforeRevoke?.(); h.revoked.push(id); } });
+};
 
 beforeEach(() => {
   h.docs.clear();
@@ -89,6 +95,10 @@ beforeEach(() => {
   h.failOn.collection = "";
   h.hooks.beforeRevoke = undefined;
   seed();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("no-show sweep", () => {
