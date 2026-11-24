@@ -12,7 +12,8 @@
  * (up to 4 billable hours) or day (over 4) price.
  *
  * D7 is the equipped-tier reception L-desk and is staff-only / not sellable.
- * The private office is omitted: it is not bookable in this slice.
+ * The private office is a separate room resource (not a seat tier): see
+ * PRIVATE_OFFICE_RESOURCE_ID. It does not consume membership desk hours.
  */
 export const BOOKABLE_SEAT_RESOURCE_IDS = [
   "seat-1",
@@ -289,6 +290,13 @@ export function visibleGuestRates(resourceId: string): {
   halfDay: string | null;
   day: string | null;
 } {
+  if (resourceId === PRIVATE_OFFICE_RESOURCE_ID) {
+    return {
+      hourly: formatUsdCents(PRIVATE_OFFICE_RATES.guestHourlyCents),
+      halfDay: formatUsdCents(PRIVATE_OFFICE_RATES.guestHalfDayCents),
+      day: formatUsdCents(PRIVATE_OFFICE_RATES.guestDayCents),
+    };
+  }
   const tier = tierRatesForSeat(resourceId);
   return {
     hourly: formatUsdCents(tier?.guestHourlyCents),
@@ -418,3 +426,32 @@ export function accessibleSeatName(resourceId: string): string {
   if (seat.staffOnly) parts.push("staff only");
   return parts.join(", ");
 }
+
+
+/** Bookable right-hand private office — a ROOM, not a hot desk. */
+export const PRIVATE_OFFICE_RESOURCE_ID = "private-office";
+export const PRIVATE_OFFICE_BLOCKED_SEAT_ID = "seat-1";
+export const PRIVATE_OFFICE_RATES = {
+  name: "Private Office",
+  shortLabel: "Right-hand room",
+  guestHourlyCents: 3900,
+  guestHalfDayCents: 9900,
+  guestDayCents: 14900,
+} as const;
+
+export function isPrivateOfficeResource(resourceId: string): boolean {
+  return resourceId === PRIVATE_OFFICE_RESOURCE_ID;
+}
+
+/**
+ * ViewBox coordinates for the right-hand private office room on the
+ * architectural floor plan (`x=628 y=36 width=198 height=368`).
+ */
+export const ARCHITECTURAL_PRIVATE_OFFICE = {
+  x: 628,
+  y: 36,
+  width: 198,
+  height: 368,
+  cx: 727,
+  cy: 220,
+} as const;

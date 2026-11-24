@@ -4,6 +4,10 @@ import {
   conferenceSlotFor,
   deskPricingPlanFor,
   priceDeskSegments,
+  pricePrivateOffice,
+  priceUpgradeToFullDay,
+  validateAfterHoursConferenceWindow,
+  afterHoursSlotsOverlap,
   type DeskPricingPlan,
 } from "../../apps/functions/src/payments/deskPricing";
 import {
@@ -368,6 +372,142 @@ describe("no stale pricing in active surfaces", () => {
       expect(source, file).not.toMatch(/Virtual Office|Virtual Plus/);
       expect(source, file).not.toMatch(/includedHoursPerMonth: (10|15),/);
       expect(source, file).not.toMatch(/amountCents: (4900|12900|19900),/);
+    }
+  });
+});
+
+describe("private office pricing and conflicts", () => {
+  const office: BookingChoice = {
+    kind: "single",
+    resourceId: "private-office",
+    resourceName: "Private Office",
+    resourceType: "ROOM",
+  };
+
+  it("mirrors $39 / $99 / $149 in shared and functions", () => {
+    expect(shared.PRIVATE_OFFICE_RATES).toMatchObject({
+      guestHourlyCents: 3900,
+      guestHalfDayCents: 9900,
+      guestDayCents: 14900,
+    });
+    expect(shared.pricePrivateOffice(1).subtotalCents).toBe(3900);
+    expect(shared.pricePrivateOffice(3).subtotalCents).toBe(9900);
+    expect(shared.pricePrivateOffice(4).subtotalCents).toBe(9900);
+    expect(shared.pricePrivateOffice(4).capApplied).toBe("half_day");
+    expect(shared.pricePrivateOffice(5).subtotalCents).toBe(14900);
+    expect(shared.pricePrivateOffice(9).subtotalCents).toBe(14900);
+    expect(shared.pricePrivateOffice(9).capApplied).toBe("day");
+  });
+
+  it("prices the office at guest room rates even for members and Plus", () => {
+    expect(priceChoice(office, at(8), at(9))).toMatchObject({ subtotalCents: 3900, includedHoursApplied: 0, capApplied: null });
+    expect(priceChoice(office, at(8), at(12))).toMatchObject({ subtotalCents: 9900, capApplied: "half_day", includedHoursApplied: 0 });
+    expect(priceChoice(office, at(8), at(17))).toMatchObject({ subtotalCents: 14900, capApplied: "day", includedHoursApplied: 0 });
+    expect(priceChoice(office, at(8), at(17), { membershipTier: plus, includedHoursRemaining: 54 })).toMatchObject({
+      subtotalCents: 14900,
+      includedHoursApplied: 0,
+      membershipName: null,
+    });
+  });
+
+  it("is mutually exclusive with D1 and the weekday conference room, not D2–D6", () => {
+    const officeBusy = [{ resourceId: "private-office", start: at(8), end: at(12), status: "CONFIRMED" }];
+    expect(resourceConflicts("seat-1", at(9), at(10), officeBusy)).toBe(true);
+    expect(resourceConflicts("mode-conference", at(8), at(12), officeBusy)).toBe(true);
+    for (const seat of ["seat-2", "seat-3", "seat-4", "seat-5", "seat-6"]) {
+      expect(resourceConflicts(seat, at(8), at(12), officeBusy)).toBe(false);
+    }
+    const d1Busy = [{ resourceId: "seat-1", start: at(13), end: at(17), status: "CONFIRMED" }];
+    expect(resourceConflicts("private-office", at(13), at(17), d1Busy)).toBe(true);
+    expect(resourceConflicts("private-office", at(8), at(12), d1Busy)).toBe(false);
+    const conferenceBusy = [{ resourceId: "mode-conference", start: at(8), end: at(12), status: "CONFIRMED" }];
+    expect(resourceConflicts("private-office", at(8), at(12), conferenceBusy)).toBe(true);
+    expect(resourceConflicts("private-office", at(13), at(17), conferenceBusy)).toBe(false);
+  });
+
+  it("does not let after-hours conference displace desks or the office", () => {
+    const evening = [{ resourceId: "mode-conference", start: at(17), end: at(21), status: "CONFIRMED", afterHours: true }];
+    expect(resourceConflicts("seat-1", at(13), at(17), evening)).toBe(false);
+    expect(resourceConflicts("private-office", at(13), at(17), evening)).toBe(false);
+    expect(resourceConflicts("mode-conference", at(17), at(21), evening)).toBe(true);
+  });
+});
+
+describe("same-day full-day upgrade deltas", () => {
+  it("charges the exact difference for guest half-day bookings", () => {
+    expect(shared.priceUpgradeToFullDay({ resourceId: "seat-1", plan: "guest", includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 2900 })).toMatchObject({ targetCents: 4900, deltaCents: 2000 });
+    expect(shared.priceUpgradeToFullDay({ resourceId: "seat-3", plan: "guest", includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 3900 })).toMatchObject({ targetCents: 6500, deltaCents: 2600 });
+    expect(shared.priceUpgradeToFullDay({ resourceId: "seat-5", plan: "guest", includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 4900 })).toMatchObject({ targetCents: 7900, deltaCents: 3000 });
+    expect(shared.priceUpgradeToFullDay({ resourceId: "private-office", plan: "guest", includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 9900 })).toMatchObject({ targetCents: 14900, deltaCents: 5000 });
+  });
+
+  it("is $0 when a member still has enough included hours, deducting only the incremental hours", () => {
+    const upgrade = shared.priceUpgradeToFullDay({
+      resourceId: "seat-1",
+      plan: "member",
+      includedHoursRemaining: 32,
+      includedHoursApplied: 4,
+      paidCents: 0,
+    });
+    expect(upgrade).toMatchObject({ targetCents: 0, deltaCents: 0, incrementalIncludedHours: 5, includedHoursApplied: 9 });
+  });
+
+  it("caps a member with no remaining hours at the day price instead of hourly overage times 9", () => {
+    const upgrade = shared.priceUpgradeToFullDay({
+      resourceId: "seat-1",
+      plan: "member",
+      includedHoursRemaining: 0,
+      includedHoursApplied: 0,
+      paidCents: 2900,
+    });
+    expect(upgrade.deltaCents).toBe(2000);
+    expect(upgrade.targetCents).toBe(4900);
+    expect(upgrade.targetCents).toBeLessThan(1400 * 9);
+  });
+});
+
+describe("evening and weekend conference slots", () => {
+  it("accepts flexible weekday evening 4-hour starts at or after 5:00 PM", () => {
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-03", "17:00", "21:00").ok).toBe(true);
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-03", "17:30", "21:30").ok).toBe(true);
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-03", "18:00", "22:00").ok).toBe(true);
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-03", "16:30", "20:30").ok).toBe(false);
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-03", "17:00", "20:00").ok).toBe(false);
+  });
+
+  it("accepts the exact weekend options and enforces the PM/evening overlap rule", () => {
+    const am = shared.validateAfterHoursConferenceWindow("2030-01-05", "08:00", "12:00");
+    const pmNoon = shared.validateAfterHoursConferenceWindow("2030-01-05", "12:00", "16:00");
+    const pmOne = shared.validateAfterHoursConferenceWindow("2030-01-05", "13:00", "17:00");
+    const eveFour = shared.validateAfterHoursConferenceWindow("2030-01-05", "16:00", "20:00");
+    const eveFive = shared.validateAfterHoursConferenceWindow("2030-01-05", "17:00", "21:00");
+    expect([am, pmNoon, pmOne, eveFour, eveFive].every((item) => item.ok)).toBe(true);
+    if (!pmNoon.ok || !pmOne.ok || !eveFour.ok || !eveFive.ok || !am.ok) throw new Error("expected valid slots");
+    expect(shared.afterHoursSlotsOverlap(pmNoon.slot, eveFour.slot)).toBe(false);
+    expect(shared.afterHoursSlotsOverlap(pmOne.slot, eveFour.slot)).toBe(true);
+    expect(shared.afterHoursSlotsOverlap(pmOne.slot, eveFive.slot)).toBe(false);
+    expect(shared.afterHoursSlotsOverlap(am.slot, pmNoon.slot)).toBe(false);
+    expect(shared.validateAfterHoursConferenceWindow("2030-01-05", "09:00", "13:00").ok).toBe(false);
+  });
+});
+
+describe("shared and functions Phase 2 pricing stay mirrored", () => {
+  it("agrees on private office, upgrade deltas, and weekend overlap", () => {
+    expect(pricePrivateOffice(4)).toEqual(shared.pricePrivateOffice(4));
+    expect(pricePrivateOffice(9)).toEqual(shared.pricePrivateOffice(9));
+    const input = { resourceId: "seat-1", plan: "member" as const, includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 2900 };
+    expect(priceUpgradeToFullDay(input)).toEqual(shared.priceUpgradeToFullDay(input));
+    const office = { resourceId: "private-office", plan: "guest" as const, includedHoursRemaining: 0, includedHoursApplied: 0, paidCents: 9900 };
+    expect(priceUpgradeToFullDay(office)).toEqual(shared.priceUpgradeToFullDay(office));
+    const a = validateAfterHoursConferenceWindow("2030-01-05", "13:00", "17:00");
+    const b = validateAfterHoursConferenceWindow("2030-01-05", "16:00", "20:00");
+    const sharedA = shared.validateAfterHoursConferenceWindow("2030-01-05", "13:00", "17:00");
+    const sharedB = shared.validateAfterHoursConferenceWindow("2030-01-05", "16:00", "20:00");
+    expect(a).toEqual(sharedA);
+    expect(b).toEqual(sharedB);
+    if (a.ok && b.ok && sharedA.ok && sharedB.ok) {
+      expect(afterHoursSlotsOverlap(a.slot, b.slot)).toBe(true);
+      expect(shared.afterHoursSlotsOverlap(sharedA.slot, sharedB.slot)).toBe(true);
     }
   });
 });

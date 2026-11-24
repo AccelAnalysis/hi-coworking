@@ -66,6 +66,7 @@ const MODULES: readonly Module[] = [
   { href: "/admin/bookstore", label: "Bookstore", description: "Catalog, inventory, orders, fulfillment, and refunds", icon: BookOpen },
   { href: "/admin/payments", label: "Payments", description: "Unified ledger, provider status, and reconciliation", icon: CreditCard },
   { href: "/admin/leads", label: "Leads", description: "New inquiries, follow-up context, and conversion", icon: UserCog },
+  { href: "/admin/conference-requests", label: "Conference requests", description: "Evening and weekend 4-hour slots awaiting approval", icon: CalendarDays },
   { href: "/admin/products", label: "Pricing & memberships", description: "Canonical plans, prices, and purchase paths", icon: Package },
   { href: "/admin/roles", label: "Roles & permissions", description: "Staff authority and protected operations", icon: UserCog },
 ];

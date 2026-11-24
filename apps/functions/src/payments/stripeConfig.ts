@@ -191,7 +191,7 @@ export const FULL_DAY_HOURS = 9;
 
 /** Weekday 4-hour slot, flat price. Blocks D1–D6 (exclusive main_space). */
 export const CONFERENCE_ROOM_SLOT_PRICE_CENTS = 24900;
-/** Evening / weekend 4-hour slot by appointment (Phase 2, not bookable online). */
+/** Evening / weekend 4-hour slot by appointment. */
 export const CONFERENCE_ROOM_AFTER_HOURS_SLOT_PRICE_CENTS = 29900;
 export const CONFERENCE_ROOM_SLOT_HOURS = 4;
 /** Marketed as 6 seats (permit cap). Was 10 in earlier code. */
@@ -211,6 +211,23 @@ export const CONFERENCE_ROOM_WEEKDAY_SLOTS: ReadonlyArray<{
 
 export const CONFERENCE_SLOT_MESSAGE =
   "The conference room books in weekday 4-hour slots only: Morning 8:00 AM–12:00 PM or Afternoon 1:00 PM–5:00 PM ($249).";
+
+// --- Private Office ---
+// MIRROR of packages/shared/src/seatCatalog.ts → PRIVATE_OFFICE_*.
+
+export const PRIVATE_OFFICE_RESOURCE_ID = "private-office";
+export const PRIVATE_OFFICE_RATES = {
+  name: "Private Office",
+  shortLabel: "Right-hand room",
+  guestHourlyCents: 3900,
+  guestHalfDayCents: 9900,
+  guestDayCents: 14900,
+} as const;
+export const PRIVATE_OFFICE_BLOCKED_SEAT_ID = "seat-1";
+
+export function isPrivateOfficeResource(resourceId: string): boolean {
+  return resourceId === PRIVATE_OFFICE_RESOURCE_ID;
+}
 
 // --- Lookup Helpers ---
 

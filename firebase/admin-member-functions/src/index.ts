@@ -36,3 +36,8 @@ export {
   admin_bookingCancel,
   admin_bookingReschedule,
 } from "../../../apps/functions/src/adminBookingManagement";
+
+export {
+  admin_listConferenceSlotRequests,
+  admin_reviewConferenceSlotRequest,
+} from "../../../apps/functions/src/conferenceSlotRequests";

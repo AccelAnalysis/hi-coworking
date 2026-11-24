@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, Clock, Users } from "lucide-react";
+import { Check, Loader2, Clock, DoorClosed, Users } from "lucide-react";
 import Link from "next/link";
 import { httpsCallable } from "firebase/functions";
 import { AppShell } from "@/components/AppShell";
@@ -15,6 +15,7 @@ import {
   GUEST_PRICING,
   CONFERENCE_ROOM_CONFIG,
   CONFERENCE_ROOM_SLOTS,
+  PRIVATE_OFFICE_RATES,
   SEAT_TIERS,
   formatUsdCents,
   type SeatTierId,
@@ -277,6 +278,46 @@ export default function PricingPage() {
             </div>
           </div>
 
+
+          <section className="mb-10" aria-labelledby="private-office-heading">
+            <h2 id="private-office-heading" className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <DoorClosed className="h-3.5 w-3.5" aria-hidden="true" /> Private Office
+            </h2>
+            <div className="bg-white rounded-2xl p-6 md:p-8 shadow-sm ring-1 ring-slate-200">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-6">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">Private Office</h3>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Right-hand room for signings, notary, and closed-door work. Booking it leaves D1 unsold; D2–D6 stay available. Membership desk hours do not apply.
+                  </p>
+                  <ul className="mt-4 space-y-2" data-testid="private-office-rates">
+                    <li className="flex items-center gap-3 text-sm text-slate-700">
+                      <span className="w-5 h-5 rounded-full bg-[#EEF0F6] flex items-center justify-center text-[#101D4B] shrink-0"><Check size={12} strokeWidth={3} aria-hidden="true" /></span>
+                      <span><span className="font-semibold text-[#101D4B]">{usd(PRIVATE_OFFICE_RATES.guestHourlyCents)}/hr</span> · hourly</span>
+                    </li>
+                    <li className="flex items-center gap-3 text-sm text-slate-700">
+                      <span className="w-5 h-5 rounded-full bg-[#EEF0F6] flex items-center justify-center text-[#101D4B] shrink-0"><Check size={12} strokeWidth={3} aria-hidden="true" /></span>
+                      <span><span className="font-semibold text-[#101D4B]">{usd(PRIVATE_OFFICE_RATES.guestHalfDayCents)}</span> · half-day (up to 4 hours)</span>
+                    </li>
+                    <li className="flex items-center gap-3 text-sm text-slate-700">
+                      <span className="w-5 h-5 rounded-full bg-[#EEF0F6] flex items-center justify-center text-[#101D4B] shrink-0"><Check size={12} strokeWidth={3} aria-hidden="true" /></span>
+                      <span><span className="font-semibold text-[#101D4B]">{usd(PRIVATE_OFFICE_RATES.guestDayCents)}</span> · full day, including weekdays 8:00 AM–5:00 PM</span>
+                    </li>
+                  </ul>
+                </div>
+                <div className="md:text-right">
+                  <span className="text-3xl font-bold text-slate-900">{usd(PRIVATE_OFFICE_RATES.guestDayCents)}</span>
+                  <span className="text-base text-slate-500"> full day</span>
+                  <Link
+                    href="/book?resource=private-office"
+                    className={`mt-3 flex min-h-11 items-center justify-center rounded-full px-5 py-2 text-sm font-semibold ${primaryClass}`}
+                  >
+                    Book the Private Office
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </section>
           <div className="mb-10">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Users className="h-3.5 w-3.5" /> Conference Room
@@ -299,7 +340,7 @@ export default function PricingPage() {
                     ))}
                   </ul>
                   <p className="mt-4 text-xs leading-5 text-slate-500">
-                    Weekdays, booked in 4-hour slots. Evenings and weekends are available by appointment at {usd(CONFERENCE_ROOM_CONFIG.afterHoursSlotPriceCents)} per 4-hour slot. <Link href="/contact" className="font-semibold text-[#101D4B] underline underline-offset-2">Contact us</Link> to arrange one.
+                    Weekdays, booked in 4-hour slots. Evenings and weekends are available by appointment at {usd(CONFERENCE_ROOM_CONFIG.afterHoursSlotPriceCents)} per 4-hour slot, seated for {CONFERENCE_ROOM_CONFIG.maxCapacity}. <Link href="/book?resource=mode-conference#after-hours" className="font-semibold text-[#101D4B] underline underline-offset-2">Request a time</Link>.
                   </p>
                 </div>
                 <div className="md:text-right">
