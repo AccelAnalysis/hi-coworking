@@ -35,11 +35,13 @@ export function isDeliverableLeadEmail(value: unknown): boolean {
 
 export type LeadEnrollmentDecision =
   | { enroll: true; email: string }
-  | { enroll: false; reason: "exempt" | "no_email" | "undeliverable" };
+  | { enroll: false; reason: "exempt" | "no_email" | "undeliverable" | "no_consent" };
 
 /**
- * Whether a new leads/{id} document should start a Nurture sequence.
- * Leads marked nurtureExempt (for example quiet imports) never enroll.
+ * Whether a new leads/{id} document should start a Nurture (marketing) sequence.
+ * Leads marked nurtureExempt (for example quiet imports) never enroll, and a
+ * lead enrolls only when it recorded affirmative marketing consent
+ * (marketingConsent === true). Staff lead alerts do not depend on this.
  */
 export function leadEnrollmentDecision(data: Record<string, unknown> | undefined): LeadEnrollmentDecision {
   if (!data) return { enroll: false, reason: "no_email" };
@@ -47,7 +49,58 @@ export function leadEnrollmentDecision(data: Record<string, unknown> | undefined
   const email = normalizeLeadEmail(data.email);
   if (!email) return { enroll: false, reason: "no_email" };
   if (!isDeliverableLeadEmail(email)) return { enroll: false, reason: "undeliverable" };
+  if (data.marketingConsent !== true) return { enroll: false, reason: "no_consent" };
   return { enroll: true, email };
+}
+
+/**
+ * Marketing-consent wording shown next to each opt-in, keyed by version.
+ * The server stores this canonical text, never text supplied by the browser.
+ * Changing the wording means adding a new version (and updating the form).
+ */
+export const LEAD_MARKETING_CONSENT_TEXT = {
+  "early-access-updates-2026-11": "Email me Hi Coworking launch updates and early booking invitations. I can unsubscribe at any time.",
+  "survey-email-2026-11": "Leave it blank to stay anonymous, or add it to hear about launch updates.",
+} as const;
+
+export type LeadMarketingConsentVersion = keyof typeof LEAD_MARKETING_CONSENT_TEXT;
+
+export const EARLY_ACCESS_CONSENT_VERSION: LeadMarketingConsentVersion = "early-access-updates-2026-11";
+export const SURVEY_EMAIL_CONSENT_VERSION: LeadMarketingConsentVersion = "survey-email-2026-11";
+
+export type LeadMarketingConsent = {
+  marketingConsent: boolean;
+  marketingConsentAt: number | null;
+  marketingConsentVersion: LeadMarketingConsentVersion | null;
+  marketingConsentText: string | null;
+};
+
+/**
+ * Records marketing consent only for an explicit opt-in: the browser must send
+ * marketingConsent === true with the consent version that matches the form
+ * type, and the lead must have an email. Anything else is stored as no consent.
+ */
+export function leadMarketingConsent(
+  body: Record<string, unknown> | undefined,
+  parsed: { type: LeadType; email: string },
+  now: number,
+): LeadMarketingConsent {
+  const none: LeadMarketingConsent = {
+    marketingConsent: false,
+    marketingConsentAt: null,
+    marketingConsentVersion: null,
+    marketingConsentText: null,
+  };
+  const input = body ?? {};
+  if (input.marketingConsent !== true || !parsed.email) return none;
+  const expected = parsed.type === "survey" ? SURVEY_EMAIL_CONSENT_VERSION : EARLY_ACCESS_CONSENT_VERSION;
+  if (input.consentVersion !== expected) return none;
+  return {
+    marketingConsent: true,
+    marketingConsentAt: now,
+    marketingConsentVersion: expected,
+    marketingConsentText: LEAD_MARKETING_CONSENT_TEXT[expected],
+  };
 }
 
 export type ParsedLeadSubmission =

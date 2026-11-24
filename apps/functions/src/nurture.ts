@@ -506,8 +506,10 @@ export const nurture_scanLifecycle = onSchedule({ schedule: "every day 09:00", t
 export const nurture_onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) => {
   const data = event.data?.data();
   if (!data) return;
-  // Anonymous surveys, placeholder or reserved-domain addresses (.local, .test, ...)
-  // and quiet imports (nurtureExempt) never start a sequence.
+  // Anonymous surveys, placeholder or reserved-domain addresses (.local, .test, ...),
+  // quiet imports (nurtureExempt) and leads without an affirmative marketing
+  // opt-in (marketingConsent !== true) never start a sequence. Staff lead
+  // alerts (leads_onNewLead) are separate and unaffected.
   const decision = leadEnrollmentDecision(data);
   if (!decision.enroll) {
     logger.info("Lead not enrolled in Nurture", { leadId: event.params.leadId, reason: decision.reason });
