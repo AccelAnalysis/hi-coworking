@@ -15,9 +15,18 @@ import {
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PublishedSetupDetails } from "@/components/booking/PublishedSetupDetails";
+import { DeskOptionList, type DeskListOption } from "@/components/booking/DeskOptionList";
+import { SeatMapPicker } from "@/components/booking/SeatMapPicker";
 import { bookingServiceType } from "@/lib/publishedSetups";
 import { functions } from "@/lib/firebase";
 import { useAuth } from "@/lib/authContext";
+import { fallbackSeatMap, loadPublishedSeatMap, type SeatMapLayoutView } from "@/lib/seatMapLayout";
+import { SEAT_MAP_PICKER } from "@/lib/seatMapPickerFlag";
+import {
+  SEAT_CATALOG,
+  STAFF_ONLY_SEAT_RESOURCE_ID,
+  getSeatByResourceId,
+} from "@hi/shared";
 import {
   INTENDED_USE_MAX,
   validateGuestScreening,
@@ -366,6 +375,7 @@ export default function BookingExperienceWithDeskChange() {
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
+  const [seatMap, setSeatMap] = useState<SeatMapLayoutView>(() => fallbackSeatMap());
   // Renter screening (guest checkout): business use only, same for everyone.
   const [guestBusinessName, setGuestBusinessName] = useState("");
   const [guestIndependent, setGuestIndependent] = useState(false);
@@ -403,6 +413,17 @@ export default function BookingExperienceWithDeskChange() {
     }
     setHydrated(true);
   }, [todayAtFacility]);
+
+  useEffect(() => {
+    if (!SEAT_MAP_PICKER) return;
+    let active = true;
+    void loadPublishedSeatMap().then((view) => {
+      if (active) setSeatMap(view);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!hydrated || !intent) return;
@@ -664,6 +685,38 @@ export default function BookingExperienceWithDeskChange() {
   }
 
   const availableOptions = options.filter((option) => option.available);
+  const deskListOptions: DeskListOption[] = SEAT_MAP_PICKER
+    ? [
+        ...options
+          .filter((option) => option.type === "SEAT")
+          .map((option) => ({
+            resourceId: option.resourceId,
+            name: getSeatByResourceId(option.resourceId)?.name || option.name,
+            available: option.available,
+          })),
+        {
+          resourceId: STAFF_ONLY_SEAT_RESOURCE_ID,
+          name: SEAT_CATALOG[STAFF_ONLY_SEAT_RESOURCE_ID].name,
+          available: false,
+          staffOnly: true,
+        },
+      ]
+    : options.map((option) => ({
+        resourceId: option.resourceId,
+        name: option.name,
+        available: option.available,
+      }));
+
+  function selectDeskOption(option: DeskListOption) {
+    const availability = options.find((item) => item.resourceId === option.resourceId);
+    if (availability?.available) void loadQuote({ kind: "single", option: availability });
+  }
+
+  function deskLabel(resourceId: string, fallback: string) {
+    if (!SEAT_MAP_PICKER) return fallback;
+    const seat = getSeatByResourceId(resourceId);
+    return seat ? seat.displayId : fallback;
+  }
   const selectedKey = selectionKey(selection);
   const meetingOption = options.find((option) => option.type === "MODE");
   const remainingAfterBooking = quote
@@ -822,44 +875,70 @@ export default function BookingExperienceWithDeskChange() {
 
         {intent === "DESK" && (options.length > 0 || deskChangeOptions.length > 0) ? (
           <section className="mt-10 border-t border-slate-200 pt-7">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-950">3. Choose your desk</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  A continuous desk keeps you in the same spot for the full stay.
-                </p>
-              </div>
-              <p className="text-sm text-slate-500">{availableOptions.length} continuous option{availableOptions.length === 1 ? "" : "s"}</p>
-            </div>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {options.map((option) => {
-                const key = `single:${option.resourceId}`;
-                const selected = selectedKey === key;
-                return (
-                  <button
-                    key={option.resourceId}
-                    type="button"
-                    disabled={!option.available || loadingQuote}
-                    onClick={() => loadQuote({ kind: "single", option })}
-                    className={`min-h-32 rounded-2xl p-4 text-left ring-1 transition ${
-                      selected
-                        ? "bg-slate-900 text-white ring-slate-900"
-                        : option.available
-                          ? "bg-white text-slate-950 ring-slate-200 hover:ring-slate-400"
-                          : "cursor-not-allowed bg-slate-50 text-slate-400 ring-slate-200"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700"><Laptop className="h-4 w-4" /></div>
-                      <span className="text-xs font-semibold uppercase tracking-wide">{option.available ? "Available" : "Unavailable"}</span>
+            {SEAT_MAP_PICKER ? (
+              <SeatMapPicker
+                spots={seatMap.spots}
+                backgroundUrl={seatMap.backgroundUrl}
+                availability={options}
+                selectedResourceId={selection?.kind === "single" ? selection.option.resourceId : undefined}
+                loadingQuote={loadingQuote}
+                onSelectSeat={(resourceId) => {
+                  const option = options.find((item) => item.resourceId === resourceId);
+                  if (option?.available) void loadQuote({ kind: "single", option });
+                }}
+                list={
+                  <>
+                    <p className="mb-4 text-sm text-[#4A5585]">
+                      {availableOptions.length} continuous option{availableOptions.length === 1 ? "" : "s"}
+                    </p>
+                    <DeskOptionList
+                      options={deskListOptions}
+                      selectedResourceId={selection?.kind === "single" ? selection.option.resourceId : undefined}
+                      loadingQuote={loadingQuote}
+                      showCatalogDetails
+                      onSelect={selectDeskOption}
+                    />
+                  </>
+                }
+                summary={
+                  selection && quote && !reviewOpen ? (
+                    <div>
+                      <p className="text-sm font-bold text-[#101D4B]">{deskLabel(quote.resourceId, quote.resourceName)}</p>
+                      <p className="mt-0.5 text-sm text-slate-600">{money(quote.totalCents)} due for this stay</p>
+                      <p className="mt-0.5 text-xs text-slate-500">Checkout still uses the current hourly rate</p>
+                      <button
+                        type="button"
+                        onClick={continueToReview}
+                        className="mt-4 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#101D4B] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#1B2A63] focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B]"
+                      >
+                        Review booking <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                      </button>
                     </div>
-                    <p className="mt-4 font-semibold">{option.name}</p>
-                    <p className={`mt-1 text-sm ${selected ? "text-slate-300" : "text-slate-500"}`}>Same desk for the full stay</p>
-                  </button>
-                );
-              })}
-            </div>
+                  ) : null
+                }
+              />
+            ) : (
+              <>
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold text-slate-950">3. Choose your desk</h2>
+                    <p className="mt-1 text-sm text-slate-600">
+                      A continuous desk keeps you in the same spot for the full stay.
+                    </p>
+                  </div>
+                  <p className="text-sm text-slate-500">{availableOptions.length} continuous option{availableOptions.length === 1 ? "" : "s"}</p>
+                </div>
+
+                <div className="mt-5">
+                  <DeskOptionList
+                    options={deskListOptions}
+                    selectedResourceId={selection?.kind === "single" ? selection.option.resourceId : undefined}
+                    loadingQuote={loadingQuote}
+                    onSelect={selectDeskOption}
+                  />
+                </div>
+              </>
+            )}
 
             {deskChangeOptions.length > 0 ? (
               <div className="mt-7 rounded-3xl bg-amber-50 p-5 ring-1 ring-amber-200 sm:p-6">
@@ -879,8 +958,9 @@ export default function BookingExperienceWithDeskChange() {
                         key={plan.planId}
                         type="button"
                         disabled={loadingQuote}
+                        aria-pressed={selected}
                         onClick={() => loadQuote({ kind: "desk_change", plan })}
-                        className={`rounded-2xl p-4 text-left ring-1 transition ${
+                        className={`rounded-2xl p-4 text-left ring-1 transition focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[#101D4B] ${
                           selected ? "bg-slate-900 text-white ring-slate-900" : "bg-white text-slate-950 ring-amber-200 hover:ring-amber-400"
                         }`}
                       >
@@ -905,7 +985,7 @@ export default function BookingExperienceWithDeskChange() {
               <div className="mt-5 flex items-center gap-2 text-sm text-slate-600"><Loader2 className="h-4 w-4 animate-spin" /> Preparing your live price…</div>
             ) : null}
 
-            {selection && quote && !reviewOpen ? (
+            {!SEAT_MAP_PICKER && selection && quote && !reviewOpen ? (
               <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-y border-slate-200 py-5">
                 <div>
                   <p className="font-semibold text-slate-950">{quote.resourceName}</p>
@@ -960,7 +1040,7 @@ export default function BookingExperienceWithDeskChange() {
                 <div className={`${HIG_CARD} p-5 sm:p-6`}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h2 className="font-display text-2xl font-semibold text-[#101D4B]">{intent === "MEETING" ? "Meeting room" : quote.resourceName}</h2>
+                      <h2 className="font-display text-2xl font-semibold text-[#101D4B]">{intent === "MEETING" ? "Meeting room" : deskLabel(quote.resourceId, quote.resourceName)}</h2>
                       <p className="mt-1 text-[15px] text-slate-600">
                         {formatFacilityDate(bookingWindow.start)} · {formatFacilityTime(bookingWindow.start)}–{formatFacilityTime(bookingWindow.end)}
                       </p>

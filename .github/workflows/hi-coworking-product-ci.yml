@@ -208,6 +208,7 @@ jobs:
           tests/functions/bookstore-return-url.test.ts
           tests/web/event-series-form.test.ts
           tests/web/published-setups.test.ts
+          tests/web/seat-map-picker.test.ts
           tests/web/my-hi-nav.test.ts
           tests/web/admin-member-record-pages.test.ts
           tests/web/public-rfx-quarantine.test.ts
