@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -92,8 +94,10 @@ function WaitlistClaimContent() {
 
 export default function EventWaitlistPage() {
   return (
+    <PublicSiteGate>
     <Suspense fallback={<AppShell><div className="flex min-h-[65vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div></AppShell>}>
       <WaitlistClaimContent />
     </Suspense>
+    </PublicSiteGate>
   );
 }

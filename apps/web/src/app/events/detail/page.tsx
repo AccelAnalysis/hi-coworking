@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
@@ -185,8 +187,10 @@ function EventDetailContent() {
 
 export default function EventDetailPage() {
   return (
+    <PublicSiteGate>
     <Suspense fallback={<AppShell><div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-slate-400" /></div></AppShell>}>
       <EventDetailContent />
     </Suspense>
+    </PublicSiteGate>
   );
 }

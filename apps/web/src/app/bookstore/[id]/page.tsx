@@ -1,5 +1,6 @@
 import { BookDetailClient } from "./BookDetailClient";
 import { STATIC_BOOKSTORE_IDS } from "../staticBookIds";
+import { PublicSiteGate } from "@/components/PublicSiteGate";
 
 export const dynamicParams = false;
 
@@ -10,5 +11,9 @@ export function generateStaticParams(): Array<{ id: string }> {
 
 export default function BookDetailPage({ params }: { params: { id: string } }) {
   void params.id;
-  return <BookDetailClient />;
+  return (
+    <PublicSiteGate>
+      <BookDetailClient />
+    </PublicSiteGate>
+  );
 }

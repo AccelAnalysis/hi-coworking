@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -61,6 +63,14 @@ function EventImage({ event, priority = false }: { event: EventPublic; priority?
 }
 
 export default function EventsPage() {
+  return (
+    <PublicSiteGate>
+      <EventsPageContent />
+    </PublicSiteGate>
+  );
+}
+
+function EventsPageContent() {
   const [events, setEvents] = useState<EventPublic[]>([]);
   const [pastEvents, setPastEvents] = useState<EventPublic[]>([]);
   const [loading, setLoading] = useState(true);

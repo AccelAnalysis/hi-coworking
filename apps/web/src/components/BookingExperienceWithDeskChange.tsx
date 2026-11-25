@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { callableErrorMessage } from "@/lib/callableError";
 import { PublishedSetupDetails } from "@/components/booking/PublishedSetupDetails";
 import { DeskOptionList, type DeskListOption } from "@/components/booking/DeskOptionList";
 import { SeatMapPicker } from "@/components/booking/SeatMapPicker";
@@ -732,7 +733,7 @@ export default function BookingExperienceWithDeskChange() {
       window.location.assign(result.data.checkoutUrl);
     } catch (caught) {
       console.error(caught);
-      setError(errorMessage(caught, "We could not start checkout. Your card has not been charged. Check availability and try again."));
+      setError(callableErrorMessage(caught, "We could not start checkout. Your card has not been charged. Check availability and try again."));
       setCheckingOut(false);
     }
   }

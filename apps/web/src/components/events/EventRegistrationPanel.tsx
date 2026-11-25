@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { CheckCircle2, Loader2, Users } from "lucide-react";
 import { useAuth } from "@/lib/authContext";
+import { callableErrorMessage } from "@/lib/callableError";
 import {
   beginEventRegistration,
   eventAvailableSeats,
@@ -75,7 +76,7 @@ export function EventRegistrationPanel({ event }: { event: EventPublic }) {
       }));
       window.location.assign(result.data.checkoutUrl);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "We could not complete registration. Please try again.");
+      setMessage(callableErrorMessage(error, "We could not complete registration. Please try again."));
     } finally {
       setBusy(false);
     }
@@ -93,7 +94,7 @@ export function EventRegistrationPanel({ event }: { event: EventPublic }) {
       });
       setWaitlisted(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "We could not add you to the waitlist.");
+      setMessage(callableErrorMessage(error, "We could not add you to the waitlist."));
     } finally {
       setBusy(false);
     }
