@@ -78,6 +78,7 @@ jobs:
           chmod 600 "${credential_file}"
           echo "GOOGLE_APPLICATION_CREDENTIALS=${credential_file}" >> "${GITHUB_ENV}"
           gcloud auth activate-service-account --key-file="${credential_file}" >/dev/null
+          echo "Deploying as $(gcloud config get-value account 2>/dev/null)"
 
       - name: Install dependencies
         run: npm ci
