@@ -3,12 +3,20 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { HttpsError } from "firebase-functions/v2/https";
 import {
-  PUBLIC_LAUNCH_AT,
-  PUBLIC_LAUNCH_LOCKED_MESSAGE,
+  PUBLIC_LAUNCH_AT as WEB_PUBLIC_LAUNCH_AT,
+  PUBLIC_LAUNCH_AT_ISO as WEB_PUBLIC_LAUNCH_AT_ISO,
+  PUBLIC_LAUNCH_LOCKED_MESSAGE as WEB_PUBLIC_LAUNCH_LOCKED_MESSAGE,
+  isComingSoonPubliclyActive as webIsComingSoonPubliclyActive,
+  resolvePublicLaunchAt as webResolvePublicLaunchAt,
 } from "../../apps/web/src/lib/publicLaunch";
 import {
+  PUBLIC_LAUNCH_AT,
+  PUBLIC_LAUNCH_AT_ISO,
+  PUBLIC_LAUNCH_LOCKED_MESSAGE,
   assertPublicLaunchOpen,
+  isComingSoonPubliclyActive,
   isLaunchBypassRole,
+  resolvePublicLaunchAt,
   type PublicLaunchGateDeps,
 } from "../../apps/functions/src/publicLaunchGate";
 
@@ -92,6 +100,22 @@ describe("pre-launch checkout lock", () => {
 
   it("uses the shared public message", () => {
     expect(PUBLIC_LAUNCH_LOCKED_MESSAGE).toBe("Booking opens Monday, November 30 at 8 AM");
+  });
+
+  it("stays in sync with the web Coming Soon helpers", () => {
+    expect(PUBLIC_LAUNCH_AT_ISO).toBe(WEB_PUBLIC_LAUNCH_AT_ISO);
+    expect(PUBLIC_LAUNCH_AT).toBe(WEB_PUBLIC_LAUNCH_AT);
+    expect(PUBLIC_LAUNCH_LOCKED_MESSAGE).toBe(WEB_PUBLIC_LAUNCH_LOCKED_MESSAGE);
+    const before = PUBLIC_LAUNCH_AT - 1;
+    const settingsOn = { comingSoonEnabled: true };
+    const settingsOff = { comingSoonEnabled: false };
+    const override = PUBLIC_LAUNCH_AT + 86_400_000;
+    expect(isComingSoonPubliclyActive(settingsOn, before)).toBe(webIsComingSoonPubliclyActive(settingsOn, before));
+    expect(isComingSoonPubliclyActive(settingsOn, PUBLIC_LAUNCH_AT)).toBe(webIsComingSoonPubliclyActive(settingsOn, PUBLIC_LAUNCH_AT));
+    expect(isComingSoonPubliclyActive(settingsOff, before)).toBe(webIsComingSoonPubliclyActive(settingsOff, before));
+    expect(resolvePublicLaunchAt(override)).toBe(webResolvePublicLaunchAt(override));
+    expect(isComingSoonPubliclyActive({ comingSoonEnabled: true, launchAt: override }, PUBLIC_LAUNCH_AT))
+      .toBe(webIsComingSoonPubliclyActive({ comingSoonEnabled: true, launchAt: override }, PUBLIC_LAUNCH_AT));
   });
 });
 
