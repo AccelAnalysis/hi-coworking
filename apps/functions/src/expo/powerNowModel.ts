@@ -3,9 +3,8 @@
  *
  * Three short forms share the Accel intake function. Path is allow-listed.
  * Pitch city, state, stage, and opportunity are stored on the note and the
- * description tag. The Pitch Competition list entry gets them only when
- * those attributes already exist. This code does not create Attio attributes.
- * Consent wording lives here so the page and the Attio record show the same sentence.
+ * description tag. Consent wording lives here so the page and the stored
+ * lead show the same sentence.
  */
 
 import {
@@ -315,10 +314,10 @@ export function buildPowerNowTaskContent(input: {
     `Power NOW ${input.path} interest for Jessica.`,
     `Name: ${input.fullName}`,
     `Company: ${input.companyName ?? "none"}`,
-    `Attio person: https://app.attio.com/accel-analysis/person/${input.personRecordId}/overview`,
+    `Person id: ${input.personRecordId}`,
     input.companyRecordId
-      ? `Attio company: https://app.attio.com/accel-analysis/company/${input.companyRecordId}/overview`
-      : "Attio company: none",
+      ? `Company id: ${input.companyRecordId}`
+      : "Company id: none",
     `Flags: ${input.flags.length > 0 ? input.flags.join(", ") : "none"}`,
     `Submission: ${input.clientSubmissionId}`,
   ]

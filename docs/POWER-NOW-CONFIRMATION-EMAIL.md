@@ -1,6 +1,6 @@
 # Power NOW confirmation emails
 
-The Power NOW form can send its own confirmation after a submission is saved in Attio. It does not use Attio sequences. Pitch, watch, and contribute each get Step 1 only, in Jessica's wording.
+The Power NOW form can send its own confirmation after a submission is saved in Firestore. Pitch, watch, and contribute each get Step 1 only, in Jessica's wording.
 
 The sender is `hello@accelanalysis.com`. The default provider is Resend. The Graph adapter remains in the code for a later switch, and its secrets are not bound on the function.
 
@@ -8,9 +8,9 @@ Nothing in this document sets a secret or deploys the function.
 
 ## Flag
 
-`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` must be the string `true`. Any other value, including empty or unset, sends nothing. The Attio person, company, list, note, task, and consent log stay as they are without this feature. The HTTP response does not include the submitted email address.
+`POWER_NOW_CONFIRMATION_EMAIL_ENABLED` must be the string `true`. Any other value, including empty or unset, sends nothing. The stored lead is unchanged when mail is skipped. The HTTP response does not include the submitted email address.
 
-`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is the allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Attio and does not receive mail. The deployed value is `jholman@accelanalysis.com` only. An empty value means no allow-list, so do not clear it while the flag is true: that would email every address that passes the other checks.
+`POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` is the allow-list (commas or spaces). When it is set, mail is sent only to those addresses. Everyone else is still saved in Firestore and does not receive mail. The deployed value is `jholman@accelanalysis.com` only. An empty value means no allow-list, so do not clear it while the flag is true: that would email every address that passes the other checks.
 
 ## Temporary flag-on test
 
@@ -21,13 +21,13 @@ POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true
 POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
 ```
 
-That is the inbox test, not the steady setting. With those two values, confirmation mail goes only to `jholman@accelanalysis.com` (the same mailbox as `JHolman@AccelAnalysis.com`). Any other submitter is still saved in Attio and gets no email. The emulator files under `apps/functions/` stay blank, so local emulators do not send.
+That is the inbox test, not the steady setting. With those two values, confirmation mail goes only to `jholman@accelanalysis.com` (the same mailbox as `JHolman@AccelAnalysis.com`). Any other submitter is still saved in Firestore and gets no email. The emulator files under `apps/functions/` stay blank, so local emulators do not send.
 
 Revert this flag, or follow this change with a flag-off pull request, after the inbox test. Do not leave `POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true` in place.
 
 ## What gets sent
 
-One message per path, right after the Attio write in the same request:
+One message per path, right after the Firestore write in the same request:
 
 | Path | Subject | Template |
 | --- | --- | --- |
@@ -83,11 +83,11 @@ POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com
 | `RESEND_API_KEY` | Secret Manager, optional at deploy | not in git. Owner supplies it | Resend `Authorization: Bearer`. Missing key skips the email and logs a warning |
 | `RECAPTCHA_ENTERPRISE_API_KEY` | Secret Manager, optional at deploy | not in git. Owner supplies it | reCAPTCHA Enterprise assessments. Missing key skips the email and does not treat reCAPTCHA as passed |
 
-The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields are not stored on the Attio note.
+The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields are not stored on the lead note.
 
 ## Secrets
 
-`RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` are not `defineSecret` bindings. The isolated deploy (`firebase.expo-lead.json`, entry `firebase/expo-lead-functions`) still requires only `ATTIO_API_KEY`. A missing Resend or reCAPTCHA secret does not block deploy. At runtime the function reads each one from the environment, then from Secret Manager as `217107644706-compute@developer.gserviceaccount.com`. That service account needs Secret Accessor on the secret. If the secret is missing or unreadable, the function logs a warning with the Secret Manager status and skips the confirmation email. It does not treat reCAPTCHA as passed. Origin checks, the honeypot, and rate limits still run. Do not put secret values in git, logs, or this doc.
+`RESEND_API_KEY` and `RECAPTCHA_ENTERPRISE_API_KEY` are not `defineSecret` bindings. The isolated deploy (`firebase.expo-lead.json`, entry `firebase/expo-lead-functions`) does not bind a secret. A missing Resend or reCAPTCHA secret does not block deploy. At runtime the function reads each one from the environment, then from Secret Manager as `217107644706-compute@developer.gserviceaccount.com`. That service account needs Secret Accessor on the secret. If the secret is missing or unreadable, the function logs a warning with the Secret Manager status and skips the confirmation email. It does not treat reCAPTCHA as passed. Origin checks, the honeypot, and rate limits still run. Do not put secret values in git, logs, or this doc.
 
 | Secret | Required for this deploy | Used by |
 | --- | --- | --- |
@@ -96,8 +96,6 @@ The page sends `pnStartedAt` and `recaptchaToken` with the form. Those fields ar
 | `M365_TENANT_ID` | no | Graph client-credentials token, only after a later switch |
 | `M365_CLIENT_ID` | no | Graph client-credentials token, only after a later switch |
 | `M365_CLIENT_SECRET` | no | Graph client-credentials token, only after a later switch |
-
-`ATTIO_API_KEY` is unchanged and still required.
 
 Create a secret without printing it in CI:
 
@@ -146,7 +144,7 @@ firebase functions:secrets:set RESEND_API_KEY --project hi-coworking-plat
 firebase functions:secrets:set RECAPTCHA_ENTERPRISE_API_KEY --project hi-coworking-plat
 ```
 
-`ATTIO_API_KEY` is already required and is unchanged. Do not create `M365_TENANT_ID`, `M365_CLIENT_ID`, or `M365_CLIENT_SECRET` for this Resend deploy.
+Do not create `M365_TENANT_ID`, `M365_CLIENT_ID`, or `M365_CLIENT_SECRET` for this Resend deploy.
 
 ### 3. reCAPTCHA Enterprise
 
@@ -174,7 +172,7 @@ After DNS is verified, both secrets exist, both site-key env vars are set, and y
 1. Keep `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` set to exactly `jholman@accelanalysis.com`. Do not add another address. This is the same mailbox as `JHolman@AccelAnalysis.com`.
 2. Set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` to the string `true` and redeploy `expo_submitNasaLead`.
 3. Open the Power NOW form, wait at least 3 seconds, and submit one path as `jholman@accelanalysis.com`.
-4. Confirm that inbox receives the Step 1 message for that path. Submit again as any other address and confirm Attio still saves it and no confirmation mail is sent.
+4. Confirm that inbox receives the Step 1 message for that path. Submit again as any other address and confirm the lead is still saved in Firestore and no confirmation mail is sent.
 5. Set `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` back to empty and redeploy. Leave `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis.com` in place until a later decision to write to other people. Clearing the allow-list sends to every address that passes the other checks.
 
 ## Microsoft Graph
@@ -193,7 +191,7 @@ Grant any Graph key least privilege and store it only in Secret Manager.
 
 Checked only when the flag is on. A block skips the email and still returns success for the saved submission. These blocks do not prefix the task. A provider or network failure does, including a missing Resend key or a Graph selection whose M365 values are not configured.
 
-- Honeypot fields `expo_hp` and `pn_hp` already return a fake success before any Attio write, so they send no mail.
+- Honeypot fields `expo_hp` and `pn_hp` already return a fake success before any lead is stored, so they send no mail.
 - Submit faster than `POWER_NOW_MIN_SUBMIT_MS`, or omit `pnStartedAt`, and the email is skipped.
 - Role local-parts (such as `info`, `admin`, `sales`, `support`, `noreply`) and common disposable domains are rejected. The domain must have an MX record.
 - reCAPTCHA Enterprise, score-based, project `hi-coworking-plat`, action `power_now_submit`. Missing site key or API key, a missing token, or a failed score skips the email. A queued offline retry may not send because the token expires. The submission is still saved.

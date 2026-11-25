@@ -7,12 +7,8 @@ const VISITOR_ERROR_BY_MESSAGE: Record<string, string> = {
   "This booth form cannot be submitted from that site.": "This page can't send from here. Please try again.",
   "That lead is too large.": "That's too long to send. Please shorten it and try again.",
   "Lead capture is not configured.": "We couldn't send this just now. Please try again.",
-  "Attio could not save this lead yet.": "We couldn't send this just now. Please try again.",
-  "More than one Attio person matches this phone. Add an email so the booth does not merge the wrong people.":
-    "Add your email so we follow up with the right person.",
   "Method not allowed": "We couldn't send this. Please try again.",
   Offline: "The connection dropped. We'll try again.",
-  "The network dropped before Attio confirmed the lead.": "The connection dropped before this sent.",
   "This lead could not be read. Enter it again.": "We couldn't read this. Please enter it again.",
   "Enter the visitor's full name.": "Enter your full name.",
   "Enter their organization.": "Enter your organization.",

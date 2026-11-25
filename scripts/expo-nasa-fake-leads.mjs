@@ -2,9 +2,9 @@
 /**
  * Preview or send three fake NASA Expo booth leads.
  *
- * Dry run (default) prints the JSON and does not contact Attio.
- * --send posts to the booth ingest. The Attio token stays in ATTIO_API_KEY
- * on the Cloud Function; this script never reads or sends that key.
+ * Dry run (default) prints the JSON and does not write a lead.
+ * --send posts to the booth ingest, which stores the lead in Firestore.
+ * This script never reads or sends a secret.
  *
  *   node scripts/expo-nasa-fake-leads.mjs
  *   node scripts/expo-nasa-fake-leads.mjs --send --url https://hi-coworking.com/api/expo/nasa-lead

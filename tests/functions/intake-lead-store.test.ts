@@ -16,28 +16,21 @@ const CONTRIB_ID = "33333333-3333-4333-8333-333333333333";
 const WATCH_ID = "44444444-4444-4444-8444-444444444444";
 
 beforeEach(() => {
-  delete process.env.ATTIO_INTAKE_ENABLED;
   resetIntakeLeadMemoryForTests();
 });
 
 describe("Firestore intake leads", () => {
-  it("saves a booth lead with consent, event, interests, and submittedAt, and ignores Attio", async () => {
-    let attioCalled = false;
+  it("saves a booth lead with consent, event, interests, and submittedAt", async () => {
     const result = await handleExpoLeadHttp({
       method: "POST",
       origin: "https://hi-coworking.com",
       body: boothPayload(),
-      apiKey: "live-key",
       now: NOW,
-      fetchImpl: async () => {
-        attioCalled = true;
-        return json(403, { message: "workspace does not have an active subscription" });
-      },
     });
 
     expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ ok: true, accepted: true, stored: true, duplicate: false, attioStatus: "disabled" });
-    expect(attioCalled).toBe(false);
+    expect(result.body).toMatchObject({ ok: true, accepted: true, stored: true, duplicate: false, action: "stored" });
+    expect(result.body).not.toHaveProperty("attioStatus");
     const saved = readIntakeLeadForTests(BOOTH_ID);
     expect(saved).toMatchObject({
       kind: "expo",
@@ -97,53 +90,17 @@ describe("Firestore intake leads", () => {
     expect(readIntakeLeadForTests(BOOTH_ID)?.fullName).toBe("Jordan Hale");
   });
 
-  it("keeps the lead when Attio is enabled and returns the subscription 403", async () => {
-    const errors: string[] = [];
-    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
-      errors.push(String(message));
-    });
-    try {
-      const result = await handleExpoLeadHttp({
-        method: "POST",
-        origin: "https://hi-coworking.com",
-        body: boothPayload(),
-        apiKey: "live-key",
-        now: NOW,
-        attioEnabled: true,
-        fetchImpl: async () => json(403, {
-          code: "workspace_authorization",
-          message: "workspace does not have an active subscription for expo-fake-jordan@example.com",
-        }),
-      });
-      expect(result.status).toBe(200);
-      expect(result.body).toMatchObject({ ok: true, stored: true, attioStatus: "failed" });
-      expect(JSON.stringify(result.body)).not.toContain("expo-fake-jordan@example.com");
-      expect(readIntakeLeadForTests(BOOTH_ID)?.email).toBe("expo-fake-jordan@example.com");
-      const line = errors.find((message) => message.includes("Expo lead send failed"));
-      expect(line).toContain("HTTP 403");
-      expect(line).not.toContain("expo-fake-jordan@example.com");
-    } finally {
-      spy.mockRestore();
-    }
-  });
 
-  it("queues a storage failure and does not call Attio", async () => {
-    let attioCalled = false;
+  it("queues a storage failure", async () => {
     const result = await handleExpoLeadHttp({
       method: "POST",
       origin: "https://hi-coworking.com",
       body: boothPayload(),
-      apiKey: "live-key",
       now: NOW,
       leadStore: { save: async () => { throw new Error("firestore down"); } },
-      fetchImpl: async () => {
-        attioCalled = true;
-        return json(200, {});
-      },
     });
     expect(result.status).toBe(502);
     expect(result.body).toMatchObject({ ok: false, error: "Could not save this lead." });
-    expect(attioCalled).toBe(false);
     expect(decideLeadSubmitOutcome({ online: true, networkError: false, httpStatus: 502 })).toBe("queue");
     expect(readIntakeLeadForTests(BOOTH_ID)).toBeNull();
   });
@@ -222,7 +179,7 @@ describe("Firestore intake leads", () => {
     expect(readIntakeLeadForTests(WATCH_ID)).toMatchObject({ path: "watch" });
   });
 
-  it("still sends confirmation mail from the allow-list when Attio is off", async () => {
+  it("still sends confirmation mail from the allow-list", async () => {
     const calls: string[] = [];
     const env = {
       POWER_NOW_CONFIRMATION_EMAIL_ENABLED: "true",
@@ -251,9 +208,6 @@ describe("Firestore intake leads", () => {
       ip: "203.0.113.10",
       rateLimiter: { allow: () => true },
       confirmation,
-      fetchImpl: async () => {
-        throw new Error("Attio should not be called");
-      },
     });
     const blocked = await handleExpoLeadHttp({
       method: "POST",

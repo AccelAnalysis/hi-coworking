@@ -74,13 +74,12 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     expect(yaml).toContain('node-version: "22"');
   });
 
-  it("checks the Attio secret without reading or printing it, then smoke-tests with OPTIONS", () => {
-    expect(yaml).toContain("gcloud secrets describe ATTIO_API_KEY");
-    expect(yaml).toContain("secrets versions list ATTIO_API_KEY");
+  it("does not require a secret, then smoke-tests with OPTIONS", () => {
+    expect(yaml).not.toContain("ATTIO_API_KEY");
     expect(yaml).not.toContain("secrets versions access");
     expect(yaml).toContain("The secret value was not printed.");
     expect(yaml).toContain("--request OPTIONS");
-    expect(yaml).toContain("does not write to Attio");
+    expect(yaml).toContain("does not write a lead");
     expect(doc).toContain("Hi Coworking Firebase expo lead function");
     expect(doc).toContain("deploy expo_submitNasaLead");
     expect(doc).toContain("workflow_dispatch");
@@ -94,7 +93,7 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     expect(doc).toContain("301");
   });
 
-  it("loads only ATTIO_API_KEY for the scoped deploy, while the monolith still registers Twilio", () => {
+  it("loads no secrets for the scoped deploy, while the monolith still registers Twilio", () => {
     expect(isolatedConfig.functions.source).toBe("firebase/expo-lead-functions");
     expect(isolatedConfig.functions.codebase).toBeUndefined();
     expect(isolatedConfig.functions.region).toBe("us-central1");
@@ -109,7 +108,7 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     );
 
     const isolated = loadGraph("firebase/expo-lead-functions/src/index.ts");
-    expect(isolated.secrets).toEqual(["ATTIO_API_KEY"]);
+    expect(isolated.secrets).toEqual([]);
     expect(isolated.files.some((file) => file.endsWith("powerNowConfirmationSecrets.ts"))).toBe(true);
     expect(isolated.files.some((file) => file.endsWith("powerNowIngest.ts"))).toBe(true);
     expect(isolated.files.some((file) => file.endsWith("intakeLeadStore.ts"))).toBe(true);
@@ -121,11 +120,11 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     expect(monolith.secrets).toContain("TWILIO_ACCOUNT_SID");
     expect(monolith.secrets).toContain("TWILIO_AUTH_TOKEN");
     expect(monolith.secrets).toContain("TWILIO_FROM_NUMBER");
-    expect(monolith.secrets).toContain("ATTIO_API_KEY");
+    expect(monolith.secrets).not.toContain("ATTIO_API_KEY");
     expect(monolith.files.some((file) => file.endsWith("eventMarketing.ts"))).toBe(true);
   });
 
-  it("emits a Firebase manifest whose only secret is ATTIO_API_KEY", () => {
+  it("emits a Firebase manifest with no bound secrets", () => {
     expect(existsSync("firebase/expo-lead-functions/lib/firebase/expo-lead-functions/src/index.js")).toBe(true);
     const output = execFileSync(
       process.execPath,
@@ -149,15 +148,14 @@ describe("expo_submitNasaLead manual deploy workflow", () => {
     );
     const parsed = JSON.parse(output) as { params: string[]; bound: string[]; ids: string[] };
     expect(parsed.ids).toEqual(["expo_submitNasaLead"]);
-    expect(parsed.bound).toEqual(["ATTIO_API_KEY"]);
-    expect(parsed.params.filter((param) => param.endsWith(":secret"))).toEqual(["ATTIO_API_KEY:secret"]);
+    expect(parsed.bound).toEqual([]);
+    expect(parsed.params.filter((param) => param.endsWith(":secret"))).toEqual([]);
     expect(parsed.params).toEqual(expect.arrayContaining([
-      "ATTIO_API_KEY:secret",
-      "ATTIO_INTAKE_ENABLED:string",
       "POWER_NOW_CONFIRMATION_EMAIL_ENABLED:string",
       "POWER_NOW_CONFIRMATION_TEST_RECIPIENTS:string",
       "RECAPTCHA_ENTERPRISE_SITE_KEY:string",
     ]));
+    expect(parsed.params.some((param) => param.startsWith("ATTIO_"))).toBe(false);
     expect(parsed.params.some((param) => param.startsWith("RESEND_API_KEY"))).toBe(false);
     expect(parsed.params.some((param) => param.startsWith("RECAPTCHA_ENTERPRISE_API_KEY"))).toBe(false);
   });

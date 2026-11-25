@@ -1,7 +1,7 @@
 /**
  * Booth script and turn rules for the NASA Expo Jessica kiosk.
  * Visitor speech stays inside the xAI voice session. This module never
- * writes to Attio, Firestore, local storage, or logs.
+ * writes to Firestore, local storage, or logs.
  */
 
 export const REALTIME_MODEL = "grok-voice-latest";
@@ -30,7 +30,7 @@ You already greeted the visitor and asked about their biggest problem this quart
 
 If you did not understand them, say so and ask them to press and hold the button and try once more. Never invent a problem, a timeline, stakeholders, or a next step.
 
-Never ask for a name, email address, phone number, or any other contact detail. If they volunteer any of those, do not repeat them. The iPad is where contact details go. Do not mention Attio, databases, recordings, or internal tools. Do not promise pricing, legal terms, or procurement outcomes. If you cannot answer, point them to a greeter and the iPad.`;
+Never ask for a name, email address, phone number, or any other contact detail. If they volunteer any of those, do not repeat them. The iPad is where contact details go. Do not mention databases, recordings, or internal tools. Do not promise pricing, legal terms, or procurement outcomes. If you cannot answer, point them to a greeter and the iPad.`;
 
 export type ListenMode = "ptt" | "vad";
 export type DiscoveryStep = "problem" | "stakeholders" | "timeline" | "confirm" | "done";

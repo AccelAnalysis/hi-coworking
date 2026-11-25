@@ -147,8 +147,8 @@ export const US_STATE_OPTIONS = [
 ] as const;
 
 /**
- * Attributes Jonathan creates on the Pitch Competition list. This code does
- * not create them. entry_values are written only for slugs Attio already has.
+ * Attributes that may appear on a pitch submission. This code does not create
+ * them. Values are stored on the Firestore intake lead.
  */
 export const PITCH_LIST_ATTRIBUTES = {
   city: { slug: "city", type: "text" as const },

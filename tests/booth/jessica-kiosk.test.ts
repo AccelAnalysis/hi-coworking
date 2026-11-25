@@ -109,7 +109,7 @@ describe("Jessica booth script", () => {
     expect(JESSICA_INSTRUCTIONS.toLowerCase()).toContain("phone");
     expect(JESSICA_INSTRUCTIONS.toLowerCase()).toContain("name");
     expect(JESSICA_INSTRUCTIONS).toContain("Never invent");
-    expect(JESSICA_INSTRUCTIONS).toContain("Attio");
+    expect(JESSICA_INSTRUCTIONS).toContain("internal tools");
     expect(nextDiscoveryStep("problem")).toBe("stakeholders");
     expect(nextDiscoveryStep("stakeholders")).toBe("timeline");
     expect(nextDiscoveryStep("timeline")).toBe("confirm");

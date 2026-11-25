@@ -1,6 +1,6 @@
 # Jessica booth kiosk
 
-TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points them at the intake form. The TV does not collect name, email, or phone, and the voice path does not write to Attio. The screen is not event-branded. An event query on the URL is not shown.
+TV page for Accel Analysis. Jessica qualifies a visitor by voice, then points them at the intake form. The TV does not collect name, email, or phone, and the voice path does not write a lead. The screen is not event-branded. An event query on the URL is not shown.
 
 - Kiosk: `/kiosk/jessica`
 - Always-on presentation: `/kiosk/jessica?mode=ambient` (alias `?display=solo`)
@@ -99,7 +99,7 @@ Hold the gold button, or hold the space bar, while the visitor speaks. Release t
 
 If speech recognition fails twice in a row, Jessica apologizes and tells them a greeter and the iPad will help. She does not guess what they said. **Next visitor** closes the voice session. The page also resets itself about eight seconds after the handoff or the apology, so the next person does not inherit the previous conversation.
 
-Say a fake email during rehearsal. Jessica should not repeat it, and it should not remain on the TV caption. Nothing from this page is written to Attio.
+Say a fake email during rehearsal. Jessica should not repeat it, and it should not remain on the TV caption. Nothing from this page is written to Firestore.
 
 ## Rehearsal — October 17
 
@@ -110,7 +110,7 @@ Say a fake email during rehearsal. Jessica should not repeat it, and it should n
 - [ ] The iPad sentence is spoken, and **Next visitor** returns to the wake screen.
 - [ ] Two empty holds produce the apology, then the greeter line. No invented summary.
 - [ ] A volunteered email or phone is not repeated and not shown on the TV.
-- [ ] Attio has no new record from the voice session.
+- [ ] Firestore has no new intake lead from the voice session.
 - [ ] The iPad still opens `/expo/nasa-2026` or `/intake?event=nasa-expo-2026-10-20`.
 
 ## Dress rehearsal — October 19

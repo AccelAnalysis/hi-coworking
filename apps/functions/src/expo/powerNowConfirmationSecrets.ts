@@ -2,9 +2,9 @@
  * Optional Power NOW secrets for expo_submitNasaLead.
  *
  * These are not defineSecret() bindings. The isolated deploy entry
- * (firebase/expo-lead-functions, firebase.expo-lead.json) registers only
- * ATTIO_API_KEY, so a missing Resend or reCAPTCHA secret does not block
- * deploy. The function reads each value from the environment first, then
+ * (firebase/expo-lead-functions, firebase.expo-lead.json) does not register
+ * secrets, so a missing Resend or reCAPTCHA secret does not block deploy.
+ * The function reads each value from the environment first, then
  * from Secret Manager as the runtime service account. A missing secret logs
  * a warning and the confirmation email is skipped. reCAPTCHA is not treated
  * as passed, and the origin, honeypot, and rate-limit checks still run.
@@ -102,6 +102,6 @@ function warnOptionalSecret(name: string, code: string): void {
   if (warned.has(name)) return;
   warned.add(name);
   console.warn(
-    `Power NOW secret ${name} is unset (${code}). Confirmation email or reCAPTCHA Enterprise is skipped until the secret exists. The Attio submission is unchanged, and reCAPTCHA is not treated as passed.`,
+    `Power NOW secret ${name} is unset (${code}). Confirmation email or reCAPTCHA Enterprise is skipped until the secret exists. The stored lead is unchanged, and reCAPTCHA is not treated as passed.`,
   );
 }

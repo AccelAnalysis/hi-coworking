@@ -82,33 +82,11 @@ jobs:
           }
           NODE
 
-      - name: Confirm ATTIO_API_KEY exists in Secret Manager
-        shell: bash
-        run: |
-          set -euo pipefail
-          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
-          err="${RUNNER_TEMP}/attio-secret-check.txt"
-          if ! gcloud secrets describe ATTIO_API_KEY --project=hi-coworking-plat --format='value(name)' >/dev/null 2>"${err}"; then
-            if grep -Eq 'NOT_FOUND|not found' "${err}"; then
-              echo "ATTIO_API_KEY is missing from Secret Manager in project hi-coworking-plat." >&2
-              echo "Set it with: firebase functions:secrets:set ATTIO_API_KEY --project hi-coworking-plat" >&2
-            else
-              echo "Could not confirm ATTIO_API_KEY in Secret Manager for hi-coworking-plat. Refusing to deploy." >&2
-            fi
-            echo "The secret value was not printed." >&2
-            exit 1
-          fi
-          enabled="$(gcloud secrets versions list ATTIO_API_KEY --project=hi-coworking-plat --filter='state=ENABLED' --format='value(name)' --limit=1)"
-          if [[ -z "${enabled}" ]]; then
-            echo "ATTIO_API_KEY has no enabled version in Secret Manager for hi-coworking-plat." >&2
-            echo "The secret value was not printed." >&2
-            exit 1
-          fi
-
       - name: Note optional Power NOW secrets
         shell: bash
         run: |
           set -euo pipefail
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" >/dev/null
           # Names only. Values are never printed. These are not defineSecret
           # bindings, so a missing secret does not block this deploy.
           # M365_TENANT_ID, M365_CLIENT_ID, and M365_CLIENT_SECRET are not checked.
@@ -131,7 +109,7 @@ jobs:
       - name: Deploy expo_submitNasaLead only
         run: npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 
-      - name: Smoke-test the function without writing to Attio
+      - name: Smoke-test the function with OPTIONS
         shell: bash
         run: |
           set -euo pipefail
@@ -146,10 +124,10 @@ jobs:
             --header 'Access-Control-Request-Headers: content-type' \
             "${endpoint}")"
           if [[ "${status}" != "204" && "${status}" != "200" ]]; then
-            echo "expo_submitNasaLead OPTIONS smoke test failed (HTTP ${status}). This request does not write to Attio." >&2
+            echo "expo_submitNasaLead OPTIONS smoke test failed (HTTP ${status}). This request does not write a lead." >&2
             exit 1
           fi
           if grep -q '<html' "${body}"; then
-            echo "expo_submitNasaLead OPTIONS returned HTML instead of the function. This request does not write to Attio." >&2
+            echo "expo_submitNasaLead OPTIONS returned HTML instead of the function. This request does not write a lead." >&2
             exit 1
           fi
