@@ -4,6 +4,7 @@ import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { createPayment } from "./payments/ledger";
 import { StripeProvider } from "./payments/stripeProvider";
+import { assertPublicLaunchOpen } from "./publicLaunchGate";
 
 // MIRROR of @hi/shared types — kept inline because @hi/shared is ESM-only.
 interface BookDoc {
@@ -34,6 +35,7 @@ function getDb() {
 export const bookstore_createCheckoutSession = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret] },
   async (request) => {
+    await assertPublicLaunchOpen(request.auth);
     if (!request.auth) {
       // Allow guest checkout for bookstore?
       // Policy in BookDoc says 'requireLoginToPurchase'. We should check that.

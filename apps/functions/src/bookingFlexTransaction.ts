@@ -46,6 +46,7 @@ import {
   validateWindow,
 } from "./bookingFlexShared";
 import { assertResourceOffered, isResourceOffered, loadResourceOfferingMap } from "./resourceOffering";
+import { assertPublicLaunchOpen } from "./publicLaunchGate";
 
 if (admin.apps.length === 0) admin.initializeApp();
 
@@ -691,6 +692,7 @@ async function finalizeHeldBookingRecord(
 export const booking_beginCheckout = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret, seamApiKey, resendApiKey] },
   async (request) => {
+    await assertPublicLaunchOpen(request.auth);
     const { resourceId, deskChangePlanId, start, end, successUrl, cancelUrl, guest } = request.data as {
       resourceId?: string;
       deskChangePlanId?: string;

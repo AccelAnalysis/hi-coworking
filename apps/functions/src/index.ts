@@ -132,6 +132,7 @@ import { events_upsertSeries, events_extendHorizon, events_setSeriesOccurrenceOv
 // declaring those secrets.
 import { events_onMediaUploaded } from "./eventMedia";
 import { membershipCheckoutExtras, virtualAddressEnabled, virtualAddressPriceId } from "./sayhi/config";
+import { assertPublicLaunchOpen } from "./publicLaunchGate";
 import { bookstore_createCheckoutSession } from "./bookstore";
 import { bookstore_getDownloadLink } from "./digitalFulfillment";
 import {
@@ -721,6 +722,7 @@ interface CreateCheckoutInput {
 export const stripe_createCheckoutSession = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret] },
   async (request) => {
+    await assertPublicLaunchOpen(request.auth);
     if (!request.auth) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }

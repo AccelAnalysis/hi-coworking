@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import BookstoreItemPage from "./BookstoreItemClient";
+import { PublicSiteGate } from "@/components/PublicSiteGate";
 
 function ItemFallback() {
   return (
@@ -18,8 +19,10 @@ function ItemFallback() {
 
 export default function BookstoreItemRoute() {
   return (
+    <PublicSiteGate>
     <Suspense fallback={<ItemFallback />}>
       <BookstoreItemPage />
     </Suspense>
+    </PublicSiteGate>
   );
 }

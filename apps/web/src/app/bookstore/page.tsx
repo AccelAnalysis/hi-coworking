@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, BookOpen, ExternalLink, Loader2 } from "lucide-react";
@@ -117,6 +119,14 @@ function Shelf({ title, intro, books, userId }: {
 }
 
 export default function BookstorePage() {
+  return (
+    <PublicSiteGate>
+      <BookstorePageContent />
+    </PublicSiteGate>
+  );
+}
+
+function BookstorePageContent() {
   const { user } = useAuth();
   const [books, setBooks] = useState<BookDoc[]>([]);
   const [loading, setLoading] = useState(true);

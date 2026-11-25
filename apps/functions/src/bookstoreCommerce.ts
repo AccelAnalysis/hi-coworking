@@ -9,6 +9,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import Stripe from "stripe";
 import { StripeProvider } from "./payments/stripeProvider";
 import { updatePaymentStatus } from "./payments/ledger";
+import { assertPublicLaunchOpen } from "./publicLaunchGate";
 
 const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -380,6 +381,7 @@ export const bookstore_getPublicStock = onCall(async (request) => {
 export const bookstore_createCheckoutSession = onCall(
   { secrets: [stripeSecretKey, stripeWebhookSecret] },
   async (request) => {
+    await assertPublicLaunchOpen(request.auth);
     const bookId = safeId(request.data?.bookId, "bookId");
     const requestedVariantId = safeString(request.data?.variantId, 120) || undefined;
     const quantity = positiveQuantity(request.data?.quantity);

@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpen, CheckCircle2, Download, Loader2, MapPin, PackageCheck, ReceiptText } from "lucide-react";
@@ -33,6 +35,14 @@ function statusCopy(order: BookstoreOrder) {
 }
 
 export default function BookstoreOrderPage() {
+  return (
+    <PublicSiteGate>
+      <BookstoreOrderPageContent />
+    </PublicSiteGate>
+  );
+}
+
+function BookstoreOrderPageContent() {
   const { user, loading: authLoading } = useAuth();
   const [order, setOrder] = useState<BookstoreOrder | null>(null);
   const [orderId, setOrderId] = useState("");

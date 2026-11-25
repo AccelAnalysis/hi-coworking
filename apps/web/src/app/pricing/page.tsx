@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { PublicSiteGate } from "@/components/PublicSiteGate";
 import { useAuth } from "@/lib/authContext";
 import { functions } from "@/lib/firebase";
+import { callableErrorMessage } from "@/lib/callableError";
 import { SAYHI_FLOW, VIRTUAL_ADDRESS } from "@/lib/sayhiFlags";
 import { rememberVirtualAddressChoice, virtualAddressChoice } from "@/lib/sayhiAccount";
 import {
@@ -98,7 +99,7 @@ export default function PricingPage() {
       }
     } catch (err: unknown) {
       console.error("Checkout error:", err);
-      setError("Failed to start checkout. Please try again.");
+      setError(callableErrorMessage(err, "Failed to start checkout. Please try again."));
     } finally {
       setLoadingTier(null);
     }

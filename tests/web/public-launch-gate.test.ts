@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   PUBLIC_LAUNCH_AT,
   PUBLIC_LAUNCH_AT_ISO,
+  PUBLIC_LAUNCH_LOCKED_MESSAGE,
   isPublicLaunchReached,
 } from "../../apps/web/src/lib/publicLaunch";
 
@@ -49,5 +50,53 @@ describe("public launch gate (Coming Soon countdown)", () => {
     expect(gate).toContain("resolvePublicLaunchAt(settings.launchAt)");
     expect(gate).toContain("<LaunchCountdown launchAt={effectiveLaunchAt} />");
     expect(countdown).toContain("launchAt = PUBLIC_LAUNCH_AT");
+  });
+});
+
+describe("pre-launch PublicSiteGate coverage", () => {
+  const gated = [
+    "apps/web/src/app/book/page.tsx",
+    "apps/web/src/app/register/page.tsx",
+    "apps/web/src/app/events/page.tsx",
+    "apps/web/src/app/events/detail/page.tsx",
+    "apps/web/src/app/events/waitlist/page.tsx",
+    "apps/web/src/app/bookstore/page.tsx",
+    "apps/web/src/app/bookstore/[id]/page.tsx",
+    "apps/web/src/app/bookstore/item/page.tsx",
+    "apps/web/src/app/bookstore/order/page.tsx",
+    "apps/web/src/app/spaces/page.tsx",
+  ];
+
+  const open = [
+    "apps/web/src/app/login/page.tsx",
+    "apps/web/src/app/my-hi/page.tsx",
+    "apps/web/src/app/book/complete/page.tsx",
+    "apps/web/src/app/events/complete/page.tsx",
+  ];
+
+  it("wraps book, register, events, and bookstore purchase routes", () => {
+    for (const file of gated) {
+      const source = read(file);
+      expect(source, file).toContain("PublicSiteGate");
+      expect(source, file).toContain("<PublicSiteGate>");
+    }
+  });
+
+  it("leaves login, my-hi, and checkout return pages open", () => {
+    for (const file of open) {
+      expect(read(file), file).not.toContain("PublicSiteGate");
+    }
+  });
+
+  it("shows the server launch message on checkout errors", () => {
+    expect(PUBLIC_LAUNCH_LOCKED_MESSAGE).toBe("Booking opens Monday, November 30 at 8 AM");
+    const booking = read("apps/web/src/components/BookingExperienceWithDeskChange.tsx");
+    const register = read("apps/web/src/app/register/page.tsx");
+    const pricing = read("apps/web/src/app/pricing/page.tsx");
+    const events = read("apps/web/src/components/events/EventRegistrationPanel.tsx");
+    const bookstore = read("apps/web/src/app/bookstore/item/BookstoreItemClient.tsx");
+    for (const source of [booking, register, pricing, events, bookstore]) {
+      expect(source).toContain("callableErrorMessage");
+    }
   });
 });

@@ -10,6 +10,10 @@ export const PUBLIC_LAUNCH_AT_ISO = "2026-11-30T08:00:00-05:00";
 
 export const PUBLIC_LAUNCH_AT = Date.parse(PUBLIC_LAUNCH_AT_ISO);
 
+/** Shown when a pre-launch checkout or registration callable is refused. */
+export const PUBLIC_LAUNCH_LOCKED_MESSAGE = "Booking opens Monday, November 30 at 8 AM";
+
+
 export type PublicLaunchSettings = {
   comingSoonEnabled: boolean;
   launchAt?: number | null;

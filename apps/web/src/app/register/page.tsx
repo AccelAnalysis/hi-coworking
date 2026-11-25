@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicSiteGate } from "@/components/PublicSiteGate";
+
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,6 +14,7 @@ import { HI_TERMS_VERSION, PRIVACY_PATH, TERMS_PATH, recordTermsAcceptance } fro
 import { HiLogo } from "@/components/HiLogo";
 import { SAYHI_FLOW } from "@/lib/sayhiFlags";
 import { readPlanChoice, saveAccountDetails, startMembershipCheckout } from "@/lib/sayhiAccount";
+import { callableErrorMessage } from "@/lib/callableError";
 import {
   BusinessProfileFields,
   EMPTY_BUSINESS_PROFILE,
@@ -21,6 +24,14 @@ import { validateBusinessProfile } from "../../../../functions/src/providers/bus
 import { HIG_CANVAS, HIG_CARD, HIG_FIELD, HIG_LABEL, HIG_LINK, HIG_PRIMARY, HIG_PRIMARY_MUTED, InsetCard } from "@/components/forms/HigControls";
 
 export default function RegisterPage() {
+  return (
+    <PublicSiteGate>
+      <RegisterPageContent />
+    </PublicSiteGate>
+  );
+}
+
+function RegisterPageContent() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -105,6 +116,8 @@ export default function RegisterPage() {
         setError("This email is already registered.");
       } else if (firebaseError.code === "auth/weak-password") {
         setError("Password should be at least 6 characters.");
+      } else if (typeof firebaseError.code === "string" && firebaseError.code.startsWith("functions/")) {
+        setError(callableErrorMessage(err, "Your account was created, but checkout could not be started."));
       } else {
         setError("Failed to create account. Please try again.");
       }

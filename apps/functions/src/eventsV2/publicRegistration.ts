@@ -24,6 +24,7 @@ import {
   HI_SMS_CONSENT_VERSION,
   normalizeUsMobile,
 } from "../providers/smsCompliance";
+import { assertPublicLaunchOpen } from "../publicLaunchGate";
 
 async function enqueueNotification(input: {
   id: string;
@@ -98,6 +99,7 @@ async function enqueueRegistrationNotifications(
 }
 
 export const events_v2BeginRegistration = onCall(adminEventCallableOptions, async (request) => {
+  await assertPublicLaunchOpen(request.auth);
   const { eventId, ticketTypeId, quantity: rawQuantity, guest } = request.data as {
     eventId?: string;
     ticketTypeId?: string;
