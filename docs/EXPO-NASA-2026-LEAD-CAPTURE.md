@@ -1,6 +1,6 @@
 # Accel Analysis lead intake
 
-Shared lead form for Accel Analysis. The page is Accel-branded. It does not show an event name. Visitors enter a lead on a phone, iPad, or laptop. The page saves the lead in Firestore. Attio is not on the success path unless `ATTIO_INTAKE_ENABLED` is `true`. It does not record audio or any kiosk voice path.
+Shared lead form for Accel Analysis. The page is Accel-branded. It does not show an event name. Visitors enter a lead on a phone, iPad, or laptop. The page saves the lead in Firestore collection `intakeLeads`. It does not record audio or any kiosk voice path.
 
 Public page: `/intake`
 
@@ -16,9 +16,7 @@ Accepted leads are written to `intakeLeads` in project `hi-coworking-plat`. The 
 
 Clients cannot read or write `intakeLeads`. `firestore.rules` denies both. The function uses the Admin SDK, which does not consult those rules, so Jonathan does not deploy rules before the booth. A collection with no allow rule is already closed to the public.
 
-Attio runs only when `ATTIO_INTAKE_ENABLED` is the string `true`. The deploy default is `false`. If Attio is called and it fails, the visitor still gets a success response after the Firestore write.
-
-Power NOW confirmation mail is unchanged: it sends only when `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is `true`, and only to `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` when that allow-list is set. With Attio off, the mail still follows that flag and allow-list. It does not write an Attio note.
+Power NOW confirmation mail sends only when `POWER_NOW_CONFIRMATION_EMAIL_ENABLED` is `true`, and only to `POWER_NOW_CONFIRMATION_TEST_RECIPIENTS` when that allow-list is set.
 
 ## Export
 
@@ -54,9 +52,9 @@ Power NOW Contribute: open `https://forms.accelanalysis.com/power-now/contribute
 
 Watch uses the same function: `https://forms.accelanalysis.com/power-now/watch`.
 
-Event context is read from `event`, `event_id`, and `list` on the form post (filled from the page query string). A post that omits those keys still uses the NASA Expo list, so older queued leads keep their destination. A post that sends the keys empty is a general Accel Analysis lead and is not added to that list. Unknown list slugs are stored on the note and are not sent to Attio.
+Event context is read from `event`, `event_id`, and `list` on the form post (filled from the page query string). A post that omits those keys is still treated as a NASA Expo lead, so older queued leads keep that event. A post that sends the keys empty is a general Accel Analysis lead. Unknown list slugs are stored on the note.
 
-Attio list: **NASA Expo 2026-10-20 Leads**
+NASA Expo event identifiers (used to recognize that event on incoming requests):
 
 - api slug: `nasa_expo_2026_10_20_leads`
 - list id: `e799de65-f5ad-4def-b9b6-abb0c680d84a`
@@ -64,29 +62,13 @@ Attio list: **NASA Expo 2026-10-20 Leads**
 
 ## Environment
 
-The Attio token stays on the server. The browser never receives it.
-
-| Name | Where | Purpose |
-| --- | --- | --- |
-| `ATTIO_API_KEY` | Cloud Function secret / env | Attio API bearer token |
-
-Set it before the first deploy:
-
-```bash
-firebase functions:secrets:set ATTIO_API_KEY --project hi-coworking-plat
-```
-
-The token needs Attio scopes that can read and write people and companies, read and write list entries, and read and write notes (`record_permission:read-write`, `object_configuration:read`, `list_entry:read-write`, `list_entry:read`, `note:read-write`).
-
-For the emulator, either export `ATTIO_API_KEY` in the shell that starts the emulators or put the same line in `apps/functions/.secret.local` (that file is local only; do not commit it).
+Lead ingest writes only to Firestore. `expo_submitNasaLead` does not bind a secret. Optional Power NOW confirmation secrets (`RESEND_API_KEY`, `RECAPTCHA_ENTERPRISE_API_KEY`) are documented in `docs/POWER-NOW-CONFIRMATION-EMAIL.md`.
 
 ## What gets written
 
-Search people by email first. If the email already exists, the person is updated in place. Phone-only leads are searched by phone and updated when there is one match. A new company is created only when the normalized name (trimmed, internal spaces collapsed, case-insensitive among the companies Attio returns) is not already there, then linked on the person.
+Each accepted lead is one `intakeLeads` document. A retry with the same `clientSubmissionId` does not create a second document.
 
-The list entry sends no custom attributes. If the list only has system attributes, or Attio rejects an entry value, the person and note still save.
-
-Each accepted lead appends one description line:
+Each accepted lead also stores one description line:
 
 `[WS:EXPO-NASA-2026-10-20 | event:nasa-expo-2026-10-20 | org:… | need:… | consent:… | by:NASA Expo booth | at:<ISO Eastern> | sub:<submission id>]`
 
@@ -124,11 +106,11 @@ I agree that Accel Analysis may call me at the phone number I provided about my 
 
 ## Deploy
 
-`expo_submitNasaLead` binds `ATTIO_API_KEY` only. Deploy it from the isolated entry in `firebase/expo-lead-functions` (`firebase.expo-lead.json`). That entry imports this function and nothing else, so Firebase resolves `ATTIO_API_KEY` during the deploy.
+`expo_submitNasaLead` does not bind a secret. Deploy it from the isolated entry in `firebase/expo-lead-functions` (`firebase.expo-lead.json`). That entry imports this function and nothing else, so a monolith secret such as Twilio is not registered during the deploy.
 
 `firebase deploy --only functions:expo_submitNasaLead` against `firebase.json` still loads `apps/functions` (`main.ts`). `main.ts` imports `index.ts`, which imports `eventMarketing.ts`. That file calls `defineSecret("TWILIO_ACCOUNT_SID")` (and the other campaign secrets) at load time. Firebase CLI 15.23.0 puts every registered `defineSecret()` on the codebase build and resolves those params before it applies `--only`. A missing Twilio secret then fails the deploy in non-interactive mode, even though this function never reads it. Twilio stays on `events_processCampaignJobs`. This deploy does not remove that function or any other.
 
-From the repo root, after `ATTIO_API_KEY` is set:
+From the repo root:
 
 ```bash
 npm run deploy:expo-lead
@@ -169,7 +151,7 @@ deploy expo_submitNasaLead
 
 The job uses the same service account as the other live function deploys (`FIREBASE_SERVICE_ACCOUNT_HI_COWORKING_PLAT`, or `FIREBASE_SERVICE_ACCOUNT`), Node 20, `npm ci`, and `npm run build:expo-lead-deploy`. It refuses to continue unless `.firebaserc` defaults to `hi-coworking-plat`.
 
-Before deploy it checks that Secret Manager in `hi-coworking-plat` has an enabled `ATTIO_API_KEY` version. A missing secret fails the job. The workflow never prints the secret value and never reads the secret payload. It does not require `TWILIO_ACCOUNT_SID` or any other secret.
+Before deploy it may warn if optional Power NOW secrets are missing, but a missing optional secret does not fail the job. The workflow never prints a secret value and never reads a secret payload. It does not require `TWILIO_ACCOUNT_SID` or any other secret.
 
 The only deploy command is:
 
@@ -177,17 +159,17 @@ The only deploy command is:
 npx firebase deploy --config firebase.expo-lead.json --project hi-coworking-plat --only functions:expo_submitNasaLead --non-interactive
 ```
 
-That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request writes nothing to Attio.
+That deploys `expo_submitNasaLead` and nothing else: no other functions, no Hosting, no Firestore rules. Afterward it sends an OPTIONS preflight to the function URL. That request does not write a lead.
 
 Open `https://hi-coworking.com/intake?event=nasa-expo-2026-10-20` on the booth iPad, or keep Guided Access on `https://hi-coworking.com/expo/nasa-2026`. That address redirects and adds the event. If the redirect does not leave the page, the form on that same page is shown. In Safari, use Share and then Add to Home Screen. The icon is named Accel Analysis and opens the form without the Safari address bar. In a browser that supports it, **Full screen** hides the browser chrome for that visit and disappears once the page is already full screen. After a successful submit the iPad shows **Thanks, you're all set.** **Start a new entry** clears it, and it also clears after 30 seconds with no taps, back on the same form. If Wi-Fi drops, the response stays in IndexedDB until it can post. The page does not mention the device or the sync. A saved response that comes back needing a correction is shown only on that screen. A later visitor does not see the earlier name or error. Responses that are still waiting keep trying to send.
 
-## Test without touching Attio
+## Test lead capture
 
 ```bash
 npx vitest run tests/functions/expo-nasa-lead.test.ts
 ```
 
-That run creates three fake leads against a mock Attio: an emailed visitor, the same email again (one person, one company), and a phone-only visitor. It also checks unchecked consent, a list that rejects custom attributes, and the offline queue decision.
+That run stores fake leads in the in-memory intake store, checks consent and event routing, and checks the offline queue decision.
 
 ## Test the iPad page locally
 
@@ -197,9 +179,9 @@ npm run dev
 
 Open `http://localhost:3000/intake?event=nasa-expo-2026-10-20`. Leave every consent box unchecked, submit an empty form, and confirm it asks for a name. Fill out the form and submit. A local `next dev` server does not include the Hosting rewrite, so that post fails and the screen should say **Thanks, you're all set.** The response stays in IndexedDB. Use **Send now** after the function is reachable, or turn the device offline and submit again to see the same confirmation without a network. Validation errors, such as a missing name, stay on screen instead of being queued. `/expo/nasa-2026` should land on the same form with the event filled in silently.
 
-## Test three fake leads against Attio
+## Test three fake leads
 
-Use obviously fake people (`example.com`, 555 numbers) and delete them from Attio afterward.
+Use obviously fake people (`example.com`, 555 numbers). After a live send, confirm the rows in the Firestore export and delete the test documents if you do not need them.
 
 Preview the payloads:
 
@@ -207,13 +189,13 @@ Preview the payloads:
 node scripts/expo-nasa-fake-leads.mjs
 ```
 
-Send them through the deployed ingest (the script does not take the API key; the function reads `ATTIO_API_KEY`):
+Send them through the deployed ingest (the script does not take a secret):
 
 ```bash
 node scripts/expo-nasa-fake-leads.mjs --send --url https://hi-coworking.com/api/expo/nasa-lead
 ```
 
-The three leads are Jordan Hale (`expo-fake-jordan@example.com`, Example Dynamics), Priya Shah (phone only, Northstar Sub Co), and Alex Kim (`expo-fake-alex@example.com`, Other Workshop). Jordan opts into text and phone. Priya opts into phone only. Alex leaves every consent box unchecked and asks about Hi Coworking early access. Each payload includes `event=nasa-expo-2026-10-20` so it joins the expo list.
+The three leads are Jordan Hale (`expo-fake-jordan@example.com`, Example Dynamics), Priya Shah (phone only, Northstar Sub Co), and Alex Kim (`expo-fake-alex@example.com`, Other Workshop). Jordan opts into text and phone. Priya opts into phone only. Alex leaves every consent box unchecked and asks about Hi Coworking early access. Each payload includes `event=nasa-expo-2026-10-20` so it is stored as a NASA Expo lead.
 
 Direct function URL, if Hosting is not deployed yet:
 

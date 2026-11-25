@@ -1,31 +1,14 @@
 import { onRequest } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
 import * as logger from "firebase-functions/logger";
 import { handleExpoLeadHttp } from "./nasaLeadIngest";
 
 /**
- * Public booth and Power NOW ingest. The lead is stored in Firestore.
- * Attio runs only when ATTIO_INTAKE_ENABLED is true, and an Attio failure
- * still returns success after the Firestore write. ATTIO_API_KEY stays bound
- * so this isolated deploy does not change secrets. This path does not read a
- * microphone, kiosk transcript, or any voice capture.
+ * Public booth and Power NOW ingest. The lead is stored in Firestore
+ * collection intakeLeads. This path does not read a microphone, kiosk
+ * transcript, or any voice capture.
  */
-const attioApiKey = defineSecret("ATTIO_API_KEY");
-
-function readAttioApiKey(): string | undefined {
-  const fromEnv = process.env.ATTIO_API_KEY?.trim();
-  if (fromEnv) return fromEnv;
-  try {
-    const fromSecret = attioApiKey.value()?.trim();
-    return fromSecret || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export const expo_submitNasaLead = onRequest(
   {
-    secrets: [attioApiKey],
     cors: false,
     timeoutSeconds: 60,
     memory: "256MiB",
@@ -41,7 +24,6 @@ export const expo_submitNasaLead = onRequest(
       origin,
       contentLength: contentLengthHeader ? Number(contentLengthHeader) : null,
       body: req.body,
-      apiKey: readAttioApiKey(),
       ip,
     });
 
@@ -54,9 +36,8 @@ export const expo_submitNasaLead = onRequest(
     } else if (result.body && "action" in result.body) {
       logger.info("expo_submitNasaLead stored", {
         action: result.body.action,
-        listStatus: result.body.listStatus,
-        noteStatus: result.body.noteStatus,
-        companyStatus: result.body.companyStatus,
+        stored: result.body.stored,
+        duplicate: result.body.duplicate,
         path: typeof result.body.path === "string" ? result.body.path : undefined,
       });
     }

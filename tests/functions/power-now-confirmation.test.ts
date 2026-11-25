@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
+import { readIntakeLeadForTests, resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
 import {
-  CONFIRMATION_FAILURE_PREFIX,
   CONFIRMATION_TEMPLATE_VERSION,
   POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
   POWER_NOW_DEFAULT_DAILY_CAP,
@@ -27,7 +26,6 @@ import {
   verifyRecaptchaEnterprise,
   type MemoryConfirmationStore,
 } from "../../apps/functions/src/expo/powerNowConfirmation";
-import { PITCH_COMPETITION_LIST } from "../../apps/functions/src/expo/powerNowModel";
 import {
   loadOptionalPowerNowSecrets,
   readPowerNowSecret,
@@ -35,122 +33,13 @@ import {
 } from "../../apps/functions/src/expo/powerNowConfirmationSecrets";
 
 const NOW = new Date("2026-10-07T21:35:00.000Z");
-const API_KEY = "test-key";
 const PITCH_ID = "11111111-1111-4111-8111-111111111111";
 const WATCH_ID = "22222222-2222-4222-8222-222222222222";
 const CONTRIB_ID = "33333333-3333-4333-8333-333333333333";
 const SECOND_ID = "44444444-4444-4444-8444-444444444444";
 
-type StoredRecord = { id: string; values: Record<string, unknown[]> };
-type MockState = {
-  people: StoredRecord[];
-  companies: StoredRecord[];
-  notes: Array<{ parentObject: string; parent: string; title: string; content: string }>;
-  entries: unknown[];
-  tasks: Array<{ id: string; content: string; linked: unknown; assignees?: unknown }>;
-  sequence: number;
-};
-
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-}
-
-function createAttio(state: MockState): typeof fetch {
-  return async (input, init) => {
-    const url = new URL(String(input));
-    const method = init?.method ?? "GET";
-    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, any> : undefined;
-    const headers = new Headers(init?.headers);
-    if (headers.get("authorization") !== `Bearer ${API_KEY}`) return json(401, { message: "unauthorized" });
-
-    if (method === "POST" && url.pathname === "/v2/objects/companies/records/query") {
-      const wanted = String(body?.filter?.name ?? "").trim().toLocaleLowerCase("en-US");
-      const matched = state.companies.filter((company) => text(company, "name").toLocaleLowerCase("en-US") === wanted);
-      return json(200, { data: matched.map(toApi) });
-    }
-    if (method === "POST" && url.pathname === "/v2/objects/companies/records") {
-      const company = { id: `company-${++state.sequence}`, values: body?.data?.values ?? {} };
-      state.companies.push(company);
-      return json(200, { data: toApi(company) });
-    }
-    if (method === "POST" && url.pathname === "/v2/objects/people/records/query") {
-      const email = String(body?.filter?.email_addresses ?? "").toLowerCase();
-      const matched = state.people.filter((person) => emails(person).includes(email));
-      return json(200, { data: matched.map(toApi) });
-    }
-    if (method === "PUT" && url.pathname === "/v2/objects/people/records") {
-      const addresses = (body?.data?.values?.email_addresses ?? []) as Array<{ email_address?: string }>;
-      const wanted = addresses.map((item) => String(item.email_address ?? "").toLowerCase());
-      let person = state.people.find((item) => emails(item).some((email) => wanted.includes(email)));
-      if (!person) {
-        person = { id: `person-${++state.sequence}`, values: {} };
-        state.people.push(person);
-      }
-      person.values = body?.data?.values ?? {};
-      return json(200, { data: toApi(person) });
-    }
-    if (method === "GET" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/attributes`) {
-      return json(200, { data: [] });
-    }
-    if (method === "GET" && url.pathname.includes("/entries")) return json(200, { data: [] });
-    if (method === "POST" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/entries`) {
-      state.entries.push(body);
-      return json(200, { data: { entry_id: "entry-new" } });
-    }
-    if (method === "GET" && url.pathname === "/v2/notes") {
-      const parent = url.searchParams.get("parent_record_id");
-      const parentObject = url.searchParams.get("parent_object");
-      return json(200, {
-        data: state.notes.filter((note) => note.parent === parent && note.parentObject === parentObject),
-      });
-    }
-    if (method === "POST" && url.pathname === "/v2/notes") {
-      state.notes.push({
-        parentObject: body?.data?.parent_object,
-        parent: body?.data?.parent_record_id,
-        title: body?.data?.title,
-        content: body?.data?.content,
-      });
-      return json(200, { data: { id: { note_id: `note-${++state.sequence}` } } });
-    }
-    if (method === "GET" && url.pathname === "/v2/tasks") {
-      const linked = url.searchParams.get("linked_record_id");
-      return json(200, {
-        data: state.tasks.filter((task) => JSON.stringify(task.linked).includes(linked ?? "")),
-      });
-    }
-    if (method === "POST" && url.pathname === "/v2/tasks") {
-      const id = `task-${++state.sequence}`;
-      state.tasks.push({ id, content: body?.data?.content, linked: body?.data?.linked_records });
-      return json(200, { data: { id: { task_id: id } } });
-    }
-    const taskUpdate = url.pathname.match(/^\/v2\/tasks\/([^/]+)$/);
-    if (taskUpdate && method === "PATCH") {
-      const task = state.tasks.find((item) => item.id === taskUpdate[1]);
-      if (!task) return json(404, { message: "missing task" });
-      if (body?.data?.assignees) task.assignees = body.data.assignees;
-      if (typeof body?.data?.content === "string") task.content = body.data.content;
-      return json(200, { data: { id: { task_id: task.id } } });
-    }
-    return json(500, { message: `Unhandled ${method} ${url.pathname}` });
-  };
-}
-
-function emptyState(): MockState {
-  return { people: [], companies: [], notes: [], entries: [], tasks: [], sequence: 0 };
-}
-
-function text(record: StoredRecord, slug: string): string {
-  const value = record.values[slug]?.[0] as { value?: string } | undefined;
-  return value?.value ?? "";
-}
-
-function emails(record: StoredRecord): string[] {
-  return (record.values.email_addresses ?? []).map((value) => String((value as { email_address?: string }).email_address ?? "").toLowerCase());
-}
-
-function toApi(record: StoredRecord) {
-  return { id: { record_id: record.id }, values: record.values };
 }
 
 function parseEnvFile(path: string): NodeJS.ProcessEnv {
@@ -263,7 +152,6 @@ function mailRecorder(mode: "ok" | "fail" = "ok") {
 }
 
 async function submit(
-  state: MockState,
   body: Record<string, unknown>,
   extras: {
     env?: NodeJS.ProcessEnv;
@@ -278,12 +166,9 @@ async function submit(
     method: "POST",
     origin: "http://localhost:3000",
     body,
-    apiKey: API_KEY,
-    fetchImpl: createAttio(state),
     now: NOW,
     ip: extras.ip ?? "203.0.113.10",
     rateLimiter: { allow: () => true },
-    consentLog: async () => undefined,
     confirmation: {
       env: extras.env ?? enabledEnv(),
       mailFetch: mail.fetchImpl,
@@ -298,7 +183,6 @@ async function submit(
 }
 
 beforeEach(() => {
-  process.env.ATTIO_INTAKE_ENABLED = "true";
   resetIntakeLeadMemoryForTests();
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -359,39 +243,24 @@ describe("Power NOW confirmation templates", () => {
 });
 
 describe("Power NOW confirmation delivery", () => {
-  it("sends nothing and leaves the person payload unchanged when the flag is off", async () => {
-    const state = emptyState();
-    state.people.push({
-      id: "person-existing",
-      values: {
-        email_addresses: [
-          { email_address: "old@example.com" },
-          { email_address: "ada@example.com" },
-        ],
-        description: [{ value: "Existing" }],
-      },
-    });
+  it("sends nothing when the flag is off and still saves the lead", async () => {
     const mail = mailRecorder();
-    const { result } = await submit(state, pitchBody({ recaptchaToken: "should-not-echo" }), {
+    const { result } = await submit(pitchBody({ recaptchaToken: "should-not-echo" }), {
       env: {},
       mail,
     });
     expect(result.status).toBe(200);
     expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
     expect(mail.calls).toHaveLength(0);
-    expect(emails(state.people[0]!)).toEqual(["ada@example.com"]);
-    expect(state.notes.some((note) => note.title === "Power NOW confirmation email")).toBe(false);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(false);
-    expect(state.notes.map((note) => note.content).join("\n")).not.toContain("should-not-echo");
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
   });
 
-  it("sends each path's template and records it on the person without echoing the email", async () => {
-    const state = emptyState();
+  it("sends each path's template without echoing the email", async () => {
     const store = createMemoryConfirmationStore();
     const mail = mailRecorder();
-    const pitch = await submit(state, pitchBody(), { store, mail });
-    const watch = await submit(state, watchBody(), { store, mail });
-    const contribute = await submit(state, contributeBody(), { store, mail });
+    const pitch = await submit(pitchBody(), { store, mail });
+    const watch = await submit(watchBody(), { store, mail });
+    const contribute = await submit(contributeBody(), { store, mail });
     expect(pitch.result.status).toBe(200);
     expect(watch.result.status).toBe(200);
     expect(contribute.result.status).toBe(200);
@@ -415,70 +284,36 @@ describe("Power NOW confirmation delivery", () => {
     expect(pitchCall.headers["List-Unsubscribe"]).toBe(listUnsubscribeValue(POWER_NOW_DEFAULT_REPLY_TO));
     expect(mail.calls[0]!.headers.get("authorization")).toBe("Bearer test-resend-key");
     expect(mail.calls[0]!.headers.get("idempotency-key")).toBe(confirmationDedupeKey("ada@example.com", "pitch", NOW));
-    const notes = state.notes.filter((note) => note.title === "Power NOW confirmation email");
-    expect(notes.map((note) => note.content)).toEqual([
-      expect.stringContaining("Template: PN-CONFIRM-PITCH-v1"),
-      expect.stringContaining("Template: PN-CONFIRM-WATCH-v1"),
-      expect.stringContaining("Template: PN-CONFIRM-CONTRIB-v1"),
-    ]);
-    expect(notes[0]?.content).toContain("Provider message id: re_test_123");
-    expect(notes[0]?.content).toContain("Sender: Accel Analysis <hello@accelanalysis.com>");
-    expect(notes[0]?.content).toContain("Sent (ET):");
-    expect(notes[0]?.content).toContain("Path: pitch");
-    expect(notes[0]?.content).not.toContain("ada@example.com");
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
+    expect(readIntakeLeadForTests(WATCH_ID)?.email).toBe("grace@example.com");
+    expect(readIntakeLeadForTests(CONTRIB_ID)?.email).toBe("katherine@example.com");
   });
 
-  it("makes the submitted address the primary email when sending is on", async () => {
-    const state = emptyState();
-    state.people.push({
-      id: "person-existing",
-      values: {
-        email_addresses: [
-          { email_address: "old@example.com" },
-          { email_address: "ada@example.com" },
-        ],
-        description: [{ value: "Existing" }],
-      },
-    });
-    const { result } = await submit(state, pitchBody());
-    expect(result.status).toBe(200);
-    const addresses = state.people[0]!.values.email_addresses as Array<{ email_address: string }>;
-    expect(addresses.map((item) => item.email_address)).toEqual(["ada@example.com", "old@example.com"]);
-  });
-
-  it("saves the submission and flags the task when the provider rejects the send", async () => {
-    const state = emptyState();
+  it("saves the submission when the provider rejects the send", async () => {
     const mail = mailRecorder("fail");
-    const { result } = await submit(state, pitchBody(), { mail });
+    const { result } = await submit(pitchBody(), { mail });
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ ok: true, accepted: true, path: "pitch" });
     expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
-    expect(state.people).toHaveLength(1);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(true);
-    expect(state.tasks[0]?.content).toContain("Power NOW pitch interest for Jessica.");
-    const failure = state.notes.find((note) => note.title === "Power NOW confirmation email failed");
-    expect(failure?.content).toContain("Error class: ResendRejected");
-    expect(failure?.content).not.toContain("ada@example.com");
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
     const logged = vi.mocked(console.error).mock.calls.map((call) => JSON.stringify(call));
     expect(logged.some((line) => line.includes("ada@example.com"))).toBe(false);
     expect(logged.some((line) => line.includes("ResendRejected"))).toBe(true);
   });
 
   it("blocks a second confirmation for the same address and path, and a suppressed address", async () => {
-    const state = emptyState();
     const store = createMemoryConfirmationStore();
     const mail = mailRecorder();
-    const first = await submit(state, pitchBody(), { store, mail });
-    const second = await submit(state, pitchBody({ clientSubmissionId: SECOND_ID }), { store, mail });
+    const first = await submit(pitchBody(), { store, mail });
+    const second = await submit(pitchBody({ clientSubmissionId: SECOND_ID }), { store, mail });
     expect(first.result.status).toBe(200);
     expect(second.result.status).toBe(200);
     expect(mail.calls).toHaveLength(1);
-    expect(state.tasks.every((task) => !task.content.startsWith(CONFIRMATION_FAILURE_PREFIX))).toBe(true);
 
     const suppressed = createMemoryConfirmationStore();
     suppressed.suppress(powerNowEmailHash("ada@example.com"));
     const quiet = mailRecorder();
-    const blocked = await submit(emptyState(), pitchBody({ clientSubmissionId: SECOND_ID }), {
+    const blocked = await submit(pitchBody({ clientSubmissionId: SECOND_ID }), {
       store: suppressed,
       mail: quiet,
     });
@@ -487,43 +322,34 @@ describe("Power NOW confirmation delivery", () => {
     expect(blocked.result.body).toMatchObject({ ok: true });
   });
 
-  it("flags the task when Graph is selected without M365 secrets, and still saves the submission", async () => {
-    const state = emptyState();
+  it("still saves the submission when Graph is selected without M365 secrets", async () => {
     const mail = mailRecorder();
-    const { result } = await submit(state, pitchBody(), {
+    const { result } = await submit(pitchBody(), {
       env: enabledEnv({ POWER_NOW_EMAIL_PROVIDER: "graph" }),
       mail,
     });
     expect(result.status).toBe(200);
     expect(result.body).toMatchObject({ ok: true, accepted: true, path: "pitch" });
     expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
-    expect(state.people).toHaveLength(1);
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
     expect(mail.calls).toHaveLength(0);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(true);
-    const failure = state.notes.find((note) => note.title === "Power NOW confirmation email failed");
-    expect(failure?.content).toContain("Error class: ProviderUnconfigured");
-    expect(failure?.content).not.toContain("ada@example.com");
+    const logged = vi.mocked(console.error).mock.calls.map((call) => JSON.stringify(call));
+    expect(logged.some((line) => line.includes("ada@example.com"))).toBe(false);
   });
 
-  it("flags the task the same way when the Resend key is missing", async () => {
-    const state = emptyState();
+  it("still saves the submission when the Resend key is missing", async () => {
     const mail = mailRecorder();
     const env = enabledEnv();
     delete env.RESEND_API_KEY;
-    const { result } = await submit(state, pitchBody(), { env, mail });
+    const { result } = await submit(pitchBody(), { env, mail });
     expect(result.status).toBe(200);
-    expect(state.people).toHaveLength(1);
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
     expect(mail.calls).toHaveLength(0);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(true);
-    expect(state.notes.find((note) => note.title === "Power NOW confirmation email failed")?.content).toContain(
-      "Error class: ProviderUnconfigured",
-    );
   });
 
   it("sends through Graph when the mailbox secrets are present in the environment", async () => {
-    const state = emptyState();
     const mail = mailRecorder();
-    const { result } = await submit(state, pitchBody(), {
+    const { result } = await submit(pitchBody(), {
       env: enabledEnv({
         POWER_NOW_EMAIL_PROVIDER: "graph",
         M365_TENANT_ID: "tenant-1",
@@ -537,14 +363,12 @@ describe("Power NOW confirmation delivery", () => {
       "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token",
       "https://graph.microsoft.com/v1.0/users/hello%40accelanalysis.com/sendMail",
     ]);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(false);
     expect(JSON.parse(mail.calls[1]!.body).saveToSentItems).toBe(true);
   });
 
   it("skips the email when captcha is not configured and still saves the submission", async () => {
-    const state = emptyState();
     const mail = mailRecorder();
-    const { result } = await submit(state, pitchBody(), {
+    const { result } = await submit(pitchBody(), {
       env: enabledEnv({
         RECAPTCHA_ENTERPRISE_SITE_KEY: "",
         RECAPTCHA_ENTERPRISE_API_KEY: "",
@@ -553,33 +377,28 @@ describe("Power NOW confirmation delivery", () => {
       verify: false,
     });
     expect(result.status).toBe(200);
-    expect(state.people).toHaveLength(1);
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
     expect(mail.calls).toHaveLength(0);
-    expect(state.tasks[0]?.content.startsWith(CONFIRMATION_FAILURE_PREFIX)).toBe(false);
   });
 
   it("skips role addresses, disposable domains, a failed MX lookup, and a too-fast submit", async () => {
     const mail = mailRecorder();
-    const role = await submit(emptyState(), pitchBody({ email: "info@example.com" }), { mail });
-    const disposable = await submit(emptyState(), pitchBody({ email: "ada@mailinator.com", clientSubmissionId: SECOND_ID }), { mail });
-    const fast = await submit(emptyState(), pitchBody({ clientSubmissionId: WATCH_ID, pnStartedAt: NOW.toISOString() }), { mail });
+    const role = await submit(pitchBody({ email: "info@example.com" }), { mail });
+    const disposable = await submit(pitchBody({ email: "ada@mailinator.com", clientSubmissionId: SECOND_ID }), { mail });
+    const fast = await submit(pitchBody({ clientSubmissionId: WATCH_ID, pnStartedAt: NOW.toISOString() }), { mail });
     expect(role.result.status).toBe(200);
     expect(disposable.result.status).toBe(200);
     expect(fast.result.status).toBe(200);
     expect(mail.calls).toHaveLength(0);
 
-    const mxState = emptyState();
     const mxMail = mailRecorder();
     const mx = await handleExpoLeadHttp({
       method: "POST",
       origin: "http://localhost:3000",
       body: pitchBody({ clientSubmissionId: CONTRIB_ID }),
-      apiKey: API_KEY,
-      fetchImpl: createAttio(mxState),
       now: NOW,
       ip: "203.0.113.20",
       rateLimiter: { allow: () => true },
-      consentLog: async () => undefined,
       confirmation: {
         env: enabledEnv(),
         mailFetch: mxMail.fetchImpl,
@@ -589,7 +408,7 @@ describe("Power NOW confirmation delivery", () => {
       },
     });
     expect(mx.status).toBe(200);
-    expect(mxState.people).toHaveLength(1);
+    expect(readIntakeLeadForTests(CONTRIB_ID)?.email).toBe("ada@example.com");
     expect(mxMail.calls).toHaveLength(0);
   });
 
@@ -597,8 +416,8 @@ describe("Power NOW confirmation delivery", () => {
     const mail = mailRecorder();
     const store = createMemoryConfirmationStore();
     const env = enabledEnv({ POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: "qa@example.com, other@example.com" });
-    const skipped = await submit(emptyState(), pitchBody(), { mail, store, env });
-    const allowed = await submit(emptyState(), pitchBody({
+    const skipped = await submit(pitchBody(), { mail, store, env });
+    const allowed = await submit(pitchBody({
       email: "qa@example.com",
       fullName: "Quincy Adams",
       clientSubmissionId: SECOND_ID,
@@ -620,13 +439,13 @@ describe("Power NOW confirmation delivery", () => {
 
     const mail = mailRecorder();
     const store = createMemoryConfirmationStore();
-    const other = await submit(emptyState(), pitchBody(), { mail, store, env });
-    const jonathan = await submit(emptyState(), pitchBody({
+    const other = await submit(pitchBody(), { mail, store, env });
+    const jonathan = await submit(pitchBody({
       email: "JHolman@AccelAnalysis.com",
       fullName: "Jonathan Holman",
       clientSubmissionId: "55555555-5555-4555-8555-555555555555",
     }), { mail, store, env });
-    const secondOther = await submit(emptyState(), watchBody({
+    const secondOther = await submit(watchBody({
       email: "grace@example.com",
       clientSubmissionId: WATCH_ID,
     }), { mail, store, env });
@@ -644,8 +463,8 @@ describe("Power NOW confirmation delivery", () => {
     const env = enabledEnv({
       POWER_NOW_CONFIRMATION_TEST_RECIPIENTS: POWER_NOW_CONFIRMATION_TEST_RECIPIENT,
     });
-    const other = await submit(emptyState(), pitchBody(), { mail, store, env });
-    const jonathan = await submit(emptyState(), pitchBody({
+    const other = await submit(pitchBody(), { mail, store, env });
+    const jonathan = await submit(pitchBody({
       email: "JHolman@AccelAnalysis.com",
       fullName: "Jonathan Holman",
       clientSubmissionId: "55555555-5555-4555-8555-555555555555",
@@ -657,12 +476,11 @@ describe("Power NOW confirmation delivery", () => {
   });
 
   it("does not send when the honeypot is filled", async () => {
-    const state = emptyState();
     const mail = mailRecorder();
-    const { result } = await submit(state, pitchBody({ pn_hp: "http://spam.example" }), { mail });
+    const { result } = await submit(pitchBody({ pn_hp: "http://spam.example" }), { mail });
     expect(result.status).toBe(200);
     expect(result.body).toEqual({ ok: true, accepted: true });
-    expect(state.people).toHaveLength(0);
+    expect(readIntakeLeadForTests(PITCH_ID)).toBeNull();
     expect(mail.calls).toHaveLength(0);
   });
 });
@@ -862,8 +680,7 @@ describe("Power NOW confirmation config surface", () => {
     ]) {
       const envFile = readFileSync(envPath, "utf8");
       expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=$/m);
-      expect(envFile).toMatch(/^ATTIO_INTAKE_ENABLED=$/m);
-      expect(envFile).not.toMatch(/^ATTIO_INTAKE_ENABLED=true$/m);
+      expect(envFile).not.toMatch(/ATTIO_INTAKE_ENABLED/);
       expect(envFile).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
       expect(envFile).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
       expect(envFile).not.toMatch(/^RESEND_API_KEY=/m);
@@ -876,8 +693,7 @@ describe("Power NOW confirmation config surface", () => {
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_EMAIL_ENABLED=false$/m);
     expect(expoLeadEnv).not.toMatch(/POWER_NOW_CONFIRMATION_EMAIL_ENABLED=true/);
     expect(expoLeadEnv).not.toMatch(/TEMPORARY INBOX TEST/);
-    expect(expoLeadEnv).toMatch(/^ATTIO_INTAKE_ENABLED=$/m);
-    expect(expoLeadEnv).not.toMatch(/^ATTIO_INTAKE_ENABLED=true$/m);
+    expect(expoLeadEnv).not.toMatch(/ATTIO_INTAKE_ENABLED/);
     expect(expoLeadEnv).toMatch(/^POWER_NOW_CONFIRMATION_TEST_RECIPIENTS=jholman@accelanalysis\.com$/m);
     expect(expoLeadEnv).toMatch(new RegExp(`^RECAPTCHA_ENTERPRISE_SITE_KEY=${POWER_NOW_RECAPTCHA_SITE_KEY}$`, "m"));
     expect(expoLeadEnv).not.toMatch(/^RESEND_API_KEY=/m);

@@ -1,6 +1,6 @@
 /**
  * Power NOW confirmation mail. Off unless POWER_NOW_CONFIRMATION_EMAIL_ENABLED is "true".
- * A skip or a provider error never fails the Attio submission.
+ * A skip or a provider error never fails the lead submission.
  * Logs include the person record id and an error class, not the visitor's email.
  */
 
@@ -757,7 +757,7 @@ export async function runPowerNowConfirmation(input: {
     if (!providerReady) {
       if (provider === "resend" && !readSecret("RESEND_API_KEY")) {
         console.warn(
-          "Power NOW secret RESEND_API_KEY is unset. The confirmation email is skipped. The Attio submission is unchanged.",
+          "Power NOW secret RESEND_API_KEY is unset. The confirmation email is skipped. The stored lead is unchanged.",
         );
       }
       return providerUnconfigured(input);

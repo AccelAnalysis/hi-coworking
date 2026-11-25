@@ -4,7 +4,7 @@
  * The public form is not event-branded. Event, event id, and list come from
  * the request (URL query on the client) and are stored with the lead. The
  * booth form imports this module so the words on screen are the same words
- * stored in Attio. Consent boxes start unchecked. Unchecked is a recorded no.
+ * stored in Firestore. Consent boxes start unchecked. Unchecked is a recorded no.
  */
 
 export const EXPO_SOURCE = "EXPO-NASA-2026-10-20";
@@ -23,6 +23,7 @@ export const ACCEL_ONE_LINER = "We redesign work so people and AI can work toget
 export const INTAKE_PRIVACY_NOTICE =
   "We'll use your information only to follow up on what you asked about. Check a box only if you'd like that kind of update. You can unsubscribe anytime.";
 
+/** Historical NASA Expo event identifiers used on incoming requests. */
 export const EXPO_LIST = {
   apiSlug: "nasa_expo_2026_10_20_leads",
   listId: "e799de65-f5ad-4def-b9b6-abb0c680d84a",
@@ -43,7 +44,7 @@ export type ExpoConsentKey = (typeof EXPO_CONSENT_KEYS)[number];
 
 /**
  * Version ids cite the exact sentence on the form. Wording is copied into the
- * Attio note only when that box is checked. A new version is required because
+ * stored lead note only when that box is checked. A new version is required because
  * the set is email, text, and phone — the prior four-box expo wording is retired.
  */
 export const EXPO_CONSENT_CATALOG = {
@@ -111,7 +112,6 @@ export type IntakeProfile = {
   event: string | null;
   eventId: string | null;
   requestedList: string | null;
-  attioList: typeof EXPO_LIST | null;
   explicit: boolean;
 };
 
@@ -141,7 +141,6 @@ export type NormalizedExpoLead = {
   eventId: string | null;
   requestedList: string | null;
   fieldSet: IntakeFieldSet;
-  attioList: typeof EXPO_LIST | null;
   clientSubmissionId: string;
   descriptionTag: string;
   note: string;
@@ -298,7 +297,6 @@ export function resolveIntakeProfile(input: {
       event: event || eventId || NASA_EXPO_EVENT,
       eventId: eventId || null,
       requestedList: list || EXPO_LIST.apiSlug,
-      attioList: EXPO_LIST,
       explicit: input.explicit,
     };
   }
@@ -309,7 +307,6 @@ export function resolveIntakeProfile(input: {
     event: event || eventId || null,
     eventId: eventId || null,
     requestedList: list || null,
-    attioList: null,
     explicit: true,
   };
 }
@@ -414,7 +411,6 @@ export function validateExpoLeadPayload(
     eventId: profile.eventId,
     requestedList: profile.requestedList,
     fieldSet: profile.fieldSet,
-    attioList: profile.attioList,
     clientSubmissionId,
   };
 

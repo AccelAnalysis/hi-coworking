@@ -1,163 +1,21 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
+import { beforeEach, describe, expect, it } from "vitest";
+import { readIntakeLeadForTests, resetIntakeLeadMemoryForTests } from "../../apps/functions/src/expo/intakeLeadStore";
 import { handleExpoLeadHttp } from "../../apps/functions/src/expo/nasaLeadIngest";
+import { createPowerNowRateLimiter } from "../../apps/functions/src/expo/powerNowIngest";
 import {
-  POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID,
-  createPowerNowRateLimiter,
-} from "../../apps/functions/src/expo/powerNowIngest";
-import {
-  PITCH_COMPETITION_LIST,
   POWER_NOW_CONSENT_VERSION,
   POWER_NOW_SEND_ERROR,
   POWER_NOW_SOURCE,
   POWER_NOW_WATCH_CONSENT_ERROR,
   consentSentence,
-  type PowerNowConsentRecord,
 } from "../../apps/functions/src/expo/powerNowModel";
 
 const NOW = new Date("2026-10-07T21:35:00.000Z");
 const CAPTURED_AT_ET = "2026-10-07T17:35:00-04:00";
-const API_KEY = "test-key";
 const PITCH_ID = "11111111-1111-4111-8111-111111111111";
 const WATCH_ID = "22222222-2222-4222-8222-222222222222";
 const CONTRIB_ID = "33333333-3333-4333-8333-333333333333";
-
-type StoredRecord = { id: string; values: Record<string, unknown[]> };
-type MockState = {
-  people: StoredRecord[];
-  companies: StoredRecord[];
-  notes: Array<{ parentObject: string; parent: string; title: string; content: string }>;
-  entries: Array<{ parent: string; slug: string; listId: string; parentObject: string; entryValues: unknown }>;
-  tasks: Array<{ id: string; content: string; linked: unknown; assignees?: unknown }>;
-  calls: string[];
-  listAttributes?: Array<{ api_slug: string; type: string; is_writable?: boolean; is_archived?: boolean }>;
-  failAssignee?: boolean;
-  failTaskCreate?: { status: number; code?: string; message?: string };
-  failPersonWrite?: { status: number; code?: string; message?: string };
-  sequence: number;
-};
-
-function createAttio(state: MockState): typeof fetch {
-  return async (input, init) => {
-    const url = new URL(String(input));
-    const method = init?.method ?? "GET";
-    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, any> : undefined;
-    const headers = new Headers(init?.headers);
-    state.calls.push(`${method} ${url.pathname}`);
-    if (headers.get("authorization") !== `Bearer ${API_KEY}`) return json(401, { message: "unauthorized" });
-
-    if (method === "POST" && url.pathname === "/v2/objects/companies/records/query") {
-      const wanted = String(body?.filter?.name ?? "").trim().toLocaleLowerCase("en-US");
-      const matched = state.companies.filter((company) => text(company, "name").toLocaleLowerCase("en-US") === wanted);
-      return json(200, { data: matched.map(toApi) });
-    }
-    if (method === "POST" && url.pathname === "/v2/objects/companies/records") {
-      const company = { id: `company-${++state.sequence}`, values: body?.data?.values ?? {} };
-      state.companies.push(company);
-      return json(200, { data: toApi(company) });
-    }
-    if (method === "POST" && url.pathname === "/v2/objects/people/records/query") {
-      const email = String(body?.filter?.email_addresses ?? "").toLowerCase();
-      const matched = state.people.filter((person) => emails(person).includes(email));
-      return json(200, { data: matched.map(toApi) });
-    }
-    if (method === "PUT" && url.pathname === "/v2/objects/people/records") {
-      if (state.failPersonWrite) {
-        return json(state.failPersonWrite.status, {
-          code: state.failPersonWrite.code,
-          message: state.failPersonWrite.message ?? "person write failed",
-        });
-      }
-      const companies = body?.data?.values?.company;
-      if (Array.isArray(companies) && companies.length > 1) {
-        return json(400, {
-          code: "validation_type",
-          message: "The company attribute is not multiselect.",
-        });
-      }
-      const email = String(body?.data?.values?.email_addresses?.[0]?.email_address ?? "").toLowerCase();
-      let person = state.people.find((item) => emails(item).includes(email));
-      if (!person) {
-        person = { id: `person-${++state.sequence}`, values: {} };
-        state.people.push(person);
-      }
-      person.values = body?.data?.values ?? {};
-      return json(200, { data: toApi(person) });
-    }
-    if (method === "GET" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/attributes`) {
-      return json(200, { data: state.listAttributes ?? [] });
-    }
-    const companyEntries = url.pathname.match(/^\/v2\/objects\/companies\/records\/([^/]+)\/entries$/);
-    if (companyEntries && method === "GET") {
-      const data = state.entries
-        .filter((entry) => entry.parent === companyEntries[1])
-        .map((entry) => ({ list_id: entry.listId, list_api_slug: entry.slug }));
-      return json(200, { data });
-    }
-    if (method === "POST" && url.pathname === `/v2/lists/${PITCH_COMPETITION_LIST.apiSlug}/entries`) {
-      state.entries.push({
-        parent: body?.data?.parent_record_id,
-        slug: PITCH_COMPETITION_LIST.apiSlug,
-        listId: PITCH_COMPETITION_LIST.listId,
-        parentObject: body?.data?.parent_object,
-        entryValues: body?.data?.entry_values,
-      });
-      return json(200, { data: { entry_id: "entry-new" } });
-    }
-    if (method === "GET" && url.pathname === "/v2/notes") {
-      const parent = url.searchParams.get("parent_record_id");
-      const parentObject = url.searchParams.get("parent_object");
-      return json(200, {
-        data: state.notes.filter((note) => note.parent === parent && note.parentObject === parentObject),
-      });
-    }
-    if (method === "POST" && url.pathname === "/v2/notes") {
-      state.notes.push({
-        parentObject: body?.data?.parent_object,
-        parent: body?.data?.parent_record_id,
-        title: body?.data?.title,
-        content: body?.data?.content,
-      });
-      return json(200, { data: { id: { note_id: `note-${++state.sequence}` } } });
-    }
-    if (method === "GET" && url.pathname === "/v2/tasks") {
-      const linked = url.searchParams.get("linked_record_id");
-      return json(200, {
-        data: state.tasks.filter((task) => JSON.stringify(task.linked).includes(linked ?? "")),
-      });
-    }
-    if (method === "POST" && url.pathname === "/v2/tasks") {
-      if (state.failTaskCreate) {
-        return json(state.failTaskCreate.status, {
-          code: state.failTaskCreate.code,
-          message: state.failTaskCreate.message ?? "task create failed",
-        });
-      }
-      const id = `task-${++state.sequence}`;
-      state.tasks.push({
-        id,
-        content: body?.data?.content,
-        linked: body?.data?.linked_records,
-        assignees: body?.data?.assignees,
-      });
-      return json(200, { data: { id: { task_id: id } } });
-    }
-    const taskUpdate = url.pathname.match(/^\/v2\/tasks\/([^/]+)$/);
-    if (taskUpdate && method === "PATCH") {
-      if (state.failAssignee) return json(500, { message: "assignee rejected" });
-      const task = state.tasks.find((item) => item.id === taskUpdate[1]);
-      if (!task) return json(404, { message: "missing task" });
-      task.assignees = body?.data?.assignees;
-      return json(200, { data: { id: { task_id: task.id } } });
-    }
-    return json(500, { message: `Unhandled ${method} ${url.pathname}` });
-  };
-}
-
-function emptyState(): MockState {
-  return { people: [], companies: [], notes: [], entries: [], tasks: [], calls: [], sequence: 0 };
-}
 
 function pitchBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -233,45 +91,33 @@ function contributeBody(overrides: Record<string, unknown> = {}) {
 }
 
 async function submit(
-  state: MockState,
   body: Record<string, unknown>,
-  extras: { limiter?: ReturnType<typeof createPowerNowRateLimiter>; logs?: unknown[] } = {},
+  extras: { limiter?: ReturnType<typeof createPowerNowRateLimiter> } = {},
 ) {
-  const logs = extras.logs ?? [];
   return handleExpoLeadHttp({
     method: "POST",
     origin: "http://localhost:3000",
     body,
-    apiKey: API_KEY,
-    fetchImpl: createAttio(state),
     now: NOW,
     ip: "203.0.113.10",
     rateLimiter: extras.limiter ?? { allow: () => true },
-    consentLog: async (entry) => {
-      logs.push(entry);
-    },
   });
 }
 
 beforeEach(() => {
-  process.env.ATTIO_INTAKE_ENABLED = "true";
   resetIntakeLeadMemoryForTests();
 });
 
 describe("Power NOW forms host origin", () => {
   it("accepts pitch, watch, and contribute from https://forms.accelanalysis.com", async () => {
-    const state = emptyState();
     for (const body of [pitchBody(), watchBody(), contributeBody()]) {
       const result = await handleExpoLeadHttp({
         method: "POST",
         origin: "https://forms.accelanalysis.com",
         body,
-        apiKey: API_KEY,
-        fetchImpl: createAttio(state),
         now: NOW,
         ip: "203.0.113.10",
         rateLimiter: { allow: () => true },
-        consentLog: async () => undefined,
       });
       expect(result.status, String(body.path)).toBe(200);
       expect(result.headers["Access-Control-Allow-Origin"]).toBe("https://forms.accelanalysis.com");
@@ -288,25 +134,20 @@ describe("Power NOW forms host origin", () => {
     expect(preflight.status).toBe(204);
     expect(preflight.headers["Access-Control-Allow-Origin"]).toBe("https://forms.accelanalysis.com");
 
-    const state = emptyState();
     const booth = await handleExpoLeadHttp({
       method: "POST",
       origin: "https://forms.accelanalysis.com",
       body: { fullName: "Booth Visitor", email: "booth@example.com" },
-      apiKey: API_KEY,
-      fetchImpl: createAttio(state),
       now: NOW,
     });
     expect(booth.status).toBe(403);
     expect(booth.headers["Access-Control-Allow-Origin"]).toBeUndefined();
     expect(booth.body).toMatchObject({ error: "This booth form cannot be submitted from that site." });
-    expect(state.calls).toEqual([]);
 
     const lookalike = await handleExpoLeadHttp({
       method: "POST",
       origin: "https://forms.accelanalysis.com.evil.example",
       body: pitchBody({ clientSubmissionId: "44444444-4444-4444-8444-444444444444" }),
-      apiKey: API_KEY,
       now: NOW,
     });
     expect(lookalike.status).toBe(403);
@@ -316,12 +157,9 @@ describe("Power NOW forms host origin", () => {
       method: "POST",
       origin: "https://hi-coworking.com",
       body: pitchBody({ clientSubmissionId: "55555555-5555-4555-8555-555555555555", email: "hi@example.com" }),
-      apiKey: API_KEY,
-      fetchImpl: createAttio(state),
       now: NOW,
       ip: "203.0.113.11",
       rateLimiter: { allow: () => true },
-      consentLog: async () => undefined,
     });
     expect(hi.status).toBe(200);
     expect(hi.headers["Access-Control-Allow-Origin"]).toBe("https://hi-coworking.com");
@@ -330,19 +168,16 @@ describe("Power NOW forms host origin", () => {
 
 describe("Power NOW path allow-list", () => {
   it("rejects a path outside pitch, watch, and contribute", async () => {
-    const state = emptyState();
-    const result = await submit(state, pitchBody({ path: "sponsor" }));
+    const result = await submit(pitchBody({ path: "sponsor" }));
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({ ok: false, error: "Choose pitch, watch, or contribute." });
-    expect(state.calls).toEqual([]);
-    expect(state.people).toHaveLength(0);
+    expect(readIntakeLeadForTests(PITCH_ID)).toBeNull();
   });
 
   it("accepts each allow-listed path, including a different case", async () => {
-    const state = emptyState();
-    const pitch = await submit(state, pitchBody({ path: "PITCH" }));
-    const watch = await submit(state, watchBody());
-    const contribute = await submit(state, contributeBody());
+    const pitch = await submit(pitchBody({ path: "PITCH" }));
+    const watch = await submit(watchBody());
+    const contribute = await submit(contributeBody());
     expect(pitch.status).toBe(200);
     expect(watch.status).toBe(200);
     expect(contribute.status).toBe(200);
@@ -354,522 +189,80 @@ describe("Power NOW path allow-list", () => {
 
 describe("Power NOW consent capture", () => {
   it("stores unchecked boxes as no, with the path wording version and Eastern timestamp", async () => {
-    const state = emptyState();
-    const logs: Array<{ consent: PowerNowConsentRecord[]; capturedAtEt: string }> = [];
-    const result = await submit(state, pitchBody(), { logs });
+    const result = await submit(pitchBody());
     expect(result.status).toBe(200);
-    const note = state.notes.find((item) => item.parentObject === "people");
-    expect(note?.content).toContain("email: no");
-    expect(note?.content).toContain("sms: no");
-    expect(note?.content).toContain("phone: no");
-    expect(note?.content).toContain(`Version: ${POWER_NOW_CONSENT_VERSION.pitch}`);
-    expect(note?.content).toContain(`At (ET): ${CAPTURED_AT_ET}`);
-    expect(note?.content).toContain(`Source: ${POWER_NOW_SOURCE}`);
-    expect(note?.content).toContain(consentSentence("pitch", "email"));
-    expect(note?.content).not.toContain("FORGED WORDING");
-    expect(logs[0]?.capturedAtEt).toBe(CAPTURED_AT_ET);
-    expect(logs[0]?.consent.map((item) => item.optIn)).toEqual([false, false, false]);
-    expect(logs[0]?.consent.map((item) => item.version)).toEqual([
-      POWER_NOW_CONSENT_VERSION.pitch,
-      POWER_NOW_CONSENT_VERSION.pitch,
-      POWER_NOW_CONSENT_VERSION.pitch,
+    const saved = readIntakeLeadForTests(PITCH_ID);
+    expect(saved?.consent).toEqual([
+      expect.objectContaining({
+        key: "email",
+        optIn: false,
+        version: POWER_NOW_CONSENT_VERSION.pitch,
+        capturedAtEt: CAPTURED_AT_ET,
+        source: POWER_NOW_SOURCE,
+      }),
+      expect.objectContaining({ key: "sms", optIn: false, version: POWER_NOW_CONSENT_VERSION.pitch }),
+      expect.objectContaining({ key: "phone", optIn: false, version: POWER_NOW_CONSENT_VERSION.pitch }),
     ]);
+    expect(JSON.stringify(saved)).not.toContain("FORGED WORDING");
+    expect(consentSentence("pitch", "email")).toContain("Email me about future Power NOW");
   });
 
   it("requires a phone number when text or phone is checked, and at least one watch channel", async () => {
-    const state = emptyState();
-    const sms = await submit(state, pitchBody({ consent: { email: false, sms: true, phone: false } }));
+    const sms = await submit(pitchBody({ consent: { email: false, sms: true, phone: false } }));
     expect(sms.status).toBe(400);
     expect(sms.body).toMatchObject({ error: "Please add a phone number, or uncheck text and phone." });
 
-    const watch = await submit(state, watchBody({ consent: { email: false, sms: false, phone: true } }));
+    const watch = await submit(watchBody({ consent: { email: false, sms: false, phone: true } }));
     expect(watch.status).toBe(400);
     expect(watch.body).toMatchObject({ error: POWER_NOW_WATCH_CONSENT_ERROR });
-    expect(state.people).toHaveLength(0);
+    expect(readIntakeLeadForTests(WATCH_ID)).toBeNull();
 
-    const watched = await submit(state, watchBody({
+    const watched = await submit(watchBody({
       consent: { email: false, sms: true, phone: false },
       phone: "757-555-0199",
     }));
     expect(watched.status).toBe(200);
-    const note = state.notes.find((item) => item.content.includes(WATCH_ID));
-    expect(note?.content).toContain("sms: yes");
-    expect(note?.content).toContain(`Version: ${POWER_NOW_CONSENT_VERSION.watch}`);
-    expect(note?.content).toContain("Phone: +17575550199");
-    expect(note?.content).not.toContain("phone: yes");
-    expect(note?.content).not.toContain("phone: no");
+    const saved = readIntakeLeadForTests(WATCH_ID);
+    expect(saved).toMatchObject({ phoneE164: "+17575550199" });
+    expect(saved?.consent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "sms", optIn: true, phone: "+17575550199", version: POWER_NOW_CONSENT_VERSION.watch }),
+      expect.objectContaining({ key: "email", optIn: false }),
+    ]));
+    expect(saved?.consent?.some((item: { key: string }) => item.key === "phone")).toBe(false);
   });
 });
 
-describe("Power NOW Attio payload mapping", () => {
-  it("maps a pitch onto a person, a company, and the existing Pitch Competition list", async () => {
-    const state = emptyState();
-    const logs: Array<{ flags: string[]; listStatus: string }> = [];
-    const result = await submit(state, pitchBody(), { logs });
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({
-      companyStatus: "created",
-      listStatus: "added",
-      noteStatus: "created",
-      taskStatus: "created",
-    });
-
-    const person = state.people[0];
-    expect(emails(person!)).toEqual(["ada@example.com"]);
-    expect(text(person!, "description")).toContain("PN | path:pitch | interest | src:power-now-interest-page");
-    expect(text(person!, "description")).toContain("utm:source=linkedin,medium=social,campaign=interest,content=post");
-    expect(text(person!, "description")).toContain("ref:/updates");
-    expect(text(person!, "description")).toContain(CAPTURED_AT_ET);
-    expect(text(person!, "description")).toContain(`sub:${PITCH_ID}`);
-    expect(text(person!, "description")).toContain("city:Carrollton");
-    expect(text(person!, "description")).toContain("state:VA");
-    expect(text(person!, "description")).toContain("stage:development_testing");
-    expect(text(person!, "description")).toContain("opportunity:growing_an_existing_business");
-    expect(person?.values.name).toEqual([
-      { first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" },
-    ]);
-    expect(person?.values.company).toEqual([
-      { target_object: "companies", target_record_id: state.companies[0]?.id },
-    ]);
-    expect(text(state.companies[0]!, "name")).toBe("Analytical Engines");
-
-    expect(state.entries).toEqual([
-      {
-        parent: state.companies[0]?.id,
-        slug: "pitch_competition",
-        listId: PITCH_COMPETITION_LIST.listId,
-        parentObject: "companies",
-        entryValues: {},
-      },
-    ]);
-
-    const personNote = state.notes.find((note) => note.parentObject === "people");
-    const companyNote = state.notes.find((note) => note.parentObject === "companies");
-    expect(personNote?.title).toBe(`Power NOW pitch interest ${CAPTURED_AT_ET}`);
-    expect(companyNote?.title).toBe(personNote?.title);
-    expect(companyNote?.content).toBe(personNote?.content);
-    expect(personNote?.content).toContain("City: Carrollton");
-    expect(personNote?.content).toContain("State: Virginia");
-    expect(personNote?.content).toContain("Business stage: Development / Testing");
-    expect(personNote?.content).toContain("What best describes the opportunity you are pitching?: Growing an existing business");
-    expect(personNote?.content).toContain("What would you pitch?: A workshop kit for first customers.");
-    expect(state.calls.some((call) => call.startsWith("POST") && call.includes("/attributes"))).toBe(false);
-    expect(POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID).toBe("2029a271-1072-4dd9-849e-6a32fdb71df5");
-    expect(state.tasks).toHaveLength(1);
-    expect(state.tasks[0]?.assignees).toEqual([jonathanAssignee()]);
-    expect(state.tasks[0]?.linked).toEqual([
-      { target_object: "people", target_record_id: person?.id },
-      { target_object: "companies", target_record_id: state.companies[0]?.id },
-    ]);
-    expect(state.tasks[0]?.content).toContain("Power NOW pitch interest for Jessica.");
-    expect(state.tasks[0]?.content).toContain("Name: Ada Lovelace");
-    expect(state.tasks[0]?.content).toContain("Company: Analytical Engines");
-    expect(state.tasks[0]?.content).toContain(`https://app.attio.com/accel-analysis/person/${person?.id}/overview`);
-    expect(logs[0]?.listStatus).toBe("added");
-  });
-
-  it("keeps an existing company when a pitcher submits a different business name", async () => {
-    const state = emptyState();
-    state.listAttributes = [
-      { api_slug: "city", type: "text", is_writable: true },
-      { api_slug: "state", type: "select", is_writable: true },
-      { api_slug: "business_stage", type: "select", is_writable: true },
-      { api_slug: "opportunity_type", type: "select", is_writable: true },
-    ];
-    state.companies.push(
-      { id: "company-existing", values: { name: [{ value: "Ada Labs" }] } },
-      { id: "company-named", values: { name: [{ value: "Analytical Engines" }] } },
-    );
-    state.people.push({
-      id: "person-existing",
-      values: {
-        email_addresses: [{ email_address: "ada@example.com" }],
-        name: [{ first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" }],
-        description: [{ value: "Earlier note" }],
-        company: [
-          {
-            target_object: "companies",
-            target_record_id: "company-retired",
-            active_until: "2020-01-01T00:00:00.000Z",
-          },
-          { target_object: "companies", target_record_id: "company-existing" },
-        ],
-      },
-    });
-
-    const result = await submit(state, pitchBody());
-
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({
-      ok: true,
-      action: "updated",
-      companyStatus: "existing",
-      listStatus: "added",
-    });
-    expect(state.calls).not.toContain("POST /v2/objects/companies/records");
-    expect(state.calls).not.toContain("POST /v2/objects/companies/records/query");
-    expect(state.companies.map((company) => company.id)).toEqual(["company-existing", "company-named"]);
-    expect(state.people).toHaveLength(1);
-    expect(state.people[0]?.values.company).toEqual([
-      { target_object: "companies", target_record_id: "company-existing" },
-    ]);
-    const description = text(state.people[0]!, "description");
-    expect(description).toContain("Earlier note");
-    expect(description).toContain("submitted-business:Analytical Engines");
-    expect(description).toContain("city:Carrollton");
-    expect(description).toContain("state:VA");
-    expect(description).toContain("stage:development_testing");
-    expect(description).toContain("opportunity:growing_an_existing_business");
-    expect(state.entries).toEqual([
-      {
-        parent: "company-existing",
-        slug: "pitch_competition",
-        listId: PITCH_COMPETITION_LIST.listId,
-        parentObject: "companies",
-        entryValues: {
-          city: [{ value: "Carrollton" }],
-          state: [{ option: "Virginia" }],
-          business_stage: [{ option: "Development / Testing" }],
-          opportunity_type: [{ option: "Growing an existing business" }],
-        },
-      },
-    ]);
-    const companyNote = state.notes.find((note) => note.parentObject === "companies");
-    expect(companyNote?.parent).toBe("company-existing");
-    expect(companyNote?.content).toContain("Business name: Analytical Engines");
-    expect(state.tasks[0]?.linked).toEqual([
-      { target_object: "people", target_record_id: "person-existing" },
-      { target_object: "companies", target_record_id: "company-existing" },
-    ]);
-  });
-
-  it("keeps an existing company when a contributor submits a different business name", async () => {
-    const state = emptyState();
-    state.companies.push(
-      { id: "company-existing", values: { name: [{ value: "Prize Labs" }] } },
-      { id: "company-named", values: { name: [{ value: "Harbor Goods" }] } },
-    );
-    state.people.push({
-      id: "person-existing",
-      values: {
-        email_addresses: [{ email_address: "katherine@example.com" }],
-        name: [{ first_name: "Katherine", last_name: "Johnson", full_name: "Katherine Johnson" }],
-        description: [{ value: "Earlier contributor note" }],
-        company: [
-          {
-            target_object: "companies",
-            target_record_id: "company-retired",
-            active_until: "2020-01-01T00:00:00.000Z",
-          },
-          { target_object: "companies", target_record_id: "company-existing" },
-        ],
-      },
-    });
-
-    const result = await submit(state, contributeBody());
-
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({
-      ok: true,
-      action: "updated",
-      path: "contribute",
-      companyStatus: "existing",
-      listStatus: "not_applicable",
-    });
-    expect(state.calls).not.toContain("POST /v2/objects/companies/records");
-    expect(state.calls).not.toContain("POST /v2/objects/companies/records/query");
-    expect(state.calls.filter((call) => call.includes("/v2/lists/"))).toEqual([]);
-    expect(state.entries).toHaveLength(0);
-    expect(state.companies.map((company) => company.id)).toEqual(["company-existing", "company-named"]);
-    expect(state.people[0]?.values.company).toEqual([
-      { target_object: "companies", target_record_id: "company-existing" },
-    ]);
-    const description = text(state.people[0]!, "description");
-    expect(description).toContain("Earlier contributor note");
-    expect(description).toContain("submitted-business:Harbor Goods");
-    expect(description).toContain("path:contribute");
-    const personNote = state.notes.find((note) => note.parentObject === "people");
-    expect(personNote?.content).toContain("Business name: Harbor Goods");
-    expect(state.tasks[0]?.linked).toEqual([
-      { target_object: "people", target_record_id: "person-existing" },
-      { target_object: "companies", target_record_id: "company-existing" },
-    ]);
-    expect(state.tasks[0]?.content).toContain("Company: Harbor Goods");
-  });
-
-  it("links a submitted company when the person has no active company", async () => {
-    const state = emptyState();
-    state.people.push({
-      id: "person-existing",
-      values: {
-        email_addresses: [{ email_address: "ada@example.com" }],
-        company: [{
-          target_object: "companies",
-          target_record_id: "company-retired",
-          active_until: "2020-01-01T00:00:00.000Z",
-        }],
-      },
-    });
-
-    const result = await submit(state, pitchBody());
-
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ companyStatus: "created", listStatus: "added" });
-    expect(state.companies).toHaveLength(1);
-    expect(text(state.companies[0]!, "name")).toBe("Analytical Engines");
-    expect(state.people[0]?.values.company).toEqual([
-      { target_object: "companies", target_record_id: state.companies[0]?.id },
-    ]);
-    expect(text(state.people[0]!, "description")).not.toContain("submitted-business:");
-    expect(state.entries[0]?.parent).toBe(state.companies[0]?.id);
-  });
-
-  it("writes city, state, stage, and opportunity onto the pitch list only when those attributes exist", async () => {
-    const state = emptyState();
-    state.listAttributes = [
-      { api_slug: "entry_id", type: "text", is_writable: false },
-      { api_slug: "city", type: "text", is_writable: true },
-      { api_slug: "state", type: "select", is_writable: true },
-      { api_slug: "business_stage", type: "select", is_writable: true },
-      { api_slug: "opportunity_type", type: "text", is_writable: true },
-      { api_slug: "created_at", type: "timestamp", is_writable: false },
-    ];
-    const result = await submit(state, pitchBody());
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ listStatus: "added" });
-    expect(state.entries[0]?.entryValues).toEqual({
-      city: [{ value: "Carrollton" }],
-      state: [{ option: "Virginia" }],
-      business_stage: [{ option: "Development / Testing" }],
-      opportunity_type: [{ value: "growing_an_existing_business" }],
-    });
-    expect(state.calls.filter((call) => call.includes("/attributes"))).toEqual([
-      "GET /v2/lists/pitch_competition/attributes",
-    ]);
-  });
-
-  it("maps a legacy pitch stage and a full name from an older client", async () => {
-    const state = emptyState();
-    const result = await submit(state, pitchBody({
-      firstName: undefined,
-      lastName: undefined,
-      fullName: "Ada Lovelace",
-      businessStage: "Prototype or testing",
-      state: "Virginia",
-      opportunityType: "other",
-    }));
-    expect(result.status).toBe(200);
-    expect(state.people[0]?.values.name).toEqual([
-      { first_name: "Ada", last_name: "Lovelace", full_name: "Ada Lovelace" },
-    ]);
-    expect(text(state.people[0]!, "description")).toContain("stage:development_testing");
-    expect(text(state.people[0]!, "description")).toContain("state:VA");
-    expect(text(state.people[0]!, "description")).toContain("opportunity:other");
-    expect(state.notes[0]?.content).toContain("Business stage: Development / Testing");
-    expect(state.notes[0]?.content).toContain("State: Virginia");
-    expect(state.notes[0]?.content).toContain("What best describes the opportunity you are pitching?: Other");
-  });
-
-  it("skips the company when a pitcher has not named it, and does not open a pitch-list entry", async () => {
-    const state = emptyState();
-    const result = await submit(state, pitchBody({ businessName: "Not named yet." }));
-    expect(result.status).toBe(200);
-    expect(result.body).toMatchObject({ companyStatus: "skipped", listStatus: "skipped" });
-    expect(state.companies).toHaveLength(0);
-    expect(state.entries).toHaveLength(0);
-    expect(state.notes[0]?.content).toContain("unnamed-business");
-    expect(state.notes[0]?.content).toContain("pitch-list-not-added");
-    expect(state.tasks[0]?.content).toContain("Flags: unnamed-business, pitch-list-not-added");
-    expect(state.tasks[0]?.assignees).toEqual([jonathanAssignee()]);
-    expect(state.tasks[0]?.linked).toEqual([
-      { target_object: "people", target_record_id: state.people[0]?.id },
-    ]);
-  });
-
-  it("maps watch and contribute without adding them to Pitch Competition", async () => {
-    const state = emptyState();
-    const watch = await submit(state, watchBody({ company: "Navy Yard Lab" }));
-    const contribute = await submit(state, contributeBody());
-    expect(watch.status).toBe(200);
-    expect(contribute.status).toBe(200);
-    expect(watch.body).toMatchObject({ listStatus: "not_applicable", companyStatus: "created" });
-    expect(contribute.body).toMatchObject({ listStatus: "not_applicable", companyStatus: "created" });
-    expect(state.entries).toHaveLength(0);
-    expect(state.calls.filter((call) => call.includes("/v2/lists/"))).toEqual([]);
-
-    const watchPerson = state.people.find((person) => emails(person).includes("grace@example.com"));
-    const contributePerson = state.people.find((person) => emails(person).includes("katherine@example.com"));
-    expect(text(watchPerson!, "description")).toContain("PN | path:watch | src:power-now-interest-page | utm:none");
-    expect(text(watchPerson!, "description")).not.toContain("prize-offer");
-    expect(text(contributePerson!, "description")).toContain("PN | path:contribute | prize-offer | src:power-now-interest-page");
-    const contributeNote = state.notes.find((note) => note.content.includes(CONTRIB_ID) && note.parentObject === "people");
-    expect(contributeNote?.content).toContain(`Version: ${POWER_NOW_CONSENT_VERSION.contribute}`);
-    expect(contributeNote?.content).toContain("sms: yes");
-    expect(contributeNote?.content).toContain("Approximate value: 80");
-    expect(contributeNote?.content).toContain("Describe your offer: A studio tour for two");
-
-    const watchTask = state.tasks.find((task) => task.content.startsWith("Power NOW watch"));
-    const contributeTask = state.tasks.find((task) => task.content.startsWith("Power NOW contribute"));
-    expect(watchTask?.assignees).toEqual([jonathanAssignee()]);
-    expect(watchTask?.linked).toEqual([
-      { target_object: "people", target_record_id: watchPerson?.id },
-      { target_object: "companies", target_record_id: state.companies.find((company) => text(company, "name") === "Navy Yard Lab")?.id },
-    ]);
-    expect(contributeTask?.assignees).toEqual([jonathanAssignee()]);
-    expect(contributeTask?.linked).toEqual([
-      { target_object: "people", target_record_id: contributePerson?.id },
-      { target_object: "companies", target_record_id: state.companies.find((company) => text(company, "name") === "Harbor Goods")?.id },
-    ]);
-  });
-
-  it("keeps an earlier path tag when the same person joins a second path", async () => {
-    const state = emptyState();
-    await submit(state, pitchBody());
-    const second = await submit(state, watchBody({
-      fullName: "Ada Lovelace",
-      email: "ada@example.com",
-      clientSubmissionId: WATCH_ID,
-    }));
-    expect(second.body).toMatchObject({ action: "updated" });
-    expect(state.people).toHaveLength(1);
-    const description = text(state.people[0]!, "description");
-    expect(description).toContain("path:pitch");
-    expect(description).toContain("path:watch");
-  });
-
-  it("logs the Attio status, code, and message when a send fails", async () => {
-    const state = emptyState();
-    const recordId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-    state.failPersonWrite = {
-      status: 400,
-      code: "validation_type",
-      message: `Invalid value for ada@example.com on record ${recordId}. Call 757-555-0100.`,
-    };
-    const errors: string[] = [];
-    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
-      errors.push(String(message));
-    });
-    try {
-      const result = await submit(state, pitchBody());
-      expect(result.status).toBe(200);
-      expect(result.body).toMatchObject({ ok: true, stored: true, attioStatus: "failed", path: "pitch" });
-      expect(JSON.stringify(result.body)).not.toContain("ada@example.com");
-      const line = errors.find((message) => message.includes("Power NOW send failed"));
-      expect(line).toContain("HTTP 400");
-      expect(line).toContain("Attio error code: validation_type");
-      expect(line).toContain("Invalid value for [redacted]");
-      expect(line).toContain(recordId);
-      expect(line).not.toContain("ada@example.com");
-      expect(line).not.toContain("757-555-0100");
-      expect(line).not.toContain("Analytical Engines");
-      expect(line).not.toContain("Ada Lovelace");
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("logs the Attio error code and still saves when follow-up task creation fails", async () => {
-    const state = emptyState();
-    state.failTaskCreate = {
-      status: 403,
-      code: "insufficient_permissions",
-      message: "Your API key is missing the required scopes: task:read-write",
-    };
-    const warnings: string[] = [];
-    const spy = vi.spyOn(console, "warn").mockImplementation((message) => {
-      warnings.push(String(message));
-    });
-    try {
-      const result = await submit(state, pitchBody());
-      expect(result.status).toBe(200);
-      expect(result.body).toMatchObject({ ok: true, taskStatus: "skipped", noteStatus: "created" });
-      expect(state.tasks).toHaveLength(0);
-      expect(state.people).toHaveLength(1);
-      expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
-      expect(warnings.some((message) =>
-        message.includes("Attio error code: insufficient_permissions")
-        && message.includes("task:read-write")
-        && message.includes("submission was saved"),
-      )).toBe(true);
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("still saves the submission when assigning the task fails", async () => {
-    const state = emptyState();
-    state.failAssignee = true;
-    const errors: string[] = [];
-    const spy = vi.spyOn(console, "error").mockImplementation((message) => {
-      errors.push(String(message));
-    });
-    try {
-      const result = await submit(state, pitchBody());
-      expect(result.status).toBe(200);
-      expect(result.body).toMatchObject({ ok: true, taskStatus: "created", noteStatus: "created" });
-      expect(state.tasks).toHaveLength(1);
-      expect(state.tasks[0]?.assignees).toBeUndefined();
-      expect(state.tasks[0]?.linked).toEqual([
-        { target_object: "people", target_record_id: state.people[0]?.id },
-        { target_object: "companies", target_record_id: state.companies[0]?.id },
-      ]);
-      expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
-      expect(errors.some((message) => message.includes("left unassigned") && message.includes("assignee rejected"))).toBe(true);
-    } finally {
-      spy.mockRestore();
-    }
-  });
-
-  it("uses POWER_NOW_TASK_ASSIGNEE_ID when it is set", async () => {
-    const override = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-    const previous = process.env.POWER_NOW_TASK_ASSIGNEE_ID;
-    process.env.POWER_NOW_TASK_ASSIGNEE_ID = override;
-    try {
-      const state = emptyState();
-      const result = await submit(state, watchBody());
-      expect(result.status).toBe(200);
-      expect(state.tasks[0]?.content).toContain("Power NOW watch interest for Jessica.");
-      expect(state.tasks[0]?.assignees).toEqual([
-        { referenced_actor_type: "workspace-member", referenced_actor_id: override },
-      ]);
-    } finally {
-      if (previous === undefined) delete process.env.POWER_NOW_TASK_ASSIGNEE_ID;
-      else process.env.POWER_NOW_TASK_ASSIGNEE_ID = previous;
-    }
-  });
-
-  it("does not write a second note or task for the same submission", async () => {
-    const state = emptyState();
-    await submit(state, pitchBody());
-    const again = await submit(state, pitchBody());
+describe("Power NOW intake storage", () => {
+  it("returns a duplicate for the same submission id", async () => {
+    const first = await submit(pitchBody());
+    const again = await submit(pitchBody());
+    expect(first.body).toMatchObject({ ok: true, stored: true, duplicate: false, action: "stored" });
     expect(again.body).toMatchObject({ ok: true, stored: true, duplicate: true });
-    expect(state.notes.filter((note) => note.parentObject === "people")).toHaveLength(1);
-    expect(state.tasks).toHaveLength(1);
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
   });
 
-  it("drops a honeypot and a burst over the rate limit before Attio", async () => {
-    const state = emptyState();
-    const honeypot = await submit(state, pitchBody({ expo_hp: "https://spam.example" }));
+  it("drops a honeypot and a burst over the rate limit before writing", async () => {
+    const honeypot = await submit(pitchBody({ expo_hp: "https://spam.example" }));
     expect(honeypot.status).toBe(200);
     expect(honeypot.body).toMatchObject({ ok: true, accepted: true });
-    expect(state.calls).toEqual([]);
+    expect(readIntakeLeadForTests(PITCH_ID)).toBeNull();
 
     const limiter = createPowerNowRateLimiter({ limit: 1, now: () => NOW.getTime() });
-    const first = await submit(state, pitchBody(), { limiter });
-    const second = await submit(state, pitchBody({ clientSubmissionId: WATCH_ID }), { limiter });
+    const first = await submit(pitchBody(), { limiter });
+    const second = await submit(pitchBody({ clientSubmissionId: WATCH_ID }), { limiter });
     expect(first.status).toBe(200);
     expect(second.status).toBe(429);
     expect(second.body).toMatchObject({ ok: false });
-    expect(state.people).toHaveLength(1);
+    expect(readIntakeLeadForTests(PITCH_ID)?.email).toBe("ada@example.com");
+    expect(readIntakeLeadForTests(WATCH_ID)).toBeNull();
   });
 
   it("leaves personal data out of the tag when a referrer tries to carry it", async () => {
-    const state = emptyState();
-    await submit(state, pitchBody({
+    await submit(pitchBody({
       referrerPath: "/updates?email=ada@example.com",
       utmSource: "ada@example.com",
     }));
-    const description = text(state.people[0]!, "description");
+    const description = String(readIntakeLeadForTests(PITCH_ID)?.descriptionTag ?? "");
     expect(description).toContain("ref:/updates");
     expect(description).not.toContain("ada@example.com");
     expect(description).not.toContain("utm:source=");
@@ -914,33 +307,3 @@ describe("Power NOW page boundaries", () => {
     expect(POWER_NOW_SEND_ERROR).toContain("hello@accelanalysis.com");
   });
 });
-
-function jonathanAssignee() {
-  return {
-    referenced_actor_type: "workspace-member",
-    referenced_actor_id: POWER_NOW_TASK_ASSIGNEE_DEFAULT_ID,
-  };
-}
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function toApi(record: StoredRecord) {
-  return { id: { record_id: record.id }, values: record.values };
-}
-
-function text(record: StoredRecord, slug: string): string {
-  const first = record.values[slug]?.[0] as { value?: string } | undefined;
-  return first?.value ?? "";
-}
-
-function emails(record: StoredRecord | undefined): string[] {
-  if (!record) return [];
-  return (record.values.email_addresses ?? []).map((value) =>
-    String((value as { email_address?: string }).email_address ?? ""),
-  );
-}

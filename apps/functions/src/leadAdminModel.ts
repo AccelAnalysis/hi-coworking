@@ -4,8 +4,7 @@
  *
  * intakeLeads (booth and Power NOW) rules deny every client read, so the
  * Admin page reads them through leadsAdmin_listIntake, which returns this
- * trimmed row shape instead of the raw document (no consent wording, UTM or
- * Attio bookkeeping).
+ * trimmed row shape instead of the raw document (no consent wording or UTM).
  */
 
 export const INTAKE_LIST_LIMIT = 500;

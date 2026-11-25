@@ -1,27 +1,16 @@
 /**
  * Booth and Power NOW leads live in Firestore collection intakeLeads.
  * The document id is clientSubmissionId, so a retry from the iPad queue
- * does not create a second lead. Attio is off unless ATTIO_INTAKE_ENABLED
- * is the string true. An Attio failure must not fail the submission.
+ * does not create a second lead.
  */
 
 import * as admin from "firebase-admin";
-import { defineString } from "firebase-functions/params";
 import type { NormalizedExpoLead } from "./nasaLeadModel";
 import type { NormalizedPowerNow } from "./powerNowModel";
 
 export const INTAKE_LEADS_COLLECTION = "intakeLeads";
 
-export const attioIntakeEnabledParam = defineString("ATTIO_INTAKE_ENABLED", {
-  default: "false",
-  description: "Set to true to also copy a saved intake lead to Attio. Any other value, including false or empty, does not call Attio.",
-});
-
 const DOC_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-export function attioIntakeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.ATTIO_INTAKE_ENABLED?.trim().toLowerCase() === "true";
-}
 
 export type IntakeLeadKind = "expo" | "power-now";
 
