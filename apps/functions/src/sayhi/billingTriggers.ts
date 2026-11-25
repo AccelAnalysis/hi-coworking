@@ -165,20 +165,39 @@ export async function chargeOvertimeForVisit(input: {
         : undefined,
       bookingPaymentIntentId: bookingPaymentIntentId || undefined,
     });
-    await ref.update({
-      chargeStatus: "charged",
-      overtimeCharge: { method: charge.method, id: charge.id, status: charge.status, at: Date.now() },
-    });
-    logger.info("Overtime charged", { visitId: input.visitId, method: charge.method, cents: split.chargedCents, includedMinutes: split.includedMinutes });
+    const overtimeCharge = { method: charge.method, id: charge.id, status: charge.status, at: Date.now() };
+    if (charge.status === "succeeded") {
+      await ref.update({ chargeStatus: "charged", overtimeCharge });
+      logger.info("Overtime charged", { visitId: input.visitId, method: charge.method, cents: split.chargedCents, includedMinutes: split.includedMinutes });
+    } else {
+      // Not settled yet (for example "processing"): staff confirm it in Stripe.
+      await ref.update({
+        chargeStatus: "charge_pending",
+        overtimeCharge,
+        needsReview: true,
+        reviewReason: "overtime_charge_pending",
+      });
+      logger.warn("Overtime charge not settled", { visitId: input.visitId, status: charge.status });
+    }
   } catch (err) {
     const noCard = err instanceof NoCardOnFileError;
+    const stripeErr = (err || {}) as { code?: string; decline_code?: string; raw?: { payment_intent?: { id?: string } }; payment_intent?: { id?: string } };
+    const code = noCard ? "no_card_on_file" : String(stripeErr.code || "stripe_error");
+    // An off-session charge the bank wants the cardholder to approve (3DS)
+    // fails with authentication_required; staff collect it with the member.
+    const reviewReason = noCard
+      ? "overtime_no_card"
+      : code === "authentication_required" ? "overtime_authentication_required" : "overtime_charge_failed";
+    const failedIntentId = String(stripeErr.payment_intent?.id || stripeErr.raw?.payment_intent?.id || "");
     await ref.update({
       chargeStatus: noCard ? "no_card_on_file" : "charge_failed",
       needsReview: true,
-      reviewReason: noCard ? "overtime_no_card" : "overtime_charge_failed",
-      overtimeChargeError: noCard ? "no_card_on_file" : String((err as { code?: string })?.code || "stripe_error"),
+      reviewReason,
+      overtimeChargeError: code,
+      ...(stripeErr.decline_code ? { overtimeDeclineCode: String(stripeErr.decline_code) } : {}),
+      ...(failedIntentId ? { overtimeFailedPaymentIntentId: failedIntentId } : {}),
     });
-    logger.warn("Overtime charge not completed", { visitId: input.visitId, noCard });
+    logger.warn("Overtime charge not completed", { visitId: input.visitId, noCard, code });
   }
 }
 
