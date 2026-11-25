@@ -34,6 +34,7 @@ export const ADMIN_ROUTES: Record<string, AdminRoute> = {
   "/admin/bookstore/orders": { label: "Orders", parent: "/admin/bookstore" },
   "/admin/payments": { label: "Payments" },
   "/admin/leads": { label: "Leads" },
+  "/admin/visit-feedback": { label: "Visit feedback" },
   "/admin/conference-requests": { label: "Conference requests" },
   "/admin/products": { label: "Pricing & memberships" },
   "/admin/roles": { label: "Roles & permissions" },

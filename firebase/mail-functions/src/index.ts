@@ -24,3 +24,4 @@ export { nurture_process } from "../../../apps/functions/src/nurture";
 export { events_v2ProcessNotificationJobs } from "../../../apps/functions/src/eventsV2/notifications";
 export { mail_sendQueued } from "../../../apps/functions/src/accessCodes/mailQueue";
 export { sayhi_sendExtraTimeEmail, sayhi_sendNoCheckoutEmail } from "../../../apps/functions/src/sayhi/followUpEmailTriggers";
+export { visitFeedback_sendInvites } from "../../../apps/functions/src/visitFeedback/sendInvites";

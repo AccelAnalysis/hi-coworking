@@ -1869,3 +1869,5 @@ export const notify_paymentCreated = onDocumentCreated(
 );
 
 export { members_createBillingPortalSession } from "./memberBillingPortal";
+
+export { visitFeedback_getInvitation, visitFeedback_submit } from "./visitFeedback/http";

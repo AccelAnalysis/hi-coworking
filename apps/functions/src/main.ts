@@ -103,6 +103,8 @@ export const setUserRole = legacy.setUserRole;
 export const leads_submitLead = legacy.leads_submitLead;
 export const leads_onNewLead = legacy.leads_onNewLead;
 export const leads_submitContact = legacy.leads_submitContact;
+export const visitFeedback_getInvitation = legacy.visitFeedback_getInvitation;
+export const visitFeedback_submit = legacy.visitFeedback_submit;
 export { expo_submitNasaLead } from "./expo/submitNasaLead";
 export { leadsAdmin_listIntake, leadsAdmin_setIntakeNotes } from "./leadAdmin";
 export { intake_onNewLead } from "./leadAlertTriggers";

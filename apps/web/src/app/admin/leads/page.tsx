@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppShell } from "@/components/AppShell";
@@ -188,7 +189,9 @@ function LeadsContent() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Leads</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Early access, survey and contact leads from the website, plus expo booth and Power NOW leads
+            Early access, survey and contact leads from the website, plus expo booth and Power NOW leads.
+            Post-attendance visit feedback is in{" "}
+            <Link href="/admin/visit-feedback" className="font-medium text-[#101D4B] underline-offset-4 hover:underline">Visit feedback</Link>, not in this Survey filter.
           </p>
         </div>
         <button

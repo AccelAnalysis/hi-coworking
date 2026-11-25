@@ -449,6 +449,16 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // --- visitFeedback/{id} ---
+    // Post-attendance survey invitations and answers. Cloud Functions
+    // create (token-gated); admin read and update (notes). Never written
+    // into leads, and never typed as "survey".
+    match /visitFeedback/{id} {
+      allow read: if isAdmin();
+      allow update: if isAdmin();
+      allow create, delete: if false;
+    }
+
     // --- siteSettings/{docId} ---
     // Public read for feature gating; admin update.
     match /siteSettings/{docId} {
