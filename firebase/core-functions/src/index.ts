@@ -1,4 +1,4 @@
-// Isolated deploy source for the 45 default-codebase functions that main
+// Isolated deploy source for the 47 default-codebase functions that main
 // exports and that are deployed in hi-coworking-plat today.
 //
 // apps/functions/src/main.ts also loads eventMarketing.ts, which declares the
@@ -62,3 +62,5 @@ export {
 } from "../../../apps/functions/src/index";
 
 export { createBooking, createBookingQuote } from "../../../apps/functions/src/retiredBookingEndpoints";
+
+export { visitFeedback_getInvitation, visitFeedback_submit } from "../../../apps/functions/src/visitFeedback/http";

@@ -243,6 +243,8 @@ jobs:
           tests/web/business-profile-forms.test.ts
           tests/functions/member-id-check.test.ts
           tests/functions/guest-checkout-screening.test.ts
+          tests/functions/visit-feedback.test.ts
+          tests/web/visit-feedback.test.ts
 
       - name: Run active transaction integration tests
         run: >-
@@ -266,7 +268,7 @@ jobs:
           npx firebase emulators:exec
           --project demo-hi-coworking
           --only firestore
-          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts tests/rules/staff-follow-ups.rules.test.ts tests/rules/sayhi-account-details.rules.test.ts tests/rules/conference-requests.rules.test.ts"
+          "npx vitest run tests/rules/events-v2.rules.test.ts tests/rules/front-desk-kiosk.rules.test.ts tests/rules/staff-follow-ups.rules.test.ts tests/rules/sayhi-account-details.rules.test.ts tests/rules/conference-requests.rules.test.ts tests/rules/visit-feedback.rules.test.ts"
 
       - name: Build production web application
         run: npm run build
