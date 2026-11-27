@@ -97,7 +97,14 @@ export class StripeProvider implements PaymentProvider {
         metadata: checkoutMetadata,
         ...(input.saveCardForLaterCharges ? { setup_future_usage: "off_session" as const } : {}),
       };
-      if (input.saveCardForLaterCharges) sessionConfig.customer_creation = "always";
+      if (input.saveCardForLaterCharges) {
+        sessionConfig.customer_creation = "always";
+        // Extra time is charged later, off-session, to "the card used for the
+        // booking" (/terms#extra-time). Keep this checkout to cards (Apple Pay
+        // and Google Pay are cards) so wallets like Klarna or Cash App, which
+        // can't be charged that way reliably, are not offered.
+        sessionConfig.payment_method_types = ["card"];
+      }
     }
 
     const session = await this.stripe.checkout.sessions.create(sessionConfig);

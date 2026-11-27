@@ -99,6 +99,10 @@ describe("SayHi overtime policy", () => {
     for (const env of ["apps/functions/.env.hi-coworking-plat", "apps/functions/.env.demo-hi-coworking"]) {
       expect(readFileSync(env, "utf8")).toMatch(/^SAYHI_FLOW_ENABLED=false$/m);
     }
+    // The booking-transactions deploy reads its own env file, not apps/functions/.env.*.
+    const bookingEnv = readFileSync("firebase/booking-transaction-functions/.env.hi-coworking-plat", "utf8");
+    expect(bookingEnv).toMatch(/^SAYHI_FLOW_ENABLED=(true|false)$/m);
+    expect(bookingEnv).not.toMatch(/sk_(live|test)_|whsec_/);
     const coreIndex = readFileSync("apps/functions/src/index.ts", "utf8");
     expect(coreIndex).not.toContain("sayhi_chargeOvertime");
     expect(coreIndex).not.toContain("billingTriggers");

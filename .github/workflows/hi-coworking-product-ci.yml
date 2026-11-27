@@ -259,7 +259,8 @@ jobs:
           tests/functions/admin-booking-management.test.ts
           tests/functions/front-desk-kiosk.test.ts
           tests/functions/booking-hold-cleanup-firestore.test.ts
-          tests/functions/guest-checkout-screening.journey.test.ts"
+          tests/functions/guest-checkout-screening.journey.test.ts
+          tests/functions/sayhi-overtime-charge.test.ts"
 
       - name: Run Events v2 Firestore rules tests
         run: >-
